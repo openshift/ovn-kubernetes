@@ -363,6 +363,7 @@ func setupEVPNBGPOnExternalFRR(ictx infraapi.Context, asn int, neighborIPs []str
 	args := []string{"configure terminal", fmt.Sprintf("router bgp %d", asn), "address-family l2vpn evpn", "advertise-all-vni"}
 	for _, ip := range neighborIPs {
 		args = append(args, fmt.Sprintf("neighbor %s activate", ip))
+		args = append(args, fmt.Sprintf("neighbor %s route-reflector-client", ip))
 	}
 	args = append(args, "exit-address-family", "end")
 

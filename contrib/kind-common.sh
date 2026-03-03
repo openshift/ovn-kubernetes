@@ -1028,6 +1028,7 @@ deploy_frr_external_container() {
     vtysh_cmds=(-c "configure terminal" -c "router bgp 64512" -c "address-family l2vpn evpn")
     for neighbor in $bgp_neighbors; do
       vtysh_cmds+=(-c "neighbor $neighbor activate")
+      vtysh_cmds+=(-c "neighbor $neighbor route-reflector-client")
     done
     vtysh_cmds+=(-c "advertise-all-vni" -c "exit-address-family" -c "end" -c "write memory")
     $OCI_BIN exec frr vtysh "${vtysh_cmds[@]}"
