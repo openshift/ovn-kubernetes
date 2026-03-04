@@ -100,6 +100,38 @@ func parseSubnetAnnotation(nodeAnnotations map[string]string, annotationName str
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
 	}
+	return parseSubnetAnnotationValue(annotationName, annotation)
+}
+
+func parseSubnetAnnotationWithCache(node *corev1.Node, annotationName string, cache NodeAnnotationCache) (map[string][]*net.IPNet, error) {
+	subnetMap, err := parseSubnetAnnotationWithCacheNoCopy(node, annotationName, cache)
+	if err != nil {
+		return nil, err
+	}
+	return copySubnetMap(subnetMap), nil
+}
+
+func parseSubnetAnnotationWithCacheNoCopy(node *corev1.Node, annotationName string, cache NodeAnnotationCache) (map[string][]*net.IPNet, error) {
+	annotation, ok := node.Annotations[annotationName]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
+	}
+	if cache != nil {
+		if cached, ok := cache.GetSubnetMap(node.Name, annotationName, annotation); ok {
+			return cached, nil
+		}
+	}
+	subnetMap, err := parseSubnetAnnotationValue(annotationName, annotation)
+	if err != nil {
+		return nil, err
+	}
+	if cache != nil {
+		cache.SetSubnetMap(node.Name, annotationName, annotation, subnetMap)
+	}
+	return subnetMap, nil
+}
+
+func parseSubnetAnnotationValue(annotationName, annotation string) (map[string][]*net.IPNet, error) {
 	subnetsStrMap := map[string][]string{}
 	subnetsDual := make(map[string][]string)
 	if err := json.Unmarshal([]byte(annotation), &subnetsDual); err == nil {
@@ -132,8 +164,15 @@ func parseSubnetAnnotation(nodeAnnotations map[string]string, annotationName str
 		}
 		subnetMap[netName] = ipnets
 	}
-
 	return subnetMap, nil
+}
+
+func copySubnetMap(in map[string][]*net.IPNet) map[string][]*net.IPNet {
+	out := make(map[string][]*net.IPNet, len(in))
+	for netName, ipnets := range in {
+		out[netName] = CopyIPNets(ipnets)
+	}
+	return out
 }
 
 func NodeSubnetAnnotationChanged(oldNode, newNode *corev1.Node) bool {
@@ -152,6 +191,67 @@ func NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *corev1.Node, netNam
 		return false
 	}
 	return !bytes.Equal(oldSubnets[netName], newSubnets[netName])
+}
+
+// NodeSubnetAnnotationChangedForNetworkWithCache returns true if the node subnet annotation
+// for the given network changed, using the provided cache if available.
+func NodeSubnetAnnotationChangedForNetworkWithCache(oldNode, newNode *corev1.Node, netName string, cache NodeAnnotationCache) bool {
+	if cache == nil {
+		return NodeSubnetAnnotationChangedForNetwork(oldNode, newNode, netName)
+	}
+	oldSubnets, err := parseSubnetAnnotationWithCache(oldNode, ovnNodeSubnets, cache)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			klog.Errorf("Failed to parse old node %s annotation: %v", oldNode.Name, err)
+		}
+		return false
+	}
+	newSubnets, err := parseSubnetAnnotationWithCache(newNode, ovnNodeSubnets, cache)
+	if err != nil {
+		if !IsAnnotationNotSetError(err) {
+			klog.Errorf("Failed to parse new node %s annotation: %v", newNode.Name, err)
+		}
+		return false
+	}
+	return !equalIPNetSlices(oldSubnets[netName], newSubnets[netName])
+}
+
+// NodeSubnetAnnotationChangedForNetworkWithState returns true if the node subnet annotation
+// for the given network changed using pre-parsed annotation state.
+func NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState *NodeAnnotationState, netName string) bool {
+	if oldState == nil || newState == nil {
+		return false
+	}
+	if oldState.subnetsErr != nil {
+		if !IsAnnotationNotSetError(oldState.subnetsErr) {
+			klog.Errorf("Failed to parse old node %s annotation: %v", oldState.nodeName, oldState.subnetsErr)
+		}
+		return false
+	}
+	if newState.subnetsErr != nil {
+		if !IsAnnotationNotSetError(newState.subnetsErr) {
+			klog.Errorf("Failed to parse new node %s annotation: %v", newState.nodeName, newState.subnetsErr)
+		}
+		return false
+	}
+	return !equalIPNetSlices(oldState.subnets[netName], newState.subnets[netName])
+}
+
+func equalIPNetSlices(a, b []*net.IPNet) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		switch {
+		case a[i] == nil && b[i] == nil:
+			continue
+		case a[i] == nil || b[i] == nil:
+			return false
+		case a[i].String() != b[i].String():
+			return false
+		}
+	}
+	return true
 }
 
 // UpdateNodeHostSubnetAnnotation updates a "k8s.ovn.org/node-subnets" annotation for network "netName",
@@ -237,6 +337,53 @@ func ParseNodeHostSubnetAnnotation(node *corev1.Node, netName string) ([]*net.IP
 	}
 
 	return ret, nil
+}
+
+// ParseNodeHostSubnetAnnotationWithCache parses the "k8s.ovn.org/node-subnets" annotation
+// for all networks using the provided cache if available. Returns the full map of
+// network name -> host subnets for all networks.
+func ParseNodeHostSubnetAnnotationWithCache(node *corev1.Node, cache NodeAnnotationCache) (map[string][]*net.IPNet, error) {
+	return parseSubnetAnnotationWithCache(node, ovnNodeSubnets, cache)
+}
+
+// UpdateNodeHostSubnetAnnotationMap updates the "k8s.ovn.org/node-subnets" annotation
+// with a complete map of all network subnets. This is more efficient than updating
+// networks individually when batching updates from multiple networks.
+func UpdateNodeHostSubnetAnnotationMap(annotations map[string]string, subnetsMap map[string][]*net.IPNet) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
+	// Filter out nil or empty subnet lists (represents deletion)
+	filteredMap := make(map[string][]*net.IPNet)
+	for netName, subnets := range subnetsMap {
+		if len(subnets) > 0 {
+			filteredMap[netName] = subnets
+		}
+	}
+
+	if len(filteredMap) == 0 {
+		delete(annotations, ovnNodeSubnets)
+		return annotations, nil
+	}
+
+	// Convert IPNets to strings before marshaling (same as updateSubnetAnnotation)
+	subnetsStrMap := make(map[string][]string)
+	for netName, subnets := range filteredMap {
+		subnetsStr := make([]string, len(subnets))
+		for i, subnet := range subnets {
+			subnetsStr[i] = subnet.String()
+		}
+		subnetsStrMap[netName] = subnetsStr
+	}
+
+	// Marshal the string map
+	bytes, err := json.Marshal(subnetsStrMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal node-subnets map: %v", err)
+	}
+	annotations[ovnNodeSubnets] = string(bytes)
+	return annotations, nil
 }
 
 // GetNodeSubnetAnnotationNetworkNames parses the "k8s.ovn.org/node-subnets" annotation
