@@ -29,6 +29,13 @@ var _ = Describe("NetlinkDeviceManager", func() {
 		controller = NewController()
 		nlMock = &mocks.NetLinkOps{}
 		util.SetNetLinkOpMockInst(nlMock)
+		// LinkSetAlias is called during createDevice and updateDevice to set the
+		// managed alias. Allow it globally so every test that triggers device
+		// creation/update doesn't need to register it individually.
+		nlMock.On("LinkSetAlias", mock.Anything, mock.Anything).Return(nil).Maybe()
+		// LinkSetIsolated is called during applyBridgePortSettings. Allow it
+		// globally for the same reason.
+		nlMock.On("LinkSetIsolated", mock.Anything, mock.Anything).Return(nil).Maybe()
 	})
 
 	AfterEach(func() {
@@ -601,6 +608,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("BridgeVlanDelTunnelInfo", vxlanLink, uint16(30), uint32(300), false, true).Return(nil)
 			nlMock.On("BridgeVniDel", vxlanLink, uint32(300)).Return(nil)
 			nlMock.On("BridgeVlanDel", vxlanLink, uint16(30), false, false, false, true).Return(nil)
+			nlMock.On("BridgeVlanDel", bridgeLink, uint16(30), false, false, true, false).Return(nil)
 
 			nlMock.On("BridgeVlanAdd", bridgeLink, uint16(10), false, false, true, false).Return(nil)
 			nlMock.On("BridgeVlanAdd", vxlanLink, uint16(10), false, false, false, true).Return(nil)
@@ -1279,6 +1287,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsEntryNotFoundError", entryNotFoundErr).Return(true)
 			nlMock.On("BridgeVniDel", vxlanLink, uint32(300)).Return(entryNotFoundErr)
 			nlMock.On("BridgeVlanDel", vxlanLink, uint16(30), false, false, false, true).Return(entryNotFoundErr)
+			nlMock.On("BridgeVlanDel", mock.AnythingOfType("*netlink.Bridge"), uint16(30), false, false, true, false).Return(entryNotFoundErr)
 
 			Expect(syncVIDVNIMappings(vxlanLink, cfg)).To(Succeed())
 		})
@@ -1301,6 +1310,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsEntryNotFoundError", realErr).Return(false)
 			nlMock.On("BridgeVniDel", vxlanLink, uint32(300)).Return(nil)
 			nlMock.On("BridgeVlanDel", vxlanLink, uint16(30), false, false, false, true).Return(nil)
+			nlMock.On("BridgeVlanDel", mock.AnythingOfType("*netlink.Bridge"), uint16(30), false, false, true, false).Return(nil)
 
 			err := syncVIDVNIMappings(vxlanLink, cfg)
 			Expect(err).To(HaveOccurred())
@@ -1328,6 +1338,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsEntryNotFoundError", entryNotFoundErr).Return(true)
 			nlMock.On("BridgeVlanDel", vxlanLink, uint16(30), false, false, false, true).Return(err2)
 			nlMock.On("IsEntryNotFoundError", err2).Return(false)
+			nlMock.On("BridgeVlanDel", mock.AnythingOfType("*netlink.Bridge"), uint16(30), false, false, true, false).Return(nil)
 
 			err := syncVIDVNIMappings(vxlanLink, cfg)
 			Expect(err).To(HaveOccurred())
@@ -1832,6 +1843,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock := &mocks.NetLinkOps{}
 			util.SetNetLinkOpMockInst(nlMock)
 			defer util.ResetNetLinkOpMockInst()
+			nlMock.On("LinkSetAlias", mock.Anything, mock.Anything).Return(nil).Maybe()
 
 			cfg := DeviceConfig{
 				Link:   &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "svi0"}},
@@ -2015,10 +2027,10 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			&netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: "vxlan0", Index: 1, Alias: "ovn-k8s-ndm:vxlan:vxlan0"}, Learning: false},
 			&DeviceConfig{Link: &netlink.Vxlan{LinkAttrs: netlink.LinkAttrs{Name: "vxlan0"}, Learning: false}},
 			false),
-		Entry("alias differs",
+		Entry("alias differs (handled separately via LinkSetAlias, not LinkModify)",
 			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0", Index: 1, Alias: ""}},
 			&DeviceConfig{Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}}},
-			true),
+			false),
 		Entry("MTU differs",
 			&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0", Index: 1, Alias: "ovn-k8s-ndm:bridge:br0", MTU: 1500}},
 			&DeviceConfig{Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0", MTU: 9000}}},
