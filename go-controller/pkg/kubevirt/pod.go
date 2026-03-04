@@ -16,16 +16,16 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/ndp"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/ndp"
 )
 
 // DefaultGatewayReconciler is responsible for reconciling the default gateway
@@ -464,13 +464,17 @@ func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
 //
 // Note: The function assumes that the pod is part of a VirtualMachine resource managed
 // by KubeVirt.
-func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) (*LiveMigrationStatus, error) {
+func DiscoverLiveMigrationStatus(podLister v1.PodLister, pod *corev1.Pod) (*LiveMigrationStatus, error) {
 	vmKey := ExtractVMNameFromPod(pod)
 	if vmKey == nil {
 		return nil, nil
 	}
 
-	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+	if err != nil {
+		return nil, err
+	}
+	vmPods, err := podLister.Pods(pod.Namespace).List(selector)
 	if err != nil {
 		return nil, err
 	}

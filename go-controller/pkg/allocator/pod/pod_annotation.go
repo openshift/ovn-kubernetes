@@ -13,16 +13,16 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/mac"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/persistentips"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip/subnet"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/mac"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // PodAnnotationAllocator is a utility to handle allocation of the PodAnnotation to Pods.
@@ -533,6 +533,11 @@ func allocatePodAnnotationWithRollback(
 			tentative.MAC, err = util.GenerateRandMAC()
 		}
 		if err != nil {
+			return
+		}
+		if netInfo.Transport() == types.NetworkTransportEVPN && util.HasEVPNMgmtPortMACPrefix(tentative.MAC) {
+			err = fmt.Errorf("MAC address %s for pod %s uses the prefix reserved for EVPN infrastructure",
+				tentative.MAC, podDesc)
 			return
 		}
 		if macRegistry != nil {
