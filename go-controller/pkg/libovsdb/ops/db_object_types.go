@@ -22,10 +22,11 @@ const (
 	NetworkQoSOwnerType                 ownerType = "NetworkQoS"
 	// NetworkPolicyOwnerType is deprecated for address sets, should only be used for sync.
 	// New owner of network policy address sets, is PodSelectorOwnerType.
-	NetworkPolicyOwnerType ownerType = "NetworkPolicy"
-	NetpolDefaultOwnerType ownerType = "NetpolDefault"
-	PodSelectorOwnerType   ownerType = "PodSelector"
-	NamespaceOwnerType     ownerType = "Namespace"
+	NetworkPolicyOwnerType        ownerType = "NetworkPolicy"
+	NetpolDefaultOwnerType        ownerType = "NetpolDefault"
+	PodSelectorOwnerType          ownerType = "PodSelector"
+	NamespaceOwnerType            ownerType = "Namespace"
+	NetworkPolicyIPBlockOwnerType ownerType = "NetworkPolicyIPBlock"
 	// HybridNodeRouteOwnerType is transferred from egressgw to apbRoute controller with the same dbIDs
 	HybridNodeRouteOwnerType    ownerType = "HybridNodeRoute"
 	EgressIPOwnerType           ownerType = "EgressIP"
@@ -115,6 +116,18 @@ var AddressSetNetworkPolicy = newObjectIDsType(addressSet, NetworkPolicyOwnerTyp
 	PolicyDirectionKey,
 	// gress rule index
 	GressIdxKey,
+	IPFamilyKey,
+})
+
+var AddressSetNetworkPolicyIPBlock = newObjectIDsType(addressSet, NetworkPolicyIPBlockOwnerType, []ExternalIDKey{
+	// namespace_name
+	ObjectNameKey,
+	// egress or ingress
+	PolicyDirectionKey,
+	// gress rule index
+	GressIdxKey,
+	// "allow" or "except"
+	TypeKey,
 	IPFamilyKey,
 })
 
