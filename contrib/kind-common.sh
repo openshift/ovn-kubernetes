@@ -1355,6 +1355,43 @@ try_extract_binary() {
   return 1
 }
 
+# Save the container image metadata for a collected binary
+# Used by collect_coredump_binaries() to record which image the binary came from
+# Extracts:
+#   - OVN image reference from container metadata (crictl inspect)
+#   - Fedora base image digest from /root/fedora_base_image (embedded at build time)
+collect_container_image_info() {
+  local node=$1
+  local container_id=$2
+  local exe=$3
+  local binary_dir=$4
+
+  local inspect_out
+  inspect_out=$(${OCI_BIN} exec "$node" crictl inspect "$container_id" 2>/dev/null) || true
+
+  local image_ref
+  image_ref=$(echo "$inspect_out" | jq -r '.status.imageRef // empty')
+  if [ -n "$image_ref" ]; then
+    echo "${exe}: ${image_ref}" >> "${binary_dir}/image-info.txt"
+    echo "  Image ref: ${image_ref}"
+  fi
+
+  # Extract the Fedora base image digest embedded during docker build
+  # (only needs to be collected once since all containers share the same base)
+  if [ ! -f "${binary_dir}/fedora-base-image.txt" ]; then
+    local pid
+    pid=$(echo "$inspect_out" | jq -r '.info.pid // empty')
+    if [ -n "$pid" ] && [ "$pid" != "null" ] && [ "$pid" != "0" ]; then
+      local digest
+      digest=$(${OCI_BIN} exec "$node" cat "/proc/${pid}/root/root/fedora_base_image" 2>/dev/null) || true
+      if [ -n "$digest" ]; then
+        echo "$digest" > "${binary_dir}/fedora-base-image.txt"
+        echo "  Fedora base image: ${digest}"
+      fi
+    fi
+  fi
+}
+
 collect_coredump_binaries() {
   # Collect binaries that caused coredumps for post-mortem debugging
   # Parses coredump filenames (core.%P.%e.%h.%s) to identify executables
@@ -1409,6 +1446,7 @@ collect_coredump_binaries() {
       for container_id in $containers; do
         if try_extract_binary "$node" "$container_id" "$exe" "$binary_dir"; then
           echo "  Collected $exe from container $container_id on node $node"
+          collect_container_image_info "$node" "$container_id" "$exe" "$binary_dir"
           found=true
           break 2
         fi
