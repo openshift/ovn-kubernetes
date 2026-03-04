@@ -116,6 +116,12 @@ func allocatePodAnnotation(
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished allocatePodAnnotation for pod %s/%s on network %s, took %v",
+			pod.Namespace, pod.Name, netInfo.GetNetworkName(), time.Since(startTime))
+	}()
+
 	// no id allocation
 	var idAllocator id.NamedAllocator
 

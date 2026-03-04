@@ -227,6 +227,12 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 // ensurePodForUserDefinedNetwork tries to set up the User Defined Network for a pod. It returns nil on success and error
 // on failure; failure indicates the pod set up should be retried later.
 func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod *corev1.Pod, addPort bool) error {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished ensurePodForUserDefinedNetwork for pod %s/%s on network %s, took %v",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(), time.Since(startTime))
+	}()
+
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
 		return nil
@@ -611,6 +617,12 @@ func (bsnc *BaseUserDefinedNetworkController) hasIPAMClaim(pod *corev1.Pod, nadK
 }
 
 func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods []interface{}) error {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished syncPodsForUserDefinedNetwork for network %s (%d pods), took %v",
+			bsnc.GetNetworkName(), len(pods), time.Since(startTime))
+	}()
+
 	annotatedLocalPods := map[*corev1.Pod]map[string]*util.PodAnnotation{}
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.
