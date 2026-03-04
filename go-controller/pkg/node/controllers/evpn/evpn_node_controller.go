@@ -1,6 +1,7 @@
 package evpn
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -329,7 +330,13 @@ func (c *Controller) reconcile(key string) error {
 	}
 
 	if err := c.reconcileOVSPorts(vtep.Name, GetEVPNBridgeName(vtep.Name), networks); err != nil {
-		return fmt.Errorf("failed to reconcile OVS ports: %w", err)
+		var linkNotFound netlink.LinkNotFoundError
+		if errors.As(err, &linkNotFound) {
+			klog.V(4).Infof("VTEP %s OVS port not yet available (%v), will retry", vtep.Name, err)
+			c.vtepController.ReconcileRateLimited(vtep.Name)
+			return nil
+		}
+		return fmt.Errorf("failed to reconcile VTEP %s OVS ports: %w", vtep.Name, err)
 	}
 
 	return nil
