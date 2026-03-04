@@ -861,6 +861,15 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 	})
 
 	ginkgo.AfterEach(func() {
+		// ensure all nodes are ready and reachable before any other cleanup;
+		// tests may have left nodes NotReady or unreachable intentionally
+		for _, node := range []string{egress1Node.name, egress2Node.name} {
+			setNodeReady(providerCtx, node, true)
+			setNodeReachable(node, true)
+			waitForNoTaint(node, "node.kubernetes.io/unreachable")
+			waitForNoTaint(node, "node.kubernetes.io/not-ready")
+		}
+
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
@@ -873,14 +882,6 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", egressIPName2, "--ignore-not-found=true")
 		e2ekubectl.RunKubectlOrDie("default", "label", "node", egress1Node.name, "k8s.ovn.org/egress-assignable-")
 		e2ekubectl.RunKubectlOrDie("default", "label", "node", egress2Node.name, "k8s.ovn.org/egress-assignable-")
-
-		// ensure all nodes are ready and reachable
-		for _, node := range []string{egress1Node.name, egress2Node.name} {
-			setNodeReady(providerCtx, node, true)
-			setNodeReachable(node, true)
-			waitForNoTaint(node, "node.kubernetes.io/unreachable")
-			waitForNoTaint(node, "node.kubernetes.io/not-ready")
-		}
 	})
 	// Validate the egress IP by creating a httpd container on the kind networking
 	// (effectively seen as "outside" the cluster) and curl it from a pod in the cluster
