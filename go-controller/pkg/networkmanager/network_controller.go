@@ -451,6 +451,12 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	}
 
 	networkName := network.GetNetworkName()
+	startTime := time.Now()
+	klog.V(5).Infof("%s: ensuring network %s", c.name, networkName)
+	defer func() {
+		klog.V(4).Infof("%s: finished ensuring network %s, took %v", c.name, networkName, time.Since(startTime))
+	}()
+
 	reconcilable, _ := c.getReconcilableNetworkState(networkName)
 
 	// this might just be an update of reconcilable network configuration

@@ -610,10 +610,15 @@ func (c *Controller) udnNeedUpdate(_, _ *userdefinednetworkv1.UserDefinedNetwork
 // The NAD objects are created with the same key as the request CR, having both kinds have the same key enable
 // the controller to act on NAD changes as well and reconciles NAD objects (e.g: in case NAD is deleted it will be re-created).
 func (c *Controller) reconcileUDN(key string) error {
+	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
 	}
+	klog.V(5).Infof("Reconciling UserDefinedNetwork %s", key)
+	defer func() {
+		klog.V(4).Infof("Finished reconciling UserDefinedNetwork %s, took %v", key, time.Since(startTime))
+	}()
 
 	udn, err := c.udnLister.UserDefinedNetworks(namespace).Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -640,6 +645,12 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 	if udn == nil {
 		return nil, nil
 	}
+	startTime := time.Now()
+	defer func() {
+		if udn != nil {
+			klog.V(4).Infof("Finished syncing UserDefinedNetwork %s/%s, took %v", udn.Namespace, udn.Name, time.Since(startTime))
+		}
+	}()
 
 	var role, topology string
 	if udn.Spec.Layer2 != nil {
@@ -757,10 +768,15 @@ func (c *Controller) cudnNeedUpdate(_ *userdefinednetworkv1.ClusterUserDefinedNe
 // The NAD objects are created with the same key as the request CR, having both kinds have the same key enable
 // the controller to act on NAD changes as well and reconciles NAD objects (e.g: in case NAD is deleted it will be re-created).
 func (c *Controller) reconcileCUDN(key string) error {
+	startTime := time.Now()
 	_, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
 	}
+	klog.V(5).Infof("Reconciling ClusterUserDefinedNetwork %s", key)
+	defer func() {
+		klog.V(4).Infof("Finished reconciling ClusterUserDefinedNetwork %s, took %v", key, time.Since(startTime))
+	}()
 
 	cudn, err := c.cudnLister.Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -798,8 +814,12 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 	if cudn == nil {
 		return nil, nil
 	}
-
+	startTime := time.Now()
 	cudnName := cudn.Name
+	defer func() {
+		klog.V(4).Infof("Finished syncing ClusterUserDefinedNetwork %s, took %v", cudnName, time.Since(startTime))
+	}()
+
 	affectedNamespaces := c.namespaceTracker[cudnName]
 
 	var role, topology string

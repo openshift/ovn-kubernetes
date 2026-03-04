@@ -23,6 +23,11 @@ import (
 )
 
 func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.NetworkAttachmentDefinition, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished updateNAD for %s/%s, took %v", namespace, obj.GetName(), time.Since(startTime))
+	}()
+
 	if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
 		// check if required UDN label is on namespace
 		ns, err := c.namespaceInformer.Lister().Get(namespace)
@@ -158,6 +163,11 @@ func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 // (either during recovery or a previous reconciliation), AllocateID returns the same VID.
 // This means VIDs are stable across reconciliations without needing to parse the existing NAD.
 func (c *Controller) allocateEVPNVIDsIfNeeded(obj client.Object) ([]template.RenderOption, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished allocateEVPNVIDsIfNeeded for %s, took %v", obj.GetName(), time.Since(startTime))
+	}()
+
 	spec := template.GetSpec(obj)
 	if spec.GetTransport() != userdefinednetworkv1.TransportOptionEVPN {
 		return nil, nil
