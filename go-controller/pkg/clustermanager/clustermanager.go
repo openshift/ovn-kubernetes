@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
 	udncontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
 	udntemplate "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
+	vtepcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/vtep"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	networkconnectclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/clientset/versioned"
 	vtepinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
@@ -70,6 +71,7 @@ type ClusterManager struct {
 	raController         *routeadvertisements.Controller
 	noOverlayController  *nooverlay.Controller
 	managedBGPController *managedbgp.Controller
+	vtepController       *vtepcontroller.Controller
 }
 
 // NewClusterManager creates a new cluster manager to manage the cluster nodes.
@@ -203,6 +205,10 @@ func NewClusterManager(
 		}
 	}
 
+	if util.IsEVPNEnabled() {
+		cm.vtepController = vtepcontroller.NewController(wf, ovnClient)
+	}
+
 	return cm, nil
 }
 
@@ -291,6 +297,12 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		}
 	}
 
+	if cm.vtepController != nil {
+		if err := cm.vtepController.Start(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -331,6 +343,10 @@ func (cm *ClusterManager) Stop() {
 		cm.noOverlayController = nil
 	}
 	cm.nodeController.Stop()
+	if cm.vtepController != nil {
+		cm.vtepController.Stop()
+		cm.vtepController = nil
+	}
 }
 
 func (cm *ClusterManager) NewNetworkController(netInfo util.NetInfo) (networkmanager.NetworkController, error) {
