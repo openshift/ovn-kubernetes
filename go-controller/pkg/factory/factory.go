@@ -292,6 +292,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 		wf.vtepFactory.K8s().V1().VTEPs().Informer()
 	}
 
+	// Initialize FRR factory for Route Advertisement support in combined mode (cluster-manager + ovnkube-controller).
+	if util.IsRouteAdvertisementsEnabled() {
+		wf.frrFactory = frrinformerfactory.NewSharedInformerFactory(ovnClientset.FRRClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.frrFactory.Start() it is initialized and caches are synced.
+		wf.frrFactory.Api().V1beta1().FRRConfigurations().Informer()
+	}
+
 	return wf, nil
 }
 
