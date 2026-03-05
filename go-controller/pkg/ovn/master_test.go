@@ -1088,6 +1088,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			wg,
 			nil,
 			NewPortCache(stopChan),
+			nil,
 		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(oc).NotTo(gomega.BeNil())
@@ -2201,6 +2202,7 @@ func TestController_syncNodes(t *testing.T) {
 				wg,
 				nil,
 				NewPortCache(stopChan),
+				nil,
 			)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			err = controller.syncNodes([]interface{}{&testNode})
@@ -2306,6 +2308,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				wg,
 				nil,
 				NewPortCache(stopChan),
+				nil,
 			)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 

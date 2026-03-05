@@ -194,6 +194,7 @@ func NewLocalnetUserDefinedNetworkController(
 	cnci *CommonNetworkControllerInfo,
 	netInfo util.NetInfo,
 	networkManager networkmanager.Interface,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) *LocalnetUserDefinedNetworkController {
 
 	stopChan := make(chan struct{})
@@ -219,13 +220,11 @@ func NewLocalnetUserDefinedNetworkController(
 					cancelableCtx:               util.NewCancelableContext(),
 					localZoneNodes:              &sync.Map{},
 					networkManager:              networkManager,
+					addressSetManager:           addressSetManager,
 				},
 			},
 		},
 	}
-	oc.addressSetManager = addresssetmanager.NewAddressSetManager(oc.watchFactory.PodCoreInformer(),
-		oc.watchFactory.NamespaceInformer(), oc.nbClient, oc.addressSetFactory,
-		oc.controllerName, oc.GetNetInfo(), oc.getNetworkNameForNADKeyFunc())
 
 	if oc.allocatesPodAnnotation() {
 		var claimsReconciler persistentips.PersistentAllocations

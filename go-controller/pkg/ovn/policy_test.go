@@ -274,7 +274,7 @@ func getGressACLs(gressIdx int, peers []knet.NetworkPolicyPeer, policyType knet.
 				// nil pod selector is equivalent to empty pod selector, which selects all
 				podSelector = &metav1.LabelSelector{}
 			}
-			peerIndex := addresssetmanager.GetPodSelectorAddrSetDbIDs(addresssetmanager.GetPodSelectorKey(podSelector, peer.NamespaceSelector, namespace), controllerName)
+			peerIndex := addresssetmanager.GetPodSelectorAddrSetDbIDs(podSelector, peer.NamespaceSelector, namespace, controllerName)
 			asv4, _ := addressset.GetHashNamesForAS(peerIndex)
 			hashedASNames = append(hashedASNames, asv4)
 		}
@@ -563,8 +563,7 @@ func getPortNetworkPolicy(policyName, namespace, labelName, labelVal string, tcp
 
 // buildNetworkPolicyPeerAddressSet builds the addresssets for the networkpolicy peer provided
 func buildNetworkPolicyPeerAddressSets(namespaceName string, peer knet.NetworkPolicyPeer, ips ...string) (*nbdb.AddressSet, *nbdb.AddressSet) {
-	asName := addresssetmanager.GetPodSelectorKey(peer.PodSelector, peer.NamespaceSelector, namespaceName)
-	dbIDs := addresssetmanager.GetPodSelectorAddrSetDbIDs(asName, DefaultNetworkControllerName)
+	dbIDs := addresssetmanager.GetPodSelectorAddrSetDbIDs(peer.PodSelector, peer.NamespaceSelector, namespaceName, DefaultNetworkControllerName)
 	return addressset.GetTestDbAddrSets(dbIDs, ips)
 }
 
@@ -705,7 +704,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			err = fakeOvn.controller.WatchPods()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
-		gomega.Expect(fakeOvn.controller.addressSetManager.Start()).To(gomega.Succeed())
+		//gomega.Expect(fakeOvn.controller.addressSetManager.Start()).To(gomega.Succeed())
 		err = fakeOvn.controller.WatchNetworkPolicy()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
@@ -2562,7 +2561,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Low-Level Operations", func() {
 		asFactory = addressset.NewFakeAddressSetFactory(controllerName)
 		config.IPv4Mode = true
 		config.IPv6Mode = false
-		asIDs := addresssetmanager.GetPodSelectorAddrSetDbIDs("test_name", DefaultNetworkControllerName)
+		asIDs := addresssetmanager.GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, nil, "nsName", DefaultNetworkControllerName)
 		gp := newGressPolicy(knet.PolicyTypeIngress, 0, "testing", "policy", controllerName,
 			false, &util.DefaultNetInfo{})
 		gp.hasPeerSelector = true

@@ -151,10 +151,11 @@ func NewDefaultNetworkController(
 	routeImportManager routeimport.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, routeImportManager, observManager, eIPController, portCache)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, routeImportManager, observManager, eIPController, portCache, addressSetManager)
 }
 
 func newDefaultNetworkControllerCommon(
@@ -167,6 +168,7 @@ func newDefaultNetworkControllerCommon(
 	observManager *observability.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) (*DefaultNetworkController, error) {
 	defaultNetInfo := &util.DefaultNetInfo{}
 
@@ -229,6 +231,7 @@ func newDefaultNetworkControllerCommon(
 			observManager:               observManager,
 			networkManager:              networkManager,
 			routeImportManager:          routeImportManager,
+			addressSetManager:           addressSetManager,
 		},
 		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC:                       eIPController,
@@ -238,9 +241,6 @@ func newDefaultNetworkControllerCommon(
 		svcController:              svcController,
 		gatewayTopologyFactory:     topology.NewGatewayTopologyFactory(cnci.nbClient),
 	}
-	oc.addressSetManager = addresssetmanager.NewAddressSetManager(oc.watchFactory.PodCoreInformer(),
-		oc.watchFactory.NamespaceInformer(), oc.nbClient, oc.addressSetFactory,
-		oc.controllerName, oc.GetNetInfo(), oc.getNetworkNameForNADKeyFunc())
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets.
 	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
@@ -354,9 +354,6 @@ func (oc *DefaultNetworkController) Stop() {
 	if oc.networkConnectController != nil {
 		oc.networkConnectController.Stop()
 	}
-	if oc.addressSetManager != nil {
-		oc.addressSetManager.Stop()
-	}
 
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
@@ -445,10 +442,6 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 	}
 
 	if err := WithSyncDurationMetric("pod", oc.WatchPods); err != nil {
-		return err
-	}
-
-	if err := WithSyncDurationMetric("pod IP address sets", oc.addressSetManager.Start); err != nil {
 		return err
 	}
 

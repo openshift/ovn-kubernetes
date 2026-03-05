@@ -561,6 +561,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				nil,
 				nil,
 				NewPortCache(ctx.Done()),
+				nil,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(dummyController.Cleanup()).To(Succeed())

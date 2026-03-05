@@ -345,6 +345,7 @@ func NewLayer2UserDefinedNetworkController(
 	routeImportManager routeimport.Manager,
 	portCache *PortCache,
 	eIPController *EgressIPController,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) (*Layer2UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
@@ -388,6 +389,7 @@ func NewLayer2UserDefinedNetworkController(
 					cancelableCtx:               util.NewCancelableContext(),
 					networkManager:              networkManager,
 					routeImportManager:          routeImportManager,
+					addressSetManager:           addressSetManager,
 				},
 			},
 		},
@@ -398,9 +400,6 @@ func NewLayer2UserDefinedNetworkController(
 		eIPController:          eIPController,
 		remoteNodesNoRouter:    sync.Map{},
 	}
-	oc.addressSetManager = addresssetmanager.NewAddressSetManager(oc.watchFactory.PodCoreInformer(),
-		oc.watchFactory.NamespaceInformer(), oc.nbClient, oc.addressSetFactory,
-		oc.controllerName, oc.GetNetInfo(), oc.getNetworkNameForNADKeyFunc())
 	if oc.IsPrimaryNetwork() && oc.eIPController != nil {
 		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
 			oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update")

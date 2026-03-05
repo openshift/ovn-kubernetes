@@ -348,6 +348,7 @@ func NewLayer3UserDefinedNetworkController(
 	routeImportManager routeimport.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) (*Layer3UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
@@ -374,6 +375,7 @@ func NewLayer3UserDefinedNetworkController(
 				cancelableCtx:               util.NewCancelableContext(),
 				networkManager:              networkManager,
 				routeImportManager:          routeImportManager,
+				addressSetManager:           addressSetManager,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -385,9 +387,7 @@ func NewLayer3UserDefinedNetworkController(
 		gatewayManagers:             sync.Map{},
 		eIPController:               eIPController,
 	}
-	oc.addressSetManager = addresssetmanager.NewAddressSetManager(oc.watchFactory.PodCoreInformer(),
-		oc.watchFactory.NamespaceInformer(), oc.nbClient, oc.addressSetFactory,
-		oc.controllerName, oc.GetNetInfo(), oc.getNetworkNameForNADKeyFunc())
+
 	if oc.IsPrimaryNetwork() && oc.eIPController != nil {
 		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
 			oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update")
@@ -514,9 +514,6 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 	}
 	if oc.routeImportManager != nil {
 		oc.routeImportManager.ForgetNetwork(oc.GetNetworkName())
-	}
-	if oc.addressSetManager != nil {
-		oc.addressSetManager.Stop()
 	}
 }
 
@@ -652,10 +649,6 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 	}
 
 	if err := oc.WatchPods(); err != nil {
-		return err
-	}
-
-	if err := oc.addressSetManager.Start(); err != nil {
 		return err
 	}
 

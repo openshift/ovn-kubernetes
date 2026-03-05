@@ -1170,7 +1170,7 @@ func (bnc *BaseNetworkController) setupGressPolicy(np *networkPolicy, gp *gressP
 	}
 	// np.namespace will be used when fromJSON.NamespaceSelector = nil
 	asKey, ipv4as, ipv6as, err := bnc.addressSetManager.EnsureAddressSet(
-		podSelector, peer.NamespaceSelector, np.namespace, np.getKeyWithKind())
+		podSelector, peer.NamespaceSelector, np.namespace, np.getKeyWithKind(), bnc.controllerName, bnc.GetNetInfo())
 	// even if GetPodSelectorAddressSet failed, add key for future cleanup or retry.
 	np.peerAddressSets = append(np.peerAddressSets, asKey)
 	if err != nil {

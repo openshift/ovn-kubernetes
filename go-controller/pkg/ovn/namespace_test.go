@@ -100,7 +100,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			_, err = fakeOvn.asf.NewAddressSet(ns2, []string{"1.1.1.2"})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// netpol peer address set for existing netpol, should stay
-			netpol := addresssetmanager.GetPodSelectorAddrSetDbIDs("pasName", DefaultNetworkControllerName)
+			netpol := addresssetmanager.GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, nil, "nsName", DefaultNetworkControllerName)
 			_, err = fakeOvn.asf.NewAddressSet(netpol, []string{"1.1.1.3"})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			// egressQoS-owned address set, should stay

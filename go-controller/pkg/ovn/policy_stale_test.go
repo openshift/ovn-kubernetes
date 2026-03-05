@@ -152,7 +152,7 @@ func getStalePolicyACLs(gressIdx int, namespace, policyName string, peerNamespac
 				// nil pod selector is equivalent to empty pod selector, which selects all
 				podSelector = &metav1.LabelSelector{}
 			}
-			peerIndex := addresssetmanager.GetPodSelectorAddrSetDbIDs(addresssetmanager.GetPodSelectorKey(podSelector, peer.NamespaceSelector, namespace), controllerName)
+			peerIndex := addresssetmanager.GetPodSelectorAddrSetDbIDs(podSelector, peer.NamespaceSelector, namespace, controllerName)
 			asv4, _ := addressset.GetHashNamesForAS(peerIndex)
 			hashedASNames = append(hashedASNames, asv4)
 		}
