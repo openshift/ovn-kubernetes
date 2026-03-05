@@ -1,4 +1,4 @@
-module github.com/ovn-org/ovn-kubernetes/openshift
+module github.com/ovn-kubernetes/ovn-kubernetes/openshift
 
 go 1.24.0
 
@@ -9,9 +9,10 @@ require (
 	github.com/onsi/gomega v1.36.1
 	github.com/openshift-eng/openshift-tests-extension v0.0.0-20250916161632-d81c09058835
 	github.com/openshift/api v0.0.0-20251020135558-286504b695bc
-	github.com/ovn-org/ovn-kubernetes/go-controller v1.0.0
-	github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250827185716-56d14a3074ba
+	github.com/openshift/client-go v0.0.0-20251015124057-db0dee36e235
+	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e v0.0.0-20250827185716-56d14a3074ba
 	github.com/spf13/cobra v1.9.1
+	golang.org/x/crypto v0.43.0
 	k8s.io/api v0.34.1
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
@@ -122,9 +123,9 @@ require (
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/opencontainers/selinux v1.11.1 // indirect
 	github.com/openshift-kni/k8sreporter v1.0.6 // indirect
-	github.com/openshift/client-go v0.0.0-20251015124057-db0dee36e235 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
 	github.com/openshift/library-go v0.0.0-20251015151611-6fc7a74b67c5 // indirect
+	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.22.0 // indirect
@@ -165,7 +166,6 @@ require (
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56 // indirect
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/oauth2 v0.29.0 // indirect
@@ -219,8 +219,8 @@ require (
 replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/onsi/ginkgo/v2 => github.com/openshift/onsi-ginkgo/v2 v2.6.1-0.20241205171354-8006f302fd12
-	github.com/ovn-org/ovn-kubernetes/go-controller => ../go-controller
-	github.com/ovn-org/ovn-kubernetes/test/e2e => ../test/e2e
+	github.com/ovn-kubernetes/ovn-kubernetes/go-controller => ../go-controller
+	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e => ../test/e2e
 	go.universe.tf/metallb => github.com/metallb/metallb v0.14.9
 	// The dependency must be with downstream kubernetes so that agnhost container image
 	// index is derived correctly.

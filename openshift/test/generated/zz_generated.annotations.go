@@ -687,9 +687,15 @@ var AppendedAnnotations = map[string]string{
 
 	"Creating a static pod on a node Should successfully create then remove a static pod": "[Disabled:Unimplemented]",
 
-	"EVPN: VTEP API validations api-server should accept valid VTEP CRs Valid VTEP configurations": "[Disabled:Unimplemented]",
+	"EVPN EVPN connectivity Layer2 network with MAC-VRF and IP-VRF": "[Suite:openshift/conformance/parallel]",
 
-	"EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations": "[Disabled:Unimplemented]",
+	"EVPN EVPN connectivity Layer2 network with MAC-VRF": "[Suite:openshift/conformance/parallel]",
+
+	"EVPN EVPN connectivity Layer3 network with IP-VRF": "[Suite:openshift/conformance/parallel]",
+
+	"EVPN: VTEP API validations api-server should accept valid VTEP CRs Valid VTEP configurations": "[Suite:openshift/conformance/parallel]",
+
+	"EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations": "[Suite:openshift/conformance/parallel]",
 
 	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Disabled:Unimplemented]",
 
@@ -1421,6 +1427,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Services does not use host masquerade address as source IP address when communicating externally": "[Disabled:Unimplemented]",
 
+	"Services of type NodePort should be able to preserve UDP traffic when server pod cycles for a NodePort service via a different node": "[Disabled:Unimplemented]",
+
 	"Services of type NodePort should handle IP fragments": "[Disabled:Unimplemented]",
 
 	"Services of type NodePort should listen on each host addresses": "[Disabled:Unimplemented]",
@@ -1551,6 +1559,10 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e delete databases recovering from deleting db files while maintaining connectivity when deleting both db files on ovnkube-db-2": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation Cluster Default Network Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
@@ -1590,6 +1602,10 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation Cluster Default Network [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Cluster Default Network of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
@@ -1631,6 +1647,10 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
@@ -1671,6 +1691,10 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
@@ -1710,6 +1734,10 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 

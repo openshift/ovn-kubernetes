@@ -6,20 +6,28 @@ import (
 	"strings"
 )
 
+// ContainerInspect represents the JSON output from 'docker/podman inspect'
+// for a container.
+type ContainerInspect struct {
+	NetworkSettings struct {
+		Networks map[string]EndpointSettings `json:"Networks"`
+	} `json:"NetworkSettings"`
+}
+
+type EndpointSettings struct {
+	Gateway             string `json:"Gateway"`
+	IPAddress           string `json:"IPAddress"`
+	IPPrefixLen         int    `json:"IPPrefixLen"`
+	IPv6Gateway         string `json:"IPv6Gateway"`
+	GlobalIPv6Address   string `json:"GlobalIPv6Address"`
+	GlobalIPv6PrefixLen int    `json:"GlobalIPv6PrefixLen"`
+	MacAddress          string `json:"MacAddress"`
+}
+
 type ContainerEngine string
 
 func (ce ContainerEngine) String() string {
 	return string(ce)
-}
-
-func (ce ContainerEngine) NetworkCIDRsFmt() string {
-	if ce == Podman {
-		return "{{json .Subnets }}"
-	}
-	if ce == Docker {
-		return "{{json .IPAM.Config }}"
-	}
-	return ""
 }
 
 const (
