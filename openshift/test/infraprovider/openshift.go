@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	ovnkconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/portalloc"
+	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/portalloc"
 
 	"github.com/onsi/ginkgo/v2"
 	"k8s.io/client-go/kubernetes"
@@ -37,6 +37,8 @@ func (m openshift) GetDefaultTimeoutContext() *framework.TimeoutContext {
 	timeouts.PodStart = 10 * time.Minute
 	return timeouts
 }
+
+var _ api.Provider = (*openshift)(nil)
 
 func IsProvider(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -78,6 +80,10 @@ func (o openshift) PrimaryNetwork() (api.Network, error) {
 	panic("not implemented")
 }
 
+func (o openshift) ListNetworks() ([]string, error) {
+	panic("not implemented")
+}
+
 func (o openshift) ExternalContainerPrimaryInterfaceName() string {
 	panic("not implemented")
 }
@@ -96,6 +102,10 @@ func (o openshift) GetK8NodeNetworkInterface(instance string, network api.Networ
 
 func (o openshift) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
 	panic("not implemented")
+}
+
+func (o openshift) GetExternalContainerPID(containerName string) (int, error) {
+	return 0, fmt.Errorf("GetExternalContainerPID not implemented for openshift provider")
 }
 
 func (o openshift) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
@@ -117,6 +127,10 @@ func (o openshift) ExecK8NodeCommand(nodeName string, cmd []string) (string, err
 
 func (o openshift) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
 	panic("not implemented")
+}
+
+func (o openshift) RunOneShotContainer(image string, cmd []string, runtimeArgs []string) (string, error) {
+	return "", fmt.Errorf("RunOneShotContainer not implemented for openshift provider")
 }
 
 func (o openshift) GetExternalContainerPort() uint16 {

@@ -8,9 +8,9 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // LOGICAL_SWITCH OPs
@@ -382,6 +382,13 @@ func CreateOrUpdateLogicalSwitchPortsOnSwitch(nbClient libovsdbclient.Client, sw
 // if it does not exist
 func CreateOrUpdateLogicalSwitchPortsAndSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch, lsps ...*nbdb.LogicalSwitchPort) error {
 	return createOrUpdateLogicalSwitchPorts(nbClient, sw, true, lsps...)
+}
+
+// CreateOrUpdateLogicalSwitchPortsAndSwitchOps creates or updates the provided
+// logical switch ports and adds them to the provided logical switch creating it
+// if it does not exist and returns the corresponding ops
+func CreateOrUpdateLogicalSwitchPortsAndSwitchOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, sw *nbdb.LogicalSwitch, lsps ...*nbdb.LogicalSwitchPort) ([]ovsdb.Operation, error) {
+	return createOrUpdateLogicalSwitchPortsOps(nbClient, ops, sw, true, true, nil, lsps...)
 }
 
 // DeleteLogicalSwitchPortsOps deletes the provided logical switch ports, removes

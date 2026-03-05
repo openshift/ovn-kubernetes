@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -57,6 +58,20 @@ func GetNodeManagementIfAddr(subnet *net.IPNet) *net.IPNet {
 		return nil
 	}
 	return &net.IPNet{IP: iputils.NextIP(gwIfAddr.IP), Mask: subnet.Mask}
+}
+
+// evpnNodeMgmtPortMAC generates a deterministic, unique MAC address for a given
+// node on a given network using 02:00 prefix.
+func evpnNodeMgmtPortMAC(nodeName string, networkID int) net.HardwareAddr {
+	input := fmt.Sprintf("%s-%d", nodeName, networkID)
+	hash := sha256.Sum256([]byte(input))
+	return net.HardwareAddr{0x02, 0x00, hash[0], hash[1], hash[2], hash[3]}
+}
+
+// HasEVPNMgmtPortMACPrefix returns true if the given MAC address uses the
+// 02:00 prefix reserved for EVPN management port MACs.
+func HasEVPNMgmtPortMACPrefix(mac net.HardwareAddr) bool {
+	return len(mac) >= 2 && mac[0] == 0x02 && mac[1] == 0x00
 }
 
 // GetNodeHybridOverlayIfAddr returns the node logical switch hybrid overlay
@@ -329,10 +344,52 @@ func GenerateRandMAC() (net.HardwareAddr, error) {
 func CopyIPNets(ipnets []*net.IPNet) []*net.IPNet {
 	copy := make([]*net.IPNet, len(ipnets))
 	for i := range ipnets {
-		ipnet := *ipnets[i]
-		copy[i] = &ipnet
+		if ipnets[i] == nil {
+			continue
+		}
+		copy[i] = &net.IPNet{
+			IP:   slices.Clone(ipnets[i].IP),
+			Mask: slices.Clone(ipnets[i].Mask),
+		}
 	}
 	return copy
+}
+
+func isIPNetEqual(ipn1, ipn2 *net.IPNet) bool {
+	if ipn1 == ipn2 {
+		return true
+	}
+	if ipn1 == nil || ipn2 == nil {
+		return false
+	}
+	m1, _ := ipn1.Mask.Size()
+	m2, _ := ipn2.Mask.Size()
+	return m1 == m2 && ipn1.IP.Equal(ipn2.IP)
+}
+
+// IsIPNetsEqual returns true if both IPNet slices are equal in length and values, regardless of order.
+func IsIPNetsEqual(ipn1, ipn2 []*net.IPNet) bool {
+	if len(ipn1) != len(ipn2) {
+		return false
+	}
+	used := make([]bool, len(ipn2))
+	for i := range ipn1 {
+		found := false
+		for j := range ipn2 {
+			if used[j] {
+				continue
+			}
+			if isIPNetEqual(ipn1[i], ipn2[j]) {
+				used[j] = true
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // IPsToNetworkIPs returns the network CIDRs of the provided IP CIDRs
@@ -462,4 +519,15 @@ func GetLastIPOfSubnet(subnet *net.IPNet, indexFromLast int) *net.IPNet {
 	r = append(make([]byte, 16), r...)
 	lastIP := net.IP(r[len(r)-16:])
 	return &net.IPNet{IP: lastIP, Mask: subnet.Mask}
+}
+
+func NetworksOverlap(n1, n2 []*net.IPNet) bool {
+	for _, s1 := range n1 {
+		for _, s2 := range n2 {
+			if s1.Contains(s2.IP) || s2.Contains(s1.IP) {
+				return true
+			}
+		}
+	}
+	return false
 }
