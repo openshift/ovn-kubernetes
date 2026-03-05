@@ -287,7 +287,7 @@ var _ = Describe("Node", func() {
 					nodeIP   string = "1.2.5.6"
 					nodeName string = "cannot.be.resolv.ed"
 					interval int    = 100000
-					ofintval int    = 0
+					ofintval int    = 60
 				)
 				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -350,7 +350,7 @@ var _ = Describe("Node", func() {
 					nodeName    string = "cannot.be.resolv.ed"
 					encapPort   uint   = 666
 					interval    int    = 100000
-					ofintval    int    = 0
+					ofintval    int    = 60
 					chassisUUID string = "1a3dfc82-2749-4931-9190-c30e7c0ecea3"
 					encapUUID   string = "e4437094-0094-4223-9f14-995d98d5fff8"
 				)
@@ -393,7 +393,7 @@ var _ = Describe("Node", func() {
 					nodeIP   string = "1.2.5.6"
 					nodeName string = "cannot.be.resolv.ed"
 					interval int    = 100000
-					ofintval int    = 0
+					ofintval int    = 60
 				)
 				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -460,7 +460,7 @@ var _ = Describe("Node", func() {
 					nodeIP    string = "1.2.5.6"
 					nodeName  string = "cannot.be.resolv.ed"
 					interval  int    = 100000
-					ofintval  int    = 0
+					ofintval  int    = 60
 					ipfixPort int32  = 456
 				)
 				ipfixIP := net.IP{1, 2, 3, 4}
@@ -535,7 +535,7 @@ var _ = Describe("Node", func() {
 					nodeIP    string = "1.2.5.6"
 					nodeName  string = "cannot.be.resolv.ed"
 					interval  int    = 100000
-					ofintval  int    = 0
+					ofintval  int    = 60
 					ipfixPort int32  = 456
 				)
 				ipfixIP := net.IP{1, 2, 3, 4}
@@ -613,7 +613,7 @@ var _ = Describe("Node", func() {
 					nodeIP   string = "1.2.5.6"
 					nodeName string = "anyhost.test"
 					interval int    = 100000
-					ofintval int    = 0
+					ofintval int    = 60
 				)
 				node := corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{

@@ -94,7 +94,7 @@ var (
 		EncapIP:                      "",
 		EncapPort:                    DefaultEncapPort,
 		InactivityProbe:              100000, // in Milliseconds
-		OpenFlowProbe:                0,      // in Milliseconds
+		OpenFlowProbe:                60,     // in seconds
 		OfctrlWaitBeforeClear:        0,      // in Milliseconds
 		MonitorAll:                   true,
 		OVSDBTxnTimeout:              DefaultDBTxnTimeout,

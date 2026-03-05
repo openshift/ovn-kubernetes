@@ -79,6 +79,15 @@ LABEL io.k8s.display-name="ovn kubernetes" \
       io.openshift.tags="openshift,networking" \
       maintainer="Tim Rozet <trozet@redhat.com>"
 
+# Copy and install custom OVS/OVN RPMs.
+RUN mkdir -p /root/fdp/
+COPY *fdp.*.rpm /root/fdp/
+RUN dnf install -y dnf
+RUN dnf clean all && dnf makecache
+RUN dnf remove -y ovn25.09 ovn25.09-central ovn25.09-host ovn25.09-vtep
+RUN dnf install --allowerasing -y /root/fdp/*.rpm
+RUN dnf clean all && rm -rf /var/cache/*
+
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
 
