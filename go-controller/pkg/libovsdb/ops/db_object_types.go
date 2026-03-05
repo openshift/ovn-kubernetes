@@ -173,6 +173,13 @@ var AddressSetClusterNetworkConnect = newObjectIDsType(addressSet, ClusterNetwor
 	IPFamilyKey,
 })
 
+var AddressSetNoOverlaySNATExemption = newObjectIDsType(addressSet, ClusterOwnerType, []ExternalIDKey{
+	// Address set for no-overlay SNAT exemption containing cluster pod subnet CIDRs and local zone node IPs
+	ObjectNameKey,
+	IPFamilyKey,
+	NetworkKey,
+})
+
 var ACLAdvertisedNetwork = newObjectIDsType(acl, AdvertisedNetworkOwnerType, []ExternalIDKey{
 	// ACL name
 	ObjectNameKey,
