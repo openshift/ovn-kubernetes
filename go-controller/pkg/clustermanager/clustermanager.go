@@ -213,7 +213,7 @@ func NewClusterManager(
 	}
 
 	if util.IsEVPNEnabled() {
-		cm.vtepController = vtepcontroller.NewController(wf, ovnClient)
+		cm.vtepController = vtepcontroller.NewController(wf, ovnClient, recorder)
 	}
 
 	return cm, nil
