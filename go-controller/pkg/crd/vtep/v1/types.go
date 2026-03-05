@@ -93,8 +93,10 @@ type VTEPStatus struct {
 	// Conditions slice of condition objects indicating details about VTEP status.
 	// +listType=map
 	// +listMapKey=type
+	// +patchMergeKey=type
+	// +patchStrategy=merge
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchMergeKey:"type" patchStrategy:"merge"`
 }
 
 // VTEPList contains a list of VTEP.
