@@ -22,11 +22,6 @@ import (
 const (
 	// emptyIdx is used to create ACL for gressPolicy that doesn't have ipBlocks
 	emptyIdx = -1
-	// ipBlockCombinedIdx is used when creating an ACL for a gressPolicy
-	// that contains ipBlocks. Previously, one ACL was created per ipBlock.
-	// This is changed to create a single combined ACL for all ipBlocks,
-	// and this special index value identifies those new ACLs.
-	ipBlockCombinedIdx = -2
 )
 
 type gressPolicy struct {
@@ -172,14 +167,14 @@ func (gp *gressPolicy) allIPsMatch() string {
 	}
 }
 
-func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) string {
+func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) []string {
 	var direction string
 	if gp.policyType == knet.PolicyTypeIngress {
 		direction = "src"
 	} else {
 		direction = "dst"
 	}
-	var ipBlockMatches []string
+	var matchStrings []string
 	var matchStr, ipVersion string
 	for _, ipBlock := range gp.ipBlocks {
 		if utilnet.IsIPv6CIDRString(ipBlock.CIDR) {
@@ -190,22 +185,17 @@ func (gp *gressPolicy) getMatchFromIPBlock(lportMatch, l4Match string) string {
 		if len(ipBlock.Except) == 0 {
 			matchStr = fmt.Sprintf("%s.%s == %s", ipVersion, direction, ipBlock.CIDR)
 		} else {
-			matchStr = fmt.Sprintf("(%s.%s == %s && %s.%s != {%s})", ipVersion, direction, ipBlock.CIDR,
+			matchStr = fmt.Sprintf("%s.%s == %s && %s.%s != {%s}", ipVersion, direction, ipBlock.CIDR,
 				ipVersion, direction, strings.Join(ipBlock.Except, ", "))
 		}
-		ipBlockMatches = append(ipBlockMatches, matchStr)
+		if l4Match == libovsdbutil.UnspecifiedL4Match {
+			matchStr = fmt.Sprintf("%s && %s", matchStr, lportMatch)
+		} else {
+			matchStr = fmt.Sprintf("%s && %s && %s", matchStr, l4Match, lportMatch)
+		}
+		matchStrings = append(matchStrings, matchStr)
 	}
-	var l3Match string
-	if len(ipBlockMatches) == 1 {
-		l3Match = ipBlockMatches[0]
-	} else {
-		l3Match = fmt.Sprintf("(%s)", strings.Join(ipBlockMatches, " || "))
-	}
-
-	if l4Match == libovsdbutil.UnspecifiedL4Match {
-		return fmt.Sprintf("%s && %s", l3Match, lportMatch)
-	}
-	return fmt.Sprintf("%s && %s && %s", l3Match, l4Match, lportMatch)
+	return matchStrings
 }
 
 // addNamespaceAddressSet adds a namespace address set to the gress policy.
@@ -295,11 +285,13 @@ func (gp *gressPolicy) buildLocalPodACLs(portGroupName string, aclLogging *libov
 	for protocol, l4Match := range libovsdbutil.GetL4MatchesFromNetworkPolicyPorts(gp.portPolicies) {
 		if len(gp.ipBlocks) > 0 {
 			// Add ACL allow rule for IPBlock CIDR
-			ipBlockMatch := gp.getMatchFromIPBlock(lportMatch, l4Match)
-			aclIDs := gp.getNetpolACLDbIDs(ipBlockCombinedIdx, protocol)
-			acl := libovsdbutil.BuildACLWithDefaultTier(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
-				aclLogging, gp.aclPipeline)
-			createdACLs = append(createdACLs, acl)
+			ipBlockMatches := gp.getMatchFromIPBlock(lportMatch, l4Match)
+			for ipBlockIdx, ipBlockMatch := range ipBlockMatches {
+				aclIDs := gp.getNetpolACLDbIDs(ipBlockIdx, protocol)
+				acl := libovsdbutil.BuildACLWithDefaultTier(aclIDs, types.DefaultAllowPriority, ipBlockMatch, action,
+					aclLogging, gp.aclPipeline)
+				createdACLs = append(createdACLs, acl)
+			}
 		}
 		// if there are pod/namespace selector, then allow packets from/to that address_set or
 		// if the NetworkPolicyPeer is empty, then allow from all sources or to all destinations.
@@ -342,10 +334,10 @@ func (gp *gressPolicy) getNetpolACLDbIDs(ipBlockIdx int, protocol string) *libov
 			// gress rule index
 			libovsdbops.GressIdxKey: strconv.Itoa(gp.idx),
 			// acls are created for every gp.portPolicies which are grouped by protocol:
-			// - for empty policy (no selectors and no ip blocks) - empty ACL with idx=emptyIdx (-1)
+			// - for empty policy (no selectors and no ip blocks) - empty ACL
 			// OR
-			// - all selector-based peers ACL with idx=emptyIdx (-1)
-			// - all ipBlocks combined into a single ACL with idx=ipBlockCombinedIdx (-2)
+			// - all selector-based peers ACL
+			// - for every IPBlock +1 ACL
 			// Therefore unique id for a given gressPolicy is protocol name + IPBlock idx
 			// (protocol will be "None" if no port policy is defined, and empty policy and all
 			// selector-based peers ACLs will have idx=-1)
