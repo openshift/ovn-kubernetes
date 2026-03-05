@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"reflect"
+	"slices"
 	"sync"
 
 	"github.com/vishvananda/netlink"
@@ -217,10 +219,25 @@ func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
 	if newNode.Name != c.nodeName {
 		return
 	}
-	if oldNode.Annotations[util.OVNNodeVTEPIPs] == newNode.Annotations[util.OVNNodeVTEPIPs] {
+
+	vtepIPsChanged := oldNode.Annotations[util.OVNNodeVTEPIPs] != newNode.Annotations[util.OVNNodeVTEPIPs]
+	hostCIDRsChanged := util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+
+	if !vtepIPsChanged && !hostCIDRsChanged {
 		return
 	}
 
+	if vtepIPsChanged {
+		c.reconcileManagedVTEPs(oldNode, newNode)
+	}
+
+	if hostCIDRsChanged {
+		c.reconcileUnmanagedVTEPs(oldNode, newNode)
+	}
+}
+
+// reconcileManagedVTEPs reconciles managed VTEPs whose IPs changed in the node annotation.
+func (c *Controller) reconcileManagedVTEPs(oldNode, newNode *corev1.Node) {
 	oldIPs, err := util.ParseVTEPIPsAnnotation(oldNode)
 	if err != nil {
 		klog.Errorf("Failed to parse VTEP IPs: %v", err)
@@ -243,6 +260,55 @@ func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
 	for vtepName := range toReconcile {
 		klog.V(4).Infof("VTEP %s IPs changed on node %s, reconciling", vtepName, c.nodeName)
 		c.vtepController.Reconcile(vtepName)
+	}
+}
+
+// reconcileUnmanagedVTEPs reconciles unmanaged VTEPs whose CIDRs overlap with
+// the host-cidrs that changed between oldNode and newNode.
+func (c *Controller) reconcileUnmanagedVTEPs(oldNode, newNode *corev1.Node) {
+	oldCIDRs, err := util.ParseNodeHostCIDRs(oldNode)
+	if err != nil {
+		klog.Errorf("Failed to parse old host-cidrs for node %s: %v", c.nodeName, err)
+		return
+	}
+	newCIDRs, err := util.ParseNodeHostCIDRs(newNode)
+	if err != nil {
+		klog.Errorf("Failed to parse new host-cidrs for node %s: %v", c.nodeName, err)
+		return
+	}
+	changed := oldCIDRs.SymmetricDifference(newCIDRs)
+	if changed.Len() == 0 {
+		return
+	}
+
+	changedNets, err := util.ParseIPNets(changed.UnsortedList())
+	if err != nil {
+		klog.Errorf("Failed to parse changed host CIDRs: %v", err)
+		return
+	}
+
+	vteps, err := c.watchFactory.VTEPInformer().Lister().List(labels.Everything())
+	if err != nil {
+		klog.Errorf("Failed to list VTEPs for host-cidrs reconciliation: %v", err)
+		return
+	}
+	for _, vtep := range vteps {
+		if vtep.Spec.Mode != vtepv1.VTEPModeUnmanaged {
+			continue
+		}
+		var vtepCIDRStrs []string
+		for _, c := range vtep.Spec.CIDRs {
+			vtepCIDRStrs = append(vtepCIDRStrs, string(c))
+		}
+		vtepNets, err := util.ParseIPNets(vtepCIDRStrs)
+		if err != nil {
+			klog.Errorf("Failed to parse VTEP %s CIDRs: %v", vtep.Name, err)
+			continue
+		}
+		if util.NetworksOverlap(vtepNets, changedNets) {
+			klog.V(4).Infof("Host CIDRs changed on node %s, reconciling unmanaged VTEP %s", c.nodeName, vtep.Name)
+			c.vtepController.Reconcile(vtep.Name)
+		}
 	}
 }
 
@@ -639,7 +705,7 @@ func (c *Controller) ensureVXLAN(vxlanName string, bridgeName string, srcIP net.
 
 func (c *Controller) getVTEPIPs(vtep *vtepv1.VTEP, node *corev1.Node) (net.IP, net.IP, error) {
 	if vtep.Spec.Mode == vtepv1.VTEPModeUnmanaged {
-		return c.discoverVTEPIPs(vtep)
+		return c.discoverVTEPIPs(vtep, node)
 	}
 	return c.getVTEPIPsFromAnnotation(vtep, node)
 }
@@ -671,10 +737,13 @@ func (c *Controller) getVTEPIPsFromAnnotation(vtep *vtepv1.VTEP, node *corev1.No
 	return ipv4, ipv6, nil
 }
 
-// discoverVTEPIPs finds IPs on local interfaces that fall within the VTEP's CIDRs.
+// discoverVTEPIPs finds IPs on the node that fall within the VTEP's CIDRs.
 // For unmanaged VTEPs, an external provider has already assigned IPs to the node;
-// this discovers them via netlink rather than requiring a node annotation.
-func (c *Controller) discoverVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP, error) {
+// this discovers them from the host-cidrs annotation. When multiple IPs match
+// a single address family, it falls back to netlink to filter out secondary and
+// VIP addresses that can float between nodes. If ambiguity remains, the
+// lexicographically lowest IP is chosen for deterministic selection.
+func (c *Controller) discoverVTEPIPs(vtep *vtepv1.VTEP, node *corev1.Node) (net.IP, net.IP, error) {
 	var cidrs []*net.IPNet
 	for _, cidr := range vtep.Spec.CIDRs {
 		_, ipNet, err := net.ParseCIDR(string(cidr))
@@ -684,31 +753,80 @@ func (c *Controller) discoverVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP, error) 
 		cidrs = append(cidrs, ipNet)
 	}
 
-	var ipv4, ipv6 net.IP
-	for _, family := range []int{netlink.FAMILY_V4, netlink.FAMILY_V6} {
-		addrs, err := util.GetNetLinkOps().AddrList(nil, family)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to list addresses (family %d): %w", family, err)
-		}
-		for _, addr := range addrs {
-			// Skip VIPs: keepalived labels them with "vip", and MetalLB/keepalived
-			// add them as secondary. These IPs can float between nodes.
-			if util.IsAddressAddedByKeepAlived(addr) || (addr.Flags&unix.IFA_F_SECONDARY) != 0 {
-				continue
+	hostCIDRs, err := util.ParseNodeHostCIDRs(node)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse host-cidrs annotation: %w", err)
+	}
+
+	matchesIP := func(ip net.IP) bool {
+		for _, cidr := range cidrs {
+			if cidr.Contains(ip) {
+				return true
 			}
-			for _, cidr := range cidrs {
-				if cidr.Contains(addr.IP) {
-					if addr.IP.To4() != nil {
-						ipv4 = addr.IP
-					} else {
-						ipv6 = addr.IP
-					}
-					break
-				}
+		}
+		return false
+	}
+
+	var v4Matches, v6Matches []net.IP
+	for hostCIDR := range hostCIDRs {
+		ip, _, err := net.ParseCIDR(hostCIDR)
+		if err != nil {
+			return nil, nil, err
+		}
+		if matchesIP(ip) {
+			if ip.To4() != nil {
+				v4Matches = append(v4Matches, ip)
+			} else {
+				v6Matches = append(v6Matches, ip)
 			}
 		}
 	}
+
+	// When a single match exists per family, use it directly. Multiple matches
+	// require netlink to filter out secondary/VIP addresses that float between nodes.
+	// If ambiguity remains, the lowest IP is picked for deterministic selection.
+	ipv4, err := c.pickVTEPIP(v4Matches, matchesIP, netlink.FAMILY_V4)
+	if err != nil {
+		return nil, nil, err
+	}
+	ipv6, err := c.pickVTEPIP(v6Matches, matchesIP, netlink.FAMILY_V6)
+	if err != nil {
+		return nil, nil, err
+	}
 	return ipv4, ipv6, nil
+}
+
+func (c *Controller) pickVTEPIP(matches []net.IP, matchesIP func(net.IP) bool, family int) (net.IP, error) {
+	if len(matches) <= 1 {
+		if len(matches) == 1 {
+			return matches[0], nil
+		}
+		return nil, nil
+	}
+
+	klog.Infof("Multiple VTEP IP candidates %v (family %d), falling back to netlink", matches, family)
+	addrs, err := util.GetNetLinkOps().AddrList(nil, family)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list addresses (family %d): %w", family, err)
+	}
+	matches = matches[:0]
+	for _, addr := range addrs {
+		if util.IsAddressAddedByKeepAlived(addr) || (addr.Flags&unix.IFA_F_SECONDARY) != 0 {
+			continue
+		}
+		if matchesIP(addr.IP) {
+			matches = append(matches, addr.IP)
+		}
+	}
+	slices.SortFunc(matches, func(a, b net.IP) int {
+		addrA, _ := netip.AddrFromSlice(a)
+		addrB, _ := netip.AddrFromSlice(b)
+		return addrA.Compare(addrB)
+	})
+	if len(matches) > 0 {
+		return matches[0], nil
+	}
+	return nil, nil
 }
 
 func (c *Controller) ensureDummyWithIPs(vtep *vtepv1.VTEP, ips ...net.IP) error {
