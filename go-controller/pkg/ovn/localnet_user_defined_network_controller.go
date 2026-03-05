@@ -20,6 +20,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
+	topologycontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/topology"
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
@@ -221,6 +222,7 @@ func NewLocalnetUserDefinedNetworkController(
 					localZoneNodes:              &sync.Map{},
 					networkManager:              networkManager,
 					addressSetManager:           addressSetManager,
+					nodeAnnotationCache:         topologycontroller.NewNodeAnnotationCache(),
 				},
 			},
 		},

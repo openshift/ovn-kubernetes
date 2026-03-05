@@ -32,6 +32,7 @@ import (
 	egresssvc "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
 	networkconnectcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/networkconnect"
 	svccontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
+	topologycontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/topology"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
 	dnsnameresolver "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/logical_router_policy"
@@ -230,6 +231,7 @@ func newDefaultNetworkControllerCommon(
 			networkManager:              networkManager,
 			routeImportManager:          routeImportManager,
 			addressSetManager:           addressSetManager,
+			nodeAnnotationCache:         topologycontroller.NewNodeAnnotationCache(),
 		},
 		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC:                       eIPController,

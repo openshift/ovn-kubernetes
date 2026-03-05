@@ -2497,9 +2497,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				// Simulate a startup window where node cache entries are not yet populated.
 				fakeOvn.controller.localZoneNodes = &sync.Map{}
 
-				localPod := newPod("ns1", "local-pod", node1Name, "10.128.1.3")
-				remotePod := newPod("ns1", "remote-pod", node2Name, "10.128.1.4")
-				unscheduledPod := newPod("ns1", "unscheduled-pod", "", "")
+				localPod := ovntest.NewPod("ns1", "local-pod", node1Name, "10.128.1.3")
+				remotePod := ovntest.NewPod("ns1", "remote-pod", node2Name, "10.128.1.4")
+				unscheduledPod := ovntest.NewPod("ns1", "unscheduled-pod", "", "")
 
 				gomega.Expect(fakeOvn.controller.isPodScheduledinLocalZone(localPod)).To(gomega.BeTrue())
 				gomega.Expect(fakeOvn.controller.isPodScheduledinLocalZone(remotePod)).To(gomega.BeFalse())

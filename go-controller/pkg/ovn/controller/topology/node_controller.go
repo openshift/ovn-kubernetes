@@ -21,9 +21,18 @@ import (
 
 // NodeHandler handles node reconciliation for a single network.
 type NodeHandler interface {
+	// GetNetworkName returns the network this handler reconciles.
 	GetNetworkName() string
-	ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *util.NodeAnnotationState) error
-	DeleteNode(node *corev1.Node, state *util.NodeAnnotationState) error
+	// ReconcileNode reconciles the network-specific state for a node. oldNode and
+	// oldState may be nil when the node is first seen for the network or becomes
+	// active again, while newNode and newState describe the latest desired state.
+	ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *NodeAnnotationState) error
+	// DeleteNode cleans up the network-specific state for a node that was deleted
+	// or is no longer active for the network. state contains the last known
+	// annotation state for the node.
+	DeleteNode(node *corev1.Node, state *NodeAnnotationState) error
+	// SyncNodes performs the initial full-network sync before per-node
+	// reconciliation is queued for the handler.
 	SyncNodes(nodes []*corev1.Node) error
 }
 
@@ -57,7 +66,7 @@ type NodeController struct {
 
 	nodeCache nodeCache
 	// annotationCache stores parsed annotation maps keyed by node.
-	annotationCache *nodeAnnotationCache
+	annotationCache *NodeAnnotationCache
 
 	startMu sync.Mutex
 	started bool
@@ -148,7 +157,7 @@ func (c *NodeController) Reconcile(key string) {
 }
 
 // AnnotationCache returns the cache used for parsed node annotations.
-func (c *NodeController) AnnotationCache() util.NodeAnnotationCache {
+func (c *NodeController) AnnotationCache() *NodeAnnotationCache {
 	return c.annotationCache
 }
 
@@ -204,8 +213,8 @@ func (c *NodeController) reconcileUpdate(oldNode, newNode *corev1.Node) error {
 		return nil
 	}
 
-	oldState := util.BuildNodeAnnotationState(oldNode, c.annotationCache)
-	newState := util.BuildNodeAnnotationState(newNode, c.annotationCache)
+	oldState := c.annotationCache.BuildNodeAnnotationState(oldNode)
+	newState := c.annotationCache.BuildNodeAnnotationState(newNode)
 
 	var errs []error
 	for _, handler := range handlers {
@@ -240,7 +249,7 @@ func (c *NodeController) reconcileDelete(key string) error {
 		return nil
 	}
 
-	oldState := util.BuildNodeAnnotationState(oldNode, c.annotationCache)
+	oldState := c.annotationCache.BuildNodeAnnotationState(oldNode)
 
 	var errs []error
 	for _, handler := range handlers {
