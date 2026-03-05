@@ -474,8 +474,13 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 
 				udnNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
 				podInfo.populateUserDefinedNetworkLogicalSwitchCache(udnNetController)
-				Expect(udnNetController.bnc.WatchNodes()).To(Succeed())
+				Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
 				Expect(udnNetController.bnc.WatchPods()).To(Succeed())
+
+				// Deregister active node handler before cleanup to avoid concurrent
+				// node reconciliation re-creating entities while pod/NAD deletes and
+				// cleanup are running.
+				fullUDNController.DeregisterNodeHandler()
 
 				Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
 				Expect(fakeOvn.fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Delete(context.Background(), nad.Name, metav1.DeleteOptions{})).To(Succeed())
@@ -551,7 +556,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			udnNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
 			Expect(ok).To(BeTrue())
 			udnNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
-			Expect(l2Controller.WatchNodes()).To(Succeed())
+			l2Controller.RegisterNodeHandler()
 			Expect(l2Controller.WatchPods()).To(Succeed())
 			Expect(l2Controller.WatchNetworkPolicy()).To(Succeed())
 
@@ -661,7 +666,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// start watching nodes to trigger initial node cleanup
-			Expect(udnNetController.WatchNodes()).To(Succeed())
+			udnNetController.RegisterNodeHandler()
 			Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDB))
 			// check if the remoteNodesNoRouter map is empty
 			isEmpty := true
@@ -852,7 +857,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			Expect(err).NotTo(HaveOccurred())
 			err = l2Controller.init()
 			Expect(err).NotTo(HaveOccurred())
-			Expect(userDefinedNetController.bnc.WatchNodes()).To(Succeed())
+			Expect(fakeOvn.registerUDNNodeHandler(netInfo.netName)).To(Succeed())
 
 			By("Remote node should not have a transit-router port before activation")
 			Consistently(func() bool {
@@ -1356,7 +1361,7 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 
 	userDefinedNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
 	podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
-	if err = userDefinedNetController.bnc.WatchNodes(); err != nil {
+	if err = fakeOvn.registerUDNNodeHandler(userDefinedNetworkName); err != nil {
 		return err
 	}
 	if err = userDefinedNetController.bnc.WatchPods(); err != nil {

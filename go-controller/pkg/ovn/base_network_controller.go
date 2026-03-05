@@ -111,8 +111,6 @@ type BaseNetworkController struct {
 	nodeReconciler NodeReconciler
 	// node annotation cache for shared node controllers (optional)
 	nodeAnnotationCache *topologycontroller.NodeAnnotationCache
-	// nodeHandlerRegistrar registers this controller with a shared node controller.
-	nodeHandlerRegistrar func()
 
 	// pod events factory handler
 	podHandler *factory.Handler
@@ -234,9 +232,7 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 	if err != nil {
 		return fmt.Errorf("failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
 	}
-	oc.doReconcile(reconcileRoutes, reconcilePendingPods, reconcileNodes, setNodeFailed, reconcileNamespaces.List())
-
-	return nil
+	return oc.doReconcile(reconcileRoutes, reconcilePendingPods, reconcileNodes, setNodeFailed, reconcileNamespaces.List())
 }
 
 func (oc *BaseNetworkController) updateNADKeysChanged(nadKeys []string) bool {
@@ -255,7 +251,12 @@ func (oc *BaseNetworkController) updateNADKeysChanged(nadKeys []string) bool {
 // instead since once the controller NetInfo has been updated there is no point in retrying.
 func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPods bool,
 	reconcileNodes []string, setNodeFailed func(string), reconcileNamespaces []string,
-) {
+) error {
+	// UDNs have moved to node level-driven reconciliation
+	if !oc.IsDefault() && oc.nodeReconciler == nil {
+		return fmt.Errorf("shared node reconciler is required for UDN network %s", oc.GetNetworkName())
+	}
+
 	if reconcileRoutes {
 		err := oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
 		if err != nil {
@@ -265,12 +266,8 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 
 	for _, nodeName := range reconcileNodes {
 		setNodeFailed(nodeName)
-		if oc.nodeReconciler != nil {
+		if !oc.IsDefault() {
 			oc.nodeReconciler.Reconcile(nodeName)
-			continue
-		}
-		if oc.retryNodes == nil {
-			klog.Infof("No node reconciler available for network %s, skipping node %s", oc.GetNetworkName(), nodeName)
 			continue
 		}
 		node, err := oc.watchFactory.GetNode(nodeName)
@@ -285,7 +282,8 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 		}
 	}
 
-	if len(reconcileNodes) > 0 && oc.nodeReconciler == nil && oc.retryNodes != nil {
+	// only default network still uses retry framework for now
+	if len(reconcileNodes) > 0 && oc.IsDefault() {
 		oc.retryNodes.RequestRetryObjs()
 	}
 
@@ -316,6 +314,7 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 	if namespaceAdded {
 		oc.retryNamespaces.RequestRetryObjs()
 	}
+	return nil
 }
 
 // SetNodeReconciler configures a shared node reconciler for this controller.
@@ -330,16 +329,9 @@ func (oc *BaseNetworkController) SetNodeAnnotationCache(cache *topologycontrolle
 	oc.nodeAnnotationCache = cache
 }
 
-// SetNodeHandlerRegistrar configures a callback to register with the shared node controller.
-func (oc *BaseNetworkController) SetNodeHandlerRegistrar(register func()) {
-	oc.nodeHandlerRegistrar = register
-}
-
-// RegisterNodeHandler registers this controller with the shared node controller when configured.
-func (oc *BaseNetworkController) RegisterNodeHandler() {
-	if oc.nodeHandlerRegistrar != nil {
-		oc.nodeHandlerRegistrar()
-	}
+// DeregisterNodeHandler removes this controller from the shared node controller.
+func (oc *BaseNetworkController) DeregisterNodeHandler() {
+	oc.nodeReconciler.DeregisterNetworkController(oc.GetNetworkName())
 }
 
 // BaseUserDefinedNetworkController structure holds per-network fields and network specific
@@ -991,6 +983,12 @@ func (bnc *BaseNetworkController) WatchNodes() error {
 	if bnc.nodeHandler != nil {
 		return nil
 	}
+	if !bnc.IsDefault() {
+		panic(fmt.Errorf("WatchNodes cannot be called on a non-default network %s", bnc.GetNetworkName()))
+	}
+	if bnc.retryNodes == nil {
+		return fmt.Errorf("node retry framework is not initialized for network %s", bnc.GetNetworkName())
+	}
 
 	handler, err := bnc.retryNodes.WatchResource()
 	if err == nil {
@@ -1117,6 +1115,10 @@ func (bnc *BaseNetworkController) isLayer2WithInterconnectTransport() bool {
 
 // HandleNetworkRefChange enqueues node reconciliation when a NAD reference becomes active/inactive.
 func (bnc *BaseNetworkController) HandleNetworkRefChange(nodeName string, active bool) {
+	if !bnc.IsDefault() {
+		bnc.nodeReconciler.Reconcile(nodeName)
+		return
+	}
 	if bnc.retryNodes == nil || bnc.watchFactory == nil {
 		return
 	}
