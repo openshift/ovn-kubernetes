@@ -465,6 +465,7 @@ func (oc *Layer3UserDefinedNetworkController) newRetryFramework(
 		EventHandler:           eventHandler,
 	}
 	return retry.NewRetryFramework(
+		oc.GetNetworkName()+"/networkController",
 		oc.stopChan,
 		oc.wg,
 		oc.watchFactory,
