@@ -129,6 +129,7 @@ echo "-uae | --preconfigured-udn-addresses-enable   Enable connecting workloads 
 echo "-rae | --enable-route-advertisements          Enable route advertisements"
 echo "-adv | --advertise-default-network            Applies a RouteAdvertisements configuration to advertise the default network on all nodes"
 echo "-rud | --routed-udn-isolation-disable         Disable isolation across BGP-advertised UDNs (sets advertised-udn-isolation-mode=loose). DEFAULT: strict."
+echo "-mps | --multi-pod-subnet                     Use multiple subnets for the default cluster network"
 echo ""
 }
 
@@ -343,6 +344,8 @@ parse_args() {
                                                 ;;
             -dns | --enable-dnsnameresolver )   OVN_ENABLE_DNSNAMERESOLVER=true
                                                 ;;
+            -mps| --multi-pod-subnet )          MULTI_POD_SUBNET=true
+                                                ;;
             -h | --help )                       usage
                                                 exit
                                                 ;;
@@ -437,6 +440,7 @@ print_params() {
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_MTU= $OVN_MTU"
      echo "OVN_ENABLE_DNSNAMERESOLVER= $OVN_ENABLE_DNSNAMERESOLVER"
+     echo "MULTI_POD_SUBNET= $MULTI_POD_SUBNET"
      echo ""
 }
 
@@ -579,15 +583,20 @@ set_default_params() {
   if [ "$OVN_ENABLE_EX_GW_NETWORK_BRIDGE" == true ]; then
     OVN_EX_GW_NETWORK_INTERFACE="eth1"
   fi
+  MULTI_POD_SUBNET=${MULTI_POD_SUBNET:-false}
   # Input not currently validated. Modify outside script at your own risk.
   # These are the same values defaulted to in KIND code (kind/default.go).
   # NOTE: KIND NET_CIDR_IPV6 default use a /64 but OVN have a /64 per host
   # so it needs to use a larger subnet
   #  Upstream - NET_CIDR_IPV6=fd00:10:244::/64 SVC_CIDR_IPV6=fd00:10:96::/112
   NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
+  NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
+  if [ "$MULTI_POD_SUBNET" == true ]; then
+    NET_CIDR_IPV4="10.243.0.0/23/24,10.244.0.0/16"
+    NET_CIDR_IPV6="fd00:10:243::/63/64,fd00:10:244::/48"
+  fi
   NET_SECOND_CIDR_IPV4=${NET_SECOND_CIDR_IPV4:-172.19.0.0/16}
   SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/16}
-  NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
   SVC_CIDR_IPV6=${SVC_CIDR_IPV6:-fd00:10:96::/112}
   JOIN_SUBNET_IPV4=${JOIN_SUBNET_IPV4:-100.64.0.0/16}
   JOIN_SUBNET_IPV6=${JOIN_SUBNET_IPV6:-fd98::/64}
@@ -716,18 +725,26 @@ check_ipv6() {
 }
 
 set_cluster_cidr_ip_families() {
+# kind only allows single subnet for pod network, while ovn-kubernetes supports multiple subnets.
+# So we pick the first subnet from the provided list for kind configuration and store it in KIND_CIDR.
+# remove host subnet mask info for kind configuration (when the subnet is set as 10.0.0.0/16/14)
+  KIND_CIDR_IPV4=$(echo "${NET_CIDR_IPV4}"| cut -d',' -f1 | cut -d'/' -f1,2 )
+  KIND_CIDR_IPV6=$(echo "${NET_CIDR_IPV6}"| cut -d',' -f1 | cut -d'/' -f1,2 )
   if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
     IP_FAMILY=""
+    KIND_CIDR=$KIND_CIDR_IPV4
     NET_CIDR=$NET_CIDR_IPV4
     SVC_CIDR=$SVC_CIDR_IPV4
     echo "IPv4 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
   elif [ "$PLATFORM_IPV4_SUPPORT" == false ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     IP_FAMILY="ipv6"
+    KIND_CIDR=$KIND_CIDR_IPV6
     NET_CIDR=$NET_CIDR_IPV6
     SVC_CIDR=$SVC_CIDR_IPV6
     echo "IPv6 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
   elif [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     IP_FAMILY="dual"
+    KIND_CIDR=$KIND_CIDR_IPV4,$KIND_CIDR_IPV6
     NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
     SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
     echo "Dual Stack Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
@@ -798,7 +815,7 @@ create_kind_cluster() {
 
   ovn_ip_family=${IP_FAMILY} \
   ovn_ha=${OVN_HA} \
-  net_cidr=${NET_CIDR} \
+  net_cidr="${KIND_CIDR}" \
   svc_cidr=${SVC_CIDR} \
   use_local_registy=${KIND_LOCAL_REGISTRY} \
   dns_domain=${KIND_DNS_DOMAIN} \

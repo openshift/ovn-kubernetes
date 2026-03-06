@@ -46,6 +46,9 @@ set_default_params() {
   # so it needs to use a larger subnet
   #  Upstream - NET_CIDR_IPV6=fd00:10:244::/64 SVC_CIDR_IPV6=fd00:10:96::/112
   export NET_CIDR_IPV4=${NET_CIDR_IPV4:-10.244.0.0/16}
+  if [ "$MULTI_POD_SUBNET" == true ]; then
+      NET_CIDR_IPV4="10.243.0.0/23/24,10.244.0.0/16"
+  fi
   export NET_SECOND_CIDR_IPV4=${NET_SECOND_CIDR_IPV4:-172.19.0.0/16}
   export SVC_CIDR_IPV4=${SVC_CIDR_IPV4:-10.96.0.0/16}
   export NET_CIDR_IPV6=${NET_CIDR_IPV6:-fd00:10:244::/48}
@@ -84,6 +87,7 @@ set_default_params() {
   export PLATFORM_IPV4_SUPPORT=true
 
   export OVN_ENABLE_DNSNAMERESOLVER=${OVN_ENABLE_DNSNAMERESOLVER:-false}
+  export MULTI_POD_SUBNET=${MULTI_POD_SUBNET:-false}
 }
 
 usage() {
@@ -131,6 +135,7 @@ usage() {
     echo "-dns | --enable-dnsnameresolver               Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
     echo "-ce  | --enable-central                       Deploy with OVN Central (Legacy Architecture)"
     echo "-npz | --nodes-per-zone                       Specify number of nodes per zone (Default 0, which means global zone; >0 means interconnect zone, where 1 for single-node zone, >1 for multi-node zone). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
+    echo "-mps | --multi-pod-subnet                     Use multiple subnets for the default cluster network"
     echo ""
 
 }
@@ -207,6 +212,8 @@ parse_args() {
                                                   fi
                                                   KIND_NUM_NODES_PER_ZONE=$1
                                                   ;;
+            -mps| --multi-pod-subnet )            MULTI_POD_SUBNET=true
+                                                  ;;
             * )                                   usage
                                                   exit 1
         esac
@@ -243,6 +250,7 @@ print_params() {
      echo "KIND_NUM_MASTER = $KIND_NUM_MASTER"
      echo "KIND_NUM_WORKER = $KIND_NUM_WORKER"
      echo "OVN_ENABLE_DNSNAMERESOLVER= $OVN_ENABLE_DNSNAMERESOLVER"
+     echo "MULTI_POD_SUBNET= $MULTI_POD_SUBNET"
      echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      if [[ $OVN_ENABLE_INTERCONNECT == true ]]; then
        echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
@@ -350,13 +358,17 @@ EOT
     for i in $(seq 1 $KIND_NUM_WORKER); do
         echo "- role: worker" >> /tmp/kind.yaml
     done
+    # kind only allows single subnet for pod network, while ovn-kubernetes supports multiple subnets.
+    # So we pick the first subnet from the provided list for kind configuration and store it in KIND_CIDR.
+    # remove host subnet mask info for kind configuration (when the subnet is set as 10.0.0.0/16/14)
+    KIND_CIDR_IPV4=$(echo "${NET_CIDR_IPV4}"| cut -d',' -f1 | cut -d'/' -f1,2 )
 
     # Add networking configuration
     cat <<EOT >> /tmp/kind.yaml
 networking:
   disableDefaultCNI: true
   kubeProxyMode: none
-  podSubnet: $NET_CIDR_IPV4
+  podSubnet: $KIND_CIDR_IPV4
   serviceSubnet: $SVC_CIDR_IPV4
 EOT
 
@@ -432,10 +444,15 @@ create_ovn_kubernetes() {
                           --set tags.ovnkube-db=$(if [ "${OVN_HA}" == "false" ]; then echo "true"; else echo "false"; fi)"
     fi
     echo "value_file=${value_file}"
+    # For multi-pod-subnet case, NET_CIDR_IPV4 is a list of CIDRs separated by comma.
+    # When Helm encounters a comma within a string value in a --set argument, it attempts to parse the comma as a separator
+    # for multiple values (like a list or a map), not as part of a single string value.
+    set -x
+    ESCAPED_NET_CIDR_IPV4="${NET_CIDR_IPV4//,/\\,}"
     cmd=$(cat <<EOF
 helm install ovn-kubernetes . -f "${value_file}" \
           --set k8sAPIServer=${API_URL} \
-          --set podNetwork="${NET_CIDR_IPV4}/24" \
+          --set podNetwork="${ESCAPED_NET_CIDR_IPV4}" \
           --set serviceNetwork=${SVC_CIDR_IPV4} \
           --set ovnkube-master.replicas=${MASTER_REPLICAS} \
           --set global.image.repository=$(get_image) \
