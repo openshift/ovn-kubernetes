@@ -47,6 +47,7 @@ type Controller struct {
 	nodeLister     corelisters.NodeLister
 	vtepController controllerutil.Controller
 	cudnController controllerutil.Controller
+	nodeController controllerutil.Controller
 	eventRecorder  record.EventRecorder
 
 	// cudnVTEPIndex tracks which VTEP each EVPN-enabled CUDN references
@@ -104,6 +105,20 @@ func NewController(
 		cudnCfg,
 	)
 
+	nodeLister := wf.NodeCoreInformer().Lister()
+	nodeCfg := &controllerutil.ControllerConfig[corev1.Node]{
+		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+		Informer:       wf.NodeCoreInformer().Informer(),
+		Lister:         nodeLister.List,
+		Reconcile:      c.reconcileNode,
+		ObjNeedsUpdate: nodeNeedsUpdate,
+		Threadiness:    1,
+	}
+	c.nodeController = controllerutil.NewController(
+		"clustermanager-vtep-node-controller",
+		nodeCfg,
+	)
+
 	return c
 }
 
@@ -113,12 +128,13 @@ func (c *Controller) Start() error {
 	return controllerutil.Start(
 		c.vtepController,
 		c.cudnController,
+		c.nodeController,
 	)
 }
 
 // Stop shuts down the VTEP controller.
 func (c *Controller) Stop() {
-	controllerutil.Stop(c.vtepController, c.cudnController)
+	controllerutil.Stop(c.vtepController, c.cudnController, c.nodeController)
 }
 
 func (c *Controller) reconcileVTEP(key string) error {
@@ -450,6 +466,35 @@ func cudnNeedsUpdate(oldObj, newObj *udnv1.ClusterUserDefinedNetwork) bool {
 		return newObj.Spec.Network.EVPN != nil
 	}
 	return false
+}
+
+// reconcileNode is called when a node's k8s.ovn.org/vteps annotation changes
+// (or on node create/delete). It re-queues all VTEPs so validateNodeVTEPIPs
+// can re-validate VTEP IPs for the affected node.
+//
+// NOTE: currently we re-queue all VTEPs because every node participates in
+// every VTEP (FRR runs on all nodes). If partial VTEP participation is
+// supported in the future, we could compare the node's IPs against each
+// VTEP's CIDRs and only re-queue overlapping VTEPs.
+func (c *Controller) reconcileNode(_ string) error {
+	c.vtepController.ReconcileAll()
+	return nil
+}
+
+// nodeNeedsUpdate triggers VTEP reconciliation only when the k8s.ovn.org/vteps
+// annotation changes. Creates (oldObj==nil) are ignored because a fresh node
+// won't have the VTEP annotation yet; the annotation-change event will handle
+// it once set. On restart, the informer fires synthetic creates for all
+// existing nodes (which may already carry the annotation), but the VTEP
+// informer also fires creates for all VTEPs, and each VTEP reconciliation
+// reads node annotations via the lister, so skipping node creates is safe.
+// Deletes (newObj==nil) bypass ObjNeedsUpdate in the controller framework,
+// so that branch is unreachable here.
+func nodeNeedsUpdate(oldObj, newObj *corev1.Node) bool {
+	if oldObj == nil || newObj == nil {
+		return false
+	}
+	return util.NodeVTEPsAnnotationChanged(oldObj, newObj)
 }
 
 func vtepNeedsUpdate(oldObj, newObj *vtepv1.VTEP) bool {
