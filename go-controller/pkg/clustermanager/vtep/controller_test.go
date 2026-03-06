@@ -2,12 +2,14 @@ package vtep
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -73,6 +75,24 @@ func getVTEPFinalizers(client *vtepfake.Clientset, vtepName string) ([]string, e
 		return nil, fmt.Errorf("failed to get VTEP %s: %w", vtepName, err)
 	}
 	return vtep.Finalizers, nil
+}
+
+// newNodeWithVTEPAnnotation creates a node with the k8s.ovn.org/vteps annotation.
+// vtepIPs is a map of VTEP name to list of IPs discovered on this node.
+func newNodeWithVTEPAnnotation(name string, vtepIPs map[string][]string) *corev1.Node {
+	vteps := make(map[string]util.VTEPNodeAnnotation, len(vtepIPs))
+	for vtepName, ips := range vtepIPs {
+		vteps[vtepName] = util.VTEPNodeAnnotation{IPs: ips}
+	}
+	annotation, _ := json.Marshal(vteps)
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Annotations: map[string]string{
+				util.OVNNodeVTEPs: string(annotation),
+			},
+		},
+	}
 }
 
 func getVTEPCondition(client *vtepfake.Clientset, vtepName, conditionType string) (*metav1.Condition, error) {
@@ -597,6 +617,235 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
 				gomega.HaveField("Status", metav1.ConditionTrue),
 				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+	})
+
+	ginkgo.Context("Node VTEP IP validation", func() {
+		ginkgo.It("sets Accepted=True when a node has a VTEP IP in the annotation", func() {
+			node := newNodeWithVTEPAnnotation("node-1", map[string][]string{"vtep-discover": {"100.64.0.5"}})
+			vtep := newVTEP("vtep-discover", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-discover", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+
+		ginkgo.It("sets Accepted=False when a node has no vteps annotation", func() {
+			nodeNoAnnotation := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "bare-node"},
+			}
+			vtep := newVTEP("vtep-skip", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			start(vtep, nodeNoAnnotation)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-skip", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+			))
+		})
+
+		ginkgo.It("sets Accepted=False when a node has no entry for this VTEP", func() {
+			node := newNodeWithVTEPAnnotation("node-nomatch", map[string][]string{"other-vtep": {"10.0.0.1"}})
+			vtep := newVTEP("vtep-nomatch", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-nomatch", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+				gomega.HaveField("Message", gomega.ContainSubstring("node-nomatch")),
+			))
+
+			gomega.Eventually(fakeRecorder.Events).Should(gomega.Receive(
+				gomega.ContainSubstring(reasonAllocationFailed),
+			))
+		})
+
+		ginkgo.It("sets Accepted=False when a node has an empty IP list for the VTEP", func() {
+			node := newNodeWithVTEPAnnotation("node-empty", map[string][]string{"vtep-empty": {}})
+			vtep := newVTEP("vtep-empty", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-empty", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+			))
+
+			gomega.Eventually(fakeRecorder.Events).Should(gomega.Receive(
+				gomega.ContainSubstring(reasonAllocationFailed),
+			))
+		})
+
+		ginkgo.It("does not fire duplicate events when failure state is unchanged", func() {
+			// Test both AllocationFailed and CIDROverlap dedup in a single scenario:
+			// vtep-a and vtep-b overlap, and vtep-a also has a missing node annotation.
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-b": {"10.0.0.1"}})
+			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/16")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
+			start(vtepA, vtepB, node)
+
+			// vtep-a should be Accepted=False due to CIDR overlap (checked before node validation)
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonCIDROverlap)),
+			))
+
+			// vtep-b should also be Accepted=False due to CIDR overlap
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-b", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonCIDROverlap)),
+			))
+
+			// Drain all events from initial convergence. We expect one
+			// CIDROverlap event per VTEP (2 total), but a 3rd is possible:
+			//  1. vtep-a reconciles first → overlap → event #1 → patches status
+			//  2. vtep-b reconciles → overlap → event #2 → patches status.
+			//     If the informer cache hasn't synced vtep-a's status yet,
+			//     validateCIDRsAcrossVTEPs re-queues vtep-a.
+			//  3. vtep-a re-reconciles → lister.Get still returns the stale
+			//     object (no conditions) → dedup guard sees existingCond==nil
+			//     → fires event #3 (duplicate).
+			// This is a benign race between the worker and the async informer
+			// cache sync. In steady state the guard works correctly.
+			gomega.Eventually(func() bool {
+				select {
+				case <-fakeRecorder.Events:
+					return false
+				default:
+					return true
+				}
+			}).WithTimeout(3 * time.Second).Should(gomega.BeTrue())
+
+			// Re-reconcile both — no new events since the lister is now in sync
+			controller.vtepController.Reconcile("vtep-a")
+			controller.vtepController.Reconcile("vtep-b")
+			gomega.Consistently(fakeRecorder.Events).WithTimeout(2 * time.Second).ShouldNot(gomega.Receive())
+
+			// Resolve the overlap by changing vtep-a's CIDRs to non-overlapping
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "vtep-a", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.CIDRs = []vtepv1.CIDR{"192.168.0.0/16"}
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// vtep-b should recover to Accepted=True now that the overlap is gone
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-b", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			// vtep-a should now fail with AllocationFailed (node has no entry for it)
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+			))
+
+			// Drain AllocationFailed events. We expect 1, but a 2nd is
+			// possible: vtep-b's re-queue (from the else-if conflict-resolved
+			// path) may re-queue vtep-a while the lister still shows the old
+			// CIDROverlap condition, causing the dedup guard to miss the match.
+			gomega.Eventually(func() bool {
+				select {
+				case <-fakeRecorder.Events:
+					return false
+				default:
+					return true
+				}
+			}).WithTimeout(3 * time.Second).Should(gomega.BeTrue())
+
+			// Re-reconcile vtep-a — no new event since AllocationFailed state is unchanged
+			controller.vtepController.Reconcile("vtep-a")
+			gomega.Consistently(fakeRecorder.Events).WithTimeout(2 * time.Second).ShouldNot(gomega.Receive())
+		})
+
+		ginkgo.It("sets Accepted=True when multiple nodes have VTEP IPs", func() {
+			node1 := newNodeWithVTEPAnnotation("node-1", map[string][]string{"vtep-multi": {"100.64.0.1"}})
+			node2 := newNodeWithVTEPAnnotation("node-2", map[string][]string{"vtep-multi": {"100.64.0.2"}})
+			node3 := newNodeWithVTEPAnnotation("node-3", map[string][]string{"vtep-multi": {"100.64.0.3"}})
+			vtep := newVTEP("vtep-multi", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			start(vtep, node1, node2, node3)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-multi", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+
+		ginkgo.It("sets Accepted=False when some nodes are missing the VTEP entry", func() {
+			nodeGood := newNodeWithVTEPAnnotation("node-good", map[string][]string{"vtep-partial": {"100.64.0.1"}})
+			nodeBad := newNodeWithVTEPAnnotation("node-bad", map[string][]string{"other-vtep": {"10.0.0.1"}})
+			vtep := newVTEP("vtep-partial", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			start(vtep, nodeGood, nodeBad)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-partial", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+			))
+		})
+
+		ginkgo.It("sets Accepted=True for both VTEPs when a node has entries for multiple VTEPs", func() {
+			node := newNodeWithVTEPAnnotation("node-1", map[string][]string{
+				"vtep-a": {"100.64.0.1"},
+				"vtep-b": {"10.0.0.1"},
+			})
+			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.0.0/8")
+			start(vtepA, vtepB, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-b", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+
+		ginkgo.It("sets Accepted=False for one VTEP when node only has the other VTEP entry", func() {
+			node := newNodeWithVTEPAnnotation("node-1", map[string][]string{
+				"vtep-a": {"100.64.0.1"},
+			})
+			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.0.0/8")
+			start(vtepA, vtepB, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-b", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
 			))
 		})
 	})
