@@ -460,11 +460,19 @@ func (oc *Layer2UserDefinedNetworkController) Start(_ context.Context) error {
 		klog.Infof("Starting controller for UDN %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
 
+	// Phase 1: Initialize controller
+	phaseStart := time.Now()
 	if err := oc.init(); err != nil {
 		return err
 	}
+	klog.V(4).Infof("[Start %s] phase 1 (init) took %v", oc.GetNetworkName(), time.Since(phaseStart))
 
-	return oc.run()
+	// Phase 2: Run controller (start watchers and sync)
+	phaseStart = time.Now()
+	err := oc.run()
+	klog.V(4).Infof("[Start %s] phase 2 (run) took %v", oc.GetNetworkName(), time.Since(phaseStart))
+
+	return err
 }
 
 func (oc *Layer2UserDefinedNetworkController) run() error {
