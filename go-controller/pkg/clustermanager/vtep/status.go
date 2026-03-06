@@ -21,6 +21,7 @@ const (
 
 	reasonManagedModeNotSupported = "ManagedModeNotSupported"
 	reasonAllocated               = "Allocated"
+	reasonAllocationFailed        = "AllocationFailed"
 	reasonCIDROverlap             = "CIDROverlap"
 )
 
