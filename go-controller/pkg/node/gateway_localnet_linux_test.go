@@ -202,7 +202,7 @@ func newEndpointSlice(svcName, namespace string, endpoints []discovery.Endpoint,
 	}
 }
 
-func makeConntrackFilter(ip string, port int, protocol corev1.Protocol) *netlink.ConntrackFilter {
+func makeConntrackFilter(ip string, port int, protocol corev1.Protocol, filterType netlink.ConntrackFilterType) *netlink.ConntrackFilter {
 	filter := &netlink.ConntrackFilter{}
 
 	var err error
@@ -221,15 +221,17 @@ func makeConntrackFilter(ip string, port int, protocol corev1.Protocol) *netlink
 	}
 	ipAddress := net.ParseIP(ip)
 	Expect(ipAddress).NotTo(BeNil())
-	err = filter.AddIP(netlink.ConntrackOrigDstIP, ipAddress)
+	err = filter.AddIP(filterType, ipAddress)
 	Expect(err).NotTo(HaveOccurred())
 
 	return filter
 }
 
 type ctFilterDesc struct {
-	ip   string
-	port int
+	ip         string
+	port       int
+	protocol   corev1.Protocol
+	filterType netlink.ConntrackFilterType
 }
 
 func addConntrackMocks(nlMock *mocks.NetLinkOps, filterDescs []ctFilterDesc) {
@@ -240,7 +242,7 @@ func addConntrackMocks(nlMock *mocks.NetLinkOps, filterDescs []ctFilterDesc) {
 			OnCallMethodArgs: []interface{}{
 				netlink.ConntrackTableType(netlink.ConntrackTable),
 				netlink.InetFamily(netlink.FAMILY_V4),
-				makeConntrackFilter(ctf.ip, ctf.port, corev1.ProtocolTCP),
+				makeConntrackFilter(ctf.ip, ctf.port, ctf.protocol, ctf.filterType),
 			},
 			RetArgList: []interface{}{uint(1), nil},
 		})
@@ -1619,7 +1621,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.watchFactory = wf
 				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"1.1.1.1", 8032}, {"10.129.0.2", 8032}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"1.1.1.1", 8032, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"10.129.0.2", 8032, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 				Eventually(func() bool {
@@ -1708,7 +1710,7 @@ var _ = Describe("Node Operations", func() {
 				fNPW.watchFactory = wf
 				Expect(startNodePortWatcher(fNPW, fakeClient)).To(Succeed())
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 0}, {"192.168.18.15", 31111}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 0, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"192.168.18.15", 31111, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 				Eventually(fExec.CalledMatchesExpected, "2s").Should(BeTrue(), fExec.ErrorDesc)
@@ -1848,7 +1850,7 @@ var _ = Describe("Node Operations", func() {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).Should(Succeed())
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.10.10.1", 8034}, {"10.129.0.2", 8034}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.10.10.1", 8034, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"10.129.0.2", 8034, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
@@ -1976,11 +1978,11 @@ var _ = Describe("Node Operations", func() {
 				}).Should(Equal(expectedLBExternalIPFlows2))
 
 				addConntrackMocks(netlinkMock, []ctFilterDesc{
-					{"1.1.1.1", 8080},
-					{"1.1.1.2", 8080},
-					{"5.5.5.5", 8080},
-					{"192.168.18.15", 31111},
-					{"10.129.0.2", 8080},
+					{"1.1.1.1", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP},
+					{"1.1.1.2", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP},
+					{"5.5.5.5", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP},
+					{"192.168.18.15", 31111, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP},
+					{"10.129.0.2", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP},
 				})
 
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
@@ -2195,7 +2197,7 @@ var _ = Describe("Node Operations", func() {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).Should(Succeed())
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 38034}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"192.168.18.15", 38034, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
@@ -2332,7 +2334,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(BeNil())
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"192.168.18.15", 31111, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
@@ -2478,7 +2480,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"192.168.18.15", 31111, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
@@ -2628,7 +2630,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"192.168.18.15", 31111, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
@@ -2773,7 +2775,7 @@ var _ = Describe("Node Operations", func() {
 				flows := fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")
 				Expect(flows).To(Equal(expectedFlows))
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"192.168.18.15", 31111, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
@@ -2921,7 +2923,7 @@ var _ = Describe("Node Operations", func() {
 
 				Expect(fNPW.ofm.getFlowsByKey("NodePort_namespace1_service1_tcp_31111")).To(Equal(expectedFlows))
 
-				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080}, {"192.168.18.15", 31111}})
+				addConntrackMocks(netlinkMock, []ctFilterDesc{{"10.129.0.2", 8080, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}, {"192.168.18.15", 31111, corev1.ProtocolTCP, netlink.ConntrackOrigDstIP}})
 				Expect(fakeClient.KubeClient.CoreV1().Services(service.Namespace).Delete(
 					context.Background(), service.Name, metav1.DeleteOptions{})).To(Succeed())
 
