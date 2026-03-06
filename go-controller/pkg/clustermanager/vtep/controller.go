@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
@@ -42,6 +43,7 @@ type Controller struct {
 	vtepClient     vtepclientset.Interface
 	vtepLister     vteplisters.VTEPLister
 	cudnLister     udnlisters.ClusterUserDefinedNetworkLister
+	nodeLister     corelisters.NodeLister
 	vtepController controllerutil.Controller
 	eventRecorder  record.EventRecorder
 }
@@ -57,6 +59,7 @@ func NewController(
 		vtepClient:    ovnClient.VTEPClient,
 		vtepLister:    vtepLister,
 		cudnLister:    wf.ClusterUserDefinedNetworkInformer().Lister(),
+		nodeLister:    wf.NodeCoreInformer().Lister(),
 		eventRecorder: recorder,
 	}
 
@@ -127,6 +130,21 @@ func (c *Controller) reconcileVTEP(key string) error {
 		}
 		return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
 			reasonCIDROverlap, err.Error())
+	}
+
+	if err := c.validateNodeVTEPIPs(vtep); err != nil {
+		existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
+		if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonAllocationFailed || existingCond.Message != err.Error() {
+			vtepRef, refErr := reference.GetReference(vtepscheme.Scheme, vtep)
+			if refErr != nil {
+				return fmt.Errorf("failed to get object reference for VTEP %s: %w", vtep.Name, refErr)
+			}
+			c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonAllocationFailed, err.Error())
+		}
+		// Don't retry: the node controller watches for k8s.ovn.org/vteps
+		// annotation changes and re-queues all VTEPs when annotations appear.
+		return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
+			reasonAllocationFailed, err.Error())
 	}
 
 	return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionTrue,
@@ -305,6 +323,42 @@ func parseVTEPCIDRs(vtep *vtepv1.VTEP) ([]*net.IPNet, error) {
 		cidrs = append(cidrs, ipNet)
 	}
 	return cidrs, nil
+}
+
+// validateNodeVTEPIPs validates that every node has a VTEP IP entry in the
+// k8s.ovn.org/vteps annotation for this VTEP. For unmanaged mode, ovnkube-node
+// discovers IPs and writes the annotation; this controller only reads and
+// validates. The RA controller reads the same annotation when generating FRR
+// configurations.
+func (c *Controller) validateNodeVTEPIPs(vtep *vtepv1.VTEP) error {
+	nodes, err := c.nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	var errs []error
+	for _, node := range nodes {
+		vteps, err := util.ParseNodeVTEPs(node)
+		if err != nil {
+			if util.IsAnnotationNotSetError(err) {
+				errs = append(errs, fmt.Errorf("node %s is missing the %s annotation", node.Name, util.OVNNodeVTEPs))
+				continue
+			}
+			errs = append(errs, fmt.Errorf("failed to parse %s annotation on node %s: %w", util.OVNNodeVTEPs, node.Name, err))
+			continue
+		}
+		entry, ok := vteps[vtep.Name]
+		if !ok {
+			errs = append(errs, fmt.Errorf("node %s has no entry for VTEP %s in %s annotation", node.Name, vtep.Name, util.OVNNodeVTEPs))
+			continue
+		}
+		if len(entry.IPs) == 0 {
+			errs = append(errs, fmt.Errorf("node %s has an empty IP list for VTEP %s", node.Name, vtep.Name))
+			continue
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (c *Controller) handleManagedModeNotSupported(vtep *vtepv1.VTEP) error {
