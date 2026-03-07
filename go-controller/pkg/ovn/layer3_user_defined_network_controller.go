@@ -23,6 +23,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	svccontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
@@ -347,6 +348,7 @@ func NewLayer3UserDefinedNetworkController(
 	routeImportManager routeimport.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) (*Layer3UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
@@ -367,13 +369,13 @@ func NewLayer3UserDefinedNetworkController(
 				addressSetFactory:           addressSetFactory,
 				networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 				sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-				podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
 				localZoneNodes:              &sync.Map{},
 				cancelableCtx:               util.NewCancelableContext(),
 				networkManager:              networkManager,
 				routeImportManager:          routeImportManager,
+				addressSetManager:           addressSetManager,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -385,6 +387,7 @@ func NewLayer3UserDefinedNetworkController(
 		gatewayManagers:             sync.Map{},
 		eIPController:               eIPController,
 	}
+
 	if oc.IsPrimaryNetwork() && oc.eIPController != nil {
 		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
 			oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update")
