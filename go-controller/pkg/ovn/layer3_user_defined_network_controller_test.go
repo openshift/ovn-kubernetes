@@ -168,9 +168,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
-				Expect(fakeOvn.networkManager.Start()).NotTo(HaveOccurred())
-				defer fakeOvn.networkManager.Stop()
-
 				// succeed the check for Load_Balancer_Group support
 				fexec := testing.NewFakeExec()
 				fexec.AddFakeCmdsNoOutputNoError([]string{"ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group"})
@@ -405,9 +402,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				Expect(ok).To(BeFalse())
 
-				Expect(fakeOvn.networkManager.Start()).NotTo(HaveOccurred())
-				defer fakeOvn.networkManager.Stop()
-
 				// succeed the check for Load_Balancer_Group support
 				fexec := testing.NewFakeExec()
 				fexec.AddFakeCmdsNoOutputNoError([]string{"ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group"})
@@ -432,16 +426,18 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 					Expect(userDefinedNetController.bnc.WatchNetworkPolicy()).To(Succeed())
 				}
 
-				Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
-				Expect(fakeOvn.fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Delete(context.Background(), nad.Name, metav1.DeleteOptions{})).To(Succeed())
-
 				// we must access the layer3 controller to be able to issue its cleanup function (to remove the GW related stuff).
 				Eventually(func() bool {
 					_, exists := fullL3UDNController.gatewayManagers.Load(nodeName)
 					return exists
 				}).Should(BeTrue())
+				// Avoid node reconcile while pod/NAD deletes and cleanup are
+				// tearing down network entities.
+				fullL3UDNController.DeregisterNodeHandler()
+				Expect(fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Delete(context.Background(), pod.Name, metav1.DeleteOptions{})).To(Succeed())
+				Expect(fakeOvn.fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Delete(context.Background(), nad.Name, metav1.DeleteOptions{})).To(Succeed())
 				Expect(fullL3UDNController.Cleanup()).To(Succeed())
-				Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(defaultNetExpectations))
+				Eventually(fakeOvn.nbClient).WithTimeout(5 * time.Second).Should(libovsdbtest.HaveData(defaultNetExpectations))
 
 				return nil
 			}
@@ -631,9 +627,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				&corev1.NodeList{Items: []corev1.Node{*localNode, *remoteNode}},
 				&corev1.PodList{Items: []corev1.Pod{localPod}},
 				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}})
-
-			Expect(fakeOvn.networkManager.Start()).To(Succeed())
-			defer fakeOvn.networkManager.Stop()
 
 			userDefinedNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
 			Expect(ok).To(BeTrue())
@@ -854,9 +847,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				&corev1.PodList{Items: []corev1.Pod{localPod}},
 				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nadA, *nadB}},
 			)
-
-			Expect(fakeOvn.networkManager.Start()).To(Succeed())
-			defer fakeOvn.networkManager.Stop()
 
 			userDefinedNetController, ok := fakeOvn.userDefinedNetworkControllers[netName]
 			Expect(ok).To(BeTrue())
