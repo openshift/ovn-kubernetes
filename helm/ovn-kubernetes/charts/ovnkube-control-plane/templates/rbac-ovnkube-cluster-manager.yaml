@@ -91,6 +91,9 @@ rules:
           - clusteruserdefinednetworks/finalizers
           - clusternetworkconnects
           - clusternetworkconnects/status
+          - vteps
+          - vteps/status
+          - vteps/finalizers
       verbs: [ "patch", "update" ]
     - apiGroups: [""]
       resources:
