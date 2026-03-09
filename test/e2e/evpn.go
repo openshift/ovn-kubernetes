@@ -1222,8 +1222,9 @@ func runEVPNNetworkAndServers(
 		return err
 	}
 
+	var macVRFVID int
 	if hasMACVRF {
-		macVRFVID := randomVID()
+		macVRFVID = randomVID()
 		framework.Logf("Generated random VIDs for external FRR: MAC-VRF VID=%d", macVRFVID)
 		framework.Logf("Setting up MAC-VRF on external FRR")
 		err = setupMACVRFOnExternalFRR(int(networkSpec.EVPN.MACVRF.VNI), macVRFVID, bridgeName, vxlanName)
@@ -1248,6 +1249,9 @@ func runEVPNNetworkAndServers(
 		// Derive VRF name from VNI (unique per IP-VRF)
 		ipVRFName := fmt.Sprintf("vrf%d", networkSpec.EVPN.IPVRF.VNI)
 		ipVRFVID := randomVID()
+		for macVRFVID == ipVRFVID {
+			ipVRFVID = randomVID()
+		}
 		framework.Logf("Generated random VIDs for external FRR: IP-VRF VID=%d", ipVRFVID)
 		framework.Logf("Setting up IP-VRF on external FRR")
 		err = setupIPVRFOnExternalFRR(ictx, ipVRFName, int(networkSpec.EVPN.IPVRF.VNI), ipVRFVID, bridgeName, vxlanName)

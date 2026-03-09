@@ -1998,12 +1998,17 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			// REVERT ME: Temporary cluster-side EVPN setup until OVN-K implements it natively
 			ginkgo.By("Running cluster-side EVPN setup script (REVERT ME)")
 			cudnSubnets := getNetworkSubnetsFromSpec(networkSpec)
-			var macVRFVNI, ipVRFVNI int
+			var macVRFVNI, ipVRFVNI, macVRFVID, ipVRFVID int
 			if networkSpec.EVPN.MACVRF != nil {
 				macVRFVNI = int(networkSpec.EVPN.MACVRF.VNI)
+				macVRFVID = randomVID()
 			}
 			if networkSpec.EVPN.IPVRF != nil {
 				ipVRFVNI = int(networkSpec.EVPN.IPVRF.VNI)
+				ipVRFVID = randomVID()
+				for macVRFVID == ipVRFVID {
+					ipVRFVID = randomVID()
+				}
 			}
 			err = runClusterEVPNSetupScript(
 				ictx,
@@ -2011,9 +2016,9 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				networkName,
 				bgpASN,
 				macVRFVNI,
-				randomVID(),
+				macVRFVID,
 				ipVRFVNI,
-				randomVID(),
+				ipVRFVID,
 				cudnSubnets,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
