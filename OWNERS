@@ -2,6 +2,7 @@ reviewers:
   - jcaamano
   - kyrtapz
   - martinkennelly
+  - pperiyasamy
   - ricky-rav
   - trozet
   - tssurya
@@ -11,6 +12,7 @@ approvers:
   - kyrtapz
   - martinkennelly
   - knobunc
+  - pperiyasamy
   - ricky-rav
   - trozet
   - tssurya
