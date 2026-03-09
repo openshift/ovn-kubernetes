@@ -876,6 +876,184 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 		})
 	})
 
+	ginkgo.Context("IPv6 CIDR rejection for EVPN VTEPs", func() {
+		ginkgo.It("sets Accepted=False when an EVPN CUDN references a VTEP with IPv6 CIDRs", func() {
+			vtep := newVTEP("vtep-v6", vtepv1.VTEPModeUnmanaged, "fd00::/64")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6": {"fd00::1"}})
+			cudn := newCUDNWithEVPN("cudn-evpn-v6", "vtep-v6")
+			start(vtep, node, cudn)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v6", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
+			))
+
+			gomega.Eventually(fakeRecorder.Events).Should(gomega.Receive(
+				gomega.ContainSubstring(reasonEVPNIPv6NotSupported),
+			))
+
+			// Drain any remaining events, then verify dedup guard prevents duplicates
+			gomega.Eventually(func() bool {
+				select {
+				case <-fakeRecorder.Events:
+					return false
+				default:
+					return true
+				}
+			}).WithTimeout(3 * time.Second).Should(gomega.BeTrue())
+
+			controller.vtepController.Reconcile("vtep-v6")
+			gomega.Consistently(fakeRecorder.Events).WithTimeout(2 * time.Second).ShouldNot(gomega.Receive())
+		})
+
+		ginkgo.It("sets Accepted=True when a VTEP has only IPv4 CIDRs and is referenced by an EVPN CUDN", func() {
+			vtep := newVTEP("vtep-v4", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v4": {"100.64.0.1"}})
+			cudn := newCUDNWithEVPN("cudn-evpn-v4", "vtep-v4")
+			start(vtep, node, cudn)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v4", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+
+		ginkgo.It("allows IPv6 CIDRs on VTEPs not referenced by any EVPN CUDN", func() {
+			vtep := newVTEP("vtep-v6-no-evpn", vtepv1.VTEPModeUnmanaged, "fd00::/64")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6-no-evpn": {"fd00::1"}})
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v6-no-evpn", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+
+		ginkgo.It("rejects when VTEP has dual-stack CIDRs and is referenced by an EVPN CUDN", func() {
+			vtep := newVTEP("vtep-ds", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24", "fd00::/64")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-ds": {"100.64.0.1", "fd00::1"}})
+			cudn := newCUDNWithEVPN("cudn-evpn-ds", "vtep-ds")
+			start(vtep, node, cudn)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-ds", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
+			))
+		})
+
+		ginkgo.It("transitions to IPv6NotSupported when an EVPN CUDN is created referencing a VTEP with IPv6 CIDRs", func() {
+			vtep := newVTEP("vtep-v6-late", vtepv1.VTEPModeUnmanaged, "fd00::/64")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6-late": {"fd00::1"}})
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v6-late", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			cudn := newCUDNWithEVPN("cudn-evpn-late", "vtep-v6-late")
+			_, err := fakeClientset.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Create(
+				context.Background(), cudn, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v6-late", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
+			))
+		})
+
+		ginkgo.It("transitions to IPv6NotSupported when an IPv6 CIDR is appended to a VTEP referenced by an EVPN CUDN", func() {
+			vtep := newVTEP("vtep-v4-append", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v4-append": {"100.64.0.1"}})
+			cudn := newCUDNWithEVPN("cudn-evpn-append", "vtep-v4-append")
+			start(vtep, node, cudn)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v4-append", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "vtep-v4-append", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.CIDRs = []vtepv1.CIDR{"100.64.0.0/24", "fd00::/64"}
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v4-append", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
+			))
+		})
+
+		ginkgo.It("recovers from IPv6NotSupported when the IPv6 CIDR is removed from the VTEP", func() {
+			vtep := newVTEP("vtep-ds-remove", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24", "fd00::/64")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-ds-remove": {"100.64.0.1", "fd00::1"}})
+			cudn := newCUDNWithEVPN("cudn-evpn-remove", "vtep-ds-remove")
+			start(vtep, node, cudn)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-ds-remove", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
+			))
+
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "vtep-ds-remove", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.CIDRs = []vtepv1.CIDR{"100.64.0.0/24"}
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-ds-remove", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+
+		ginkgo.It("recovers from IPv6NotSupported when the EVPN CUDN is deleted", func() {
+			vtep := newVTEP("vtep-v6-recover", vtepv1.VTEPModeUnmanaged, "fd00::/64")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6-recover": {"fd00::1"}})
+			cudn := newCUDNWithEVPN("cudn-evpn-recover", "vtep-v6-recover")
+			start(vtep, node, cudn)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v6-recover", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
+			))
+
+			err := fakeClientset.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Delete(
+				context.Background(), "cudn-evpn-recover", metav1.DeleteOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v6-recover", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+	})
+
 	ginkgo.Context("CUDN watch for finalizer re-evaluation", func() {
 		ginkgo.It("indexes EVPN CUDNs on create and ignores non-EVPN CUDNs", func() {
 			evpnCUDN := newCUDNWithEVPN("cudn-evpn", "vtep-indexed")

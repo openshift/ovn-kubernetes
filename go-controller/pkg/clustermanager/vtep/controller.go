@@ -179,6 +179,19 @@ func (c *Controller) reconcileVTEP(key string) error {
 			reasonCIDROverlap, err.Error())
 	}
 
+	if err := c.validateNoIPv6VTEPsForEVPN(vtep); err != nil {
+		existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
+		if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonEVPNIPv6NotSupported || existingCond.Message != err.Error() {
+			vtepRef, refErr := reference.GetReference(vtepscheme.Scheme, vtep)
+			if refErr != nil {
+				return fmt.Errorf("failed to get object reference for VTEP %s: %w", vtep.Name, refErr)
+			}
+			c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonEVPNIPv6NotSupported, err.Error())
+		}
+		return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
+			reasonEVPNIPv6NotSupported, err.Error())
+	}
+
 	if err := c.validateNodeVTEPIPs(vtep); err != nil {
 		existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
 		if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonAllocationFailed || existingCond.Message != err.Error() {
@@ -231,7 +244,7 @@ func (c *Controller) handleVTEPDeletion(vtep *vtepv1.VTEP) error {
 
 	if len(referencingCUDNs) > 0 {
 		// we don't retry here since when a CUDN is deleted, this controller will be notified and will re-queue the VTEP
-		klog.Infof("VTEP %s is still referenced by CUDNs %v, blocking deletion", vtep.Name, referencingCUDNs)
+		klog.Infof("VTEP %s is still referenced by CUDNs [%s], blocking deletion", vtep.Name, strings.Join(referencingCUDNs, ", "))
 		return nil
 	}
 
@@ -267,6 +280,34 @@ func cudnReferencesVTEP(cudn *udnv1.ClusterUserDefinedNetwork, vtepName string) 
 		return true
 	}
 	return false
+}
+
+// validateNoIPv6ForEVPN rejects VTEPs that contain IPv6 CIDRs when they are
+// referenced by an EVPN CUDN. FRR does not support IPv6 VTEPs for EVPN
+// transport. VTEPs not referenced by any EVPN CUDN are unaffected.
+func (c *Controller) validateNoIPv6VTEPsForEVPN(vtep *vtepv1.VTEP) error {
+	referencingCUDNs, err := c.getCUDNsReferencingVTEP(vtep.Name)
+	if err != nil {
+		return fmt.Errorf("failed to check CUDN references for VTEP %s: %w", vtep.Name, err)
+	}
+	if len(referencingCUDNs) == 0 {
+		return nil
+	}
+
+	var errs []error
+	for _, cidr := range vtep.Spec.CIDRs {
+		_, ipNet, err := net.ParseCIDR(string(cidr))
+		if err != nil {
+			// shouldn't happen since CIDRs are validated by CEL
+			errs = append(errs, fmt.Errorf("invalid CIDR %q in VTEP %s: %w", cidr, vtep.Name, err))
+			continue
+		}
+		if ipNet.IP.To4() == nil {
+			errs = append(errs, fmt.Errorf("VTEP %s contains IPv6 CIDR %s but is referenced by EVPN CUDNs [%s]; "+
+				"IPv6 VTEPs are not supported for EVPN transport", vtep.Name, cidr, strings.Join(referencingCUDNs, ", ")))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // validateCIDRsAcrossVTEPs checks that none of this VTEP's CIDRs overlap with
@@ -422,9 +463,11 @@ func (c *Controller) handleManagedModeNotSupported(vtep *vtepv1.VTEP) error {
 }
 
 // reconcileCUDN handles CUDN create and delete events relevant to VTEP
-// finalizer management. On create, it populates the reverse index so the
-// VTEP name is available when the CUDN is later deleted. On delete, it
-// uses the index to re-queue only the specific referenced VTEP.
+// management. On create, it populates the reverse index and re-queues the
+// referenced VTEP so validations like IPv6 rejection can fire. On delete,
+// it re-queues the VTEP to allow finalizer removal and re-evaluation of
+// EVPN-specific constraints (e.g. clearing IPv6NotSupported when no EVPN
+// CUDNs reference the VTEP any longer).
 func (c *Controller) reconcileCUDN(key string) error {
 	cudnName := key
 	cudn, err := c.cudnLister.Get(cudnName)
@@ -440,7 +483,9 @@ func (c *Controller) reconcileCUDN(key string) error {
 				return nil
 			}
 			// Re-queue the VTEP so reconcileVTEP can re-evaluate whether
-			// the finalizer can be removed now that this CUDN is gone.
+			// the finalizer can be removed now that this CUDN is gone,
+			// or if the VTEP had Accepted=False due to IPv6 CIDRs
+			// referenced by this EVPN CUDN, it can recover.
 			klog.V(5).Infof("CUDN %s deleted, re-queuing VTEP %s", cudnName, vtepName)
 			c.vtepController.Reconcile(vtepName)
 			return nil
@@ -449,10 +494,16 @@ func (c *Controller) reconcileCUDN(key string) error {
 	}
 
 	if cudn.Spec.Network.EVPN != nil && cudn.Spec.Network.EVPN.VTEP != "" {
+		vtepName := cudn.Spec.Network.EVPN.VTEP
 		c.cudnVTEPIndexMu.Lock()
-		c.cudnVTEPIndex[cudnName] = cudn.Spec.Network.EVPN.VTEP
+		_, alreadyIndexed := c.cudnVTEPIndex[cudnName]
+		c.cudnVTEPIndex[cudnName] = vtepName
 		c.cudnVTEPIndexMu.Unlock()
-		klog.V(5).Infof("Indexed CUDN %s -> VTEP %s", cudnName, cudn.Spec.Network.EVPN.VTEP)
+		if !alreadyIndexed {
+			// fresh create event
+			klog.V(5).Infof("Indexed CUDN %s -> VTEP %s, re-queuing VTEP", cudnName, vtepName)
+			c.vtepController.Reconcile(vtepName)
+		}
 	}
 	return nil
 }
