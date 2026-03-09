@@ -46,7 +46,7 @@ ubuntu-shared-gw-deployment: ubuntu-image
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-ubuntu:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-ubuntu:latest
 
-FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:42
+FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:43
 
 fedora-image:
 	${OCI_BIN} pull --platform=linux/${ARCH} ${FEDORA_BASE_IMAGE} 2>/dev/null || true; \
