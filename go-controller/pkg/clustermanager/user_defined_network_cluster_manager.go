@@ -7,6 +7,7 @@ import (
 	"k8s.io/klog/v2"
 
 	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/clustermanager/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
@@ -27,6 +28,9 @@ type userDefinedNetworkClusterManager struct {
 	recorder record.EventRecorder
 
 	errorReporter NetworkStatusReporter
+
+	// nodeAnnotationBatcher batches node annotation updates across networks
+	nodeAnnotationBatcher *node.NodeAnnotationBatcher
 }
 
 func newUserDefinedNetworkClusterManager(
@@ -34,13 +38,15 @@ func newUserDefinedNetworkClusterManager(
 	wf *factory.WatchFactory,
 	networkManager networkmanager.Interface,
 	recorder record.EventRecorder,
+	batcher *node.NodeAnnotationBatcher,
 ) (*userDefinedNetworkClusterManager, error) {
 	klog.Infof("Creating user-defined network cluster manager")
 	sncm := &userDefinedNetworkClusterManager{
-		ovnClient:      ovnClient,
-		watchFactory:   wf,
-		networkManager: networkManager,
-		recorder:       recorder,
+		ovnClient:             ovnClient,
+		watchFactory:          wf,
+		networkManager:        networkManager,
+		recorder:              recorder,
+		nodeAnnotationBatcher: batcher,
 	}
 	return sncm, nil
 }
@@ -69,6 +75,7 @@ func (sncm *userDefinedNetworkClusterManager) NewNetworkController(nInfo util.Ne
 		sncm.recorder,
 		sncm.networkManager,
 		sncm.errorReporter,
+		sncm.nodeAnnotationBatcher,
 	)
 	return sncc, nil
 }
@@ -156,6 +163,7 @@ func (sncm *userDefinedNetworkClusterManager) newDummyLayer3NetworkController(ne
 		sncm.recorder,
 		sncm.networkManager,
 		nil,
+		sncm.nodeAnnotationBatcher,
 	)
 	err := nc.init()
 	return nc, err
