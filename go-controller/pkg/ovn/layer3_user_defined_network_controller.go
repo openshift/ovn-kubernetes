@@ -500,6 +500,10 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 		return err
 	}
 
+	if err := oc.waitForLocalZoneNodeLogicalSwitches(); err != nil {
+		return err
+	}
+
 	if oc.svcController != nil {
 		startSvc := time.Now()
 		// Services should be started after nodes to prevent LB churn
@@ -553,6 +557,26 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
+
+	return nil
+}
+
+func (oc *Layer3UserDefinedNetworkController) waitForLocalZoneNodeLogicalSwitches() error {
+	nodes, err := oc.GetLocalZoneNodes()
+	if err != nil {
+		return fmt.Errorf("failed to get local zone nodes for network %s: %w", oc.GetNetworkName(), err)
+	}
+
+	for _, node := range nodes {
+		if util.NoHostSubnet(node) {
+			continue
+		}
+		switchName := oc.GetNetworkScopedSwitchName(node.Name)
+		if _, err := oc.waitForNodeLogicalSwitch(switchName); err != nil {
+			return fmt.Errorf("failed waiting for local zone node %s logical switch %s for network %s: %w",
+				node.Name, switchName, oc.GetNetworkName(), err)
+		}
+	}
 
 	return nil
 }

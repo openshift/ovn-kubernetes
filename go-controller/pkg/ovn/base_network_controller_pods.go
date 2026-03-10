@@ -373,7 +373,9 @@ func (bnc *BaseNetworkController) waitForNodeLogicalSwitch(switchName string) (*
 	ls := &nbdb.LogicalSwitch{Name: switchName}
 	if err := wait.PollUntilContextTimeout(context.Background(), 30*time.Millisecond, 30*time.Second, true, func(_ context.Context) (bool, error) {
 		if subnets := bnc.lsManager.GetSwitchSubnets(switchName); subnets == nil {
-			return false, fmt.Errorf("error getting logical switch %s: %s", switchName, "switch not in logical switch cache")
+			// A cache miss is expected while node topology reconciliation is still creating the switch.
+			// Keep polling until it appears or the overall wait times out.
+			return false, nil
 		}
 		return true, nil
 	}); err != nil {
