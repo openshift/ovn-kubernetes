@@ -1107,26 +1107,5 @@ func (oc *Layer3UserDefinedNetworkController) HandleNetworkRefChange(nodeName st
 	if active {
 		oc.syncZoneICFailed.Store(nodeName, true)
 	}
-	node, err := oc.watchFactory.GetNode(nodeName)
-	if err != nil {
-		if active {
-			klog.V(4).Infof("Skipping network ref add for node %s on network %s: %v", nodeName, oc.GetNetworkName(), err)
-			return
-		}
-		node = &corev1.Node{}
-		node.Name = nodeName
-	}
-	if active {
-		if err := oc.ReconcileNode(nil, node, nil, nil); err != nil {
-			klog.V(4).Infof("Failed to reconcile node %s on network ref add for network %s: %v", nodeName, oc.GetNetworkName(), err)
-		}
-	} else {
-		if err := oc.DeleteNode(node, nil); err != nil {
-			klog.V(4).Infof("Failed to delete node %s on network ref remove for network %s: %v", nodeName, oc.GetNetworkName(), err)
-		}
-	}
-	if oc.nodeReconciler == nil {
-		return
-	}
 	oc.nodeReconciler.Reconcile(nodeName)
 }

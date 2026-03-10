@@ -29,12 +29,9 @@ type NodeHandler interface {
 	GetNetworkName() string
 	// ReconcileNode reconciles the network-specific state for a node. oldNode and
 	// oldState may be nil when the node is first seen for the network or becomes
-	// active again, while newNode and newState describe the latest desired state.
+	// active again. newNode and newState describe the latest desired state; they
+	// are nil when network-specific state for the node should be deleted.
 	ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *NodeAnnotationState) error
-	// DeleteNode cleans up the network-specific state for a node that was deleted
-	// or is no longer active for the network. state contains the last known
-	// annotation state for the node.
-	DeleteNode(node *corev1.Node, state *NodeAnnotationState) error
 	// SyncNodes performs the initial full-network sync before per-node
 	// reconciliation is queued for the handler.
 	SyncNodes(nodes []*corev1.Node) error
@@ -53,8 +50,10 @@ type NodeController struct {
 
 	stateMu sync.RWMutex
 	// bootstrapNodes tracks nodes that should be treated as "new" per network.
+	// keyed by network -> nodes
 	bootstrapNodes map[string]map[string]struct{}
 	// nodeActive tracks whether a node is currently active for a network.
+	// keyed by network -> nodes
 	nodeActive map[string]map[string]bool
 
 	nodeCache nodeCache
@@ -78,7 +77,7 @@ func NewNodeController(wf *factory.WatchFactory, networkManager networkmanager.I
 		bootstrapNodes:  map[string]map[string]struct{}{},
 		nodeActive:      map[string]map[string]bool{},
 		nodeCache:       newNodeCache(),
-		annotationCache: newNodeAnnotationCache(),
+		annotationCache: NewNodeAnnotationCache(),
 	}
 
 	nodeControllerConfig := &controller.ControllerConfig[corev1.Node]{
@@ -194,8 +193,8 @@ func (c *NodeController) reconcileUpdate(oldNode, newNode *corev1.Node, netName 
 		return nil
 	}
 
-	oldState := c.annotationCache.BuildNodeAnnotationState(oldNode)
-	newState := c.annotationCache.BuildNodeAnnotationState(newNode)
+	oldState := c.annotationCache.buildNodeAnnotationState(oldNode, false)
+	newState := c.annotationCache.buildNodeAnnotationState(newNode, true)
 
 	var errs []error
 	for _, netName := range keys {
@@ -254,7 +253,7 @@ func (c *NodeController) reconcileUpdate(oldNode, newNode *corev1.Node, netName 
 					deleteNode = newNode
 					deleteState = newState
 				}
-				if err := handler.DeleteNode(deleteNode, deleteState); err != nil {
+				if err := handler.ReconcileNode(deleteNode, nil, deleteState, nil); err != nil {
 					return err
 				}
 				c.setNodeNetworkActive(key, nodeName, false)
@@ -288,7 +287,7 @@ func (c *NodeController) reconcileDelete(nodeName, netName string) error {
 		return nil
 	}
 
-	oldState := c.annotationCache.BuildNodeAnnotationState(oldNode)
+	oldState := c.annotationCache.buildNodeAnnotationState(oldNode, true)
 
 	var errs []error
 	for _, netName := range handlerKeys {
@@ -303,7 +302,7 @@ func (c *NodeController) reconcileDelete(nodeName, netName string) error {
 				!c.nodeNeedsBootstrap(handlerKey, oldNode.Name) {
 				return nil
 			}
-			if err := handler.DeleteNode(oldNode, oldState); err != nil {
+			if err := handler.ReconcileNode(oldNode, nil, oldState, nil); err != nil {
 				return err
 			}
 			c.setNodeNetworkActive(handlerKey, oldNode.Name, false)
@@ -318,7 +317,7 @@ func (c *NodeController) reconcileDelete(nodeName, netName string) error {
 	// Keep node cache/state for the regular node delete event to process all networks.
 	if len(errs) == 0 && netName == "" {
 		c.nodeCache.Delete(nodeName)
-		c.annotationCache.DeleteNode(nodeName)
+		c.annotationCache.deleteNode(nodeName)
 		c.deleteNodeNetworkState(nodeName)
 	}
 	return utilerrors.Join(errs...)

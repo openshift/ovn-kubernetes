@@ -28,13 +28,12 @@ func (f *fakeNodeHandler) GetNetworkName() string {
 	return f.netName
 }
 
-func (f *fakeNodeHandler) ReconcileNode(_, _ *corev1.Node, _, _ *NodeAnnotationState) error {
+func (f *fakeNodeHandler) ReconcileNode(_ *corev1.Node, newNode *corev1.Node, _, _ *NodeAnnotationState) error {
+	if newNode == nil {
+		f.deleteCalls++
+		return nil
+	}
 	f.reconcileCalls++
-	return nil
-}
-
-func (f *fakeNodeHandler) DeleteNode(_ *corev1.Node, _ *NodeAnnotationState) error {
-	f.deleteCalls++
 	return nil
 }
 
@@ -75,7 +74,7 @@ func TestNodeControllerStartFailure(t *testing.T) {
 		nodeController:  newNodeControllerForTest(0, nil),
 		handlers:        syncmap.NewSyncMap[NodeHandler](),
 		bootstrapNodes:  map[string]map[string]struct{}{},
-		annotationCache: newNodeAnnotationCache(),
+		annotationCache: NewNodeAnnotationCache(),
 	}
 
 	err := c.Start()
@@ -98,7 +97,7 @@ func TestRegisterNetworkControllerBootstrapFailure(t *testing.T) {
 		nodeLister:      newNodeLister(t, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}),
 		handlers:        syncmap.NewSyncMap[NodeHandler](),
 		bootstrapNodes:  map[string]map[string]struct{}{},
-		annotationCache: newNodeAnnotationCache(),
+		annotationCache: NewNodeAnnotationCache(),
 	}
 
 	c.RegisterNetworkController(handler)
@@ -114,7 +113,7 @@ func TestRegisterNetworkControllerPanicsOnDuplicateNetworkHandler(t *testing.T) 
 		nodeLister:      newNodeLister(t, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}),
 		handlers:        syncmap.NewSyncMap[NodeHandler](),
 		bootstrapNodes:  map[string]map[string]struct{}{},
-		annotationCache: newNodeAnnotationCache(),
+		annotationCache: NewNodeAnnotationCache(),
 	}
 	h1 := &fakeNodeHandler{netName: "net-a"}
 	h2 := &fakeNodeHandler{netName: "net-a"}
@@ -176,7 +175,7 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 		handlers:        handlers,
 		bootstrapNodes:  map[string]map[string]struct{}{},
 		nodeActive:      map[string]map[string]bool{},
-		annotationCache: newNodeAnnotationCache(),
+		annotationCache: NewNodeAnnotationCache(),
 	}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
 

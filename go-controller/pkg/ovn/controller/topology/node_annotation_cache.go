@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -16,8 +16,7 @@ import (
 // NodeAnnotationCache stores parsed node annotation values keyed by node and
 // raw annotation value.
 type NodeAnnotationCache struct {
-	mu    sync.RWMutex
-	nodes map[string]*nodeAnnotationEntry
+	nodes *syncmap.SyncMap[*nodeAnnotationEntry]
 }
 
 type nodeAnnotationEntry struct {
@@ -26,41 +25,42 @@ type nodeAnnotationEntry struct {
 }
 
 type cachedNetworkMap struct {
-	raw    string
+	// raw is used for fast comparisons within the cache
+	raw string
+	// parsed holds the parsed annotation of network names -> string values
 	parsed map[string]string
 }
 
 type cachedSubnetMap struct {
-	raw    string
+	// raw is used for fast comparisons within the cache
+	raw string
+	// parsed holds the parsed annotation of network names -> subnets
 	parsed map[string][]*net.IPNet
 }
 
 // NewNodeAnnotationCache creates an empty per-node annotation parse cache.
 func NewNodeAnnotationCache() *NodeAnnotationCache {
-	return &NodeAnnotationCache{nodes: map[string]*nodeAnnotationEntry{}}
+	return &NodeAnnotationCache{nodes: syncmap.NewSyncMap[*nodeAnnotationEntry]()}
 }
 
-// newNodeAnnotationCache is kept for local tests/constructors within this package.
-func newNodeAnnotationCache() *NodeAnnotationCache {
-	return NewNodeAnnotationCache()
-}
-
-// BuildNodeAnnotationState builds a parse-once view of node annotations backed
-// by this cache.
-func (c *NodeAnnotationCache) BuildNodeAnnotationState(node *corev1.Node) *NodeAnnotationState {
+// buildNodeAnnotationState builds a parse-once view of node annotations. When
+// updateCache is true, parsed values refresh the per-node cache; callers
+// comparing an older node snapshot against a newer one should pass false for
+// the old snapshot so it cannot replace the latest cached value.
+func (c *NodeAnnotationCache) buildNodeAnnotationState(node *corev1.Node, updateCache bool) *NodeAnnotationState {
 	if node == nil {
 		return nil
 	}
-	networkIDs, networkIDsErr := c.getOrParseNetworkMap(node, util.OvnNetworkIDs)
-	tunnelIDs, tunnelIDsErr := c.getOrParseNetworkMap(node, types.UDNLayer2NodeGRLRPTunnelIDAnnotation)
-	subnets, subnetsErr := c.getOrParseSubnetMap(node, types.NodeSubnetsAnnotation)
+	networkIDs, networkIDsErr := c.getOrParseNetworkMap(node, util.OvnNetworkIDs, updateCache)
+	tunnelIDs, tunnelIDsErr := c.getOrParseNetworkMap(node, types.UDNLayer2NodeGRLRPTunnelIDAnnotation, updateCache)
+	subnets, subnetsErr := c.getOrParseSubnetMap(node, types.NodeSubnetsAnnotation, updateCache)
 	return newNodeAnnotationState(node.Name, networkIDs, networkIDsErr, tunnelIDs, tunnelIDsErr, subnets, subnetsErr)
 }
 
-// ParseUDNLayer2NodeGRLRPTunnelID returns the per-network tunnel ID from the
+// GetOrParseUDNLayer2NodeGRLRPTunnelID returns the per-network tunnel ID from the
 // node annotation map using this cache.
-func (c *NodeAnnotationCache) ParseUDNLayer2NodeGRLRPTunnelID(node *corev1.Node, netName string) (int, error) {
-	tunnelIDs, err := c.getOrParseNetworkMap(node, types.UDNLayer2NodeGRLRPTunnelIDAnnotation)
+func (c *NodeAnnotationCache) GetOrParseUDNLayer2NodeGRLRPTunnelID(node *corev1.Node, netName string) (int, error) {
+	tunnelIDs, err := c.getOrParseNetworkMap(node, types.UDNLayer2NodeGRLRPTunnelIDAnnotation, true)
 	if err != nil {
 		return types.InvalidID, err
 	}
@@ -74,8 +74,8 @@ func (c *NodeAnnotationCache) ParseUDNLayer2NodeGRLRPTunnelID(node *corev1.Node,
 // NodeSubnetAnnotationChangedForNetwork reports whether the per-network subnet
 // slice changed between oldNode and newNode, using this cache.
 func (c *NodeAnnotationCache) NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *corev1.Node, netName string) bool {
-	oldState := c.BuildNodeAnnotationState(oldNode)
-	newState := c.BuildNodeAnnotationState(newNode)
+	oldState := c.buildNodeAnnotationState(oldNode, false)
+	newState := c.buildNodeAnnotationState(newNode, true)
 	if oldState == nil || newState == nil {
 		return false
 	}
@@ -96,19 +96,28 @@ func (c *NodeAnnotationCache) NodeSubnetAnnotationChangedForNetwork(oldNode, new
 	return !equalIPNetSlices(oldSubnets, newSubnets)
 }
 
-func (c *NodeAnnotationCache) getOrParseNetworkMap(node *corev1.Node, annotationName string) (map[string]string, error) {
+// getOrParseNetworkMap returns the parsed per-network string map for the
+// given annotation, reusing a cached parse result when the raw annotation
+// value has not changed. If there is a cache miss, the annotation is parsed;
+// updateCache controls whether the parsed result replaces the cached value for
+// this node and annotation.
+func (c *NodeAnnotationCache) getOrParseNetworkMap(node *corev1.Node, annotationName string, updateCache bool) (map[string]string, error) {
 	annotation, ok := node.Annotations[annotationName]
 	if !ok {
 		return nil, util.NewAnnotationNotSetError("could not find %q annotation", annotationName)
 	}
-	if cached, ok := c.GetNetworkMap(node.Name, annotationName, annotation); ok {
+	// fast path - see if we already have this parsed annotation in cache
+	if cached, ok := c.getParsedNetworkMap(node.Name, annotationName, annotation); ok {
 		return cached, nil
 	}
+	// cache miss - parse and optionally update the cache
 	parsed, err := parseNetworkMapValue(annotationName, annotation)
 	if err != nil {
 		return nil, err
 	}
-	c.SetNetworkMap(node.Name, annotationName, annotation, parsed)
+	if updateCache {
+		c.setNetworkMap(node.Name, annotationName, annotation, parsed)
+	}
 	return parsed, nil
 }
 
@@ -123,19 +132,21 @@ func parseNetworkMapValue(annotationName, annotation string) (map[string]string,
 	return out, nil
 }
 
-func (c *NodeAnnotationCache) getOrParseSubnetMap(node *corev1.Node, annotationName string) (map[string][]*net.IPNet, error) {
+func (c *NodeAnnotationCache) getOrParseSubnetMap(node *corev1.Node, annotationName string, updateCache bool) (map[string][]*net.IPNet, error) {
 	annotation, ok := node.Annotations[annotationName]
 	if !ok {
 		return nil, util.NewAnnotationNotSetError("could not find %q annotation", annotationName)
 	}
-	if cached, ok := c.GetSubnetMap(node.Name, annotationName, annotation); ok {
+	if cached, ok := c.getParsedSubnetMap(node.Name, annotationName, annotation); ok {
 		return cached, nil
 	}
 	parsed, err := parseSubnetMapValue(annotationName, annotation)
 	if err != nil {
 		return nil, err
 	}
-	c.SetSubnetMap(node.Name, annotationName, annotation, parsed)
+	if updateCache {
+		c.setSubnetMap(node.Name, annotationName, annotation, parsed)
+	}
 	return parsed, nil
 }
 
@@ -188,83 +199,90 @@ func equalIPNetSlices(a, b []*net.IPNet) bool {
 	return true
 }
 
-// GetNetworkMap returns a cached parsed network annotation for a node.
+// getParsedNetworkMap returns a cached parsed network annotation for a node.
 // annotationName is the annotation key on the node object. raw is the exact
 // string value read from that annotation before parsing.
 // A hit requires both annotationName and raw to match.
 // The returned map is the cached reference and is not deep-copied.
-func (c *NodeAnnotationCache) GetNetworkMap(nodeName, annotationName, raw string) (map[string]string, bool) {
-	c.mu.RLock()
-	entry := c.nodes[nodeName]
-	if entry == nil {
-		c.mu.RUnlock()
-		return nil, false
-	}
-	cached, ok := entry.networkMaps[annotationName]
-	c.mu.RUnlock()
-	if !ok || cached.raw != raw {
-		return nil, false
-	}
-	return cached.parsed, true
+func (c *NodeAnnotationCache) getParsedNetworkMap(nodeName, annotationName, raw string) (map[string]string, bool) {
+	var parsed map[string]string
+	var ok bool
+	_ = c.nodes.DoWithLock(nodeName, func(key string) error {
+		entry, loaded := c.nodes.Load(key)
+		if !loaded || entry == nil {
+			return nil
+		}
+		cached, found := entry.networkMaps[annotationName]
+		if !found || cached.raw != raw {
+			return nil
+		}
+		parsed = cached.parsed
+		ok = true
+		return nil
+	})
+	return parsed, ok
 }
 
-// SetNetworkMap stores a parsed network annotation for a node keyed by
+// setNetworkMap stores a parsed network annotation for a node keyed by
 // annotationName and the exact raw annotation string from the node object.
 // The parsed map is stored by reference and is not deep-copied.
-func (c *NodeAnnotationCache) SetNetworkMap(nodeName, annotationName, raw string, parsed map[string]string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry := c.ensureEntryLocked(nodeName)
-	entry.networkMaps[annotationName] = cachedNetworkMap{raw: raw, parsed: parsed}
+func (c *NodeAnnotationCache) setNetworkMap(nodeName, annotationName, raw string, parsed map[string]string) {
+	_ = c.nodes.DoWithLock(nodeName, func(key string) error {
+		entry := c.ensureEntryLocked(key)
+		entry.networkMaps[annotationName] = cachedNetworkMap{raw: raw, parsed: parsed}
+		return nil
+	})
 }
 
-// GetSubnetMap returns a cached parsed subnet annotation for a node.
+// getParsedSubnetMap returns a cached parsed subnet annotation for a node.
 // annotationName is the annotation key on the node object. raw is the exact
 // string value read from that annotation before parsing.
 // A hit requires both annotationName and raw to match.
 // The returned map is the cached reference and is not deep-copied.
-func (c *NodeAnnotationCache) GetSubnetMap(nodeName, annotationName, raw string) (map[string][]*net.IPNet, bool) {
-	c.mu.RLock()
-	entry := c.nodes[nodeName]
-	if entry == nil {
-		c.mu.RUnlock()
-		return nil, false
-	}
-	cached, ok := entry.subnetMaps[annotationName]
-	c.mu.RUnlock()
-	if !ok || cached.raw != raw {
-		return nil, false
-	}
-	return cached.parsed, true
+func (c *NodeAnnotationCache) getParsedSubnetMap(nodeName, annotationName, raw string) (map[string][]*net.IPNet, bool) {
+	var parsed map[string][]*net.IPNet
+	var ok bool
+	_ = c.nodes.DoWithLock(nodeName, func(key string) error {
+		entry, loaded := c.nodes.Load(key)
+		if !loaded || entry == nil {
+			return nil
+		}
+		cached, found := entry.subnetMaps[annotationName]
+		if !found || cached.raw != raw {
+			return nil
+		}
+		parsed = cached.parsed
+		ok = true
+		return nil
+	})
+	return parsed, ok
 }
 
-// SetSubnetMap stores a parsed subnet annotation for a node keyed by
+// setSubnetMap stores a parsed subnet annotation for a node keyed by
 // annotationName and the exact raw annotation string from the node object.
 // The parsed map is stored by reference and is not deep-copied.
-func (c *NodeAnnotationCache) SetSubnetMap(nodeName, annotationName, raw string, parsed map[string][]*net.IPNet) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	entry := c.ensureEntryLocked(nodeName)
-	entry.subnetMaps[annotationName] = cachedSubnetMap{raw: raw, parsed: parsed}
+func (c *NodeAnnotationCache) setSubnetMap(nodeName, annotationName, raw string, parsed map[string][]*net.IPNet) {
+	_ = c.nodes.DoWithLock(nodeName, func(key string) error {
+		entry := c.ensureEntryLocked(key)
+		entry.subnetMaps[annotationName] = cachedSubnetMap{raw: raw, parsed: parsed}
+		return nil
+	})
 }
 
-// DeleteNode removes all cached annotation parse results for the node.
-func (c *NodeAnnotationCache) DeleteNode(nodeName string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.nodes, nodeName)
+// deleteNode removes all cached annotation parse results for the node.
+func (c *NodeAnnotationCache) deleteNode(nodeName string) {
+	_ = c.nodes.DoWithLock(nodeName, func(key string) error {
+		c.nodes.Delete(key)
+		return nil
+	})
 }
 
 // ensureEntryLocked returns the cache entry for nodeName, creating one if
-// needed. Caller must hold c.mu for writing.
+// needed. Caller must hold the per-node syncmap key lock.
 func (c *NodeAnnotationCache) ensureEntryLocked(nodeName string) *nodeAnnotationEntry {
-	entry := c.nodes[nodeName]
-	if entry == nil {
-		entry = &nodeAnnotationEntry{
-			networkMaps: map[string]cachedNetworkMap{},
-			subnetMaps:  map[string]cachedSubnetMap{},
-		}
-		c.nodes[nodeName] = entry
-	}
+	entry, _ := c.nodes.LoadOrStore(nodeName, &nodeAnnotationEntry{
+		networkMaps: map[string]cachedNetworkMap{},
+		subnetMaps:  map[string]cachedSubnetMap{},
+	})
 	return entry
 }

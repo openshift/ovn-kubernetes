@@ -10,7 +10,9 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
-// NodeAnnotationState holds parsed node annotation data for a single reconcile.
+// NodeAnnotationState holds parsed node annotation data.
+// Used during reconciliation to compare old and new node annotations quickly
+// with already parsed data.
 type NodeAnnotationState struct {
 	nodeName string
 
@@ -44,26 +46,8 @@ func newNodeAnnotationState(
 	}
 }
 
-// NetworkID returns the network ID for a given network name.
-func (s *NodeAnnotationState) NetworkID(netName string) (int, error) {
-	if s == nil {
-		return types.InvalidID, util.NewAnnotationNotSetError("node %q has no %q annotation for network %s", "", util.OvnNetworkIDs, netName)
-	}
-	if s.networkIDsErr != nil {
-		return types.InvalidID, s.networkIDsErr
-	}
-	networkID, ok := s.networkIDs[netName]
-	if !ok {
-		return types.InvalidID, util.NewAnnotationNotSetError("node %q has no %q annotation for network %s", s.nodeName, util.OvnNetworkIDs, netName)
-	}
-	return strconv.Atoi(networkID)
-}
-
 // TunnelID returns the UDN L2 tunnel ID for a given network name.
 func (s *NodeAnnotationState) TunnelID(netName string) (int, error) {
-	if s == nil {
-		return types.InvalidID, util.NewAnnotationNotSetError("node %q has no %q annotation for network %s", "", types.UDNLayer2NodeGRLRPTunnelIDAnnotation, netName)
-	}
 	if s.tunnelIDsErr != nil {
 		return types.InvalidID, s.tunnelIDsErr
 	}
@@ -76,9 +60,6 @@ func (s *NodeAnnotationState) TunnelID(netName string) (int, error) {
 
 // Subnets returns the parsed node subnets for the given network name.
 func (s *NodeAnnotationState) Subnets(netName string) ([]*net.IPNet, error) {
-	if s == nil {
-		return nil, util.NewAnnotationNotSetError("node %q has no %q annotation for network %s", "", types.NodeSubnetsAnnotation, netName)
-	}
 	if s.subnetsErr != nil {
 		return nil, s.subnetsErr
 	}

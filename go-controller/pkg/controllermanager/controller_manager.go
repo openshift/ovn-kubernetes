@@ -91,10 +91,8 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 		if err != nil {
 			return nil, err
 		}
-		if cm.udnNodeController != nil {
-			oc.SetNodeReconciler(cm.udnNodeController)
-			oc.SetNodeAnnotationCache(cm.udnNodeController.AnnotationCache())
-		}
+		oc.SetNodeReconciler(cm.udnNodeController)
+		oc.SetNodeAnnotationCache(cm.udnNodeController.AnnotationCache())
 		return oc, nil
 	case ovntypes.Layer2Topology:
 		oc, err := ovn.NewLayer2UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
@@ -102,17 +100,13 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 		if err != nil {
 			return nil, err
 		}
-		if cm.udnNodeController != nil {
-			oc.SetNodeReconciler(cm.udnNodeController)
-			oc.SetNodeAnnotationCache(cm.udnNodeController.AnnotationCache())
-		}
+		oc.SetNodeReconciler(cm.udnNodeController)
+		oc.SetNodeAnnotationCache(cm.udnNodeController.AnnotationCache())
 		return oc, nil
 	case ovntypes.LocalnetTopology:
 		oc := ovn.NewLocalnetUserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.addressSetManager)
-		if cm.udnNodeController != nil {
-			oc.SetNodeReconciler(cm.udnNodeController)
-			oc.SetNodeAnnotationCache(cm.udnNodeController.AnnotationCache())
-		}
+		oc.SetNodeReconciler(cm.udnNodeController)
+		oc.SetNodeAnnotationCache(cm.udnNodeController.AnnotationCache())
 		return oc, nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)

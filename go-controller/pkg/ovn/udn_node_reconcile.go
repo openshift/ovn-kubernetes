@@ -19,20 +19,20 @@ func nodesToInterfaces(nodes []*corev1.Node) []interface{} {
 	return objs
 }
 
-func nodeSubnetChangedForUDN(oldNode, newNode *corev1.Node, netName string, cache *topologycontroller.NodeAnnotationCache, oldState, newState *topologycontroller.NodeAnnotationState) bool {
+func nodeSubnetChangedForUDN(oldNode, newNode *corev1.Node, netName string, oldState, newState *topologycontroller.NodeAnnotationState) bool {
 	if !util.NodeSubnetAnnotationChanged(oldNode, newNode) {
 		return false
 	}
-	if oldState != nil && newState != nil {
-		return topologycontroller.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, netName)
-	}
-	return cache.NodeSubnetAnnotationChangedForNetwork(oldNode, newNode, netName)
+	return topologycontroller.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, netName)
 }
 
 // ReconcileNode reconciles a node for a layer3 UDN controller.
 func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *topologycontroller.NodeAnnotationState) error {
 	if newNode == nil {
-		return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		if oldNode == nil {
+			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		}
+		return oc.deleteNodeEvent(oldNode)
 	}
 
 	if oc.isLocalZoneNode(newNode) {
@@ -65,7 +65,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 			}
 		} else if oc.isLocalZoneNode(oldNode) {
 			zoneClusterChanged := oc.nodeZoneClusterChanged(oldNode, newNode)
-			nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oc.nodeAnnotationCache, oldState, newState)
+			nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oldState, newState)
 
 			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
 			_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
@@ -119,7 +119,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 	}
 
 	zoneClusterChanged := oc.nodeZoneClusterChanged(oldNode, newNode)
-	nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oc.nodeAnnotationCache, oldState, newState)
+	nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oldState, newState)
 	_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
 	syncZoneIC = syncZoneIC || oc.isLocalZoneNode(oldNode) || nodeSubnetChange || zoneClusterChanged
 	if syncZoneIC {
@@ -127,11 +127,6 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 			newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)
 	}
 	return oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
-}
-
-// DeleteNode deletes node resources for a layer3 UDN controller.
-func (oc *Layer3UserDefinedNetworkController) DeleteNode(node *corev1.Node, _ *topologycontroller.NodeAnnotationState) error {
-	return oc.deleteNodeEvent(node)
 }
 
 // SyncNodes runs the node sync for a layer3 UDN controller.
@@ -142,7 +137,10 @@ func (oc *Layer3UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) er
 // ReconcileNode reconciles a node for a layer2 UDN controller.
 func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *topologycontroller.NodeAnnotationState) error {
 	if newNode == nil {
-		return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		if oldNode == nil {
+			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		}
+		return oc.deleteNodeEvent(oldNode)
 	}
 
 	if oc.isLocalZoneNode(newNode) {
@@ -168,7 +166,7 @@ func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 				}
 			}
 		} else if oc.isLocalZoneNode(oldNode) {
-			nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oc.nodeAnnotationCache, oldState, newState)
+			nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oldState, newState)
 			_, mgmtUpdateFailed := oc.mgmtPortFailed.Load(newNode.Name)
 			shouldSyncMgmtPort := mgmtUpdateFailed || nodeSubnetChange
 			_, gwUpdateFailed := oc.gatewaysFailed.Load(newNode.Name)
@@ -221,27 +219,20 @@ func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 	return oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC, newState)
 }
 
-// DeleteNode deletes node resources for a layer2 UDN controller.
-func (oc *Layer2UserDefinedNetworkController) DeleteNode(node *corev1.Node, _ *topologycontroller.NodeAnnotationState) error {
-	return oc.deleteNodeEvent(node)
-}
-
 // SyncNodes runs the node sync for a layer2 UDN controller.
 func (oc *Layer2UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) error {
 	return oc.syncNodes(nodesToInterfaces(nodes))
 }
 
 // ReconcileNode reconciles a node for a localnet UDN controller.
-func (oc *LocalnetUserDefinedNetworkController) ReconcileNode(_ *corev1.Node, newNode *corev1.Node, _ *topologycontroller.NodeAnnotationState, _ *topologycontroller.NodeAnnotationState) error {
+func (oc *LocalnetUserDefinedNetworkController) ReconcileNode(oldNode *corev1.Node, newNode *corev1.Node, _ *topologycontroller.NodeAnnotationState, _ *topologycontroller.NodeAnnotationState) error {
 	if newNode == nil {
-		return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		if oldNode == nil {
+			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		}
+		return oc.deleteNodeEvent(oldNode)
 	}
 	return oc.addUpdateNodeEvent(newNode)
-}
-
-// DeleteNode deletes node resources for a localnet UDN controller.
-func (oc *LocalnetUserDefinedNetworkController) DeleteNode(node *corev1.Node, _ *topologycontroller.NodeAnnotationState) error {
-	return oc.deleteNodeEvent(node)
 }
 
 // SyncNodes runs the node sync for a localnet UDN controller.

@@ -375,7 +375,7 @@ func (gw *GatewayManager) createGWRouterPeerSwitchPort(nodeName string) error {
 		if err != nil {
 			return fmt.Errorf("failed to fetch node %s from watch factory %w", node.Name, err)
 		}
-		tunnelID, err := gw.nodeAnnotationCache.ParseUDNLayer2NodeGRLRPTunnelID(node, gw.netInfo.GetNetworkName())
+		tunnelID, err := gw.nodeAnnotationCache.GetOrParseUDNLayer2NodeGRLRPTunnelID(node, gw.netInfo.GetNetworkName())
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				// remote node may not have the annotation yet, suppress it

@@ -3,6 +3,12 @@ package topology
 import (
 	"net"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func mustParseCIDR(t *testing.T, cidr string) *net.IPNet {
@@ -15,19 +21,19 @@ func mustParseCIDR(t *testing.T, cidr string) *net.IPNet {
 }
 
 func TestNodeAnnotationCacheNetworkMapHitMissAndStaleRaw(t *testing.T) {
-	cache := newNodeAnnotationCache()
+	cache := NewNodeAnnotationCache()
 	nodeName := "node-a"
 	annotationName := "k8s.ovn.org/network-ids"
 	raw := `{"default":"0","blue":"42"}`
 	parsed := map[string]string{"default": "0", "blue": "42"}
 
-	if _, ok := cache.GetNetworkMap(nodeName, annotationName, raw); ok {
+	if _, ok := cache.getParsedNetworkMap(nodeName, annotationName, raw); ok {
 		t.Fatal("expected cache miss before SetNetworkMap")
 	}
 
-	cache.SetNetworkMap(nodeName, annotationName, raw, parsed)
+	cache.setNetworkMap(nodeName, annotationName, raw, parsed)
 
-	got, ok := cache.GetNetworkMap(nodeName, annotationName, raw)
+	got, ok := cache.getParsedNetworkMap(nodeName, annotationName, raw)
 	if !ok {
 		t.Fatal("expected cache hit for matching node/annotation/raw")
 	}
@@ -35,24 +41,24 @@ func TestNodeAnnotationCacheNetworkMapHitMissAndStaleRaw(t *testing.T) {
 		t.Fatalf("unexpected parsed map: got=%v want=%v", got, parsed)
 	}
 
-	if _, ok := cache.GetNetworkMap(nodeName, annotationName, `{"default":"0"}`); ok {
+	if _, ok := cache.getParsedNetworkMap(nodeName, annotationName, `{"default":"0"}`); ok {
 		t.Fatal("expected cache miss for stale raw value")
 	}
-	if _, ok := cache.GetNetworkMap(nodeName, "k8s.ovn.org/other", raw); ok {
+	if _, ok := cache.getParsedNetworkMap(nodeName, "k8s.ovn.org/other", raw); ok {
 		t.Fatal("expected cache miss for different annotation name")
 	}
-	if _, ok := cache.GetNetworkMap("node-b", annotationName, raw); ok {
+	if _, ok := cache.getParsedNetworkMap("node-b", annotationName, raw); ok {
 		t.Fatal("expected cache miss for different node")
 	}
 
 	newRaw := `{"default":"0","blue":"43"}`
 	newParsed := map[string]string{"default": "0", "blue": "43"}
-	cache.SetNetworkMap(nodeName, annotationName, newRaw, newParsed)
+	cache.setNetworkMap(nodeName, annotationName, newRaw, newParsed)
 
-	if _, ok := cache.GetNetworkMap(nodeName, annotationName, raw); ok {
+	if _, ok := cache.getParsedNetworkMap(nodeName, annotationName, raw); ok {
 		t.Fatal("expected old raw value to miss after cache update")
 	}
-	got, ok = cache.GetNetworkMap(nodeName, annotationName, newRaw)
+	got, ok = cache.getParsedNetworkMap(nodeName, annotationName, newRaw)
 	if !ok {
 		t.Fatal("expected cache hit for updated raw value")
 	}
@@ -62,7 +68,7 @@ func TestNodeAnnotationCacheNetworkMapHitMissAndStaleRaw(t *testing.T) {
 }
 
 func TestNodeAnnotationCacheSubnetMapHitMissAndDeleteNode(t *testing.T) {
-	cache := newNodeAnnotationCache()
+	cache := NewNodeAnnotationCache()
 	nodeName := "node-a"
 	annotationName := "k8s.ovn.org/node-subnets"
 	raw := `{"default":["10.128.0.0/23"]}`
@@ -70,13 +76,13 @@ func TestNodeAnnotationCacheSubnetMapHitMissAndDeleteNode(t *testing.T) {
 		"default": {mustParseCIDR(t, "10.128.0.0/23")},
 	}
 
-	if _, ok := cache.GetSubnetMap(nodeName, annotationName, raw); ok {
+	if _, ok := cache.getParsedSubnetMap(nodeName, annotationName, raw); ok {
 		t.Fatal("expected cache miss before SetSubnetMap")
 	}
 
-	cache.SetSubnetMap(nodeName, annotationName, raw, parsed)
+	cache.setSubnetMap(nodeName, annotationName, raw, parsed)
 
-	got, ok := cache.GetSubnetMap(nodeName, annotationName, raw)
+	got, ok := cache.getParsedSubnetMap(nodeName, annotationName, raw)
 	if !ok {
 		t.Fatal("expected cache hit for matching node/annotation/raw")
 	}
@@ -84,9 +90,53 @@ func TestNodeAnnotationCacheSubnetMapHitMissAndDeleteNode(t *testing.T) {
 		t.Fatalf("unexpected subnet map: got=%v", got)
 	}
 
-	cache.DeleteNode(nodeName)
+	cache.deleteNode(nodeName)
 
-	if _, ok := cache.GetSubnetMap(nodeName, annotationName, raw); ok {
+	if _, ok := cache.getParsedSubnetMap(nodeName, annotationName, raw); ok {
 		t.Fatal("expected subnet cache miss after DeleteNode")
+	}
+}
+
+func TestBuildNodeAnnotationStateDoesNotOverwriteLatestCacheWithOldSnapshot(t *testing.T) {
+	cache := NewNodeAnnotationCache()
+	nodeName := "node-a"
+	oldRaw := `{"default":"0","blue":"42"}`
+	newRaw := `{"default":"0","blue":"43"}`
+
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				util.OvnNetworkIDs:          newRaw,
+				types.NodeSubnetsAnnotation: `{"default":["10.128.1.0/24"]}`,
+			},
+		},
+	}
+	oldNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				util.OvnNetworkIDs:          oldRaw,
+				types.NodeSubnetsAnnotation: `{"default":["10.128.0.0/24"]}`,
+			},
+		},
+	}
+
+	if state := cache.buildNodeAnnotationState(newNode, true); state == nil {
+		t.Fatal("expected new node state to be built")
+	}
+	if state := cache.buildNodeAnnotationState(oldNode, false); state == nil {
+		t.Fatal("expected old node state to be built")
+	}
+
+	if _, ok := cache.getParsedNetworkMap(nodeName, util.OvnNetworkIDs, oldRaw); ok {
+		t.Fatal("expected old raw network annotation not to replace the latest cached value")
+	}
+	got, ok := cache.getParsedNetworkMap(nodeName, util.OvnNetworkIDs, newRaw)
+	if !ok {
+		t.Fatal("expected new raw network annotation to remain cached")
+	}
+	if got["blue"] != "43" {
+		t.Fatalf("expected latest cached value to be preserved, got=%v", got["blue"])
 	}
 }
