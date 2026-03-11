@@ -7,6 +7,7 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -17,6 +18,9 @@ const (
 	// MaxNetworks is the maximum number of networks allowed.
 	MaxNetworks = 4096
 )
+
+// NADReconciler is a level-driven controller notified of NAD key changes.
+type NADReconciler controller.Reconciler
 
 // Interface is the main package entrypoint and provides network related
 // information to the rest of the project.
@@ -48,9 +52,13 @@ type Interface interface {
 	// DoWithLock takes care of locking and unlocking while iterating over all role primary user defined networks.
 	DoWithLock(f func(network util.NetInfo) error) error
 	GetActiveNetworkNamespaces(networkName string) ([]string, error)
-	// RegisterNADHandler allows external entities to register callback functions to be executed when
-	// a NAD is deleted/created/updated. These operations should be non-blocking and lightweight.
-	RegisterNADHandler(handler handlerFunc) error
+	// GetNetInfoForNADKey returns a copy of the  cached network info for the given NAD key, or nil if unknown.
+	// This is a cheap lookup that does not parse the NAD object; it relies on NAD controller state.
+	GetNetInfoForNADKey(nadKey string) util.NetInfo
+	// RegisterNADReconciler registers a reconciler to be notified of NAD changes.
+	RegisterNADReconciler(r NADReconciler) (uint64, error)
+	// DeRegisterNADReconciler removes a previously registered reconciler.
+	DeRegisterNADReconciler(id uint64) error
 }
 
 // Controller handles the runtime of the package
@@ -225,8 +233,12 @@ func (nm defaultNetworkManager) GetActiveNetwork(network string) util.NetInfo {
 	return &util.DefaultNetInfo{}
 }
 
-func (nm defaultNetworkManager) RegisterNADHandler(_ handlerFunc) error {
-	return nil
+func (nm defaultNetworkManager) GetNetInfoForNADKey(_ string) util.NetInfo { return nil }
+
+func (nm defaultNetworkManager) RegisterNADReconciler(_ NADReconciler) (uint64, error) {
+	return 0, nil
 }
+
+func (nm defaultNetworkManager) DeRegisterNADReconciler(_ uint64) error { return nil }
 
 var def Controller = &defaultNetworkManager{}

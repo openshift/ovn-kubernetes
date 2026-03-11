@@ -2,6 +2,7 @@ package networkmanager
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -51,23 +52,40 @@ type FakeNetworkManager struct {
 	// namespace -> netInfo
 	// if netInfo is nil, it represents a namespace which contains the required UDN label but with no valid network. It will return invalid network error.
 	PrimaryNetworks map[string]util.NetInfo
-	HandlerFuncs    []handlerFunc
+	Reconcilers     []reconcilerRegistration
+	nextID          uint64
 	// UDNNamespaces are a list of namespaces that require UDN for primary network
 	UDNNamespaces sets.Set[string]
 }
 
-func (fnm *FakeNetworkManager) RegisterNADHandler(h handlerFunc) error {
+func (fnm *FakeNetworkManager) RegisterNADReconciler(r NADReconciler) (uint64, error) {
 	fnm.Lock()
 	defer fnm.Unlock()
-	fnm.HandlerFuncs = append(fnm.HandlerFuncs, h)
-	return nil
+	fnm.nextID++
+	id := fnm.nextID
+	fnm.Reconcilers = append(fnm.Reconcilers, reconcilerRegistration{id: id, r: r})
+	return id, nil
+}
+
+func (fnm *FakeNetworkManager) DeRegisterNADReconciler(id uint64) error {
+	fnm.Lock()
+	defer fnm.Unlock()
+	for i, rec := range fnm.Reconcilers {
+		if rec.id == id {
+			fnm.Reconcilers = append(fnm.Reconcilers[:i], fnm.Reconcilers[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("reconciler not found")
 }
 
 func (fnm *FakeNetworkManager) TriggerHandlers(nadName string, info util.NetInfo, removed bool) {
 	fnm.Lock()
 	defer fnm.Unlock()
-	for _, h := range fnm.HandlerFuncs {
-		h(nadName, info, removed)
+	_ = info
+	_ = removed
+	for _, entry := range fnm.Reconcilers {
+		entry.r.Reconcile(nadName)
 	}
 }
 
@@ -110,6 +128,19 @@ func (fnm *FakeNetworkManager) GetNetwork(networkName string) util.NetInfo {
 
 func (fnm *FakeNetworkManager) GetActiveNetwork(networkName string) util.NetInfo {
 	return fnm.GetNetwork(networkName)
+}
+
+func (fnm *FakeNetworkManager) GetNetInfoForNADKey(nadKey string) util.NetInfo {
+	fnm.Lock()
+	defer fnm.Unlock()
+	for _, ni := range fnm.PrimaryNetworks {
+		for _, n := range ni.GetNADs() {
+			if n == nadKey {
+				return ni
+			}
+		}
+	}
+	return nil
 }
 
 func (fnm *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
