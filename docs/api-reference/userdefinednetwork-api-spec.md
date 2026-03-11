@@ -43,6 +43,7 @@ _Validation:_
 
 _Appears in:_
 - [DualStackCIDRs](#dualstackcidrs)
+- [Layer2Config](#layer2config)
 - [Layer3Subnet](#layer3subnet)
 - [LocalnetConfig](#localnetconfig)
 
@@ -137,6 +138,34 @@ _Appears in:_
 
 
 
+#### DualStackIPs
+
+_Underlying type:_ _[IP](#ip)_
+
+
+
+_Validation:_
+- MaxItems: 2
+- MinItems: 1
+
+_Appears in:_
+- [Layer2Config](#layer2config)
+
+
+
+#### IP
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [DualStackIPs](#dualstackips)
+
+
+
 #### IPAMConfig
 
 
@@ -153,7 +182,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `mode` _[IPAMMode](#ipammode)_ | Mode controls how much of the IP configuration will be managed by OVN.<br />`Enabled` means OVN-Kubernetes will apply IP configuration to the SDN infrastructure and it will also assign IPs<br />from the selected subnet to the individual pods.<br />`Disabled` means OVN-Kubernetes will only assign MAC addresses and provide layer 2 communication, letting users<br />configure IP addresses for the pods.<br />`Disabled` is only available for Secondary networks.<br />By disabling IPAM, any Kubernetes features that rely on selecting pods by IP will no longer function<br />(such as network policy, services, etc). Additionally, IP port security will also be disabled for interfaces attached to this network.<br />Defaults to `Enabled`. |  | Enum: [Enabled Disabled] <br /> |
-| `lifecycle` _[NetworkIPAMLifecycle](#networkipamlifecycle)_ | Lifecycle controls IP addresses management lifecycle.<br /><br />The only allowed value is Persistent. When set, the IP addresses assigned by OVN-Kubernetes will be persisted in an<br />`ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.<br />Only supported when mode is `Enabled`. |  | Enum: [Persistent] <br /> |
+| `lifecycle` _[NetworkIPAMLifecycle](#networkipamlifecycle)_ | Lifecycle controls IP addresses management lifecycle.<br />The only allowed value is Persistent. When set, the IP addresses assigned by OVN-Kubernetes will be persisted in an<br />`ipamclaims.k8s.cni.cncf.io` object. These IP addresses will be reused by other pods if requested.<br />Only supported when mode is `Enabled`. |  | Enum: [Persistent] <br /> |
 
 
 #### IPAMMode
@@ -188,10 +217,13 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `role` _[NetworkRole](#networkrole)_ | Role describes the network role in the pod.<br /><br />Allowed value is "Secondary".<br />Secondary network is only assigned to pods that use `k8s.v1.cni.cncf.io/networks` annotation to select given network. |  | Enum: [Primary Secondary] <br />Required: \{\} <br /> |
+| `role` _[NetworkRole](#networkrole)_ | Role describes the network role in the pod.<br />Allowed value is "Secondary".<br />Secondary network is only assigned to pods that use `k8s.v1.cni.cncf.io/networks` annotation to select given network. |  | Enum: [Primary Secondary] <br />Required: \{\} <br /> |
 | `mtu` _integer_ | MTU is the maximum transmission unit for a network.<br />MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network. |  | Maximum: 65536 <br />Minimum: 576 <br /> |
-| `subnets` _[DualStackCIDRs](#dualstackcidrs)_ | Subnets are used for the pod network across the cluster.<br />Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.<br /><br />The format should match standard CIDR notation (for example, "10.128.0.0/16").<br />This field must be omitted if `ipam.mode` is `Disabled`. |  | MaxItems: 2 <br />MaxLength: 43 <br />MinItems: 1 <br /> |
-| `joinSubnets` _[DualStackCIDRs](#dualstackcidrs)_ | JoinSubnets are used inside the OVN network topology.<br /><br />Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.<br />This field is only allowed for "Primary" network.<br />It is not recommended to set this field without explicit need and understanding of the OVN network topology.<br />When omitted, the platform will choose a reasonable default which is subject to change over time. |  | MaxItems: 2 <br />MaxLength: 43 <br />MinItems: 1 <br /> |
+| `subnets` _[DualStackCIDRs](#dualstackcidrs)_ | Subnets are used for the pod network across the cluster.<br />Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.<br />The format should match standard CIDR notation (for example, "10.128.0.0/16").<br />This field must be omitted if `ipam.mode` is `Disabled`. |  | MaxItems: 2 <br />MaxLength: 43 <br />MinItems: 1 <br /> |
+| `reservedSubnets` _[CIDR](#cidr) array_ | reservedSubnets specifies a list of CIDRs reserved for static IP assignment, excluded from automatic allocation.<br />reservedSubnets is optional. When omitted, all IP addresses in `subnets` are available for automatic assignment.<br />IPs from these ranges can still be requested through static IP assignment.<br />Each item should be in range of the specified CIDR(s) in `subnets`.<br />The maximum number of entries allowed is 25.<br />The format should match standard CIDR notation (for example, "10.128.0.0/16").<br />This field must be omitted if `subnets` is unset or `ipam.mode` is `Disabled`. |  | MaxItems: 25 <br />MaxLength: 43 <br />MinItems: 1 <br /> |
+| `infrastructureSubnets` _[CIDR](#cidr) array_ | infrastructureSubnets specifies a list of internal CIDR ranges that OVN-Kubernetes will reserve for internal network infrastructure.<br />Any IP addresses within these ranges cannot be assigned to workloads.<br />When omitted, OVN-Kubernetes will automatically allocate IP addresses from `subnets` for its infrastructure needs.<br />When there are not enough available IPs in the provided infrastructureSubnets, OVN-Kubernetes will automatically allocate IP addresses from subnets for its infrastructure needs.<br />When `reservedSubnets` is also specified the CIDRs cannot overlap.<br />When `defaultGatewayIPs` is also specified, the default gateway IPs must belong to one of the infrastructure subnet CIDRs.<br />Each item should be in range of the specified CIDR(s) in `subnets`.<br />The maximum number of entries allowed is 4.<br />The format should match standard CIDR notation (for example, "10.128.0.0/16").<br />This field must be omitted if `subnets` is unset or `ipam.mode` is `Disabled`. |  | MaxItems: 4 <br />MaxLength: 43 <br />MinItems: 1 <br /> |
+| `defaultGatewayIPs` _[DualStackIPs](#dualstackips)_ | defaultGatewayIPs specifies the default gateway IP used in the internal OVN topology.<br />Dual-stack clusters may set 2 IPs (one for each IP family), otherwise only 1 IP is allowed.<br />This field is only allowed for "Primary" network.<br />It is not recommended to set this field without explicit need and understanding of the OVN network topology.<br />When omitted, an IP from the subnets field is used. |  | MaxItems: 2 <br />MinItems: 1 <br /> |
+| `joinSubnets` _[DualStackCIDRs](#dualstackcidrs)_ | JoinSubnets are used inside the OVN network topology.<br />Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.<br />This field is only allowed for "Primary" network.<br />It is not recommended to set this field without explicit need and understanding of the OVN network topology.<br />When omitted, the platform will choose a reasonable default which is subject to change over time. |  | MaxItems: 2 <br />MaxLength: 43 <br />MinItems: 1 <br /> |
 | `ipam` _[IPAMConfig](#ipamconfig)_ | IPAM section contains IPAM-related configuration for the network. |  | MinProperties: 1 <br /> |
 
 
@@ -209,10 +241,10 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `role` _[NetworkRole](#networkrole)_ | Role describes the network role in the pod.<br /><br />Allowed values are "Primary" and "Secondary".<br />Primary network is automatically assigned to every pod created in the same namespace.<br />Secondary network is only assigned to pods that use `k8s.v1.cni.cncf.io/networks` annotation to select given network. |  | Enum: [Primary Secondary] <br />Required: \{\} <br /> |
-| `mtu` _integer_ | MTU is the maximum transmission unit for a network.<br /><br />MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network. |  | Maximum: 65536 <br />Minimum: 576 <br /> |
-| `subnets` _[Layer3Subnet](#layer3subnet) array_ | Subnets are used for the pod network across the cluster.<br /><br />Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.<br />Given subnet is split into smaller subnets for every node. |  | MaxItems: 2 <br />MinItems: 1 <br /> |
-| `joinSubnets` _[DualStackCIDRs](#dualstackcidrs)_ | JoinSubnets are used inside the OVN network topology.<br /><br />Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.<br />This field is only allowed for "Primary" network.<br />It is not recommended to set this field without explicit need and understanding of the OVN network topology.<br />When omitted, the platform will choose a reasonable default which is subject to change over time. |  | MaxItems: 2 <br />MaxLength: 43 <br />MinItems: 1 <br /> |
+| `role` _[NetworkRole](#networkrole)_ | Role describes the network role in the pod.<br />Allowed values are "Primary" and "Secondary".<br />Primary network is automatically assigned to every pod created in the same namespace.<br />Secondary network is only assigned to pods that use `k8s.v1.cni.cncf.io/networks` annotation to select given network. |  | Enum: [Primary Secondary] <br />Required: \{\} <br /> |
+| `mtu` _integer_ | MTU is the maximum transmission unit for a network.<br />MTU is optional, if not provided, the globally configured value in OVN-Kubernetes (defaults to 1400) is used for the network. |  | Maximum: 65536 <br />Minimum: 576 <br /> |
+| `subnets` _[Layer3Subnet](#layer3subnet) array_ | Subnets are used for the pod network across the cluster.<br />Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.<br />Given subnet is split into smaller subnets for every node. |  | MaxItems: 2 <br />MinItems: 1 <br /> |
+| `joinSubnets` _[DualStackCIDRs](#dualstackcidrs)_ | JoinSubnets are used inside the OVN network topology.<br />Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.<br />This field is only allowed for "Primary" network.<br />It is not recommended to set this field without explicit need and understanding of the OVN network topology.<br />When omitted, the platform will choose a reasonable default which is subject to change over time. |  | MaxItems: 2 <br />MaxLength: 43 <br />MinItems: 1 <br /> |
 
 
 #### Layer3Subnet
@@ -229,7 +261,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `cidr` _[CIDR](#cidr)_ | CIDR specifies L3Subnet, which is split into smaller subnets for every node. |  | MaxLength: 43 <br /> |
-| `hostSubnet` _integer_ | HostSubnet specifies the subnet size for every node.<br /><br />When not set, it will be assigned automatically. |  | Maximum: 127 <br />Minimum: 1 <br /> |
+| `hostSubnet` _integer_ | HostSubnet specifies the subnet size for every node.<br />When not set, it will be assigned automatically. |  | Maximum: 127 <br />Minimum: 1 <br /> |
 
 
 #### LocalnetConfig
@@ -303,10 +335,12 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `topology` _[NetworkTopology](#networktopology)_ | Topology describes network configuration.<br /><br />Allowed values are "Layer3", "Layer2" and "Localnet".<br />Layer3 topology creates a layer 2 segment per node, each with a different subnet. Layer 3 routing is used to interconnect node subnets.<br />Layer2 topology creates one logical switch shared by all nodes.<br />Localnet topology is based on layer 2 topology, but also allows connecting to an existent (configured) physical network to provide north-south traffic to the workloads. |  | Enum: [Layer2 Layer3 Localnet] <br />Required: \{\} <br /> |
+| `topology` _[NetworkTopology](#networktopology)_ | Topology describes network configuration.<br />Allowed values are "Layer3", "Layer2" and "Localnet".<br />Layer3 topology creates a layer 2 segment per node, each with a different subnet. Layer 3 routing is used to interconnect node subnets.<br />Layer2 topology creates one logical switch shared by all nodes.<br />Localnet topology is based on layer 2 topology, but also allows connecting to an existent (configured) physical network to provide north-south traffic to the workloads. |  | Enum: [Layer2 Layer3 Localnet] <br />Required: \{\} <br /> |
 | `layer3` _[Layer3Config](#layer3config)_ | Layer3 is the Layer3 topology configuration. |  |  |
 | `layer2` _[Layer2Config](#layer2config)_ | Layer2 is the Layer2 topology configuration. |  |  |
 | `localnet` _[LocalnetConfig](#localnetconfig)_ | Localnet is the Localnet topology configuration. |  |  |
+| `transport` _[TransportOption](#transportoption)_ | Transport describes the transport technology for pod-to-pod traffic.<br />Allowed values are "NoOverlay" and "Geneve".<br />- "NoOverlay": The network operates in no-overlay mode.<br />- "Geneve": The network uses Geneve overlay.<br />When omitted, the default behaviour is Geneve. |  | Enum: [NoOverlay Geneve] <br /> |
+| `noOverlayOptions` _[NoOverlayOptions](#nooverlayoptions)_ | NoOverlayOptions contains configuration for no-overlay mode.<br />This is only allowed when Transport is "NoOverlay". |  |  |
 
 
 #### NetworkTopology
@@ -326,6 +360,74 @@ _Appears in:_
 | `Localnet` |  |
 | `Layer2` |  |
 | `Layer3` |  |
+
+
+#### NoOverlayOptions
+
+
+
+NoOverlayOptions contains configuration options for networks operating in no-overlay mode.
+
+
+
+_Appears in:_
+- [NetworkSpec](#networkspec)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `outboundSNAT` _[SNATOption](#snatoption)_ | OutboundSNAT defines the SNAT behavior for outbound traffic from pods. |  | Enum: [Enabled Disabled] <br /> |
+| `routing` _[RoutingOption](#routingoption)_ | Routing specifies whether the pod network routing is managed by OVN-Kubernetes or users. |  | Enum: [Managed Unmanaged] <br /> |
+
+
+#### RoutingOption
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [NoOverlayOptions](#nooverlayoptions)
+
+| Field | Description |
+| --- | --- |
+| `Managed` |  |
+| `Unmanaged` |  |
+
+
+#### SNATOption
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [NoOverlayOptions](#nooverlayoptions)
+
+| Field | Description |
+| --- | --- |
+| `Enabled` |  |
+| `Disabled` |  |
+
+
+#### TransportOption
+
+_Underlying type:_ _string_
+
+
+
+
+
+_Appears in:_
+- [NetworkSpec](#networkspec)
+
+| Field | Description |
+| --- | --- |
+| `NoOverlay` |  |
+| `Geneve` |  |
 
 
 #### UserDefinedNetwork
@@ -379,7 +481,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `topology` _[NetworkTopology](#networktopology)_ | Topology describes network configuration.<br /><br />Allowed values are "Layer3", "Layer2".<br />Layer3 topology creates a layer 2 segment per node, each with a different subnet. Layer 3 routing is used to interconnect node subnets.<br />Layer2 topology creates one logical switch shared by all nodes. |  | Enum: [Layer2 Layer3] <br />Required: \{\} <br /> |
+| `topology` _[NetworkTopology](#networktopology)_ | Topology describes network configuration.<br />Allowed values are "Layer3", "Layer2".<br />Layer3 topology creates a layer 2 segment per node, each with a different subnet. Layer 3 routing is used to interconnect node subnets.<br />Layer2 topology creates one logical switch shared by all nodes. |  | Enum: [Layer2 Layer3] <br />Required: \{\} <br /> |
 | `layer3` _[Layer3Config](#layer3config)_ | Layer3 is the Layer3 topology configuration. |  |  |
 | `layer2` _[Layer2Config](#layer2config)_ | Layer2 is the Layer2 topology configuration. |  |  |
 
