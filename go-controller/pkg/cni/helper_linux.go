@@ -472,11 +472,6 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 				return nil, nil, err
 			}
 		}
-		// 4. make sure it's not a port managed by OVS to avoid conflicts
-		_, err = ovsExec("--if-exists", "del-port", hostRepName)
-		if err != nil {
-			return nil, nil, err
-		}
 
 		hostIface.Name = hostRepName
 		link, err := util.GetNetLinkOps().LinkByName(hostIface.Name)
@@ -484,17 +479,12 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 			return nil, nil, err
 		}
 
-		err = util.GetNetLinkOps().LinkSetUp(link)
-		if err != nil {
-			return nil, nil, err
-		}
-
 		hostIface.Mac = link.Attrs().HardwareAddr.String()
-
-		// 5. set MTU on the representor
-		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
-			return nil, nil, fmt.Errorf("failed to set MTU on %s: %v", hostIface.Name, err)
-		}
+		// Do not bring the representor up or set MTU here. In full mode the representor must be
+		// added to br-int first, then brought up (and set MTU) in ConfigureOVS after the port
+		// is added to br-int. This avoids a race where an old pod's CmdDel could bring down the
+		// same VF representor and remove it from br-int after we brought the link up but before
+		// we added it to br-int.
 	}
 
 	return hostIface, contIface, nil
@@ -577,7 +567,7 @@ func ConfigureOVS(ctx context.Context, namespace, podName, podIfName, hostIfaceN
 		extId := extIds[0]
 		ifaceIDStr := util.GetExternalIDValByKey(extId, "iface-id")
 		nadKeyString := util.GetExternalIDValByKey(extId, types.NADExternalID)
-		// if NADExternalID does not exists, it is default network
+		// if NADExternalID does not exist, it is default network
 		if nadKeyString == "" {
 			nadKeyString = types.DefaultNetworkName
 		}
@@ -663,12 +653,27 @@ func ConfigureOVS(ctx context.Context, namespace, podName, podIfName, hostIfaceN
 		return err
 	}
 
-	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
-		l, err := netlink.LinkByName(hostIfaceName)
-		if err != nil {
-			return fmt.Errorf("failed to find host veth interface %s: %v", hostIfaceName, err)
+	var link netlink.Link
+	if deviceID != "" || (ifInfo.Ingress > 0 || ifInfo.Egress > 0) {
+		if link, err = util.GetNetLinkOps().LinkByName(hostIfaceName); err != nil {
+			return fmt.Errorf("failed to find interface %s: %v", hostIfaceName, err)
 		}
-		err = netlink.LinkSetTxQLen(l, 1000)
+	}
+
+	if deviceID != "" {
+		// 4. set MTU on the representor
+		if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
+			return fmt.Errorf("failed to set MTU on %s: %v", hostIfaceName, err)
+		}
+		// 5. if the interface is not up, set it to up
+		err = util.GetNetLinkOps().LinkSetUp(link)
+		if err != nil {
+			return fmt.Errorf("failed to set link UP on %s: %v", hostIfaceName, err)
+		}
+	}
+
+	if ifInfo.Ingress > 0 || ifInfo.Egress > 0 {
+		err = netlink.LinkSetTxQLen(link, 1000)
 		if err != nil {
 			return fmt.Errorf("failed to set host veth txqlen: %v", err)
 		}
@@ -920,13 +925,34 @@ func (pr *PodRequest) deletePodConntrack() {
 func (pr *PodRequest) deletePort(ifaceName, podNamespace, podName string) {
 	podDesc := fmt.Sprintf("%s/%s", podNamespace, podName)
 
+	var isVFDevice bool
+	link, err := util.GetNetLinkOps().LinkByName(ifaceName)
+	if err != nil {
+		klog.Warningf("Failed to find host-side link %s for pod %q: %v", ifaceName, podDesc, err)
+	} else if pr.CNIConf.DeviceID != "" {
+		isVFDevice = true
+	}
+
+	if isVFDevice {
+		// SR-IOV case: bring down the representor before removing from OVS.
+		// The device plugin can re-allocate a VF to a new pod before this
+		// CmdDel completes, causing the new pod's CmdAdd shim to run
+		// concurrently. By doing LinkSetDown before del-port, we eliminate
+		// the window where a racing CmdAdd could have its LinkSetUp or
+		// ConfigureOVS undone.
+		if err = util.GetNetLinkOps().LinkSetDown(link); err != nil {
+			klog.Warningf("Failed to bring down pod %q interface %s: %v", podDesc, ifaceName, err)
+		}
+	}
+
 	out, err := ovsExec("del-port", "br-int", ifaceName)
 	if err != nil && !strings.Contains(err.Error(), "no port named") {
 		// DEL should be idempotent; don't return an error just log it
 		klog.Warningf("Failed to delete pod %q OVS port %s: %v\n  %q", podDesc, ifaceName, err, string(out))
 	}
+
 	// skip deleting representor ports
-	if pr.CNIConf.DeviceID == "" {
+	if link != nil && !isVFDevice {
 		if err = util.LinkDelete(ifaceName); err != nil {
 			klog.Warningf("Failed to delete pod %q interface %s: %v", podDesc, ifaceName, err)
 		}
