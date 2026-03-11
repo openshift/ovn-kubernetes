@@ -107,8 +107,10 @@ type BaseNetworkController struct {
 	// retry framework for IPAMClaims
 	retryIPAMClaims *ovnretry.RetryFramework
 
-	// node reconciler for shared node controllers (optional)
-	nodeReconciler NodeReconciler
+	// nodeReconciler is the shared UDN node controller. It is optional and will
+	// be nil for controllers that do not use the shared node path, such as the
+	// default network controller.
+	nodeReconciler *nodecontroller.NodeController
 	// node annotation cache for shared node controllers (optional)
 	nodeAnnotationCache *nodecontroller.NodeAnnotationCache
 
@@ -267,7 +269,7 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 	for _, nodeName := range reconcileNodes {
 		setNodeFailed(nodeName)
 		if !oc.IsDefault() {
-			oc.nodeReconciler.Reconcile(nodeName)
+			oc.nodeReconciler.ReconcileNetwork(nodeName, oc.GetNetworkName())
 			continue
 		}
 		node, err := oc.watchFactory.GetNode(nodeName)
@@ -315,18 +317,6 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 		oc.retryNamespaces.RequestRetryObjs()
 	}
 	return nil
-}
-
-// SetNodeReconciler configures a shared node reconciler for this controller.
-func (oc *BaseNetworkController) SetNodeReconciler(reconciler NodeReconciler) {
-	oc.nodeReconciler = reconciler
-}
-
-func (oc *BaseNetworkController) SetNodeAnnotationCache(cache *nodecontroller.NodeAnnotationCache) {
-	if cache == nil {
-		cache = nodecontroller.NewNodeAnnotationCache()
-	}
-	oc.nodeAnnotationCache = cache
 }
 
 // DeregisterNodeHandler removes this controller from the shared node controller.
@@ -1116,7 +1106,7 @@ func (bnc *BaseNetworkController) isLayer2WithInterconnectTransport() bool {
 // HandleNetworkRefChange enqueues node reconciliation when a NAD reference becomes active/inactive.
 func (bnc *BaseNetworkController) HandleNetworkRefChange(nodeName string, active bool) {
 	if !bnc.IsDefault() {
-		bnc.nodeReconciler.Reconcile(nodeName)
+		bnc.nodeReconciler.ReconcileNetwork(nodeName, bnc.GetNetworkName())
 		return
 	}
 	if bnc.retryNodes == nil || bnc.watchFactory == nil {

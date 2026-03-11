@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -1114,4 +1115,19 @@ func (bsnc *BaseUserDefinedNetworkController) enableSourceLSPFailedLiveMigration
 
 func shouldAddPort(oldPod, newPod *corev1.Pod, inRetryCache bool) bool {
 	return inRetryCache || util.PodScheduled(oldPod) != util.PodScheduled(newPod)
+}
+
+func nodesToInterfaces(nodes []*corev1.Node) []interface{} {
+	objs := make([]interface{}, 0, len(nodes))
+	for _, node := range nodes {
+		objs = append(objs, node)
+	}
+	return objs
+}
+
+func nodeSubnetChangedForUDN(oldNode, newNode *corev1.Node, netName string, oldState, newState *nodecontroller.NodeAnnotationState) bool {
+	if !util.NodeSubnetAnnotationChanged(oldNode, newNode) {
+		return false
+	}
+	return nodecontroller.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, netName)
 }

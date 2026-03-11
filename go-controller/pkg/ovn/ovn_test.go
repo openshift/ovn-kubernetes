@@ -628,32 +628,29 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 
 		switch topoType {
 		case types.Layer3Topology:
-			l3Controller, err := NewLayer3UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil, o.eIPController, o.portCache, nil)
+			l3Controller, err := NewLayer3UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
+				o.eIPController, o.portCache, nil, o.udnNodeController)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l3Controller.addressSetFactory = asf
 			}
-			l3Controller.SetNodeReconciler(o.udnNodeController)
-			l3Controller.SetNodeAnnotationCache(o.udnNodeController.AnnotationCache())
 			userDefinedNetworkController = &l3Controller.BaseUserDefinedNetworkController
 			o.fullL3UDNControllers[netName] = l3Controller
 		case types.Layer2Topology:
-			l2Controller, err := NewLayer2UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil, o.portCache, o.eIPController, nil)
+			l2Controller, err := NewLayer2UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
+				o.portCache, o.eIPController, nil, o.udnNodeController)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l2Controller.addressSetFactory = asf
 			}
-			l2Controller.SetNodeReconciler(o.udnNodeController)
-			l2Controller.SetNodeAnnotationCache(o.udnNodeController.AnnotationCache())
 			userDefinedNetworkController = &l2Controller.BaseUserDefinedNetworkController
 			o.fullL2UDNControllers[netName] = l2Controller
 		case types.LocalnetTopology:
-			localnetController := NewLocalnetUserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil)
+			localnetController := NewLocalnetUserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
+				o.udnNodeController)
 			if o.asf != nil { // use fake asf only when enabled
 				localnetController.addressSetFactory = asf
 			}
-			localnetController.SetNodeReconciler(o.udnNodeController)
-			localnetController.SetNodeAnnotationCache(o.udnNodeController.AnnotationCache())
 			userDefinedNetworkController = &localnetController.BaseUserDefinedNetworkController
 			o.fullLocalnetUDNControllers[netName] = localnetController
 		default:

@@ -122,10 +122,10 @@ func TestBuildNodeAnnotationStateDoesNotOverwriteLatestCacheWithOldSnapshot(t *t
 		},
 	}
 
-	if state := cache.buildNodeAnnotationState(newNode, true); state == nil {
+	if state := cache.updateNodeAnnotationState(newNode, true); state == nil {
 		t.Fatal("expected new node state to be built")
 	}
-	if state := cache.buildNodeAnnotationState(oldNode, false); state == nil {
+	if state := cache.updateNodeAnnotationState(oldNode, false); state == nil {
 		t.Fatal("expected old node state to be built")
 	}
 

@@ -65,12 +65,6 @@ type GatewayManager struct {
 
 type GatewayOption func(*GatewayManager)
 
-func WithNodeAnnotationCache(cache *nodecontroller.NodeAnnotationCache) GatewayOption {
-	return func(gw *GatewayManager) {
-		gw.nodeAnnotationCache = cache
-	}
-}
-
 func NewGatewayManagerForLayer2Topology(
 	nodeName string,
 	coopUUID string,
@@ -78,6 +72,7 @@ func NewGatewayManagerForLayer2Topology(
 	nbClient libovsdbclient.Client,
 	netInfo util.NetInfo,
 	watchFactory *factory.WatchFactory,
+	nodeAnnotationCache *nodecontroller.NodeAnnotationCache,
 	useTransitRouter bool,
 	opts ...GatewayOption,
 ) *GatewayManager {
@@ -95,6 +90,7 @@ func NewGatewayManagerForLayer2Topology(
 		nbClient,
 		netInfo,
 		watchFactory,
+		nodeAnnotationCache,
 		opts...,
 	)
 }
@@ -106,6 +102,7 @@ func NewGatewayManager(
 	nbClient libovsdbclient.Client,
 	netInfo util.NetInfo,
 	watchFactory *factory.WatchFactory,
+	nodeAnnotationCache *nodecontroller.NodeAnnotationCache,
 	opts ...GatewayOption,
 ) *GatewayManager {
 	return newGWManager(
@@ -118,6 +115,7 @@ func NewGatewayManager(
 		nbClient,
 		netInfo,
 		watchFactory,
+		nodeAnnotationCache,
 		opts...,
 	)
 }
@@ -129,6 +127,7 @@ func newGWManager(
 	nbClient libovsdbclient.Client,
 	netInfo util.NetInfo,
 	watchFactory *factory.WatchFactory,
+	nodeAnnotationCache *nodecontroller.NodeAnnotationCache,
 	opts ...GatewayOption) *GatewayManager {
 	gwManager := &GatewayManager{
 		nodeName:            nodeName,
@@ -141,7 +140,7 @@ func newGWManager(
 		nbClient:            nbClient,
 		netInfo:             netInfo,
 		watchFactory:        watchFactory,
-		nodeAnnotationCache: nodecontroller.NewNodeAnnotationCache(),
+		nodeAnnotationCache: nodeAnnotationCache,
 	}
 
 	for _, opt := range opts {
@@ -375,7 +374,7 @@ func (gw *GatewayManager) createGWRouterPeerSwitchPort(nodeName string) error {
 		if err != nil {
 			return fmt.Errorf("failed to fetch node %s from watch factory %w", node.Name, err)
 		}
-		tunnelID, err := gw.nodeAnnotationCache.GetOrParseUDNLayer2NodeGRLRPTunnelID(node, gw.netInfo.GetNetworkName())
+		tunnelID, err := gw.nodeAnnotationCache.ParseUDNLayer2NodeGRLRPTunnelIDCached(node, gw.netInfo.GetNetworkName())
 		if err != nil {
 			if util.IsAnnotationNotSetError(err) {
 				// remote node may not have the annotation yet, suppress it

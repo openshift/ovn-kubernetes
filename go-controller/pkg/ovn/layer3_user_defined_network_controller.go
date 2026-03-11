@@ -208,10 +208,15 @@ func NewLayer3UserDefinedNetworkController(
 	eIPController *EgressIPController,
 	portCache *PortCache,
 	addressSetManager *addresssetmanager.AddressSetManager,
+	nodeReconciler *nodecontroller.NodeController,
 ) (*Layer3UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
+	nodeAnnotationCache := nodecontroller.NewNodeAnnotationCache()
+	if nodeReconciler != nil {
+		nodeAnnotationCache = nodeReconciler.AnnotationCache()
+	}
 
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
 
@@ -235,7 +240,8 @@ func NewLayer3UserDefinedNetworkController(
 				networkManager:              networkManager,
 				routeImportManager:          routeImportManager,
 				addressSetManager:           addressSetManager,
-				nodeAnnotationCache:         nodecontroller.NewNodeAnnotationCache(),
+				nodeReconciler:              nodeReconciler,
+				nodeAnnotationCache:         nodeAnnotationCache,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -593,6 +599,114 @@ func (oc *Layer3UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) er
 
 func (oc *Layer3UserDefinedNetworkController) RegisterNodeHandler() {
 	oc.nodeReconciler.RegisterNetworkController(oc)
+}
+
+// ReconcileNode reconciles a node for a layer3 UDN controller.
+func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
+	if newNode == nil {
+		if oldNode == nil {
+			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		}
+		return oc.deleteNodeEvent(oldNode)
+	}
+
+	if oc.isLocalZoneNode(newNode) {
+		var nodeParams *nodeSyncs
+		if oldNode == nil {
+			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
+			_, clusterRtrSync := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+			_, syncMgmtPort := oc.mgmtPortFailed.Load(newNode.Name)
+			_, syncGw := oc.gatewaysFailed.Load(newNode.Name)
+			_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
+			_, syncReRoute := oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
+			if nodeSync || clusterRtrSync || syncMgmtPort || syncGw || syncZoneIC || syncReRoute {
+				nodeParams = &nodeSyncs{
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          syncMgmtPort,
+					syncZoneIC:            syncZoneIC,
+					syncGw:                syncGw,
+					syncReroute:           syncReRoute,
+				}
+			} else {
+				nodeParams = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+					syncGw:                true,
+					syncReroute:           true,
+				}
+			}
+		} else if oc.isLocalZoneNode(oldNode) {
+			zoneClusterChanged := oc.nodeZoneClusterChanged(oldNode, newNode)
+			nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oldState, newState)
+
+			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
+			_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+			clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChange
+			_, failed = oc.mgmtPortFailed.Load(newNode.Name)
+			syncMgmtPort := failed || nodeSubnetChange
+			_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
+			syncZoneIC = syncZoneIC || zoneClusterChanged
+			_, failed = oc.gatewaysFailed.Load(newNode.Name)
+			syncGw := failed ||
+				gatewayChanged(oldNode, newNode) ||
+				nodeSubnetChange ||
+				hostCIDRsChanged(oldNode, newNode) ||
+				nodeGatewayMTUSupportChanged(oldNode, newNode)
+			_, failed = oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
+			syncReroute := failed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+			nodeParams = &nodeSyncs{
+				syncNode:              nodeSync,
+				syncClusterRouterPort: clusterRtrSync,
+				syncMgmtPort:          syncMgmtPort,
+				syncZoneIC:            syncZoneIC,
+				syncGw:                syncGw,
+				syncReroute:           syncReroute,
+			}
+		} else {
+			klog.Infof("Node %s moved from the remote zone %s to local zone %s.",
+				newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode))
+			nodeParams = &nodeSyncs{
+				syncNode:              true,
+				syncClusterRouterPort: true,
+				syncMgmtPort:          true,
+				syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+				syncGw:                true,
+				syncReroute:           true,
+			}
+		}
+		return oc.addUpdateLocalNodeEvent(newNode, nodeParams)
+	}
+
+	if config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
+		if !oc.networkManager.NodeHasNetwork(newNode.Name, oc.GetNetworkName()) {
+			klog.V(5).Infof("Ignoring processing remote node: %s as it has no active NAD for network: %s",
+				newNode.Name, oc.GetNetworkName())
+			oc.syncZoneICFailed.Store(newNode.Name, true)
+			return nil
+		}
+	}
+
+	if oldNode == nil {
+		return oc.addUpdateRemoteNodeEvent(newNode, config.OVNKubernetesFeature.EnableInterconnect)
+	}
+
+	zoneClusterChanged := oc.nodeZoneClusterChanged(oldNode, newNode)
+	nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oldState, newState)
+	_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
+	syncZoneIC = syncZoneIC || oc.isLocalZoneNode(oldNode) || nodeSubnetChange || zoneClusterChanged
+	if syncZoneIC {
+		klog.Infof("Node %s in remote zone %s needs interconnect zone sync up. Zone cluster changed: %v",
+			newNode.Name, util.GetNodeZone(newNode), zoneClusterChanged)
+	}
+	return oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC)
+}
+
+// SyncNodes runs the node sync for a layer3 UDN controller.
+func (oc *Layer3UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) error {
+	return oc.syncNodes(nodesToInterfaces(nodes))
 }
 
 func (oc *Layer3UserDefinedNetworkController) init() error {
@@ -1077,6 +1191,7 @@ func (oc *Layer3UserDefinedNetworkController) newGatewayManager(nodeName string)
 		oc.nbClient,
 		oc.GetNetInfo(),
 		oc.watchFactory,
+		oc.nodeAnnotationCache,
 		oc.gatewayOptions()...,
 	)
 }
@@ -1093,7 +1208,6 @@ func (oc *Layer3UserDefinedNetworkController) gatewayOptions() []GatewayOption {
 	if resolver := oc.getNetworkNameForNADKeyFunc(); resolver != nil {
 		opts = append(opts, WithNetworkNameForNADKeyResolver(resolver))
 	}
-	opts = append(opts, WithNodeAnnotationCache(oc.nodeAnnotationCache))
 	return opts
 }
 
@@ -1131,5 +1245,5 @@ func (oc *Layer3UserDefinedNetworkController) HandleNetworkRefChange(nodeName st
 	if active {
 		oc.syncZoneICFailed.Store(nodeName, true)
 	}
-	oc.nodeReconciler.Reconcile(nodeName)
+	oc.nodeReconciler.ReconcileNetwork(nodeName, oc.GetNetworkName())
 }

@@ -19,6 +19,7 @@ import (
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/node"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -2115,6 +2116,7 @@ func newGatewayManager(ovn *FakeOVN, nodeName string) *GatewayManager {
 		controller.nbClient,
 		controller.GetNetInfo(),
 		ovn.watcher,
+		nodecontroller.NewNodeAnnotationCache(),
 		WithLoadBalancerGroups(
 			controller.routerLoadBalancerGroupUUID,
 			controller.clusterLoadBalancerGroupUUID,

@@ -48,6 +48,7 @@ type NodeController struct {
 	// handlers maps network name to node handler.
 	handlers *syncmap.SyncMap[NodeHandler]
 
+	// stateMu protects bootstrapNodes and nodeActive.
 	stateMu sync.RWMutex
 	// bootstrapNodes tracks nodes that should be treated as "new" per network.
 	// keyed by network -> nodes
@@ -119,9 +120,9 @@ func (c *NodeController) Stop() {
 	controller.Stop(c.nodeController)
 }
 
-// Reconcile queues a node key for reconciliation.
-func (c *NodeController) Reconcile(key string) {
-	c.nodeController.Reconcile(key)
+// ReconcileNetwork queues reconciliation for a single node/network pair.
+func (c *NodeController) ReconcileNetwork(nodeName, netName string) {
+	c.nodeController.Reconcile(scopedNodeQueueKey(nodeName, netName))
 }
 
 // AnnotationCache returns the cache used for parsed node annotations.
@@ -193,12 +194,11 @@ func (c *NodeController) reconcileUpdate(oldNode, newNode *corev1.Node, netName 
 		return nil
 	}
 
-	oldState := c.annotationCache.buildNodeAnnotationState(oldNode, false)
-	newState := c.annotationCache.buildNodeAnnotationState(newNode, true)
+	oldState := c.annotationCache.updateNodeAnnotationState(oldNode, false)
+	newState := c.annotationCache.updateNodeAnnotationState(newNode, true)
 
 	var errs []error
 	for _, netName := range keys {
-		netName := netName
 		err := c.handlers.DoWithLock(netName, func(key string) error {
 			handler, ok := c.handlers.Load(key)
 			if !ok || handler == nil {
@@ -244,7 +244,6 @@ func (c *NodeController) reconcileUpdate(oldNode, newNode *corev1.Node, netName 
 					return err
 				}
 				c.setNodeNetworkActive(key, nodeName, true)
-				c.markBootstrapNodeDone(key, nodeName)
 			case prevActive:
 				// going inactive
 				deleteNode := oldNode
@@ -257,7 +256,6 @@ func (c *NodeController) reconcileUpdate(oldNode, newNode *corev1.Node, netName 
 					return err
 				}
 				c.setNodeNetworkActive(key, nodeName, false)
-				c.markBootstrapNodeDone(key, nodeName)
 			}
 			return nil
 		})
@@ -287,7 +285,7 @@ func (c *NodeController) reconcileDelete(nodeName, netName string) error {
 		return nil
 	}
 
-	oldState := c.annotationCache.buildNodeAnnotationState(oldNode, true)
+	oldState := c.annotationCache.updateNodeAnnotationState(oldNode, true)
 
 	var errs []error
 	for _, netName := range handlerKeys {

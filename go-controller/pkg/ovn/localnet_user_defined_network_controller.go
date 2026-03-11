@@ -9,6 +9,7 @@ import (
 
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/pod"
@@ -165,9 +166,14 @@ func NewLocalnetUserDefinedNetworkController(
 	netInfo util.NetInfo,
 	networkManager networkmanager.Interface,
 	addressSetManager *addresssetmanager.AddressSetManager,
+	nodeReconciler *nodecontroller.NodeController,
 ) *LocalnetUserDefinedNetworkController {
 
 	stopChan := make(chan struct{})
+	nodeAnnotationCache := nodecontroller.NewNodeAnnotationCache()
+	if nodeReconciler != nil {
+		nodeAnnotationCache = nodeReconciler.AnnotationCache()
+	}
 
 	ipv4Mode, ipv6Mode := netInfo.IPMode()
 	addressSetFactory := addressset.NewOvnAddressSetFactory(cnci.nbClient, ipv4Mode, ipv6Mode)
@@ -191,7 +197,8 @@ func NewLocalnetUserDefinedNetworkController(
 					localZoneNodes:              &sync.Map{},
 					networkManager:              networkManager,
 					addressSetManager:           addressSetManager,
-					nodeAnnotationCache:         nodecontroller.NewNodeAnnotationCache(),
+					nodeReconciler:              nodeReconciler,
+					nodeAnnotationCache:         nodeAnnotationCache,
 				},
 			},
 		},
@@ -298,6 +305,22 @@ func (oc *LocalnetUserDefinedNetworkController) Reconcile(netInfo util.NetInfo) 
 
 func (oc *LocalnetUserDefinedNetworkController) RegisterNodeHandler() {
 	oc.nodeReconciler.RegisterNetworkController(oc)
+}
+
+// ReconcileNode reconciles a node for a localnet UDN controller.
+func (oc *LocalnetUserDefinedNetworkController) ReconcileNode(oldNode *corev1.Node, newNode *corev1.Node, _ *nodecontroller.NodeAnnotationState, _ *nodecontroller.NodeAnnotationState) error {
+	if newNode == nil {
+		if oldNode == nil {
+			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		}
+		return oc.deleteNodeEvent(oldNode)
+	}
+	return oc.addUpdateNodeEvent(newNode)
+}
+
+// SyncNodes runs the node sync for a localnet UDN controller.
+func (oc *LocalnetUserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) error {
+	return oc.syncNodes(nodesToInterfaces(nodes))
 }
 
 func (oc *LocalnetUserDefinedNetworkController) initRetryFramework() {
