@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/dsl/table"
@@ -480,6 +481,60 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 		return reflect.DeepEqual(eIPsFound, ips)
 	}
 
+	// verifyEgressIPAddrProto checks that the EgressIP address assigned on the
+	// node has IFA_PROTO set to 85 (OVN-K). Value 85 is used instead of
+	// RTPROT_OVN (84) so we do not reuse a protocol identifier owned by OVN.
+	// iproute2 renders unknown protocol numbers in hex, so protocol
+	// 85 appears as "0x55" in JSON output unless a name mapping exists in
+	// rt_addrprotos. IFA_PROTO requires Linux kernel 5.18+; on older kernels
+	// the attribute is silently ignored by the kernel and the ip CLI will not
+	// report a protocol field, so the check is skipped.
+	// EgressIP addresses are only assigned to node interfaces when both
+	// interconnect and network segmentation are enabled (see canHandleBridgeEgressIP
+	// in gateway.go); otherwise EgressIP is handled entirely through OVN logical
+	// flows and no Linux address is present on the node.
+	verifyEgressIPAddrProto := func(nodeName, eipAddr string) {
+		if !isInterconnectEnabled() {
+			framework.Logf("Skipping IFA_PROTO check for EgressIP %s on node %s: EgressIP addresses are only assigned to node interfaces when interconnect and network segmentation are enabled", eipAddr, nodeName)
+			return
+		}
+
+		type ipAddrInfo struct {
+			Local    string `json:"local"`
+			Protocol string `json:"protocol"`
+		}
+		type ipAddrEntry struct {
+			AddrInfo []ipAddrInfo `json:"addr_info"`
+		}
+
+		// iproute2 renders unknown protocol numbers in hex (e.g. 85 -> "0x55").
+		expectedProtoHex := fmt.Sprintf("0x%x", 85)
+
+		gomega.Eventually(func(g gomega.Gomega) {
+			output, err := runCommand(containerRuntime, "exec", nodeName, "ip", "-d", "-j", "addr", "show", "to", eipAddr)
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "failed to get address info on node %s", nodeName)
+
+			var entries []ipAddrEntry
+			g.Expect(json.Unmarshal([]byte(output), &entries)).To(gomega.Succeed(), "failed to parse ip addr JSON")
+			g.Expect(entries).To(gomega.HaveLen(1), "expected a single interface entry for EgressIP %s on node %s", eipAddr, nodeName)
+
+			var ai *ipAddrInfo
+			for i, info := range entries[0].AddrInfo {
+				if info.Local == eipAddr {
+					ai = &entries[0].AddrInfo[i]
+					break
+				}
+			}
+			g.Expect(ai).NotTo(gomega.BeNil(), "EgressIP %s not found on node %s", eipAddr, nodeName)
+			if ai.Protocol == "" {
+				framework.Logf("IFA_PROTO not reported for EgressIP %s on node %s; kernel may not support IFA_PROTO (requires 5.18+), skipping check", eipAddr, nodeName)
+				return
+			}
+			g.Expect(ai.Protocol).To(gomega.Equal(expectedProtoHex),
+				"EgressIP %s on node %s should have IFA_PROTO 85/0x55 (OVN-K), got %q", eipAddr, nodeName, ai.Protocol)
+		}, 30*time.Second, 2*time.Second).Should(gomega.Succeed())
+	}
+
 	getIPVersions := func(ips ...string) (bool, bool) {
 		var v4, v6 bool
 		for _, ip := range ips {
@@ -689,6 +744,11 @@ spec:
 				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
 				framework.ExpectNoError(err, "Step 4. Check connectivity from second to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
 
+				ginkgo.By("4a. Check that the EgressIP addresses have IFA_PROTO set to OVN-K (85)")
+				for _, status := range statuses {
+					verifyEgressIPAddrProto(status.Node, status.EgressIP)
+				}
+
 				ginkgo.By("5. Check connectivity from one pod to the other and verify that the connection is achieved")
 				err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP))
 				framework.ExpectNoError(err, "Step 5. Check connectivity from one pod to the other and verify that the connection is achieved, failed, err: %v", err)
@@ -881,6 +941,9 @@ spec:
 		ginkgo.By("6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP, failed: %v", err)
+
+		ginkgo.By("6a. Check that the EgressIP address has IFA_PROTO set to OVN-K (85)")
+		verifyEgressIPAddrProto(statuses[0].Node, statuses[0].EgressIP)
 
 		ginkgo.By("7. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected nodeIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
@@ -2013,6 +2076,11 @@ spec:
 			podNamespace.Name, true, []string{egressIPIP1, egressIPIP2}))
 		framework.ExpectNoError(err, "Step 5. Check connectivity from pod (%s/%s) to an external container attached to "+
 			"a network that is a secondary host network and verify that the src IP is the expected egressIP, failed: %v", podNamespace.Name, pod2Name, err)
+
+		ginkgo.By("5a. Check that the EgressIP addresses have IFA_PROTO set to OVN-K (85)")
+		for _, status := range statuses {
+			verifyEgressIPAddrProto(status.Node, status.EgressIP)
+		}
 
 		ginkgo.By("6. Check connectivity from one pod to the other and verify that the connection is achieved")
 		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
