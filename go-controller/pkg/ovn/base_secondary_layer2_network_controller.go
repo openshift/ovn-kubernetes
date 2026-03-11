@@ -354,7 +354,7 @@ func getDenyARPAndNSOnMACVRF(controllerName, macvrfportName string, nodeLRPMAC n
 			),
 			types.DefaultDenyPriority,
 			fmt.Sprintf(
-				"outport==%q && eth.dst==%s && arp & arp.op==1 && arp.tpa==%s",
+				"outport==%q && eth.dst==%s && arp && arp.op==1 && arp.tpa==%s",
 				macvrfportName,
 				nodeLRPMAC.String(),
 				gwIfAddrv4.IP.String(),
