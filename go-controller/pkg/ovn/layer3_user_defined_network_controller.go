@@ -24,8 +24,8 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/node"
 	svccontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
-	topologycontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/topology"
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/topology"
@@ -235,7 +235,7 @@ func NewLayer3UserDefinedNetworkController(
 				networkManager:              networkManager,
 				routeImportManager:          routeImportManager,
 				addressSetManager:           addressSetManager,
-				nodeAnnotationCache:         topologycontroller.NewNodeAnnotationCache(),
+				nodeAnnotationCache:         nodecontroller.NewNodeAnnotationCache(),
 			},
 		},
 		mgmtPortFailed:              sync.Map{},

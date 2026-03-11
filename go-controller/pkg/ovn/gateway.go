@@ -28,7 +28,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	topologycontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/topology"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/gateway"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/gatewayrouter"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -47,7 +47,7 @@ type GatewayManager struct {
 	netInfo                 util.NetInfo
 	watchFactory            *factory.WatchFactory
 	getNetworkNameForNADKey func(nadKey string) string
-	nodeAnnotationCache     *topologycontroller.NodeAnnotationCache
+	nodeAnnotationCache     *nodecontroller.NodeAnnotationCache
 	// Cluster wide Load_Balancer_Group UUID.
 	// Includes all node switches and node gateway routers.
 	clusterLoadBalancerGroupUUID string
@@ -65,7 +65,7 @@ type GatewayManager struct {
 
 type GatewayOption func(*GatewayManager)
 
-func WithNodeAnnotationCache(cache *topologycontroller.NodeAnnotationCache) GatewayOption {
+func WithNodeAnnotationCache(cache *nodecontroller.NodeAnnotationCache) GatewayOption {
 	return func(gw *GatewayManager) {
 		gw.nodeAnnotationCache = cache
 	}
@@ -141,7 +141,7 @@ func newGWManager(
 		nbClient:            nbClient,
 		netInfo:             netInfo,
 		watchFactory:        watchFactory,
-		nodeAnnotationCache: topologycontroller.NewNodeAnnotationCache(),
+		nodeAnnotationCache: nodecontroller.NewNodeAnnotationCache(),
 	}
 
 	for _, opt := range opts {

@@ -34,7 +34,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
-	topologycontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/topology"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -68,7 +68,7 @@ type ControllerManager struct {
 	// networkManager creates and deletes network controllers
 	networkManager     networkmanager.Controller
 	routeImportManager routeimport.Controller
-	udnNodeController  *topologycontroller.NodeController
+	udnNodeController  *nodecontroller.NodeController
 
 	// eIPController programs OVN to support EgressIP
 	eIPController *ovn.EgressIPController
@@ -302,7 +302,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 		if err != nil {
 			return nil, err
 		}
-		cm.udnNodeController = topologycontroller.NewNodeController(cm.watchFactory, cm.networkManager.Interface())
+		cm.udnNodeController = nodecontroller.NewNodeController(cm.watchFactory, cm.networkManager.Interface())
 	}
 
 	if util.IsRouteAdvertisementsEnabled() {

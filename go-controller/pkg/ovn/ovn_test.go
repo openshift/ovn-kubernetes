@@ -48,7 +48,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
-	topologycontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/topology"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/node"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -120,7 +120,7 @@ type FakeOVN struct {
 	eIPController     *EgressIPController
 	addressSetManager *addresssetmanager.AddressSetManager
 	portCache         *PortCache
-	udnNodeController *topologycontroller.NodeController
+	udnNodeController *nodecontroller.NodeController
 
 	// information map of all UDN controllers
 	userDefinedNetworkControllers map[string]userDefinedNetworkControllerInfo
@@ -581,7 +581,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 	_, ok = o.userDefinedNetworkControllers[netName]
 	if !ok {
 		if o.udnNodeController == nil {
-			o.udnNodeController = topologycontroller.NewNodeController(o.watcher, o.networkManager.Interface())
+			o.udnNodeController = nodecontroller.NewNodeController(o.watcher, o.networkManager.Interface())
 		}
 
 		nbZoneFailed := false

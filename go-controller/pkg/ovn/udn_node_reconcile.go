@@ -7,7 +7,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	topologycontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/topology"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -19,15 +19,15 @@ func nodesToInterfaces(nodes []*corev1.Node) []interface{} {
 	return objs
 }
 
-func nodeSubnetChangedForUDN(oldNode, newNode *corev1.Node, netName string, oldState, newState *topologycontroller.NodeAnnotationState) bool {
+func nodeSubnetChangedForUDN(oldNode, newNode *corev1.Node, netName string, oldState, newState *nodecontroller.NodeAnnotationState) bool {
 	if !util.NodeSubnetAnnotationChanged(oldNode, newNode) {
 		return false
 	}
-	return topologycontroller.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, netName)
+	return nodecontroller.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, netName)
 }
 
 // ReconcileNode reconciles a node for a layer3 UDN controller.
-func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *topologycontroller.NodeAnnotationState) error {
+func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
 	if newNode == nil {
 		if oldNode == nil {
 			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
@@ -135,7 +135,7 @@ func (oc *Layer3UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) er
 }
 
 // ReconcileNode reconciles a node for a layer2 UDN controller.
-func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *topologycontroller.NodeAnnotationState) error {
+func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
 	if newNode == nil {
 		if oldNode == nil {
 			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
@@ -225,7 +225,7 @@ func (oc *Layer2UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) er
 }
 
 // ReconcileNode reconciles a node for a localnet UDN controller.
-func (oc *LocalnetUserDefinedNetworkController) ReconcileNode(oldNode *corev1.Node, newNode *corev1.Node, _ *topologycontroller.NodeAnnotationState, _ *topologycontroller.NodeAnnotationState) error {
+func (oc *LocalnetUserDefinedNetworkController) ReconcileNode(oldNode *corev1.Node, newNode *corev1.Node, _ *nodecontroller.NodeAnnotationState, _ *nodecontroller.NodeAnnotationState) error {
 	if newNode == nil {
 		if oldNode == nil {
 			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
