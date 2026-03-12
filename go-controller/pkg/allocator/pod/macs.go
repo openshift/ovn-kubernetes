@@ -12,10 +12,10 @@ import (
 	"k8s.io/klog/v2"
 	k8snet "k8s.io/utils/net"
 
-	allocmac "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/mac"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	allocmac "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/mac"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // macOwner compose the owner identifier reserved for MAC addresses management.
@@ -116,6 +116,12 @@ func calculateSubnetsInfraMACAddresses(netInfo util.NetInfo) map[string]net.Hard
 		gwMAC := util.IPAddrToHWAddr(gwIP.IP)
 		gwKey := fmt.Sprintf("gw-v%s", k8snet.IPFamilyOf(gwIP.IP))
 		reservedMACs[gwKey] = gwMAC
+
+		// For EVPN networks, management port MACs use the 02:00 prefix (per-node
+		// hash-based) so skip reserving.
+		if netInfo.Transport() == types.NetworkTransportEVPN {
+			continue
+		}
 
 		mgmtIP := netInfo.GetNodeManagementIP(subnet.CIDR)
 		mgmtMAC := util.IPAddrToHWAddr(mgmtIP.IP)

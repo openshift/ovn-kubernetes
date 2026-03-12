@@ -25,21 +25,21 @@ import (
 	"sigs.k8s.io/knftables"
 	anpfake "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned/fake"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
-	egressipv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
-	networkqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/fake"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	multinetworkmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks/multinetwork"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	egressfirewallfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipv1fake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	egressservicefake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	networkqosfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/fake"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
+	multinetworkmocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks/multinetwork"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -249,6 +249,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		netInfo.On("GetNodeGatewayIP", nodeSubnetCIDRs[i]).Return(util.GetNodeGatewayIfAddr(nodeSubnetCIDRs[i]))
 		netInfo.On("GetNodeManagementIP", nodeSubnetCIDRs[i]).Return(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[i]))
 	}
+	netInfo.On("GetNodeManagementPortMAC", nodeName, nodeSubnetCIDRs[0]).Return(util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[0]).IP))
 
 	existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
@@ -355,6 +356,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		netInfo.On("GetNodeGatewayIP", nodeSubnetCIDRs[i]).Return(util.GetNodeGatewayIfAddr(nodeSubnetCIDRs[i]))
 		netInfo.On("GetNodeManagementIP", nodeSubnetCIDRs[i]).Return(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[i]))
 	}
+	netInfo.On("GetNodeManagementPortMAC", nodeName, nodeSubnetCIDRs[0]).Return(util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[0]).IP))
 
 	existingNode := corev1.Node{ObjectMeta: metav1.ObjectMeta{
 		Name: nodeName,
@@ -461,6 +463,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		netInfo.On("GetNodeGatewayIP", nodeSubnetCIDRs[i]).Return(util.GetNodeGatewayIfAddr(nodeSubnetCIDRs[i]))
 		netInfo.On("GetNodeManagementIP", nodeSubnetCIDRs[i]).Return(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[i]))
 	}
+	netInfo.On("GetNodeManagementPortMAC", nodeName, nodeSubnetCIDRs[0]).Return(util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[0]).IP))
 
 	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 

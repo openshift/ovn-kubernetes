@@ -26,17 +26,17 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	egressqosapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
-	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	egressqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	egressqosapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
+	egressqosinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -140,28 +140,19 @@ func (oc *DefaultNetworkController) cloneEgressQoSRule(raw egressqosapi.EgressQo
 
 func (oc *DefaultNetworkController) createASForEgressQoSRule(podSelector metav1.LabelSelector, namespace string, priority int) (addressset.AddressSet, *sync.Map, error) {
 	var addrSet addressset.AddressSet
+	var err error
 
-	selector, err := metav1.LabelSelectorAsSelector(&podSelector)
-	if err != nil {
+	if _, err := metav1.LabelSelectorAsSelector(&podSelector); err != nil {
 		return nil, nil, err
-	}
-	if selector.Empty() { // empty selector means that the rule applies to all pods in the namespace
-		asIndex := getNamespaceAddrSetDbIDs(namespace, oc.controllerName)
-		addrSet, err := oc.addressSetFactory.EnsureAddressSet(asIndex)
-		if err != nil {
-			return nil, nil, fmt.Errorf("cannot ensure that addressSet for namespace %s exists %v", namespace, err)
-		}
-		return addrSet, &sync.Map{}, nil
 	}
 
 	podsCache := sync.Map{}
-
-	pods, err := oc.watchFactory.GetPodsBySelector(namespace, podSelector)
+	asIndex := getEgressQosAddrSetDbIDs(namespace, fmt.Sprintf("%d", priority), oc.controllerName)
+	addrSet, err = oc.addressSetFactory.EnsureAddressSet(asIndex)
 	if err != nil {
 		return nil, nil, err
 	}
-	asIndex := getEgressQosAddrSetDbIDs(namespace, fmt.Sprintf("%d", priority), oc.controllerName)
-	addrSet, err = oc.addressSetFactory.EnsureAddressSet(asIndex)
+	pods, err := oc.watchFactory.GetPodsBySelector(namespace, podSelector)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -770,19 +761,16 @@ func (oc *DefaultNetworkController) syncEgressQoSPod(key string) error {
 		if err != nil {
 			return err
 		}
-		if selector.Empty() { // rule applies to all pods in the namespace, no need to modify address set
-			continue
-		}
-
 		_, loaded := r.pods.Load(pod.Name)
-		if selector.Matches(podLabels) && !loaded {
+		selected := selector.Empty() || selector.Matches(podLabels)
+		if selected && !loaded {
 			ops, err := r.addrSet.AddAddressesReturnOps(util.StringSlice(podIPs))
 			if err != nil {
 				return err
 			}
 			allOps = append(allOps, ops...)
 			podMapOps = append(podMapOps, mapAndOp{r.pods, mapInsert})
-		} else if !selector.Matches(podLabels) && loaded {
+		} else if !selected && loaded {
 			ops, err := r.addrSet.DeleteAddressesReturnOps(util.StringSlice(podIPs))
 			if err != nil {
 				return err

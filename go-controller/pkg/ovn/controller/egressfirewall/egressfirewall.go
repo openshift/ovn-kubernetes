@@ -28,29 +28,28 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/egressfirewall/v1"
-	v1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
-	v2 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
-	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
-	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
+	egressfirewallapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/egressfirewall/v1"
+	v1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
+	v2 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/observability"
+	dnsnameresolver "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/batching"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
-	aclDeleteBatchSize = 1000
 	// transaction time to delete 80K ACLs from 2 port groups is ~4.5 sec.
 	// transaction time to delete 80K acls from one port group and add them to another
 	// is ~3 sec
@@ -110,7 +109,7 @@ type matchKind int
 type cacheEntry struct {
 	pgName            string
 	hasNodeSelector   bool
-	subnetsKey        string
+	subnets           []*net.IPNet
 	efResourceVersion string
 	logHash           string
 }
@@ -254,11 +253,6 @@ func (oc *EFController) initialSync() error {
 	egressFirewalls, err := oc.efLister.List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("%s: failed to list egress firewalls: %w", oc.name, err)
-	}
-
-	err = oc.deleteStaleACLs()
-	if err != nil {
-		return err
 	}
 
 	existingEFNamespaces := map[string]bool{}
@@ -422,20 +416,15 @@ func (oc *EFController) sync(key string) (updateErr error) {
 		}()
 
 		activeNetwork, netErr := oc.networkManager.GetActiveNetworkForNamespace(namespace)
-		if netErr != nil {
-			if util.IsUnprocessedActiveNetworkError(netErr) {
-				klog.V(5).Infof("Skipping egress firewall %s/%s: primary network not ready: %v", namespace, efName, netErr)
-				skipStatusUpdate = true
-				return nil
-			}
-			if util.IsInvalidPrimaryNetworkError(netErr) {
-				// Namespace requires P-UDN, but it does not exist. Remove EF config and surface error in status.
-				updateErr = netErr
-			} else {
-				return fmt.Errorf("failed to get active network for egress firewall %s/%s namespace: %w",
-					namespace, efName, netErr)
-			}
-		} else {
+		switch {
+		case netErr != nil:
+			// Failed to resolve active network; surface this in EF status.
+			updateErr = netErr
+		case activeNetwork == nil:
+			// No active network for this namespace in this controller context (e.g. filtered by D-UDN):
+			// cleanup stale EF config but don't report an EF status error.
+			skipStatusUpdate = true
+		default:
 			aclLoggingLevels, logErr := oc.getNamespaceACLLogging(namespace)
 			if logErr != nil {
 				return fmt.Errorf("failed to get acl logging levels for egress firewall %s/%s: %w",
@@ -444,7 +433,7 @@ func (oc *EFController) sync(key string) (updateErr error) {
 			ownerController := activeNetwork.GetNetworkName() + "-network-controller"
 			newEntry = &cacheEntry{
 				pgName:            libovsdbutil.GetPortGroupName(getNamespacePortGroupDbIDs(namespace, ownerController)),
-				subnetsKey:        subnetsKeyForNetInfo(activeNetwork),
+				subnets:           subnetsForNetInfo(activeNetwork),
 				efResourceVersion: ef.ResourceVersion,
 				logHash:           aclLogHash(aclLoggingLevels),
 			}
@@ -540,20 +529,19 @@ func (oc *EFController) sync(key string) (updateErr error) {
 	return
 }
 
-func subnetsKeyForNetInfo(netInfo util.NetInfo) string {
+func subnetsForNetInfo(netInfo util.NetInfo) []*net.IPNet {
 	if netInfo == nil {
-		return ""
+		return nil
 	}
 	subnets := netInfo.Subnets()
-	if len(subnets) == 0 {
-		return ""
+	unsortedSubnets := make([]*net.IPNet, 0, len(subnets))
+	for _, subnet := range subnets {
+		if subnet.CIDR == nil {
+			continue
+		}
+		unsortedSubnets = append(unsortedSubnets, subnet.CIDR)
 	}
-	keys := make([]string, 0, len(subnets))
-	for _, s := range subnets {
-		keys = append(keys, s.String())
-	}
-	slices.Sort(keys)
-	return strings.Join(keys, ",")
+	return util.CopyIPNets(unsortedSubnets)
 }
 
 func entriesEqual(a, b *cacheEntry) bool {
@@ -564,7 +552,7 @@ func entriesEqual(a, b *cacheEntry) bool {
 		return false
 	default:
 		return a.pgName == b.pgName &&
-			a.subnetsKey == b.subnetsKey &&
+			util.IsIPNetsEqual(a.subnets, b.subnets) &&
 			a.efResourceVersion == b.efResourceVersion &&
 			a.logHash == b.logHash
 	}
@@ -624,7 +612,7 @@ func (oc *EFController) addEgressFirewall(egressFirewall *egressfirewallapi.Egre
 
 // validateAndGetEgressFirewallDestination validates an egress firewall rule destination and returns
 // the parsed contents of the destination.
-func (oc *EFController) validateAndGetEgressFirewallDestination(namespace string, egressFirewallDestination egressfirewallapi.EgressFirewallDestination) (
+func (oc *EFController) validateAndGetEgressFirewallDestination(namespace string, egressFirewallDestination egressfirewallapi.EgressFirewallDestination, entry *cacheEntry) (
 	cidrSelector string,
 	dnsName string,
 	clusterSubnetIntersection []*net.IPNet,
@@ -644,15 +632,13 @@ func (oc *EFController) validateAndGetEgressFirewallDestination(namespace string
 			return "", "", nil, nil, err
 		}
 		cidrSelector = egressFirewallDestination.CIDRSelector
-		netInfo, err := oc.networkManager.GetActiveNetworkForNamespace(namespace)
-		if err != nil {
-			return "", "", nil, nil,
-				fmt.Errorf("failed to validate egress firewall destination: %w", err)
+		if entry == nil || entry.subnets == nil {
+			return "", "", nil, nil, fmt.Errorf("failed to "+
+				"validate egress firewall destination: missing cached subnets for namespace %s", namespace)
 		}
-		subnets := netInfo.Subnets()
-		for _, clusterSubnet := range subnets {
-			if clusterSubnet.CIDR.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.CIDR.IP) {
-				clusterSubnetIntersection = append(clusterSubnetIntersection, clusterSubnet.CIDR)
+		for _, clusterSubnet := range entry.subnets {
+			if clusterSubnet.Contains(ipNet.IP) || ipNet.Contains(clusterSubnet.IP) {
+				clusterSubnetIntersection = append(clusterSubnetIntersection, clusterSubnet)
 			}
 		}
 	} else {
@@ -680,7 +666,7 @@ func (oc *EFController) newEgressFirewallRule(namespace string, rawEgressFirewal
 	// fields of efr.
 	var err error
 	efr.to.cidrSelector, efr.to.dnsName, efr.to.clusterSubnetIntersection, efr.to.nodeSelector, err =
-		oc.validateAndGetEgressFirewallDestination(namespace, rawEgressFirewallRule.To)
+		oc.validateAndGetEgressFirewallDestination(namespace, rawEgressFirewallRule.To, entry)
 	if err != nil {
 		return efr, err
 	}
@@ -865,49 +851,6 @@ func (oc *EFController) addEgressFirewallRules(ef *egressFirewall, pgName string
 	return nil
 }
 
-// deleteStaleACLs cleans up 2 previous implementations:
-//   - Cleanup the old implementation (using LRP) in local GW mode
-//     For this it just deletes all LRP setup done for egress firewall
-//   - Cleanup the old implementation (using ACLs on the join and node switches)
-//     For this it deletes all the ACLs on the join and node switches, they will be created from scratch later.
-func (oc *EFController) deleteStaleACLs() error {
-	// In any gateway mode, make sure to delete all LRPs on ovn_cluster_router.
-	p := func(item *nbdb.LogicalRouterPolicy) bool {
-		return item.Priority <= types.EgressFirewallStartPriority && item.Priority >= types.MinimumReservedEgressFirewallPriority
-	}
-	err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(oc.nbClient, types.OVNClusterRouter, p)
-	if err != nil {
-		return fmt.Errorf("error deleting egress firewall policies on router %s: %v", types.OVNClusterRouter, err)
-	}
-
-	// delete acls from all switches, they reside on the port group now
-	// Lookup all ACLs used for egress Firewalls
-	aclPred := func(item *nbdb.ACL) bool {
-		return item.Priority >= types.MinimumReservedEgressFirewallPriority && item.Priority <= types.EgressFirewallStartPriority
-	}
-	egressFirewallACLs, err := libovsdbops.FindACLsWithPredicate(oc.nbClient, aclPred)
-	if err != nil {
-		return fmt.Errorf("unable to list egress firewall ACLs, cannot cleanup old stale data, err: %v", err)
-	}
-	if len(egressFirewallACLs) != 0 {
-		err = batching.Batch[*nbdb.ACL](aclDeleteBatchSize, egressFirewallACLs, func(batchACLs []*nbdb.ACL) error {
-			// optimize the predicate to exclude switches that don't reference deleting acls.
-			aclsToDelete := sets.NewString()
-			for _, acl := range batchACLs {
-				aclsToDelete.Insert(acl.UUID)
-			}
-			swWithACLsPred := func(sw *nbdb.LogicalSwitch) bool {
-				return aclsToDelete.HasAny(sw.ACLs...)
-			}
-			return libovsdbops.RemoveACLsFromLogicalSwitchesWithPredicate(oc.nbClient, swWithACLsPred, batchACLs...)
-		})
-		if err != nil {
-			return fmt.Errorf("failed to remove egress firewall acls from node logical switches: %v", err)
-		}
-	}
-	return nil
-}
-
 // moveACLsToNamespacedPortGroups syncs db from the previous version where all ACLs were attached to the ClusterPortGroup
 // to the new version where ACLs are attached to the namespace port groups.
 func (oc *EFController) moveACLsToNamespacedPortGroups(existingEFNamespaces map[string]bool, efACLs []*nbdb.ACL) error {
@@ -948,8 +891,8 @@ func (oc *EFController) moveACLsToNamespacedPortGroups(existingEFNamespaces map[
 			if namespace != "" && existingEFNamespaces[namespace] {
 				pgName, err := oc.getNamespacePortGroupName(namespace)
 				if err != nil {
-					return fmt.Errorf("failed to get port group name for egress firewall ACL move with "+
-						"namespace: %s, err: %w", namespace, err)
+					klog.Warningf("Skipping egress firewall ACL move for namespace %s: %v", namespace, err)
+					continue
 				}
 				// re-attach from ClusterPortGroupNameBase to namespaced port group.
 				// port group should exist, because namespace handler will create it.
@@ -1088,11 +1031,18 @@ func getNamespacePortGroupDbIDs(ns string, controller string) *libovsdbops.DbObj
 }
 
 func (oc *EFController) getNamespacePortGroupName(namespace string) (string, error) {
-	activeNetwork, err := oc.networkManager.GetActiveNetworkForNamespace(namespace)
+	nadKey, err := oc.networkManager.GetPrimaryNADForNamespace(namespace)
 	if err != nil {
-		return "", fmt.Errorf("failed to get active network for namespace %s: %w", namespace, err)
+		return "", fmt.Errorf("failed to get primary NAD for namespace %s: %w", namespace, err)
 	}
-	ownerController := activeNetwork.GetNetworkName() + "-network-controller"
+	networkName := types.DefaultNetworkName
+	if nadKey != types.DefaultNetworkName && nadKey != "" {
+		networkName = oc.networkManager.GetNetworkNameForNADKey(nadKey)
+		if networkName == "" {
+			return "", fmt.Errorf("failed to resolve network name for NAD %s in namespace %s", nadKey, namespace)
+		}
+	}
+	ownerController := networkName + "-network-controller"
 	return libovsdbutil.GetPortGroupName(getNamespacePortGroupDbIDs(namespace, ownerController)), nil
 }
 

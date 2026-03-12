@@ -18,6 +18,8 @@ type Provider interface {
 
 	// PrimaryNetwork returns OVN-Kubernetes primary infrastructure network information
 	PrimaryNetwork() (Network, error)
+	// ListNetworks returns the names of all networks
+	ListNetworks() ([]string, error)
 	// GetNetwork returns a network
 	GetNetwork(name string) (Network, error)
 	// GetExternalContainerNetworkInterface fetches network interface information from the external container attached to a specific network
@@ -65,6 +67,7 @@ type Underlay struct {
 type Context interface {
 	CreateExternalContainer(container ExternalContainer) (ExternalContainer, error)
 	DeleteExternalContainer(container ExternalContainer) error
+	GetExternalContainerImage() string
 
 	CreateNetwork(name string, subnets ...string) (Network, error)
 	DeleteNetwork(network Network) error
@@ -174,7 +177,7 @@ func (n NetworkInterface) GetIPv4Prefix() string {
 }
 
 func (n NetworkInterface) GetIPv6Gateway() string {
-	return n.IPv4Gateway
+	return n.IPv6Gateway
 }
 
 func (n NetworkInterface) GetIPv6() string {
