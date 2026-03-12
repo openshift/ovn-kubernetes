@@ -64,8 +64,9 @@ func (a *idAllocatorStub) ReserveID(int) error {
 	return a.reserveIDError
 }
 
-func (a *idAllocatorStub) ReleaseID() {
+func (a *idAllocatorStub) ReleaseID() int {
 	a.releasedID = true
+	return a.nextID
 }
 
 type persistentIPsStub struct {
@@ -84,6 +85,17 @@ func (c *persistentIPsStub) FindIPAMClaim(claimName string, namespace string) (*
 		return nil, fmt.Errorf("not found")
 	}
 	return &ipamClaim, nil
+}
+
+func (c *persistentIPsStub) UpdateIPAMClaimStatus(ipamClaim *ipamclaimsapi.IPAMClaim, podAnnotation *util.PodAnnotation, podName string, allocationErr error) *ipamclaimsapi.IPAMClaim {
+	updatedClaim := ipamClaim.DeepCopy()
+	updatedClaim.Status.OwnerPod = &ipamclaimsapi.OwnerPod{Name: podName}
+	if allocationErr != nil {
+		updatedClaim.Status.IPs = []string{}
+	} else if podAnnotation != nil && len(podAnnotation.IPs) > 0 {
+		updatedClaim.Status.IPs = util.StringSlice(podAnnotation.IPs)
+	}
+	return updatedClaim
 }
 
 func ipamClaimKey(namespace string, claimName string) string {
@@ -968,21 +980,6 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// ID allocation error
-			name:         "expect ID allocation error",
-			idAllocation: true,
-			args: args{
-				idAllocator: &idAllocatorStub{
-					reserveIDError: errors.New("ID allocation error"),
-				},
-			},
-			podAnnotation: &util.PodAnnotation{
-				MAC:      randomMac,
-				TunnelID: 200,
-			},
-			wantErr: true,
-		},
-		{
 			// expect ID release on error
 			name:         "expect error, release ID",
 			idAllocation: true,
@@ -1251,6 +1248,7 @@ func Test_allocatePodAnnotationWithRollback(t *testing.T) {
 				tt.netInfo,
 				node,
 				pod,
+				fmt.Sprintf("%s/%s", network.Namespace, network.Name),
 				network,
 				claimsReconciler,
 				macRegistry,

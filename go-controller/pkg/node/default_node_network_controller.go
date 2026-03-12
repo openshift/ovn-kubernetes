@@ -42,6 +42,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/podresourcesapi"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -972,7 +973,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			defer nc.wg.Done()
 			nodeController.Run(nc.stopChan)
 		}()
-	} else {
+	} else if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// attempt to cleanup the possibly stale bridge
 		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", "br-ext")
 		if err != nil {
@@ -1081,7 +1082,17 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nc.wg.Add(1)
 	go func() {
 		defer nc.wg.Done()
-		ovspinning.Run(nc.stopChan)
+		podResClient, err := podresourcesapi.New()
+		if err != nil {
+			klog.Errorf("Failed to initialize PodResourcesAPI client: %v", err)
+			return
+		}
+		defer func() {
+			if err := podResClient.Close(); err != nil {
+				klog.V(4).Infof("Error closing PodResourcesAPI client: %v", err)
+			}
+		}()
+		ovspinning.Run(ctx, nc.stopChan, podResClient)
 	}()
 
 	klog.Infof("Default node network controller initialized and ready.")
@@ -1091,7 +1102,12 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 // Stop gracefully stops the controller
 // deleteLogicalEntities will never be true for default network
 func (nc *DefaultNodeNetworkController) Stop() {
+	if nc.stopChan == nil {
+		klog.Infof("Default node network controller is already stopped")
+		return
+	}
 	close(nc.stopChan)
+	nc.stopChan = nil
 	nc.wg.Wait()
 }
 
@@ -1408,9 +1424,23 @@ func (nc *DefaultNodeNetworkController) syncNodes(objs []interface{}) error {
 }
 
 // validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
-// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
-// enough, it will return an error
+// enough to carry the `config.Default.MTU` and the Geneve header (if overlay transport is used).
+// If the MTU is not big enough, it will return an error
 func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
+	// calc required MTU
+	var requiredMTU int
+	if config.Gateway.SingleNode || config.Default.Transport == types.NetworkTransportNoOverlay {
+		requiredMTU = config.Default.MTU
+	} else {
+		if config.IPv4Mode && !config.IPv6Mode {
+			// we run in single-stack IPv4 only
+			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
+		} else {
+			// we run in single-stack IPv6 or dual-stack mode
+			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
+		}
+	}
+
 	// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma
 	ovnEncapIps := strings.Split(config.Default.EffectiveEncapIP, ",")
 	for _, ip := range ovnEncapIps {
@@ -1421,20 +1451,6 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 		interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 		if err != nil {
 			return fmt.Errorf("could not get MTU for the interface with address %s: %w", ovnEncapIP, err)
-		}
-
-		// calc required MTU
-		var requiredMTU int
-		if config.Gateway.SingleNode {
-			requiredMTU = config.Default.MTU
-		} else {
-			if config.IPv4Mode && !config.IPv6Mode {
-				// we run in single-stack IPv4 only
-				requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
-			} else {
-				// we run in single-stack IPv6 or dual-stack mode
-				requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
-			}
 		}
 
 		if mtu < requiredMTU {

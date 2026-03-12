@@ -14,6 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -89,6 +90,8 @@ type BaseNetworkController struct {
 
 	// network information
 	util.ReconcilableNetInfo
+	nadKeysLock sync.Mutex
+	lastNADKeys sets.Set[string]
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework
@@ -204,7 +207,8 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 		return true
 	})
 	reconcileRoutes := oc.routeImportManager != nil && oc.routeImportManager.NeedsReconciliation(netInfo)
-	reconcilePendingPods := !oc.IsDefault() && !oc.ReconcilableNetInfo.EqualNADs(netInfo.GetNADs()...)
+	nadKeys := oc.networkManager.GetNADKeysForNetwork(netInfo.GetNetworkName())
+	reconcilePendingPods := !oc.IsDefault() && oc.updateNADKeysChanged(nadKeys)
 	reconcileNamespaces := sets.NewString()
 	if oc.IsPrimaryNetwork() {
 		// since CanServeNamespace filters out namespace events for namespaces unknown
@@ -219,10 +223,19 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 	if err != nil {
 		return fmt.Errorf("failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
 	}
-
 	oc.doReconcile(reconcileRoutes, reconcilePendingPods, reconcileNodes, setNodeFailed, reconcileNamespaces.List())
 
 	return nil
+}
+
+func (oc *BaseNetworkController) updateNADKeysChanged(nadKeys []string) bool {
+	oc.nadKeysLock.Lock()
+	defer oc.nadKeysLock.Unlock()
+
+	next := sets.New(nadKeys...)
+	changed := oc.lastNADKeys == nil || !next.Equal(oc.lastNADKeys)
+	oc.lastNADKeys = next
+	return changed
 }
 
 // doReconcile performs the reconciliation after the controller NetInfo has already being
@@ -230,7 +243,8 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 // provided on the arguments of the method. This method returns no error and logs them
 // instead since once the controller NetInfo has been updated there is no point in retrying.
 func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPods bool,
-	reconcileNodes []string, setNodeFailed func(string), reconcileNamespaces []string) {
+	reconcileNodes []string, setNodeFailed func(string), reconcileNamespaces []string,
+) {
 	if reconcileRoutes {
 		err := oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
 		if err != nil {
@@ -245,11 +259,13 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 			klog.Infof("Failed to get node %s for reconciling network %s: %v", nodeName, oc.GetNetworkName(), err)
 			continue
 		}
+		klog.V(5).Infof("Requesting to add node %s to network %s", nodeName, oc.GetNetworkName())
 		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
 		if err != nil {
 			klog.Errorf("Failed to retry node %s for network %s: %v", nodeName, oc.GetNetworkName(), err)
 		}
 	}
+
 	if len(reconcileNodes) > 0 {
 		oc.retryNodes.RequestRetryObjs()
 	}
@@ -302,27 +318,61 @@ func (oc *BaseUserDefinedNetworkController) FilterOutResource(objType reflect.Ty
 			klog.Errorf("Failed to cast the provided object to a namespace")
 			return false
 		}
-		return !util.CanServeNamespace(oc.GetNetInfo(), ns.Name)
+		return oc.shouldFilterNamespace(ns.Name)
 	case factory.PodType:
 		pod, ok := obj.(*corev1.Pod)
 		if !ok {
 			klog.Errorf("Failed to cast the provided object to a pod")
 			return false
 		}
-		return !util.CanServeNamespace(oc.GetNetInfo(), pod.GetNamespace())
+		return oc.shouldFilterNamespace(pod.GetNamespace())
 	default:
 		return false
 	}
+}
+
+func (oc *BaseUserDefinedNetworkController) shouldFilterNamespace(namespace string) bool {
+	if !oc.IsPrimaryNetwork() || oc.networkManager == nil {
+		return !util.CanServeNamespace(oc.GetNetInfo(), namespace)
+	}
+
+	nadKey, err := oc.networkManager.GetPrimaryNADForNamespace(namespace)
+	if err != nil {
+		if util.IsUnprocessedActiveNetworkError(err) {
+			return false
+		}
+		if util.IsInvalidPrimaryNetworkError(err) {
+			return true
+		}
+		return false
+	}
+	if nadKey == types.DefaultNetworkName {
+		return true
+	}
+
+	networkName := oc.networkManager.GetNetworkNameForNADKey(nadKey)
+	if networkName == "" {
+		return !util.CanServeNamespace(oc.GetNetInfo(), namespace)
+	}
+	return networkName != oc.GetNetworkName()
 }
 
 func getNetworkControllerName(netName string) string {
 	return netName + "-network-controller"
 }
 
+func (bnc *BaseNetworkController) getNetworkNameForNADKeyFunc() func(nadKey string) string {
+	if bnc.networkManager == nil || !bnc.GetNetInfo().IsUserDefinedNetwork() {
+		return nil
+	}
+	return bnc.networkManager.GetNetworkNameForNADKey
+}
+
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
-	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport, svcTemplateSupport bool) (*CommonNetworkControllerInfo, error) {
+	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport, svcTemplateSupport bool,
+) (*CommonNetworkControllerInfo, error) {
 	zone, err := libovsdbutil.GetNBZone(nbClient)
 	if err != nil {
 		return nil, fmt.Errorf("error getting NB zone name : err - %w", err)
@@ -342,16 +392,17 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 	}, nil
 }
 
-func (bnc *BaseNetworkController) GetLogicalPortName(pod *corev1.Pod, nadName string) string {
+func (bnc *BaseNetworkController) GetLogicalPortName(pod *corev1.Pod, nadKey string) string {
 	if !bnc.IsUserDefinedNetwork() {
 		return util.GetLogicalPortName(pod.Namespace, pod.Name)
 	} else {
-		return util.GetUserDefinedNetworkLogicalPortName(pod.Namespace, pod.Name, nadName)
+		return util.GetUserDefinedNetworkLogicalPortName(pod.Namespace, pod.Name, nadKey)
 	}
 }
 
 func (bnc *BaseNetworkController) AddConfigDurationRecord(kind, namespace, name string) (
-	[]ovsdb.Operation, func(), time.Time, error) {
+	[]ovsdb.Operation, func(), time.Time, error,
+) {
 	if !bnc.IsUserDefinedNetwork() {
 		return recorders.GetConfigDurationRecorder().AddOVN(bnc.nbClient, kind, namespace, name)
 	}
@@ -518,7 +569,8 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 }
 
 func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostSubnets []*net.IPNet,
-	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string) error {
+	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID string,
+) error {
 	// logical router port MAC is based on IPv4 subnet if there is one, else IPv6
 	var nodeLRPMAC net.HardwareAddr
 	switchName := bnc.GetNetworkScopedSwitchName(nodeName)
@@ -544,8 +596,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		if utilnet.IsIPv6CIDR(hostSubnet) {
 			v6Gateway = gwIfAddr.IP
 
-			logicalSwitch.OtherConfig["ipv6_prefix"] =
-				hostSubnet.IP.String()
+			logicalSwitch.OtherConfig["ipv6_prefix"] = hostSubnet.IP.String()
 		} else {
 			v4Gateway = gwIfAddr.IP
 			excludeIPs := mgmtIfAddr.IP.String()
@@ -583,7 +634,7 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	}
 
 	err := libovsdbops.CreateOrUpdateLogicalSwitch(bnc.nbClient, &logicalSwitch, &logicalSwitch.OtherConfig,
-		&logicalSwitch.LoadBalancerGroup)
+		&logicalSwitch.LoadBalancerGroup, &logicalSwitch.ExternalIDs)
 	if err != nil {
 		return fmt.Errorf("failed to add logical switch %+v: %v", logicalSwitch, err)
 	}
@@ -941,12 +992,12 @@ func (bnc *BaseNetworkController) doesNetworkRequireIPAM() bool {
 	return util.DoesNetworkRequireIPAM(bnc.GetNetInfo())
 }
 
-func (bnc *BaseNetworkController) getPodNADNames(pod *corev1.Pod) []string {
+func (bnc *BaseNetworkController) getPodNADKeys(pod *corev1.Pod) []string {
 	if !bnc.IsUserDefinedNetwork() {
 		return []string{types.DefaultNetworkName}
 	}
-	podNadNames, _ := util.PodNadNames(pod, bnc.GetNetInfo())
-	return podNadNames
+	podNADKeys, _ := util.PodNADKeys(pod, bnc.GetNetInfo(), bnc.networkManager.GetNetworkNameForNADKey)
+	return podNADKeys
 }
 
 func (bnc *BaseNetworkController) getClusterPortGroupDbIDs(base string) *libovsdbops.DbObjectIDs {
@@ -989,8 +1040,12 @@ func (bnc *BaseNetworkController) isLocalZoneNode(node *corev1.Node) bool {
 
 // GetNetworkRole returns the role of this controller's network for the given pod
 func (bnc *BaseNetworkController) GetNetworkRole(pod *corev1.Pod) (string, error) {
-
-	role, err := util.GetNetworkRole(bnc.GetNetInfo(), bnc.networkManager.GetActiveNetworkForNamespace, pod)
+	role, err := util.GetNetworkRole(
+		bnc.GetNetInfo(),
+		bnc.networkManager.GetPrimaryNADForNamespace,
+		bnc.networkManager.GetNetworkNameForNADKey,
+		pod,
+	)
 	if err != nil {
 		if util.IsUnprocessedActiveNetworkError(err) {
 			bnc.recordPodErrorEvent(pod, err)
@@ -1003,6 +1058,39 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *corev1.Pod) (string, error
 
 func (bnc *BaseNetworkController) isLayer2Interconnect() bool {
 	return config.OVNKubernetesFeature.EnableInterconnect && bnc.TopologyType() == types.Layer2Topology
+}
+
+// HandleNetworkRefChange enqueues node reconciliation when a NAD reference becomes active/inactive.
+func (bnc *BaseNetworkController) HandleNetworkRefChange(nodeName string, active bool) {
+	if bnc.retryNodes == nil || bnc.watchFactory == nil {
+		return
+	}
+	var node *corev1.Node
+	var err error
+	if active {
+		node, err = bnc.watchFactory.GetNode(nodeName)
+		if err != nil {
+			klog.V(4).Infof("%s: skipping network ref change for node %s: %v", bnc.controllerName, nodeName, err)
+			return
+		}
+	} else {
+		// Prefer the cached node for deletes; if it is gone, fall back to a stub with just the name.
+		node, err = bnc.watchFactory.GetNode(nodeName)
+		if err != nil {
+			node = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+		}
+	}
+	if active {
+		if err := bnc.retryNodes.AddRetryObjWithAddNoBackoff(node); err != nil {
+			klog.V(4).Infof("%s: failed to enqueue add for node %s: %v", bnc.controllerName, nodeName, err)
+		}
+	} else {
+		if err := bnc.retryNodes.AddRetryObjWithDeleteNoBackoff(node); err != nil {
+			klog.V(4).Infof("%s: failed to enqueue delete for node %s: %v", bnc.controllerName, nodeName, err)
+		}
+	}
+	// Nudge the queue so newly enqueued work is processed promptly.
+	bnc.retryNodes.RequestRetryObjs()
 }
 
 func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *corev1.Node) bool {
@@ -1139,6 +1227,7 @@ func (bnc *BaseNetworkController) newNetworkQoSController() error {
 		bnc.watchFactory.PodCoreInformer(),
 		bnc.watchFactory.NodeCoreInformer(),
 		nadInformer,
+		bnc.networkManager,
 		bnc.addressSetFactory,
 		bnc.isPodScheduledinLocalZone,
 		bnc.zone,
@@ -1147,8 +1236,8 @@ func (bnc *BaseNetworkController) newNetworkQoSController() error {
 }
 
 func initLoadBalancerGroups(nbClient libovsdbclient.Client, netInfo util.NetInfo) (
-	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID, routerLoadBalancerGroupUUID string, err error) {
-
+	clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID, routerLoadBalancerGroupUUID string, err error,
+) {
 	loadBalancerGroupName := netInfo.GetNetworkScopedLoadBalancerGroupName(types.ClusterLBGroupName)
 	clusterLBGroup := nbdb.LoadBalancerGroup{Name: loadBalancerGroupName}
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancerGroupOps(nbClient, nil, &clusterLBGroup)
@@ -1232,4 +1321,26 @@ func (bnc *BaseNetworkController) GetSamplingConfig() *libovsdbops.SamplingConfi
 		return bnc.observManager.SamplingConfig()
 	}
 	return nil
+}
+
+func (bnc *BaseNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *util.PodAnnotation, lsp *nbdb.LogicalSwitchPort) error {
+	opts := []kubevirt.DHCPConfigsOpt{}
+
+	ipv4DNSServer, ipv6DNSServer, err := kubevirt.RetrieveDNSServiceClusterIPs(bnc.watchFactory)
+	if err != nil {
+		return err
+	}
+
+	ipv4Gateway, _ := util.MatchFirstIPFamily(false /*ipv4*/, podAnnotation.Gateways)
+	if ipv4Gateway != nil {
+		opts = append(opts, kubevirt.WithIPv4Router(ipv4Gateway.String()))
+	}
+
+	if bnc.MTU() > 0 {
+		opts = append(opts, kubevirt.WithIPv4MTU(bnc.MTU()))
+	}
+
+	opts = append(opts, kubevirt.WithIPv4DNSServer(ipv4DNSServer), kubevirt.WithIPv6DNSServer(ipv6DNSServer))
+
+	return kubevirt.EnsureDHCPOptionsForLSP(bnc.controllerName, bnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
 }
