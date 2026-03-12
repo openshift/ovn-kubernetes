@@ -34,7 +34,7 @@ theme:
     - navigation.tabs
     - navigation.tabs.sticky
     - content.code.annotate
-    
+    - content.code.copy
 plugins:
   - search
   - awesome-pages
@@ -47,6 +47,11 @@ plugins:
       blog_toc: true
       post_excerpt: required
       post_excerpt_max_authors: 2
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      zoomable: true
+      draggable: true
 markdown_extensions:
   - admonition
   - meta
