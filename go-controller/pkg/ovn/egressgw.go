@@ -43,9 +43,9 @@ func (oc *DefaultNetworkController) addPodExternalGW(pod *corev1.Pod) error {
 	if podRoutingNamespaceAnno == "" {
 		return nil
 	}
-	enableBFD := false
+	enableBFD := true
 	if _, ok := pod.Annotations[util.BfdAnnotation]; ok {
-		enableBFD = true
+		enableBFD = false
 	}
 
 	klog.Infof("External gateway pod: %s, detected for namespace(s) %s", pod.Name, podRoutingNamespaceAnno)
