@@ -469,8 +469,9 @@ func setupSriovInterface(netns ns.NetNS, containerID, ifName string, ifInfo *Pod
 			return nil, nil, err
 		}
 
-		if isVFIO {
-			// 3. it's not possible to set mac address within container netns for VFIO case, hence set it through VF representor
+		// 3. it's not possible to set mac address within container netns for VFIO case,
+		// hence set it through VF representor (PCI device IDs only).
+		if util.IsPCIDeviceName(deviceID) {
 			if err := util.SetVFHardwreAddress(deviceID, ifInfo.MAC); err != nil {
 				return nil, nil, err
 			}
