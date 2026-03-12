@@ -90,3 +90,25 @@ func NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState *NodeAnno
 	}
 	return !equalIPNetSlices(oldState.subnets[netName], newState.subnets[netName])
 }
+
+// TunnelIDAnnotationChangedForNetworkWithState returns true if the node tunnel
+// ID annotation for the given network changed using pre-parsed annotation
+// state.
+func TunnelIDAnnotationChangedForNetworkWithState(oldState, newState *NodeAnnotationState, netName string) bool {
+	if oldState == nil || newState == nil {
+		return false
+	}
+	if oldState.tunnelIDsErr != nil {
+		if !util.IsAnnotationNotSetError(oldState.tunnelIDsErr) {
+			klog.Errorf("Failed to parse old node %s tunnel ID annotation: %v", oldState.nodeName, oldState.tunnelIDsErr)
+		}
+		return false
+	}
+	if newState.tunnelIDsErr != nil {
+		if !util.IsAnnotationNotSetError(newState.tunnelIDsErr) {
+			klog.Errorf("Failed to parse new node %s tunnel ID annotation: %v", newState.nodeName, newState.tunnelIDsErr)
+		}
+		return false
+	}
+	return oldState.tunnelIDs[netName] != newState.tunnelIDs[netName]
+}

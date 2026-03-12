@@ -43,6 +43,14 @@ func NewNodeAnnotationCache() *NodeAnnotationCache {
 	return &NodeAnnotationCache{nodes: syncmap.NewSyncMap[*nodeAnnotationEntry]()}
 }
 
+// UpdateNodeAnnotationState builds a parse-once view of node annotations.
+// When updateCache is true, parsed values refresh the per-node cache; callers
+// comparing an older node snapshot against a newer one should pass false for
+// the old snapshot so it cannot replace the latest cached value.
+func (c *NodeAnnotationCache) UpdateNodeAnnotationState(node *corev1.Node, updateCache bool) *NodeAnnotationState {
+	return c.updateNodeAnnotationState(node, updateCache)
+}
+
 // updateNodeAnnotationState builds a parse-once view of node annotations. When
 // updateCache is true, parsed values refresh the per-node cache; callers
 // comparing an older node snapshot against a newer one should pass false for
@@ -254,6 +262,11 @@ func (c *NodeAnnotationCache) deleteNode(nodeName string) {
 		c.nodes.Delete(key)
 		return nil
 	})
+}
+
+// DeleteNode removes all cached annotation parse results for the node.
+func (c *NodeAnnotationCache) DeleteNode(nodeName string) {
+	c.deleteNode(nodeName)
 }
 
 // ensureEntryLocked returns the cache entry for nodeName, creating one if
