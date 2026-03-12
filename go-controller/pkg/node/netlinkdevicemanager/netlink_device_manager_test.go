@@ -60,7 +60,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", createdBridge).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertExpectations(GinkgoT())
 		})
 
@@ -101,7 +101,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", createdVxlan).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("vxlan0")).To(Succeed())
-			Expect(controller.GetDeviceState("vxlan0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["vxlan0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertExpectations(GinkgoT())
 		})
 
@@ -131,7 +131,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			})).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("dummy0")).To(Succeed())
-			Expect(controller.GetDeviceState("dummy0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["dummy0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertExpectations(GinkgoT())
 		})
 
@@ -165,7 +165,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", createdVlan).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("vlan100")).To(Succeed())
-			Expect(controller.GetDeviceState("vlan100")).To(Equal(DeviceStateReady))
+			Expect(controller.store["vlan100"].state).To(Equal(deviceStateReady))
 			nlMock.AssertExpectations(GinkgoT())
 		})
 	})
@@ -213,7 +213,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", existingVxlan).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("vxlan0")).To(Succeed())
-			Expect(controller.GetDeviceState("vxlan0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["vxlan0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertExpectations(GinkgoT())
 		})
 
@@ -238,7 +238,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", existingBridge).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertCalled(GinkgoT(), "LinkSetNoMaster", existingBridge)
 		})
 
@@ -263,7 +263,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", existingBridge).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertCalled(GinkgoT(), "LinkModify", mock.AnythingOfType("*netlink.Bridge"))
 		})
 
@@ -298,7 +298,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", recreatedVrf).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("vrf0")).To(Succeed())
-			Expect(controller.GetDeviceState("vrf0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["vrf0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertCalled(GinkgoT(), "LinkDelete", existingVrf)
 		})
 
@@ -332,7 +332,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			})).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("dummy0")).To(Succeed())
-			Expect(controller.GetDeviceState("dummy0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["dummy0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertNotCalled(GinkgoT(), "AddrDel", existingDummy, mock.MatchedBy(func(addr *netlink.Addr) bool {
 				return addr.IPNet.String() == "fe80::1/64"
 			}))
@@ -373,7 +373,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", existingVxlan).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("vxlan0")).To(Succeed())
-			Expect(controller.GetDeviceState("vxlan0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["vxlan0"].state).To(Equal(deviceStateReady))
 			nlMock.AssertNotCalled(GinkgoT(), "LinkSetVlanTunnel", mock.Anything, mock.Anything)
 			nlMock.AssertNotCalled(GinkgoT(), "LinkSetLearning", mock.Anything, mock.Anything)
 			nlMock.AssertNotCalled(GinkgoT(), "LinkSetIsolated", mock.Anything, mock.Anything)
@@ -399,7 +399,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkDelete", kernelBridge).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(controller.Has("br0")).To(BeFalse())
+			Expect(controller.store["br0"]).To(BeNil())
 			nlMock.AssertCalled(GinkgoT(), "LinkDelete", kernelBridge)
 		})
 
@@ -469,7 +469,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsLinkNotFoundError", linkNotFoundErr).Return(true)
 
 			Expect(controller.reconcileDeviceKey("vxlan0")).To(Succeed()) // DependencyError -> nil
-			Expect(controller.GetDeviceState("vxlan0")).To(Equal(DeviceStatePending))
+			Expect(controller.store["vxlan0"].state).To(Equal(deviceStatePending))
 		})
 
 		It("transitions to Pending when VLANParent doesn't exist", func() {
@@ -485,7 +485,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsLinkNotFoundError", linkNotFoundErr).Return(true)
 
 			Expect(controller.reconcileDeviceKey("vlan100")).To(Succeed())
-			Expect(controller.GetDeviceState("vlan100")).To(Equal(DeviceStatePending))
+			Expect(controller.store["vlan100"].state).To(Equal(deviceStatePending))
 		})
 
 		DescribeTable("transitions to Blocked when device exists with non-owned alias",
@@ -503,7 +503,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 				nlMock.On("LinkByName", "br0").Return(existingBridge, nil)
 
 				Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-				Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateBlocked))
+				Expect(controller.store["br0"].state).To(Equal(deviceStateBlocked))
 			},
 			Entry("foreign alias", "someone-else:br0"),
 			Entry("empty alias", ""),
@@ -522,7 +522,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("br0")
 			Expect(err).To(HaveOccurred()) // Transient error returned for workqueue retry
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateFailed))
 		})
 
 		It("transitions Pending -> Ready when dependency appears", func() {
@@ -538,7 +538,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsLinkNotFoundError", linkNotFoundErr).Return(true)
 
 			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStatePending))
+			Expect(controller.store["br0"].state).To(Equal(deviceStatePending))
 
 			// Dependency appears
 			vrfLink := &netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: "vrf0", Index: 50, Flags: net.FlagUp}}
@@ -556,7 +556,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("LinkSetUp", createdBridge).Return(nil)
 
 			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateReady))
 		})
 
 		It("master deleted during update -> transitions to Pending", func() {
@@ -587,7 +587,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsLinkNotFoundError", linkNotFoundErr).Return(true)
 
 			Expect(controller.reconcileDeviceKey("vxlan0")).To(Succeed()) // DependencyError -> nil
-			Expect(controller.GetDeviceState("vxlan0")).To(Equal(DeviceStatePending))
+			Expect(controller.store["vxlan0"].state).To(Equal(deviceStatePending))
 		})
 	})
 
@@ -742,213 +742,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 		)
 	})
 
-	Describe("State transitions and subscriber notifications", func() {
-		It("notifies subscriber on Pending -> Ready transition", func() {
-			var notifiedDevices []string
-			controller.RegisterDeviceReconciler(&mockReconciler{
-				fn: func(key string) error {
-					notifiedDevices = append(notifiedDevices, key)
-					return nil
-				},
-			})
-
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-			})).To(Succeed())
-
-			linkNotFoundErr := errors.New("link not found")
-			createdBridge := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0", Index: 10}}
-
-			nlMock.On("LinkByName", "br0").Return(nil, linkNotFoundErr).Once()
-			nlMock.On("IsLinkNotFoundError", linkNotFoundErr).Return(true)
-			nlMock.On("LinkAdd", mock.AnythingOfType("*netlink.Bridge")).Return(nil)
-			nlMock.On("LinkByName", "br0").Return(createdBridge, nil)
-			nlMock.On("LinkSetAlias", createdBridge, managedAliasPrefix+"bridge:br0").Return(nil)
-			nlMock.On("LinkSetUp", createdBridge).Return(nil)
-
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifiedDevices).To(ContainElement("br0"))
-		})
-
-		It("notifies subscriber on Pending -> Blocked transition", func() {
-			var notifiedDevices []string
-			controller.RegisterDeviceReconciler(&mockReconciler{
-				fn: func(key string) error {
-					notifiedDevices = append(notifiedDevices, key)
-					return nil
-				},
-			})
-
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-			})).To(Succeed())
-
-			foreignBridge := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{
-				Name:  "br0",
-				Index: 10,
-				Alias: "foreign:br0",
-			}}
-			nlMock.On("LinkByName", "br0").Return(foreignBridge, nil)
-
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifiedDevices).To(ContainElement("br0"))
-		})
-
-		It("does NOT notify when state stays Ready and kernel state is unchanged", func() {
-			notifyCount := 0
-			controller.RegisterDeviceReconciler(&mockReconciler{
-				fn: func(_ string) error {
-					notifyCount++
-					return nil
-				},
-			})
-
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-			})).To(Succeed())
-
-			// Both reconciles see device already existing with our alias and UP.
-			// This exercises the update-idempotency path directly.
-			brLink := &netlink.Bridge{
-				LinkAttrs: netlink.LinkAttrs{
-					Name:  "br0",
-					Index: 10,
-					Alias: managedAliasPrefix + "bridge:br0",
-					Flags: net.FlagUp,
-				},
-			}
-			nlMock.On("LinkByName", "br0").Return(brLink, nil)
-			nlMock.On("LinkSetUp", brLink).Return(nil)
-
-			// First reconcile: Pending -> Ready (notified)
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifyCount).To(Equal(1))
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateReady))
-
-			// Second reconcile: Ready -> Ready, no kernel change (should NOT notify)
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifyCount).To(Equal(1)) // Still 1, not 2
-		})
-
-		It("notifies when state stays Ready but kernel state was modified (self-heal)", func() {
-			notifyCount := 0
-			controller.RegisterDeviceReconciler(&mockReconciler{
-				fn: func(_ string) error {
-					notifyCount++
-					return nil
-				},
-			})
-
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-			})).To(Succeed())
-
-			// First reconcile: device exists, Pending -> Ready
-			brLink := &netlink.Bridge{
-				LinkAttrs: netlink.LinkAttrs{
-					Name:  "br0",
-					Index: 10,
-					Alias: managedAliasPrefix + "bridge:br0",
-					Flags: net.FlagUp,
-				},
-			}
-			nlMock.On("LinkByName", "br0").Return(brLink, nil).Once()
-			nlMock.On("LinkSetUp", brLink).Return(nil)
-
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifyCount).To(Equal(1))
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateReady))
-
-			// Second reconcile: device was deleted externally, NDM recreates it.
-			// State stays Ready but kernel state was modified — subscriber must be notified
-			// so that components depending on the device (e.g., OVS port attached to this
-			// bridge) can re-apply their side-configuration.
-			linkNotFoundErr := errors.New("link not found")
-			recreatedBridge := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0", Index: 20}}
-
-			nlMock.On("LinkByName", "br0").Return(nil, linkNotFoundErr).Once()
-			nlMock.On("IsLinkNotFoundError", linkNotFoundErr).Return(true)
-			nlMock.On("LinkAdd", mock.AnythingOfType("*netlink.Bridge")).Return(nil)
-			nlMock.On("LinkByName", "br0").Return(recreatedBridge, nil)
-			nlMock.On("LinkSetAlias", recreatedBridge, managedAliasPrefix+"bridge:br0").Return(nil)
-			nlMock.On("LinkSetUp", recreatedBridge).Return(nil)
-
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifyCount).To(Equal(2)) // Notified again despite Ready -> Ready
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateReady))
-		})
-
-		It("notifies when state stays Ready but master was re-attached (attribute drift)", func() {
-			notifyCount := 0
-			controller.RegisterDeviceReconciler(&mockReconciler{
-				fn: func(_ string) error {
-					notifyCount++
-					return nil
-				},
-			})
-
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link:   &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-				Master: "vrf0",
-			})).To(Succeed())
-
-			vrfLink := &netlink.Vrf{LinkAttrs: netlink.LinkAttrs{Name: "vrf0", Index: 20}}
-			nlMock.On("LinkByName", "vrf0").Return(vrfLink, nil)
-
-			// First reconcile: device exists with correct master. Pending -> Ready.
-			brLink := &netlink.Bridge{
-				LinkAttrs: netlink.LinkAttrs{
-					Name:        "br0",
-					Index:       10,
-					MasterIndex: 20,
-					Alias:       managedAliasPrefix + "bridge:br0",
-					Flags:       net.FlagUp,
-				},
-			}
-			nlMock.On("LinkByName", "br0").Return(brLink, nil).Once()
-			nlMock.On("LinkSetUp", brLink).Return(nil)
-
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifyCount).To(Equal(1))
-
-			// Second reconcile: master was externally detached (MasterIndex=0).
-			// updateDevice re-attaches it — modified=true, state stays Ready.
-			brLinkDetached := &netlink.Bridge{
-				LinkAttrs: netlink.LinkAttrs{
-					Name:        "br0",
-					Index:       10,
-					MasterIndex: 0,
-					Alias:       managedAliasPrefix + "bridge:br0",
-					Flags:       net.FlagUp,
-				},
-			}
-			nlMock.On("LinkByName", "br0").Return(brLinkDetached, nil).Once()
-			nlMock.On("LinkSetDown", brLinkDetached).Return(nil)
-			nlMock.On("LinkSetMaster", brLinkDetached, vrfLink).Return(nil)
-			nlMock.On("LinkSetUp", brLinkDetached).Return(nil)
-
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifyCount).To(Equal(2)) // Notified: master re-attached
-		})
-
-		It("notifies subscriber on delete path", func() {
-			var notifiedDevices []string
-			controller.RegisterDeviceReconciler(&mockReconciler{
-				fn: func(key string) error {
-					notifiedDevices = append(notifiedDevices, key)
-					return nil
-				},
-			})
-
-			linkNotFoundErr := errors.New("link not found")
-			nlMock.On("LinkByName", "br0").Return(nil, linkNotFoundErr)
-			nlMock.On("IsLinkNotFoundError", linkNotFoundErr).Return(true)
-
-			// Device not in store -> delete path -> notifies
-			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
-			Expect(notifiedDevices).To(ContainElement("br0"))
-		})
-
+	Describe("Staleness guard", func() {
 		It("skips state update when config changed during I/O (staleness guard)", func() {
 			Expect(controller.EnsureLink(DeviceConfig{
 				Link:   &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
@@ -976,7 +770,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 						Link:   &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
 						Master: "vrf-new", // Config changed!
 					},
-					state: DeviceStatePending,
+					state: deviceStatePending,
 				}
 				controller.mu.Unlock()
 			})
@@ -988,7 +782,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			Expect(controller.reconcileDeviceKey("br0")).To(Succeed())
 
 			// State should NOT be updated to Ready because config was stale
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStatePending))
+			Expect(controller.store["br0"].state).To(Equal(deviceStatePending))
 		})
 	})
 
@@ -1067,7 +861,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("br0")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateFailed))
 		})
 
 		DescribeTable("transitions to Failed when a bridge port setting fails during creation",
@@ -1093,7 +887,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 				err := controller.reconcileDeviceKey("vxlan0")
 				Expect(err).To(HaveOccurred())
-				Expect(controller.GetDeviceState("vxlan0")).To(Equal(DeviceStateFailed))
+				Expect(controller.store["vxlan0"].state).To(Equal(deviceStateFailed))
 			},
 			Entry("LinkSetVlanTunnel fails", func(nlMock *mocks.NetLinkOps, _ *netlink.Bridge, vxlan *netlink.Vxlan) {
 				nlMock.On("LinkSetVlanTunnel", vxlan, true).Return(errors.New("not supported"))
@@ -1131,7 +925,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("br0")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateFailed))
 		})
 
 		It("fails when LinkGetProtinfo returns error", func() {
@@ -1164,7 +958,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("vxlan0")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("vxlan0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["vxlan0"].state).To(Equal(deviceStateFailed))
 			nlMock.AssertNotCalled(GinkgoT(), "LinkSetVlanTunnel", mock.Anything, mock.Anything)
 		})
 	})
@@ -1178,7 +972,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("br0")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateFailed))
 		})
 
 		It("fails when VLANParent is set on a Vxlan (type mismatch)", func() {
@@ -1189,7 +983,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("vxlan0")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("vxlan0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["vxlan0"].state).To(Equal(deviceStateFailed))
 		})
 
 		It("fails when VLAN has no VLANParent", func() {
@@ -1202,7 +996,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("vlan100")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("vlan100")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["vlan100"].state).To(Equal(deviceStateFailed))
 		})
 
 		It("transitions to Failed on non-link-not-found error from master lookup", func() {
@@ -1217,7 +1011,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("br0")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateFailed))
 		})
 	})
 
@@ -1246,7 +1040,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsAlreadyExistsError", eexistErr).Return(true)
 
 			Expect(controller.reconcileDeviceKey("dummy0")).To(Succeed())
-			Expect(controller.GetDeviceState("dummy0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["dummy0"].state).To(Equal(deviceStateReady))
 		})
 
 		It("tolerates ENOENT when removing addresses (still Ready)", func() {
@@ -1273,7 +1067,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			nlMock.On("IsEntryNotFoundError", enoentErr).Return(true)
 
 			Expect(controller.reconcileDeviceKey("dummy0")).To(Succeed())
-			Expect(controller.GetDeviceState("dummy0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["dummy0"].state).To(Equal(deviceStateReady))
 		})
 
 		It("transitions to Failed on non-retriable address add failure", func() {
@@ -1301,7 +1095,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("dummy0")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("dummy0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["dummy0"].state).To(Equal(deviceStateFailed))
 		})
 
 		It("transitions to Failed on non-retriable address delete failure", func() {
@@ -1329,7 +1123,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			err := controller.reconcileDeviceKey("dummy0")
 			Expect(err).To(HaveOccurred())
-			Expect(controller.GetDeviceState("dummy0")).To(Equal(DeviceStateFailed))
+			Expect(controller.store["dummy0"].state).To(Equal(deviceStateFailed))
 		})
 	})
 
@@ -1529,7 +1323,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 				if expectErr {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("link-local address"))
-					Expect(controller.Has("dev0")).To(BeFalse())
+					Expect(controller.store["dev0"]).To(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 				}
@@ -1655,7 +1449,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			}
 
 			Expect(controller.EnsureLink(cfg)).To(Succeed())
-			Expect(controller.Has("br0")).To(BeTrue())
+			Expect(controller.store["br0"]).ToNot(BeNil())
 		})
 
 		It("returns error for config without name", func() {
@@ -1681,7 +1475,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			}
 
 			Expect(controller.EnsureLink(cfg1)).To(Succeed())
-			Expect(controller.GetConfig("br0").Master).To(Equal("vrf0"))
+			Expect(controller.store["br0"].cfg.Master).To(Equal("vrf0"))
 
 			// Update config
 			cfg2 := DeviceConfig{
@@ -1693,11 +1487,11 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			Expect(controller.EnsureLink(cfg2)).To(Succeed())
 
-			Expect(controller.GetConfig("br0").Master).To(Equal("vrf1"))
+			Expect(controller.store["br0"].cfg.Master).To(Equal("vrf1"))
 		})
 
-		It("returns nil config for non-existent device", func() {
-			Expect(controller.GetConfig("nonexistent")).To(BeNil())
+		It("returns that non-existent device is not in store", func() {
+			Expect(controller.store).ToNot(HaveKey("nonexistent"))
 		})
 	})
 
@@ -1710,10 +1504,10 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			Expect(controller.EnsureLink(DeviceConfig{
 				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
 			})).To(Succeed())
-			Expect(controller.Has("br0")).To(BeTrue())
+			Expect(controller.store["br0"]).ToNot(BeNil())
 
 			Expect(controller.DeleteLink("br0")).To(Succeed())
-			Expect(controller.Has("br0")).To(BeFalse())
+			Expect(controller.store["br0"]).To(BeNil())
 		})
 
 	})
@@ -1938,7 +1732,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			Expect(controller.EnsureLink(cfg)).To(Succeed())
 			Expect(controller.reconcileDeviceKey("svi0")).To(Succeed())
-			Expect(controller.GetDeviceState("svi0")).To(Equal(DeviceStatePending),
+			Expect(controller.store["svi0"].state).To(Equal(deviceStatePending),
 				"device should be pending due to missing master")
 
 			// Phase 2: Master appears -> handleLinkUpdate enqueues, then reconcileDeviceKey succeeds
@@ -1956,7 +1750,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			})
 			Expect(controller.reconcileDeviceKey("svi0")).To(Succeed())
 
-			Expect(controller.GetDeviceState("svi0")).To(Equal(DeviceStateReady),
+			Expect(controller.store["svi0"].state).To(Equal(deviceStateReady),
 				"state should be Ready after successful retry")
 		})
 
@@ -1965,7 +1759,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
 			}
 			Expect(controller.EnsureLink(cfg)).To(Succeed())
-			controller.store["br0"].state = DeviceStateReady
+			controller.store["br0"].state = deviceStateReady
 
 			// Simulate unrelated link update
 			dummyLink := &netlink.Dummy{
@@ -1977,7 +1771,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			})
 
 			// Device should still be Ready
-			Expect(controller.GetDeviceState("br0")).To(Equal(DeviceStateReady))
+			Expect(controller.store["br0"].state).To(Equal(deviceStateReady))
 		})
 
 	})
@@ -1989,7 +1783,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			controller.store["br0"] = &managedDevice{
 				cfg:     DeviceConfig{Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}}},
-				state:   DeviceStateReady,
+				state:   deviceStateReady,
 				ifindex: 10,
 			}
 
@@ -2004,7 +1798,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			controller.store["br0"] = &managedDevice{
 				cfg:     DeviceConfig{Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}}},
-				state:   DeviceStateReady,
+				state:   deviceStateReady,
 				ifindex: 10,
 			}
 
@@ -2019,7 +1813,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 
 			controller.store["br0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}}},
-				state: DeviceStatePending,
+				state: deviceStatePending,
 			}
 
 			controller.handleAddrUpdate(netlink.AddrUpdate{LinkIndex: 10})
@@ -2037,35 +1831,35 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			bridgeAttrs.Name = "br0"
 			controller.store["br0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Bridge{LinkAttrs: bridgeAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			vxlanAttrs := netlink.NewLinkAttrs()
 			vxlanAttrs.Name = "vxlan0"
 			controller.store["vxlan0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Vxlan{LinkAttrs: vxlanAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			vlanAttrs := netlink.NewLinkAttrs()
 			vlanAttrs.Name = "vlan100"
 			controller.store["vlan100"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Vlan{LinkAttrs: vlanAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			vrfAttrs := netlink.NewLinkAttrs()
 			vrfAttrs.Name = "vrf0"
 			controller.store["vrf0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Vrf{LinkAttrs: vrfAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			dummyAttrs := netlink.NewLinkAttrs()
 			dummyAttrs.Name = "dummy0"
 			controller.store["dummy0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Dummy{LinkAttrs: dummyAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			Expect(controller.reconcileSyncKey()).To(Succeed())
@@ -2081,21 +1875,21 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			vxlan1Attrs.Name = "vxlan0"
 			controller.store["vxlan0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Vxlan{LinkAttrs: vxlan1Attrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			vxlan2Attrs := netlink.NewLinkAttrs()
 			vxlan2Attrs.Name = "vxlan1"
 			controller.store["vxlan1"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Vxlan{LinkAttrs: vxlan2Attrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			bridgeAttrs := netlink.NewLinkAttrs()
 			bridgeAttrs.Name = "br0"
 			controller.store["br0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Bridge{LinkAttrs: bridgeAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			Expect(controller.reconcileSyncKey()).To(Succeed())
@@ -2114,7 +1908,7 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			bridgeAttrs.Name = "br0"
 			controller.store["br0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Bridge{LinkAttrs: bridgeAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			Expect(controller.reconcileSyncKey()).To(Succeed())
@@ -2650,120 +2444,40 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			addr2, _ := netlink.ParseAddr("10.0.0.99/32")
 			addrs[0] = *addr2
 
-			stored := controller.GetConfig("d0").Addresses
+			stored := controller.store["d0"].cfg.Addresses
 			Expect(stored).To(HaveLen(1))
 			Expect(stored[0].IP.String()).To(Equal("10.0.0.1"))
 		})
 	})
 
-	Describe("ListDevicesByVLANParent", func() {
-		It("returns only devices with matching VLANParent", func() {
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link:       &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "br0.100"}, VlanId: 100},
-				VLANParent: "br0",
-			})).To(Succeed())
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link:       &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "br0.200"}, VlanId: 200},
-				VLANParent: "br0",
-			})).To(Succeed())
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link:       &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "br1.100"}, VlanId: 100},
-				VLANParent: "br1",
-			})).To(Succeed())
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-			})).To(Succeed())
-
-			result := controller.ListDevicesByVLANParent("br0")
-			Expect(result).To(HaveLen(2))
-
-			names := []string{result[0].Link.Attrs().Name, result[1].Link.Attrs().Name}
-			Expect(names).To(ContainElements("br0.100", "br0.200"))
-		})
-
-		It("returns empty for no matches", func() {
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-			})).To(Succeed())
-			result := controller.ListDevicesByVLANParent("nonexistent")
-			Expect(result).To(BeEmpty())
-		})
-	})
-
-	Describe("EnsureLink name validation edge cases", func() {
-		It("accepts exactly 15-character name", func() {
-			err := controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "exactly15chars_"}},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(controller.Has("exactly15chars_")).To(BeTrue())
-		})
-
-		It("rejects 16-character name", func() {
-			err := controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "exactly16chars__"}},
-			})
-			Expect(err).To(HaveOccurred())
-			Expect(controller.Has("exactly16chars__")).To(BeFalse())
-		})
-
-		It("accepts 15-character master name", func() {
-			err := controller.EnsureLink(DeviceConfig{
-				Link:   &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dev0"}},
-				Master: "exactly15chars_",
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("rejects 16-character master name", func() {
-			err := controller.EnsureLink(DeviceConfig{
-				Link:   &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dev0"}},
-				Master: "exactly16chars__",
-			})
-			Expect(err).To(HaveOccurred())
-			Expect(controller.Has("dev0")).To(BeFalse())
-		})
-
-		It("accepts 15-character VLANParent name", func() {
-			err := controller.EnsureLink(DeviceConfig{
-				Link:       &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "v0"}, VlanId: 10},
-				VLANParent: "exactly15chars_",
-			})
-			Expect(err).NotTo(HaveOccurred())
-		})
-
-		It("rejects 16-character VLANParent name", func() {
-			err := controller.EnsureLink(DeviceConfig{
-				Link:       &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "v0"}, VlanId: 10},
-				VLANParent: "exactly16chars__",
-			})
-			Expect(err).To(HaveOccurred())
-			Expect(controller.Has("v0")).To(BeFalse())
-		})
-	})
-
-	Describe("IsDeviceReady", func() {
-		It("returns true for Ready device", func() {
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-			})).To(Succeed())
-
-			controller.store["br0"].state = DeviceStateReady
-			Expect(controller.IsDeviceReady("br0")).To(BeTrue())
-		})
-
-		It("returns false for Pending device", func() {
-			Expect(controller.EnsureLink(DeviceConfig{
-				Link: &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "br0"}},
-			})).To(Succeed())
-
-			Expect(controller.IsDeviceReady("br0")).To(BeFalse())
-		})
-
-		It("returns false for non-existent device", func() {
-			Expect(controller.IsDeviceReady("nonexistent")).To(BeFalse())
-		})
-	})
+	DescribeTable("EnsureLink name validation edge cases",
+		func(cfg DeviceConfig, expectErr bool) {
+			err := controller.EnsureLink(cfg)
+			if expectErr {
+				Expect(err).To(HaveOccurred())
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+			}
+		},
+		Entry("accepts exactly 15-character name",
+			DeviceConfig{Link: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "exactly15chars_"}}},
+			false),
+		Entry("rejects 16-character name",
+			DeviceConfig{Link: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "exactly16chars__"}}},
+			true),
+		Entry("accepts 15-character master name",
+			DeviceConfig{Link: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dev0"}}, Master: "exactly15chars_"},
+			false),
+		Entry("rejects 16-character master name",
+			DeviceConfig{Link: &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "dev0"}}, Master: "exactly16chars__"},
+			true),
+		Entry("accepts 15-character VLANParent name",
+			DeviceConfig{Link: &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "v0"}, VlanId: 10}, VLANParent: "exactly15chars_"},
+			false),
+		Entry("rejects 16-character VLANParent name",
+			DeviceConfig{Link: &netlink.Vlan{LinkAttrs: netlink.LinkAttrs{Name: "v0"}, VlanId: 10}, VLANParent: "exactly16chars__"},
+			true),
+	)
 
 	Describe("IsNotOwnedError", func() {
 		It("returns true for NotOwnedError", func() {
@@ -2789,7 +2503,6 @@ var _ = Describe("NetlinkDeviceManager", func() {
 	Describe("reconcileFullSyncKey", func() {
 		It("continues sync even when orphan cleanup fails", func() {
 			nlMock.On("LinkList").Return(nil, errors.New("netlink error"))
-
 			Expect(controller.reconcileFullSyncKey()).To(Succeed())
 		})
 
@@ -2802,28 +2515,28 @@ var _ = Describe("NetlinkDeviceManager", func() {
 			bridgeAttrs.Name = "br0"
 			controller.store["br0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Bridge{LinkAttrs: bridgeAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			vxlanAttrs := netlink.NewLinkAttrs()
 			vxlanAttrs.Name = "vxlan0"
 			controller.store["vxlan0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Vxlan{LinkAttrs: vxlanAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			vlanAttrs := netlink.NewLinkAttrs()
 			vlanAttrs.Name = "vlan100"
 			controller.store["vlan100"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Vlan{LinkAttrs: vlanAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			dummyAttrs := netlink.NewLinkAttrs()
 			dummyAttrs.Name = "dummy0"
 			controller.store["dummy0"] = &managedDevice{
 				cfg:   DeviceConfig{Link: &netlink.Dummy{LinkAttrs: dummyAttrs}},
-				state: DeviceStateReady,
+				state: deviceStateReady,
 			}
 
 			Expect(controller.reconcileFullSyncKey()).To(Succeed())
@@ -2859,16 +2572,4 @@ func mustParseIPNetWithIP(cidr string) *net.IPNet {
 	}
 	ipnet.IP = ip
 	return ipnet
-}
-
-// mockReconciler is a test helper for subscriber notifications
-type mockReconciler struct {
-	fn func(key string) error
-}
-
-func (r *mockReconciler) ReconcileDevice(key string) error {
-	if r.fn != nil {
-		return r.fn(key)
-	}
-	return nil
 }

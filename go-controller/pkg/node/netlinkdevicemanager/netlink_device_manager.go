@@ -44,7 +44,7 @@ import (
 //     — the caller cannot resolve the dependency; a synchronous error would
 //     only force the caller to implement retry/backoff (or poll/track
 //     dependency readiness), often delaying convergence. The async model
-//     classifies this as DeviceStatePending and retries promptly when the
+//     classifies this as pending and retries promptly when the
 //     dependency appears via a netlink event, without caller involvement.
 //
 //  2. Multi-step I/O. Each device reconciliation involves multiple netlink
@@ -76,23 +76,13 @@ import (
 //     direct control over how much pressure it puts on the kernel's netlink
 //     subsystem.
 //
-// Because the API is asynchronous, downstream controllers that depend on
-// device readiness (e.g., EVPN waiting for the bridge before attaching OVS
-// ports) are notified via the DeviceReconciler subscriber interface.
-//
-// Callers that need synchronous confirmation can poll GetDeviceState after
-// calling EnsureLink. A dedicated synchronous interface may be added in the
-// future if specific use cases (e.g., synchronous startup sequences) require
-// it.
-//
 // # Ownership
 //
 // Devices created through EnsureLink are marked with an IFLA_IFALIAS prefix
 // ("ovn-k8s-ndm:"). Only devices with this alias are considered owned and may
 // be modified or deleted. Devices without the alias (or with a foreign alias)
 // are never touched — if a name collision occurs, the reconciler sets the
-// device state to DeviceStateBlocked (discoverable via GetDeviceState or
-// subscriber notification).
+// device to a blocked state.
 //
 // # Supported Device Types
 //
@@ -126,7 +116,7 @@ type Interface interface {
 	// devices where the caller may know the external conflict was resolved.
 	//
 	// If a dependency (Master, VLANParent) does not exist in the kernel,
-	// the device is marked DeviceStatePending and automatically retried
+	// the device is marked pending and automatically retried
 	// when the dependency appears via netlink event.
 	//
 	// The device is always brought UP after all configuration is applied,
@@ -147,57 +137,17 @@ type Interface interface {
 	//
 	// Only devices with our ownership alias are deleted from the kernel.
 	DeleteLink(name string) error
-
-	// Has returns true if a device is registered in the desired state store.
-	Has(name string) bool
-
-	// GetConfig returns a copy of the config for a managed device, or nil
-	// if the device is not in the store.
-	GetConfig(name string) *DeviceConfig
-
-	// ListDevicesByVLANParent returns configs for all devices whose
-	// VLANParent matches the given name.
-	ListDevicesByVLANParent(parentName string) []DeviceConfig
-
-	// IsDeviceReady returns true if the device exists in the store and its
-	// state is DeviceStateReady (kernel state matches desired config).
-	IsDeviceReady(name string) bool
-
-	// GetDeviceState returns the lifecycle state of a managed device.
-	// Returns DeviceStateUnknown if the device is not in the store (never
-	// declared via EnsureLink, or already removed via DeleteLink).
-	GetDeviceState(name string) DeviceState
-
-	// RegisterDeviceReconciler registers a subscriber to be notified on
-	// device state transitions. The subscriber's ReconcileDevice method is
-	// called with the device name whenever the device's state changes
-	// (e.g., Pending→Ready, Ready→Failed). Subscribers should map the
-	// device name to their own work items and re-queue them — heavy
-	// processing should not be done inline.
-	//
-	// Safe to call before or after the controller is started. Subscribers
-	// registered after startup will receive notifications for all subsequent
-	// state transitions; they can query current state of devices they care
-	// about via GetDeviceState or IsDeviceReady.
-	RegisterDeviceReconciler(r DeviceReconciler)
 }
 
-// DeviceState represents the lifecycle state of a managed device.
-type DeviceState string
+// deviceState represents the lifecycle state of a managed device.
+type deviceState string
 
 const (
-	DeviceStateUnknown DeviceState = ""        // Not in store (never declared or already deleted)
-	DeviceStateReady   DeviceState = "Ready"   // Device matches desired state in kernel
-	DeviceStatePending DeviceState = "Pending" // Waiting for dependency (master, VLANParent)
-	DeviceStateFailed  DeviceState = "Failed"  // Transient kernel error (will retry with backoff)
-	DeviceStateBlocked DeviceState = "Blocked" // External device conflict (NotOwnedError)
+	deviceStateReady   deviceState = "Ready"   // Device matches desired state in kernel
+	deviceStatePending deviceState = "Pending" // Waiting for dependency (master, VLANParent)
+	deviceStateFailed  deviceState = "Failed"  // Transient kernel error (will retry with backoff)
+	deviceStateBlocked deviceState = "Blocked" // External device conflict (NotOwnedError)
 )
-
-// DeviceReconciler is notified when device state transitions.
-// Implementations should re-queue their own work, not do heavy processing inline.
-type DeviceReconciler interface {
-	ReconcileDevice(key string) error
-}
 
 // DeviceConfig represents the complete desired configuration for a network device.
 // Controllers provide the FULL configuration; manager enforces EXACTLY what's provided.
@@ -337,7 +287,7 @@ const (
 // managedDevice tracks a device with its config and status
 type managedDevice struct {
 	cfg           DeviceConfig // Complete desired config
-	state         DeviceState  // Lifecycle state (Ready, Pending, Failed, Blocked)
+	state         deviceState  // Lifecycle state (Ready, Pending, Failed, Blocked)
 	ifindex       int          // Kernel ifindex, updated on successful reconciliation
 	masterIfindex int          // Master's kernel ifindex at last successful reconciliation (0 = no master)
 	lastError     error        // Last error from reconciliation (preserved for status/debug)
@@ -353,9 +303,7 @@ type Controller struct {
 	mu    sync.RWMutex
 	store map[string]*managedDevice // device name -> managed device info
 
-	reconciler    controller.Reconciler // workqueue reconciler (single worker, all I/O)
-	subscribersMu sync.RWMutex          // protects subscribers slice; allows post-Run() registration
-	subscribers   []DeviceReconciler
+	reconciler controller.Reconciler // workqueue reconciler (single worker, all I/O)
 
 	// ReconcilePeriod is the interval for periodic sync as a safety net.
 	// Defaults to defaultReconcilePeriod. Can be overridden before calling Run().
@@ -406,7 +354,7 @@ func (c *Controller) reconcileWorkqueue(key string) error {
 
 // reconcileDeviceKey is the core device reconciler.
 // Handles both create/update (device in store) and delete (device not in store).
-// Pattern: Lock → copy config → Unlock → I/O outside lock → Lock → update state → Unlock → notify.
+// Pattern: Lock → copy config → Unlock → I/O outside lock → Lock → update state → Unlock.
 func (c *Controller) reconcileDeviceKey(name string) error {
 	start := time.Now()
 	defer func() {
@@ -426,7 +374,6 @@ func (c *Controller) reconcileDeviceKey(name string) error {
 		if err != nil && !IsNotOwnedError(err) {
 			return err // rate-limited retry
 		}
-		c.notifySubscribers(name)
 		return nil
 	}
 	// Snapshot config for lock-free I/O. Deep-copy Link so downstream
@@ -434,16 +381,14 @@ func (c *Controller) reconcileDeviceKey(name string) error {
 	cfg := device.cfg
 	cfg.Link = buildManagedLink(cfg.Link)
 	gen := device.generation
-	previousState := device.state
 	unlock()
 
 	// All netlink I/O OUTSIDE lock
-	modified, ifindex, masterIfindex, err := applyDeviceConfig(&cfg)
+	ifindex, masterIfindex, err := applyDeviceConfig(&cfg)
 
 	// Update state under Lock
 	c.mu.Lock()
-	unlock = sync.OnceFunc(c.mu.Unlock)
-	defer unlock()
+	defer c.mu.Unlock()
 
 	device, stillExists := c.store[name]
 	if !stillExists {
@@ -457,39 +402,29 @@ func (c *Controller) reconcileDeviceKey(name string) error {
 		return nil
 	}
 
-	var newState DeviceState
+	var newState deviceState
 	var reconcileErr error
 
 	switch {
 	case err == nil:
-		newState = DeviceStateReady
-		device.lastError = nil
+		newState = deviceStateReady
 		device.ifindex = ifindex
 		device.masterIfindex = masterIfindex
 	case isDependencyError(err):
-		newState = DeviceStatePending
-		device.lastError = err // Preserve reason: "pending on X (reason)" for status/debug
+		newState = deviceStatePending
 		// return nil: don't retry via rate-limited backoff
 		// Will be re-triggered by netlink event when dependency appears
 	case IsNotOwnedError(err):
-		newState = DeviceStateBlocked
-		device.lastError = err
+		newState = deviceStateBlocked
 		// return nil: permanent condition, no point retrying
 		// Will be re-triggered by netlink event when external device removed
 	default:
-		newState = DeviceStateFailed
-		device.lastError = err
+		newState = deviceStateFailed
 		reconcileErr = err // return error → rate-limited retry via workqueue
 	}
 
+	device.lastError = err
 	device.state = newState
-	unlock()
-
-	// Notify subscribers OUTSIDE lock (avoids deadlock if subscriber calls GetDeviceState).
-	// Notify on state transitions OR when kernel state was modified.
-	if previousState != newState || modified {
-		c.notifySubscribers(name)
-	}
 
 	return reconcileErr
 }
@@ -657,7 +592,7 @@ func (c *Controller) EnsureLink(cfg DeviceConfig) error {
 	defer unlock()
 
 	var gen uint64
-	state := DeviceStatePending // default for new devices; existing devices preserve their state
+	state := deviceStatePending // default for new devices; existing devices preserve their state
 	if existing := c.store[name]; existing != nil {
 		if configsEqual(&existing.cfg, &cfg) {
 			// Config unchanged. Re-enqueue only for Blocked devices — the caller
@@ -665,15 +600,13 @@ func (c *Controller) EnsureLink(cfg DeviceConfig) error {
 			// Don't re-enqueue Failed — the workqueue already has it in rate-limited
 			// backoff. Reconcile() bypasses the rate limiter (queue.Add), so calling
 			// it here would reset the backoff and cause rapid retries.
-			if existing.state == DeviceStateBlocked {
+			if existing.state == deviceStateBlocked {
 				unlock()
 				c.reconciler.Reconcile(deviceKeyPrefix + name)
 			}
 			return nil
 		}
 		gen = existing.generation
-		// preserve last reconciliation result so the reconciler detects the real state transition
-		// and notifies subscribers
 		state = existing.state
 	}
 
@@ -702,86 +635,6 @@ func (c *Controller) DeleteLink(name string) error {
 
 	c.reconciler.Reconcile(deviceKeyPrefix + name)
 	return nil
-}
-
-// Has checks if a device is registered in the desired state.
-func (c *Controller) Has(name string) bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	_, ok := c.store[name]
-	return ok
-}
-
-// GetConfig returns the config for a managed device, or nil if not managed.
-func (c *Controller) GetConfig(name string) *DeviceConfig {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	existing := c.store[name]
-	if existing == nil {
-		return nil
-	}
-	cfgCopy := existing.cfg
-	return &cfgCopy
-}
-
-// ListDevicesByVLANParent returns configs for all devices with the given VLANParent.
-func (c *Controller) ListDevicesByVLANParent(parentName string) []DeviceConfig {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	var result []DeviceConfig
-	for _, device := range c.store {
-		if device.cfg.VLANParent == parentName {
-			cfgCopy := device.cfg
-			result = append(result, cfgCopy)
-		}
-	}
-	return result
-}
-
-// IsDeviceReady returns true if the device exists in store and is in Ready state.
-func (c *Controller) IsDeviceReady(name string) bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if d, ok := c.store[name]; ok {
-		return d.state == DeviceStateReady
-	}
-	return false
-}
-
-// GetDeviceState returns the current state of a managed device.
-// Returns DeviceStateUnknown if the device is not in the store
-// (never declared via EnsureLink, or already removed via DeleteLink).
-func (c *Controller) GetDeviceState(name string) DeviceState {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if d, ok := c.store[name]; ok {
-		return d.state
-	}
-	return DeviceStateUnknown
-}
-
-// RegisterDeviceReconciler registers a reconciler to be notified on device state transitions.
-// Safe to call before or after Run(). Subscribers that register after Run() will receive
-// notifications for all subsequent state transitions.
-func (c *Controller) RegisterDeviceReconciler(r DeviceReconciler) {
-	c.subscribersMu.Lock()
-	c.subscribers = append(c.subscribers, r)
-	c.subscribersMu.Unlock()
-}
-
-// notifySubscribers calls ReconcileDevice(name) on all registered subscribers.
-// Called from the worker goroutine after state transitions.
-// MUST be called OUTSIDE c.mu to avoid deadlock (subscribers may call GetDeviceState).
-func (c *Controller) notifySubscribers(name string) {
-	c.subscribersMu.RLock()
-	subscribers := c.subscribers
-	c.subscribersMu.RUnlock()
-
-	for _, sub := range subscribers {
-		if err := sub.ReconcileDevice(name); err != nil {
-			klog.Warningf("NetlinkDeviceManager: subscriber error for device %s: %v", name, err)
-		}
-	}
 }
 
 // eventChanBufferSize is the buffer size for netlink event channels (link and addr).
@@ -940,10 +793,10 @@ func (c *Controller) handleLinkUpdate(update netlink.LinkUpdate) {
 		needsReconcile := true
 		if update.Header.Type != unix.RTM_DELLINK {
 			switch d.state {
-			case DeviceStateBlocked:
+			case deviceStateBlocked:
 				needsReconcile = false
 				klog.V(5).Infof("NetlinkDeviceManager: skipping non-delete event for blocked device %s", linkName)
-			case DeviceStateReady:
+			case deviceStateReady:
 				if eventLinkMatchesDesired(update.Link, d) {
 					needsReconcile = false
 					klog.V(5).Infof("NetlinkDeviceManager: skipping no-drift event for ready device %s", linkName)
@@ -958,7 +811,7 @@ func (c *Controller) handleLinkUpdate(update netlink.LinkUpdate) {
 	// Queue devices that depend on this link.
 	for name, device := range c.store {
 		// Skip failed devices, they are already in rate-limited backoff.
-		if device.state != DeviceStateFailed {
+		if device.state != deviceStateFailed {
 			if device.cfg.Master == linkName || device.cfg.VLANParent == linkName {
 				c.reconciler.Reconcile(deviceKeyPrefix + name)
 			}
@@ -1066,8 +919,7 @@ func resolveDependencies(cfg *DeviceConfig) error {
 }
 
 // applyDeviceConfig creates or updates a single device in the kernel.
-// Returns (modified, ifindex, masterIfindex, err):
-//   - modified: whether kernel state was actually changed
+// Returns (ifindex, masterIfindex, err):
 //   - ifindex: kernel-assigned interface index (>0 on success, 0 on error)
 //   - masterIfindex: master's kernel ifindex after reconciliation (0 if no master)
 //
@@ -1075,7 +927,7 @@ func resolveDependencies(cfg *DeviceConfig) error {
 //   - If device doesn't exist: create it with our alias
 //   - If device exists with our alias: update or recreate as needed
 //   - If device exists without our alias: return NotOwnedError (could be human-created)
-func applyDeviceConfig(cfg *DeviceConfig) (bool, int, int, error) {
+func applyDeviceConfig(cfg *DeviceConfig) (int, int, error) {
 	name := cfg.deviceName()
 	// Resolve all dependencies first. For the delete-then-recreate path, this ensures
 	// we never delete an existing device unless all dependencies are present to recreate it.
@@ -1083,15 +935,14 @@ func applyDeviceConfig(cfg *DeviceConfig) (bool, int, int, error) {
 	// both return DependencyError and mark the config pending. But for existing devices,
 	// failing after delete would leave us in a worse state (device gone, can't recreate).
 	if err := resolveDependencies(cfg); err != nil {
-		return false, 0, 0, err
+		return 0, 0, err
 	}
-	modified := false
 	// Check if device already exists
 	link, err := util.GetNetLinkOps().LinkByName(name)
 	if err == nil {
 		// Device exists - verify ownership before modifying
 		if err := checkOwnership(link); err != nil {
-			return modified, 0, 0, err
+			return 0, 0, err
 		}
 
 		// Check for critical mismatches (immutable attributes that require recreate)
@@ -1099,25 +950,20 @@ func applyDeviceConfig(cfg *DeviceConfig) (bool, int, int, error) {
 			klog.Warningf("NetlinkDeviceManager: device %s has critical config drift, recreating: existing=%+v desired=%+v",
 				name, buildManagedLink(link), buildManagedLink(cfg.Link))
 			if err := util.GetNetLinkOps().LinkDelete(link); err != nil {
-				return modified, 0, 0, fmt.Errorf("failed to delete mismatched device %s: %w", name, err)
+				return 0, 0, fmt.Errorf("failed to delete mismatched device %s: %w", name, err)
 			}
-			modified = true
 			// Fall through to create
 		} else {
 			// Device exists with correct critical attrs, update mutable attrs
-			modified, masterIfindex, err := updateDevice(link, cfg)
-			return modified, link.Attrs().Index, masterIfindex, err
+			masterIfindex, err := updateDevice(link, cfg)
+			return link.Attrs().Index, masterIfindex, err
 		}
 	} else if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
-		return modified, 0, 0, fmt.Errorf("failed to check device %s: %w", name, err)
+		return 0, 0, fmt.Errorf("failed to check device %s: %w", name, err)
 	}
 
 	// Device doesn't exist (or was just deleted), create it
-	ifindex, masterIfindex, err := createDevice(cfg)
-	if err != nil {
-		return modified, 0, 0, err
-	}
-	return true, ifindex, masterIfindex, nil
+	return createDevice(cfg)
 }
 
 // createDevice creates a new netlink device.
@@ -1198,10 +1044,9 @@ func createDevice(cfg *DeviceConfig) (int, int, error) {
 //
 // Immutable attributes (VNI, SrcAddr, VlanId, etc.) are handled by fieldsMatch
 // (criticalMatch), which triggers delete+recreate instead.
-func updateDevice(link netlink.Link, cfg *DeviceConfig) (bool, int, error) {
+func updateDevice(link netlink.Link, cfg *DeviceConfig) (int, error) {
 	name := cfg.deviceName()
 	currentAttrs := link.Attrs()
-	modified := false
 	masterIfindex := 0
 
 	// Only call LinkModify if there are actual differences to apply.
@@ -1209,9 +1054,8 @@ func updateDevice(link netlink.Link, cfg *DeviceConfig) (bool, int, error) {
 	if needsLinkModify(link, cfg) {
 		modifiedLink := prepareLinkForModify(link, cfg)
 		if err := util.GetNetLinkOps().LinkModify(modifiedLink); err != nil {
-			return modified, 0, fmt.Errorf("failed to modify link %s: %w", name, err)
+			return 0, fmt.Errorf("failed to modify link %s: %w", name, err)
 		}
-		modified = true
 		klog.V(5).Infof("NetlinkDeviceManager: applied LinkModify for device %s", name)
 	}
 
@@ -1222,54 +1066,52 @@ func updateDevice(link netlink.Link, cfg *DeviceConfig) (bool, int, error) {
 		masterLink, err := util.GetNetLinkOps().LinkByName(cfg.Master)
 		if err != nil {
 			if util.GetNetLinkOps().IsLinkNotFoundError(err) {
-				return modified, 0, &DependencyError{Dependency: cfg.Master, Reason: "master not found (deleted after validation)"}
+				return 0, &DependencyError{Dependency: cfg.Master, Reason: "master not found (deleted after validation)"}
 			}
-			return modified, 0, fmt.Errorf("failed to find master %s: %w", cfg.Master, err)
+			return 0, fmt.Errorf("failed to find master %s: %w", cfg.Master, err)
 		}
 		masterIfindex = masterLink.Attrs().Index
 		if currentAttrs.MasterIndex != masterIfindex {
 			// Bring device down before master change to avoid having traffic flowing
 			// through the device during intermediate states.
 			if err := util.GetNetLinkOps().LinkSetDown(link); err != nil {
-				return modified, 0, fmt.Errorf("failed to set link %s down before master change: %w", name, err)
+				return 0, fmt.Errorf("failed to set link %s down before master change: %w", name, err)
 			}
-			modified = true
 			if err := util.GetNetLinkOps().LinkSetMaster(link, masterLink); err != nil {
-				return modified, 0, fmt.Errorf("failed to set master %s for device %s: %w", cfg.Master, name, err)
+				return 0, fmt.Errorf("failed to set master %s for device %s: %w", cfg.Master, name, err)
 			}
 			klog.V(5).Infof("NetlinkDeviceManager: updated master %s for device %s", cfg.Master, name)
 		}
 		// Apply bridge port settings if configured (not handled by LinkModify).
 		if err := ensureBridgePortSettings(link, cfg); err != nil {
-			return modified, 0, err
+			return 0, err
 		}
 	} else if currentAttrs.MasterIndex != 0 {
 		// Desired config has no master, but device is currently attached to one.
 		// Detach to match the declarative "no master" intent.
 		if err := util.GetNetLinkOps().LinkSetNoMaster(link); err != nil {
-			return modified, 0, fmt.Errorf("failed to detach %s from master: %w", name, err)
+			return 0, fmt.Errorf("failed to detach %s from master: %w", name, err)
 		}
-		modified = true
 		klog.V(5).Infof("NetlinkDeviceManager: detached device %s from master (ifindex %d)", name, currentAttrs.MasterIndex)
 	}
 
 	// Sync addresses if configured
 	if err := syncAddresses(link, cfg); err != nil {
-		return modified, 0, err
+		return 0, err
 	}
 
 	// Sync VID/VNI mappings (VXLAN bridge ports only)
 	if err := syncVIDVNIMappings(link, cfg); err != nil {
-		return modified, 0, err
+		return 0, err
 	}
 
 	// Bring device up.
 	// For already-up devices (no master change) this is a no-op.
 	if err := ensureDeviceUp(link); err != nil {
-		return modified, 0, err
+		return 0, err
 	}
 
-	return modified, masterIfindex, nil
+	return masterIfindex, nil
 }
 
 // needsLinkModify checks if any mutable attributes differ between current link and desired config.
