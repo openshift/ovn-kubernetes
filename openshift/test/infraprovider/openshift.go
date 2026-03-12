@@ -36,6 +36,7 @@ const (
 	primaryNetworkName         = "ostestbm_net"
 	frrContainerPrimaryNetIPv4 = "192.168.111.3"
 	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
+	externalFRRContainerName   = "frr"
 )
 
 type openshift struct {
@@ -109,6 +110,10 @@ func New(config *rest.Config) (api.Provider, error) {
 				// Initialize command runner for executing podman commands on hypervisor
 				o.ContainerOps = &container.ContainerOps{CmdRunner: host}
 				o.host = host
+				err = o.setupExternalFRRContainer()
+				if err != nil {
+					ginkgo.GinkgoLogr.Info("Failed to configure external frr container", "error", err)
+				}
 				ginkgo.GinkgoLogr.Info("External container support enabled")
 			}
 		}
@@ -223,6 +228,20 @@ func findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeName string) (st
 		}
 	}
 	return "", fmt.Errorf("failed to find network interface from ovnkube-node pod %s", ovnKubeNodePodName)
+}
+
+func (o *openshift) setupExternalFRRContainer() error {
+	frr := api.ExternalContainer{Name: externalFRRContainerName}
+	// Enable keep_addr_on_down to preserve IPv6 addresses during VRF enslavement.
+	// Without this, IPv6 global addresses are removed when interfaces are moved to a VRF,
+	// causing FRR/zebra to fail creating FIB nexthop groups ("no fib nhg" bug).
+	// See: https://docs.kernel.org/networking/vrf.html (section 4: Enslave L3 interfaces)
+	//     https://github.com/FRRouting/frr/issues/1666
+	_, err := o.ExecExternalContainerCommand(frr, []string{"sysctl", "-w", "net.ipv6.conf.all.keep_addr_on_down=1"})
+	if err != nil {
+		return fmt.Errorf("failed to configure %s container: %w", externalFRRContainerName, err)
+	}
+	return nil
 }
 
 func (o *openshift) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
