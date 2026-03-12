@@ -19,7 +19,7 @@ package v1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 )
 
 // ClusterNetworkConnect enables connecting multiple User Defined Networks
@@ -139,15 +139,17 @@ type ConnectSubnet struct {
 }
 
 // ConnectivityType represents the different connectivity types that can be enabled for connected networks.
-// +kubebuilder:validation:Enum=PodNetwork;ClusterIPServiceNetwork
+// +kubebuilder:validation:Enum=PodNetwork;ServiceNetwork
 type ConnectivityType string
 
 const (
 	// PodNetwork enables direct pod-to-pod communication across connected networks.
 	PodNetwork ConnectivityType = "PodNetwork"
 
-	// ClusterIPServiceNetwork enables ClusterIP service access across connected networks.
-	ClusterIPServiceNetwork ConnectivityType = "ClusterIPServiceNetwork"
+	// ServiceNetwork enables ClusterIP service access across connected networks.
+	// Note that services of type nodeports and loadbalancers are already reachable
+	// across networks by default.
+	ServiceNetwork ConnectivityType = "ServiceNetwork"
 )
 
 // StatusType represents the status of a ClusterNetworkConnect.

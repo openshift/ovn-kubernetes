@@ -22,12 +22,11 @@ Design document can be found [here](https://docs.google.com/document/d/11IoMKioh
 
 The **ovn-kubernetes** deployment will have two parts one on the host and another on the DPU side.
 
-
 These aforementioned parts are expected to be deployed also on two different Kubernetes clusters, one for the host and another for the DPUs.
 
+Always check the dependencies on the [Requirements page](../requirements.md)
 
 ### Host Cluster
----
 
 #### OVN-Kubernetes control plane related component
 - ovn-cluster-manager
@@ -46,7 +45,6 @@ These aforementioned parts are expected to be deployed also on two different Kub
 For detailed configuration of gateway interfaces in DPU host mode, see [DPU Gateway Interface Configuration](dpu-gateway-interface.md).
 
 ### DPU Cluster
----
 
 #### OVN-Kubernetes components
 - local-nb-ovsdb 
@@ -55,3 +53,15 @@ For detailed configuration of gateway interfaces in DPU host mode, see [DPU Gate
 - ovnkube-controller-with-node
 - ovn-controller
 - ovs-metrics
+
+## DPU health monitoring
+
+OVN-Kubernetes uses a custom Kubernetes `Lease` in the `ovn-kubernetes` namespace to track the health of the DPU side of a trusted deployment.
+The DPU host creates the lease and sets an owner reference to the Kubernetes `Node`, while ovnkube running on the DPU renews the lease on a regular interval.
+
+Two ovnkube-node options control this behavior:
+- `--dpu-node-lease-renew-interval` (seconds, default 10). Set to `0` to disable the health check.
+- `--dpu-node-lease-duration` (seconds, default 40).
+
+If the lease expires, the DPU host CNI server fails `ADD` requests immediately with `DPU Not Ready` and the `STATUS` command returns a CNI error with code `50` (The plugin is not available).
+This causes the container runtime to report `NetworkReady=false`, preventing new workloads from landing on the affected host until the DPU becomes healthy again.
