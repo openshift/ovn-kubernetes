@@ -3,6 +3,7 @@ package node
 import (
 	"fmt"
 	"net"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -440,6 +441,14 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 				return fmt.Errorf("failed to update node %q tunnel id annotation %d for network %s: %w",
 					node.Name, tunnelID, networkName, err)
 			}
+		}
+
+		if na.netInfo.IsPrimaryNetwork() && na.netInfo.IsUserDefinedNetwork() {
+			util.MaybeSleepOnce(
+				"ocpbugs-74973:udn-node-annotation:"+networkName,
+				10*time.Second,
+				fmt.Sprintf("node annotation update for network %s (node %s)", networkName, nodeName),
+			)
 		}
 		// It is possible to update the node annotations using status subresource
 		// because changes to metadata via status subresource are not restricted for nodes.

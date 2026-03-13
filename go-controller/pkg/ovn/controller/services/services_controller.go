@@ -249,6 +249,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 	c.startupDoneLock.Lock()
 	c.startupDone = true
 	c.startupDoneLock.Unlock()
+	klog.Infof("OCPBUGS-74973-DEBUG: startupDone=true for network=%s, nodeInfos count: %d", c.netInfo.GetNetworkName(), len(c.nodeInfos))
 
 	// Start the workers after the repair loop to avoid races
 	klog.Infof("Starting workers for network=%s", c.netInfo.GetNetworkName())
@@ -307,7 +308,14 @@ func (c *Controller) handleErr(err error, key string) {
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
+
+	isUDNSvc := c.netInfo.IsPrimaryNetwork() && util.IsUDNEnabledService(key)
+
 	if err == nil {
+		if isUDNSvc {
+			klog.Infof("OCPBUGS-74973-DEBUG: handleErr: UDN service %s synced successfully for network=%s — forgetting (will not be reprocessed unless re-queued)",
+				key, c.netInfo.GetNetworkName())
+		}
 		recorders.GetConfigDurationRecorder().End("service", ns, name)
 		c.queue.Forget(key)
 		return
@@ -316,11 +324,19 @@ func (c *Controller) handleErr(err error, key string) {
 	metrics.MetricRequeueServiceCount.Inc()
 
 	if c.queue.NumRequeues(key) < maxRetries {
+		if isUDNSvc {
+			klog.Infof("OCPBUGS-74973-DEBUG: handleErr: UDN service %s FAILED for network=%s (requeue %d/%d): %v",
+				key, c.netInfo.GetNetworkName(), c.queue.NumRequeues(key)+1, maxRetries, err)
+		}
 		klog.V(2).InfoS("Error syncing service, retrying", "service", klog.KRef(ns, name), "err", err)
 		c.queue.AddRateLimited(key)
 		return
 	}
 
+	if isUDNSvc {
+		klog.Warningf("OCPBUGS-74973-DEBUG: handleErr: UDN service %s DROPPED from queue for network=%s after %d retries: %v",
+			key, c.netInfo.GetNetworkName(), maxRetries, err)
+	}
 	klog.Warningf("Dropping service %q out of the queue for network=%s: %v", key, c.netInfo.GetNetworkName(), err)
 	recorders.GetConfigDurationRecorder().End("service", ns, name)
 	c.queue.Forget(key)
@@ -402,8 +418,12 @@ func (c *Controller) syncService(key string) error {
 	// Handle default network services enabled for UDN in shared gateway mode
 	if c.netInfo.IsPrimaryNetwork() &&
 		util.IsUDNEnabledService(key) {
+		klog.Infof("OCPBUGS-74973-DEBUG: syncService processing UDN-enabled service %s for network=%s, nodeInfos count: %d, service found in cache: %v",
+			key, c.netInfo.GetNetworkName(), len(c.nodeInfos), service != nil)
 
 		if service == nil {
+			klog.Warningf("OCPBUGS-74973-DEBUG: service %s is NIL in cache for network=%s — calling cleanupUDNEnabledServiceRoute (this will DELETE routes!)",
+				key, c.netInfo.GetNetworkName())
 			return c.cleanupUDNEnabledServiceRoute(key)
 		}
 
@@ -571,7 +591,7 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 
 // RequestFullSync re-syncs every service that currently exists
 func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
-	klog.Infof("Full service sync requested for network=%s", c.netInfo.GetNetworkName())
+	klog.Infof("OCPBUGS-74973-DEBUG: RequestFullSync called for network=%s with %d nodeInfos", c.netInfo.GetNetworkName(), len(nodeInfos))
 
 	// Resync node infos and node IP templates.
 	c.syncNodeInfos(nodeInfos)
@@ -581,6 +601,8 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 	// aren't up yet anyway: no need to do it during node tracker startup then)
 	c.startupDoneLock.RLock()
 	defer c.startupDoneLock.RUnlock()
+	klog.Infof("OCPBUGS-74973-DEBUG: RequestFullSync for network=%s, startupDone=%v, nodeInfos after sync: %d",
+		c.netInfo.GetNetworkName(), c.startupDone, len(c.nodeInfos))
 	if c.startupDone {
 		services, err := c.serviceLister.List(labels.Everything())
 		if err != nil {
@@ -770,7 +792,8 @@ func (c *Controller) getServiceNamespacedNameFromEndpointSlice(endpointSlice *di
 }
 
 func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
-	klog.Infof("Removing UDN enabled service route for service %s in network: %s", key, c.netInfo.GetNetworkName())
+	klog.Infof("OCPBUGS-74973-DEBUG: cleanupUDNEnabledServiceRoute called for service %s in network=%s, topology=%s, nodeInfos count: %d",
+		key, c.netInfo.GetNetworkName(), c.netInfo.TopologyType(), len(c.nodeInfos))
 	delPredicate := func(route *nbdb.LogicalRouterStaticRoute) bool {
 		return route.ExternalIDs[types.NetworkExternalID] == c.netInfo.GetNetworkName() &&
 			route.ExternalIDs[types.TopologyExternalID] == c.netInfo.TopologyType() &&
@@ -781,26 +804,45 @@ func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
 	var err error
 	if c.netInfo.TopologyType() == types.Layer2Topology && !globalconfig.Layer2UsesTransitRouter {
 		for _, node := range c.nodeInfos {
-			if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, c.netInfo.GetNetworkScopedGWRouterName(node.name), delPredicate); err != nil {
+			routerName := c.netInfo.GetNetworkScopedGWRouterName(node.name)
+			klog.Infof("OCPBUGS-74973-DEBUG: cleanupUDNEnabledServiceRoute deleting routes from router %s for service %s network=%s",
+				routerName, key, c.netInfo.GetNetworkName())
+			if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, routerName, delPredicate); err != nil {
 				return err
 			}
 		}
 	} else {
-		if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, c.netInfo.GetNetworkScopedClusterRouterName(), delPredicate); err != nil {
+		routerName := c.netInfo.GetNetworkScopedClusterRouterName()
+		klog.Infof("OCPBUGS-74973-DEBUG: cleanupUDNEnabledServiceRoute deleting routes from cluster router %s for service %s network=%s",
+			routerName, key, c.netInfo.GetNetworkName())
+		if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, routerName, delPredicate); err != nil {
 			return err
 		}
 	}
+	klog.Infof("OCPBUGS-74973-DEBUG: cleanupUDNEnabledServiceRoute transacting %d ops for service %s network=%s",
+		len(ops), key, c.netInfo.GetNetworkName())
 	_, err = libovsdbops.TransactAndCheck(c.nbClient, ops)
 	return err
 }
 
 func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) error {
-	klog.Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, c.netInfo.GetNetworkName())
+	klog.Infof("OCPBUGS-74973-DEBUG: configureUDNEnabledServiceRoute called for %s/%s in network %s, topology=%s, nodeInfos count: %d",
+		service.Namespace, service.Name, c.netInfo.GetNetworkName(), c.netInfo.TopologyType(), len(c.nodeInfos))
+	if len(c.nodeInfos) == 0 {
+		klog.Warningf("OCPBUGS-74973-DEBUG: nodeInfos is EMPTY for network %s while configuring service %s/%s — this is the race condition! No static routes will be created.",
+			c.netInfo.GetNetworkName(), service.Namespace, service.Name)
+	} else {
+		for _, nodeInfo := range c.nodeInfos {
+			klog.Infof("OCPBUGS-74973-DEBUG: nodeInfo present: %s, gatewayRouter=%s, mgmtIPs=%v (network %s)",
+				nodeInfo.name, nodeInfo.gatewayRouterName, nodeInfo.mgmtIPs, c.netInfo.GetNetworkName())
+		}
+	}
 
+	svcKey := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String()
 	extIDs := map[string]string{
 		types.NetworkExternalID:           c.netInfo.GetNetworkName(),
 		types.TopologyExternalID:          c.netInfo.TopologyType(),
-		types.UDNEnabledServiceExternalID: ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String(),
+		types.UDNEnabledServiceExternalID: svcKey,
 	}
 	routesEqual := func(a, b *nbdb.LogicalRouterStaticRoute) bool {
 		return a.IPPrefix == b.IPPrefix &&
@@ -812,6 +854,7 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 
 	}
 	var ops []ovsdb.Operation
+	var routerNames []string
 	for _, nodeInfo := range c.nodeInfos {
 		mgmtIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6String(service.Spec.ClusterIP), nodeInfo.mgmtIPs)
 		if err != nil {
@@ -827,6 +870,9 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 		if c.netInfo.TopologyType() == types.Layer2Topology && !globalconfig.Layer2UsesTransitRouter {
 			routerName = nodeInfo.gatewayRouterName
 		}
+		klog.Infof("OCPBUGS-74973-DEBUG: configureUDNEnabledServiceRoute creating route on router=%s, prefix=%s, nexthop=%s for service %s/%s network=%s",
+			routerName, staticRoute.IPPrefix, staticRoute.Nexthop, service.Namespace, service.Name, c.netInfo.GetNetworkName())
+		routerNames = append(routerNames, routerName)
 		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, nil, routerName, &staticRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return routesEqual(item, &staticRoute)
 		})
@@ -835,8 +881,34 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 		}
 	}
 
+	klog.Infof("OCPBUGS-74973-DEBUG: configureUDNEnabledServiceRoute transacting %d ops for service %s/%s network=%s",
+		len(ops), service.Namespace, service.Name, c.netInfo.GetNetworkName())
 	_, err := libovsdbops.TransactAndCheck(c.nbClient, ops)
-	return err
+	if err != nil {
+		klog.Errorf("OCPBUGS-74973-DEBUG: configureUDNEnabledServiceRoute TransactAndCheck FAILED for service %s/%s network=%s: %v",
+			service.Namespace, service.Name, c.netInfo.GetNetworkName(), err)
+		return err
+	}
+
+	// Verify routes actually exist after creation
+	verifyPredicate := func(route *nbdb.LogicalRouterStaticRoute) bool {
+		return route.ExternalIDs[types.NetworkExternalID] == c.netInfo.GetNetworkName() &&
+			route.ExternalIDs[types.TopologyExternalID] == c.netInfo.TopologyType() &&
+			route.ExternalIDs[types.UDNEnabledServiceExternalID] == svcKey
+	}
+	existingRoutes, verifyErr := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(c.nbClient, verifyPredicate)
+	if verifyErr != nil {
+		klog.Warningf("OCPBUGS-74973-DEBUG: configureUDNEnabledServiceRoute verification read FAILED for network=%s: %v",
+			c.netInfo.GetNetworkName(), verifyErr)
+	} else {
+		klog.Infof("OCPBUGS-74973-DEBUG: configureUDNEnabledServiceRoute verification: found %d routes for service %s/%s network=%s (expected routers: %v)",
+			len(existingRoutes), service.Namespace, service.Name, c.netInfo.GetNetworkName(), routerNames)
+		for _, r := range existingRoutes {
+			klog.Infof("OCPBUGS-74973-DEBUG:   verified route: prefix=%s nexthop=%s uuid=%s", r.IPPrefix, r.Nexthop, r.UUID)
+		}
+	}
+
+	return nil
 }
 
 func _getServiceNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice, inDefaultNetwork bool) (ktypes.NamespacedName, error) {
