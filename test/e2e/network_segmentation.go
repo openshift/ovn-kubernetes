@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
-	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
+	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/util/podutils"
@@ -47,6 +48,7 @@ import (
 const openDefaultPortsAnnotation = "k8s.ovn.org/open-default-ports"
 const RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
 const OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
+const expectedUDNCNIVersion = "1.1.0"
 
 var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 	f := wrappedTestFramework("network-segmentation")
@@ -280,7 +282,7 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 						udnPodConfig podConfiguration,
 					) {
 						if !isInterconnectEnabled() {
-							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4528"
+							const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4528"
 							e2eskipper.Skipf(
 								"These tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
 							)
@@ -1317,6 +1319,40 @@ spec:
 			}
 		})
 
+		It("should delete NAD when target namespace is terminating", func() {
+			testTerminatingNs := f.Namespace.Name + "terminating"
+
+			By("add new target namespace to CR namespace-selector")
+			patch := fmt.Sprintf(`[{"op": "add", "path": "./spec/namespaceSelector/matchExpressions/0/values/-", "value": "%s"}]`, testTerminatingNs)
+			_, err := e2ekubectl.RunKubectl("", "patch", clusterUserDefinedNetworkResource, testClusterUdnName, "--type=json", "-p="+patch)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("create the target namespace")
+			_, err = cs.CoreV1().Namespaces().Create(context.Background(), &v1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   testTerminatingNs,
+					Labels: map[string]string{RequiredUDNNamespaceLabel: ""},
+				}}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verify NAD is created in the namespace")
+			Eventually(func() error {
+				_, err := nadClient.NetworkAttachmentDefinitions(testTerminatingNs).Get(context.Background(), testClusterUdnName, metav1.GetOptions{})
+				return err
+			}, time.Second*15, time.Second*1).Should(Succeed(), "NAD should be created in target namespace")
+
+			By("delete the namespace to trigger termination")
+			err = cs.CoreV1().Namespaces().Delete(context.Background(), testTerminatingNs, metav1.DeleteOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verify NAD is deleted from the terminating namespace")
+			Eventually(func() bool {
+				_, err := nadClient.NetworkAttachmentDefinitions(testTerminatingNs).Get(context.Background(), testClusterUdnName, metav1.GetOptions{})
+				return err != nil && kerrors.IsNotFound(err)
+			}, time.Second*30, time.Second*1).Should(BeTrue(),
+				"NAD should be deleted when namespace is terminating")
+		})
+
 		It("should create NAD in new created namespaces that apply to namespace-selector", func() {
 			testNewNs := f.Namespace.Name + "green"
 
@@ -1563,7 +1599,7 @@ spec:
 					"can be accessed to from the pods running in the Kubernetes cluster",
 					func(netConfigParams *networkAttachmentConfigParams, clientPodConfig podConfiguration) {
 						if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
-							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
+							const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4642"
 							e2eskipper.Skipf(
 								"Egress e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
 							)
@@ -2093,7 +2129,7 @@ func assertL2SecondaryNetAttachDefManifest(nadClient nadclient.K8sCniCncfIoV1Int
 	expectedNetworkName := namespace + "_" + udnName
 	expectedNadName := namespace + "/" + udnName
 	ExpectWithOffset(1, nad.Spec.Config).To(MatchJSON(`{
-		"cniVersion":"1.0.0",
+		"cniVersion":"` + expectedUDNCNIVersion + `",
 		"type": "ovn-k8s-cni-overlay",
 		"name": "` + expectedNetworkName + `",
 		"netAttachDefName": "` + expectedNadName + `",
@@ -2158,7 +2194,7 @@ func assertClusterNADManifest(nadClient nadclient.K8sCniCncfIoV1Interface, names
 	expectedNetworkName := "cluster_udn_" + udnName
 	expectedNadName := namespace + "/" + udnName
 	ExpectWithOffset(1, nad.Spec.Config).To(MatchJSON(`{
-		"cniVersion":"1.0.0",
+		"cniVersion":"` + expectedUDNCNIVersion + `",
 		"type": "ovn-k8s-cni-overlay",
 		"name": "` + expectedNetworkName + `",
 		"netAttachDefName": "` + expectedNadName + `",
@@ -2371,6 +2407,24 @@ func filterL3Subnets(cs clientset.Interface, l3Subnets []udnv1.Layer3Subnet) []u
 	return filteredL3Subnets
 }
 
+func matchL3SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1.Layer3Subnet) (out []udnv1.Layer3Subnet) {
+	for _, subnet := range in {
+		if families.Has(utilnet.IPFamilyOfCIDRString(string(subnet.CIDR))) {
+			out = append(out, subnet)
+		}
+	}
+	return
+}
+
+func matchL2SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1.CIDR) (out []udnv1.CIDR) {
+	for _, subnet := range in {
+		if families.Has(utilnet.IPFamilyOfCIDRString(string(subnet))) {
+			out = append(out, subnet)
+		}
+	}
+	return
+}
+
 func generateCIDRforClusterUDN(cs clientset.Interface, v4, v6 string) string {
 	cidr := `[{cidr: ` + v4 + `}]`
 	if isIPv6Supported(cs) && isIPv4Supported(cs) {
@@ -2514,4 +2568,21 @@ func unmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[strin
 		}
 	}
 	return podNetworks, nil
+}
+
+func getNetworkSubnetsFromSpec(networkSpec *udnv1.NetworkSpec) []string {
+	var subnets []string
+	switch {
+	case networkSpec.Layer2 != nil:
+		for _, cidr := range networkSpec.Layer2.Subnets {
+			subnets = append(subnets, string(cidr))
+		}
+	case networkSpec.Layer3 != nil:
+		for _, subnet := range networkSpec.Layer3.Subnets {
+			subnets = append(subnets, string(subnet.CIDR))
+		}
+	default:
+		panic("unsupported network type")
+	}
+	return subnets
 }

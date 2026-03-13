@@ -1,12 +1,12 @@
 package healthcheck
 
 import (
+	"context"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
-	"golang.org/x/net/context"
 	"golang.org/x/net/proxy"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -16,7 +16,7 @@ import (
 
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 )
 
 const (

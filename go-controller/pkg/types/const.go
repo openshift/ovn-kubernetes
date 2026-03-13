@@ -4,10 +4,11 @@ import "time"
 
 const (
 	// Default network name
-	DefaultNetworkName    = "default"
-	K8sPrefix             = "k8s-"
-	HybridOverlayPrefix   = "int-"
-	HybridOverlayGRSubfix = "-gr"
+	DefaultNetworkName           = "default"
+	DefaultNetworkControllerName = "default-network-controller"
+	K8sPrefix                    = "k8s-"
+	HybridOverlayPrefix          = "int-"
+	HybridOverlayGRSubfix        = "-gr"
 
 	// K8sMgmtIntfNamePrefix name to be used as an OVS internal port on the node as prefix for networs
 	K8sMgmtIntfNamePrefix = "ovn-k8s-mp"
@@ -52,6 +53,7 @@ const (
 	EgressGWSwitchPrefix       = "exgw-"
 	PatchPortPrefix            = "patch-"
 	PatchPortSuffix            = "-to-br-int"
+	MACVRFPortPrefix           = "macvrf-"
 
 	// types.OVNLayer2Switch is the name of layer2 topology switch
 	OVNLayer2Switch = "ovn_layer2_switch"
@@ -97,6 +99,14 @@ const (
 	PrimaryUDNAllowPriority = 1001
 	// Default deny acl rule priority
 	PrimaryUDNDenyPriority = 1000
+	// Priority for allowing service traffic to pass through before the drop ACL
+	// for network connect partial service connectivity
+	NetworkConnectPassServiceTrafficPriority = 500
+	// Priority for allowing same-network traffic to pass through before the drop ACL
+	// This prevents the drop ACL from blocking intra-network communication
+	NetworkConnectPassSameNetworkPriority = 475
+	// Priority for dropping pod-to-pod traffic between connected networks
+	NetworkConnectDropPodTrafficPriority = 450
 
 	// ACL Tiers
 	// Tier 0 is called Primary as it is evaluated before any other feature-related Tiers.
@@ -212,6 +222,11 @@ const (
 	ClusterSwitchLBGroupName = "clusterSwitchLBGroup"
 	ClusterRouterLBGroupName = "clusterRouterLBGroup"
 
+	// NetworkConnectServiceLBGroupPrefix is the prefix for per-CNC LoadBalancerGroups
+	// used for cross-network service connectivity. Each CNC gets its own LBG
+	// so that overlapping CNCs don't interfere with each other's cleanup.
+	NetworkConnectServiceLBGroupPrefix = "cnc_svc_"
+
 	// key for network name external-id
 	NetworkExternalID = OvnK8sPrefix + "/" + "network"
 	// key for node name external-id
@@ -253,9 +268,13 @@ const (
 	NetworkRoleNone           = "none"
 
 	// Network transport types - canonical format (lowercase)
-	NetworkTransportGeneve    = "geneve"
 	NetworkTransportNoOverlay = "no-overlay"
 	NetworkTransportEVPN      = "evpn"
+
+	// NoOverlaySNATEnabled enables SNAT for outbound traffic
+	NoOverlaySNATEnabled = "enabled"
+	// NoOverlaySNATDisabled disables SNAT for outbound traffic
+	NoOverlaySNATDisabled = "disabled"
 
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
@@ -333,6 +352,14 @@ const (
 	// NFTRemoteNodeIPsv6 is a set used to track remote node v6IPs that do not belong to
 	// the local node's subnet.
 	NFTRemoteNodeIPsv6 = "remote-node-ips-v6"
+
+	// NFTNoOverlaySNATExemptV4 is a set used for no-overlay mode with outbound SNAT enabled.
+	// Contains cluster CIDRs + local node IPv4 addresses that should be exempted from SNAT.
+	NFTNoOverlaySNATExemptV4 = "no-overlay-snat-exempt-v4"
+
+	// NFTNoOverlaySNATExemptV6 is a set used for no-overlay mode with outbound SNAT enabled.
+	// Contains cluster CIDRs + local node IPv6 addresses that should be exempted from SNAT.
+	NFTNoOverlaySNATExemptV6 = "no-overlay-snat-exempt-v6"
 
 	// Metrics
 	MetricOvnkubeNamespace               = "ovnkube"

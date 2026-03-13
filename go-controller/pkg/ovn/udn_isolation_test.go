@@ -1,12 +1,12 @@
 package ovn
 
 import (
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -20,7 +20,7 @@ var _ = Describe("UDN Isolation", func() {
 	It("ACLs should be updated to the Primary tier ", func() {
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-		fakeController := getFakeController(DefaultNetworkControllerName)
+		fakeController := getFakeController(types.DefaultNetworkControllerName)
 
 		// build port group with one ACL that has default tier
 		pgIDs := fakeController.getSecondaryPodsPortGroupDbIDs()
@@ -54,7 +54,7 @@ var _ = Describe("UDN Isolation", func() {
 	It("Should handle syncing legacy DBIDs", func() {
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-		fakeController := getFakeController(DefaultNetworkControllerName)
+		fakeController := getFakeController(types.DefaultNetworkControllerName)
 
 		By("initializing the database with legacy secondary IDs")
 		pgIDs := fakeController.getSecondaryPodsPortGroupDbIDs()

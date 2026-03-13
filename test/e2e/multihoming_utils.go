@@ -9,8 +9,6 @@ import (
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/client"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kapitypes "k8s.io/apimachinery/pkg/types"
@@ -25,7 +23,7 @@ import (
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/ip"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/ip"
 )
 
 func netCIDR(netCIDR string, netPrefixLengthPerNode int) string {
@@ -199,7 +197,7 @@ type podConfiguration struct {
 	nodeSelector           map[string]string
 	isPrivileged           bool
 	labels                 map[string]string
-	annotations                  map[string]string
+	annotations            map[string]string
 	requiresExtraNamespace bool
 	hostNetwork            bool
 	ipRequestFromSubnet    string
@@ -737,20 +735,6 @@ func findInterfaceByIP(targetIP string) (string, error) {
 	}
 
 	return "", fmt.Errorf("Interface with IP %s not found", targetIP)
-}
-
-func getNetworkGateway(cli *client.Client, networkName string) (string, error) {
-	network, err := cli.NetworkInspect(context.Background(), networkName, types.NetworkInspectOptions{})
-	if err != nil {
-		return "", err
-	}
-
-	if network.IPAM.Config != nil && len(network.IPAM.Config) > 0 {
-		gatewayIP := network.IPAM.Config[0].Gateway
-		return gatewayIP, nil
-	}
-
-	return "", fmt.Errorf("Gateway not found for network %q", networkName)
 }
 
 func getPodAnnotationForAttachment(pod *v1.Pod, attachmentName string) (PodAnnotation, error) {

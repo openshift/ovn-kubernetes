@@ -16,16 +16,16 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/ndp"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/ndp"
 )
 
 // DefaultGatewayReconciler is responsible for reconciling the default gateway
@@ -276,19 +276,19 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 	return nil
 }
 
-func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool) error {
+func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool, controllerName string) error {
 	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale vm static routes: %v", err)
 	}
 	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale vm policies: %v", err)
 	}
 	if err := libovsdbops.DeleteDHCPOptionsWithPredicate(nbClient, func(item *nbdb.DHCPOptions) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale dhcp options: %v", err)
 	}

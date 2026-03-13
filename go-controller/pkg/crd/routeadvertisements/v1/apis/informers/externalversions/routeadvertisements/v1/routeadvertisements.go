@@ -21,10 +21,10 @@ import (
 	context "context"
 	time "time"
 
-	crdrouteadvertisementsv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
-	versioned "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
-	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/internalinterfaces"
-	routeadvertisementsv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/listers/routeadvertisements/v1"
+	crdrouteadvertisementsv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	versioned "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
+	internalinterfaces "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/internalinterfaces"
+	routeadvertisementsv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/listers/routeadvertisements/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
@@ -55,7 +55,7 @@ func NewRouteAdvertisementsInformer(client versioned.Interface, resyncPeriod tim
 // one. This reduces memory footprint and number of connections to the server.
 func NewFilteredRouteAdvertisementsInformer(client versioned.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
 	return cache.NewSharedIndexInformer(
-		&cache.ListWatch{
+		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
@@ -80,7 +80,7 @@ func NewFilteredRouteAdvertisementsInformer(client versioned.Interface, resyncPe
 				}
 				return client.K8sV1().RouteAdvertisements().Watch(ctx, options)
 			},
-		},
+		}, client),
 		&crdrouteadvertisementsv1.RouteAdvertisements{},
 		resyncPeriod,
 		indexers,

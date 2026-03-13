@@ -8,7 +8,7 @@ KIND (Kubernetes in Docker) deployment of OVN kubernetes is a fast and easy mean
 - Docker run time or podman
 - [KIND](https://kubernetes.io/docs/setup/learning-environment/kind/)
    - Installation instructions can be found at https://github.com/kubernetes-sigs/kind#installation-and-usage. 
-   - NOTE: The OVN-Kubernetes [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml](https://github.com/ovn-org/ovn-kubernetes/blob/master/contrib/kind.yaml) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
+   - NOTE: The OVN-Kubernetes [ovn-kubernetes/contrib/kind.sh](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.sh) and [ovn-kubernetes/contrib/kind.yaml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/contrib/kind.yaml) files provision port 11337. If firewalld is enabled, this port will need to be unblocked:
 
       ```
       sudo firewall-cmd --permanent --add-port=11337/tcp; sudo firewall-cmd --reload
@@ -318,7 +318,7 @@ and blamed on firewalld.
 To run OVN-Kubernetes with IPv6 in a KIND deployment, run:
 
 ```
-$ go get github.com/ovn-org/ovn-kubernetes; cd $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+$ go get github.com/ovn-kubernetes/ovn-kubernetes; cd $GOPATH/src/github.com/ovn-kubernetes/ovn-kubernetes
 
 $ cd go-controller/
 $ make
@@ -375,7 +375,7 @@ sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
 Download and install latest version of `kubectl`:
 
 ```
-$ K8S_VERSION=v1.34.0
+$ K8S_VERSION=v1.35.0
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
 $ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
@@ -417,12 +417,12 @@ make install INSTALL_DIR=$GOPATH/bin
 ### OVN-Kubernetes With IP Dual-stack
 
 For status of IP dual-stack in OVN-Kubernetes, see
-[1142](https://github.com/ovn-org/ovn-kubernetes/issues/1142).
+[1142](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/1142).
 
 To run OVN-Kubernetes with IP dual-stack in a KIND deployment, run:
 
 ```
-$ go get github.com/ovn-org/ovn-kubernetes; cd $GOPATH/src/github.com/ovn-org/ovn-kubernetes
+$ go get github.com/ovn-kubernetes/ovn-kubernetes; cd $GOPATH/src/github.com/ovn-kubernetes/ovn-kubernetes
 
 $ cd go-controller/
 $ make
@@ -431,7 +431,7 @@ $ cd ../dist/images/
 $ make fedora-image
 
 $ cd ../../contrib/
-$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.34.0 ./kind.sh
+$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.35.0 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
@@ -457,7 +457,7 @@ one (or both of) the following variables:
 
 ```
 $ cd ../../contrib/
-$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.34.0 ./kind.sh
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.35.0 ./kind.sh
 ```
 
 ### Using kind local registry to deploy non ovn-k containers

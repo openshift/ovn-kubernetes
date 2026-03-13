@@ -12,7 +12,7 @@ import (
 
 	"sigs.k8s.io/knftables"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 )
 
 func doNFTablesRules(platformType string) error {
