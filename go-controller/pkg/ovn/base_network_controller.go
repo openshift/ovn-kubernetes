@@ -1106,7 +1106,11 @@ func (bnc *BaseNetworkController) isLayer2WithInterconnectTransport() bool {
 // HandleNetworkRefChange enqueues node reconciliation when a NAD reference becomes active/inactive.
 func (bnc *BaseNetworkController) HandleNetworkRefChange(nodeName string, active bool) {
 	if !bnc.IsDefault() {
-		bnc.nodeReconciler.ReconcileNetwork(nodeName, bnc.GetNetworkName())
+		if active {
+			bnc.nodeReconciler.ReconcileNetwork(nodeName, bnc.GetNetworkName())
+		} else {
+			bnc.nodeReconciler.ReconcileNetworkDelete(nodeName, bnc.GetNetworkName())
+		}
 		return
 	}
 	if bnc.retryNodes == nil || bnc.watchFactory == nil {

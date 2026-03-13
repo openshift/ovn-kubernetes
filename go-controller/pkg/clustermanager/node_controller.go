@@ -189,7 +189,6 @@ func (c *clusterManagerNodeController) reconcileDelete(nodeName, netName string)
 
 	var errs []error
 	for _, handlerKey := range handlerKeys {
-		handlerKey := handlerKey
 		err := c.handlers.DoWithLock(handlerKey, func(key string) error {
 			handler, ok := c.handlers.Load(key)
 			if !ok || handler == nil {

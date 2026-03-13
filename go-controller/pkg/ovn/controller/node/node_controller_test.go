@@ -11,9 +11,11 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type fakeNodeHandler struct {
@@ -40,6 +42,15 @@ func (f *fakeNodeHandler) ReconcileNode(_ *corev1.Node, newNode *corev1.Node, _,
 func (f *fakeNodeHandler) SyncNodes(_ []*corev1.Node) error {
 	f.syncCalls++
 	return f.syncErr
+}
+
+type fakeNodeActivityNetworkManager struct {
+	networkmanager.FakeNetworkManager
+	active bool
+}
+
+func (f *fakeNodeActivityNetworkManager) NodeHasNetwork(_, _ string) bool {
+	return f.active
 }
 
 func newNodeLister(t *testing.T, nodes ...*corev1.Node) corelisters.NodeLister {
@@ -137,7 +148,7 @@ func TestDeregisterNetworkControllerClearsNetworkState(t *testing.T) {
 		bootstrapNodes: map[string]map[string]struct{}{
 			handler.netName: {"node-a": {}},
 		},
-		nodeActive: map[string]map[string]bool{
+		nodeConfigured: map[string]map[string]bool{
 			handler.netName: {"node-a": true},
 		},
 	}
@@ -150,8 +161,8 @@ func TestDeregisterNetworkControllerClearsNetworkState(t *testing.T) {
 	if _, ok := c.bootstrapNodes[handler.netName]; ok {
 		t.Fatalf("expected bootstrap nodes for %q to be removed", handler.netName)
 	}
-	if _, ok := c.nodeActive[handler.netName]; ok {
-		t.Fatalf("expected node activity for %q to be removed", handler.netName)
+	if _, ok := c.nodeConfigured[handler.netName]; ok {
+		t.Fatalf("expected configured state for %q to be removed", handler.netName)
 	}
 }
 
@@ -174,7 +185,7 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 		networkManager:  networkmanager.Default().Interface(),
 		handlers:        handlers,
 		bootstrapNodes:  map[string]map[string]struct{}{},
-		nodeActive:      map[string]map[string]bool{},
+		nodeConfigured:  map[string]map[string]bool{},
 		annotationCache: NewNodeAnnotationCache(),
 	}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}
@@ -187,5 +198,219 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 	}
 	if handlerB.reconcileCalls != 0 {
 		t.Fatalf("expected net-b handler to not be called, got %d", handlerB.reconcileCalls)
+	}
+}
+
+func TestDetermineNodeNetworkReconcileAction(t *testing.T) {
+	tests := []struct {
+		name                  string
+		deleteRequested       bool
+		bootstrapPending      bool
+		needsDynamicFiltering bool
+		desiredActive         bool
+		appliedActive         bool
+		expected              nodeNetworkReconcileAction
+	}{
+		{
+			name:             "bootstrap add when filtering disabled",
+			bootstrapPending: true,
+			expected:         nodeNetworkReconcileAdd,
+		},
+		{
+			name:                  "bootstrap noop for inactive filtered node",
+			bootstrapPending:      true,
+			needsDynamicFiltering: true,
+			expected:              nodeNetworkReconcileNoop,
+		},
+		{
+			name:                  "bootstrap add for active filtered node",
+			bootstrapPending:      true,
+			needsDynamicFiltering: true,
+			desiredActive:         true,
+			expected:              nodeNetworkReconcileAdd,
+		},
+		{
+			name:                  "add when node becomes active",
+			needsDynamicFiltering: true,
+			desiredActive:         true,
+			expected:              nodeNetworkReconcileAdd,
+		},
+		{
+			name:                  "update when node stays active",
+			needsDynamicFiltering: true,
+			desiredActive:         true,
+			appliedActive:         true,
+			expected:              nodeNetworkReconcileUpdate,
+		},
+		{
+			name:                  "delete when node becomes inactive",
+			needsDynamicFiltering: true,
+			appliedActive:         true,
+			expected:              nodeNetworkReconcileDelete,
+		},
+		{
+			name:                  "noop when node stays inactive",
+			needsDynamicFiltering: true,
+			expected:              nodeNetworkReconcileNoop,
+		},
+		{
+			name:            "delete when delete requested and node inactive",
+			deleteRequested: true,
+			expected:        nodeNetworkReconcileDelete,
+		},
+		{
+			name:                  "active state wins over stale delete request",
+			deleteRequested:       true,
+			needsDynamicFiltering: true,
+			desiredActive:         true,
+			expected:              nodeNetworkReconcileAdd,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := determineNodeNetworkReconcileAction(tt.deleteRequested, tt.bootstrapPending, tt.needsDynamicFiltering, tt.desiredActive, tt.appliedActive)
+			if got != tt.expected {
+				t.Fatalf("unexpected action: got %v want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestReconcileUpdateBootstrapInactiveRemoteNodeNoops(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+
+	handler := &fakeNodeHandler{netName: "net-a"}
+	handlers := syncmap.NewSyncMap[NodeHandler]()
+	handlers.Store(handler.netName, handler)
+
+	c := &NodeController{
+		networkManager: &fakeNodeActivityNetworkManager{active: false},
+		handlers:       handlers,
+		bootstrapNodes: map[string]map[string]struct{}{
+			handler.netName: {"node-a": {}},
+		},
+		nodeConfigured:  map[string]map[string]bool{},
+		annotationCache: NewNodeAnnotationCache(),
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Annotations: map[string]string{
+				util.OvnNodeZoneName: "remote-zone",
+			},
+		},
+	}
+
+	if err := c.reconcileUpdate(nil, node, handler.netName); err != nil {
+		t.Fatalf("reconcileUpdate returned error: %v", err)
+	}
+	if handler.reconcileCalls != 0 {
+		t.Fatalf("expected inactive remote bootstrap to skip reconcile, got %d calls", handler.reconcileCalls)
+	}
+	if c.nodeNeedsBootstrap(handler.netName, node.Name) {
+		t.Fatal("expected bootstrap state to be cleared")
+	}
+	if c.isNodeNetworkConfigured(handler.netName, node.Name) {
+		t.Fatal("expected node configured state to remain inactive")
+	}
+}
+
+func TestReconcileUpdateBootstrapInactiveRemoteNodeWithPendingDeleteDeletes(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+
+	handler := &fakeNodeHandler{netName: "net-a"}
+	handlers := syncmap.NewSyncMap[NodeHandler]()
+	handlers.Store(handler.netName, handler)
+
+	c := &NodeController{
+		networkManager: &fakeNodeActivityNetworkManager{active: false},
+		handlers:       handlers,
+		bootstrapNodes: map[string]map[string]struct{}{
+			handler.netName: {"node-a": {}},
+		},
+		pendingDeletes: map[string]map[string]bool{
+			handler.netName: {"node-a": true},
+		},
+		nodeConfigured:  map[string]map[string]bool{},
+		annotationCache: NewNodeAnnotationCache(),
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Annotations: map[string]string{
+				util.OvnNodeZoneName: "remote-zone",
+			},
+		},
+	}
+
+	if err := c.reconcileUpdate(nil, node, handler.netName); err != nil {
+		t.Fatalf("reconcileUpdate returned error: %v", err)
+	}
+	if handler.reconcileCalls != 0 {
+		t.Fatalf("expected delete-intent reconcile to skip add/update, got %d reconcile calls", handler.reconcileCalls)
+	}
+	if handler.deleteCalls != 1 {
+		t.Fatalf("expected delete-intent reconcile to invoke delete once, got %d", handler.deleteCalls)
+	}
+	if c.nodeNeedsBootstrap(handler.netName, node.Name) {
+		t.Fatal("expected bootstrap state to be cleared")
+	}
+	if c.isNodeNetworkConfigured(handler.netName, node.Name) {
+		t.Fatal("expected node configured state to remain inactive")
+	}
+	if c.isNodeNetworkPendingDelete(handler.netName, node.Name) {
+		t.Fatal("expected pending delete state to be cleared")
+	}
+}
+
+func TestReconcileUpdatePendingDeleteClearedWhenNodeBecomesActive(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+
+	handler := &fakeNodeHandler{netName: "net-a"}
+	handlers := syncmap.NewSyncMap[NodeHandler]()
+	handlers.Store(handler.netName, handler)
+
+	c := &NodeController{
+		networkManager: &fakeNodeActivityNetworkManager{active: true},
+		handlers:       handlers,
+		bootstrapNodes: map[string]map[string]struct{}{
+			handler.netName: {"node-a": {}},
+		},
+		pendingDeletes: map[string]map[string]bool{
+			handler.netName: {"node-a": true},
+		},
+		nodeConfigured:  map[string]map[string]bool{},
+		annotationCache: NewNodeAnnotationCache(),
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Annotations: map[string]string{
+				util.OvnNodeZoneName: "remote-zone",
+			},
+		},
+	}
+
+	if err := c.reconcileUpdate(nil, node, handler.netName); err != nil {
+		t.Fatalf("reconcileUpdate returned error: %v", err)
+	}
+	if handler.deleteCalls != 0 {
+		t.Fatalf("expected stale delete intent to be ignored, got %d delete calls", handler.deleteCalls)
+	}
+	if handler.reconcileCalls != 1 {
+		t.Fatalf("expected active node to reconcile normally, got %d reconcile calls", handler.reconcileCalls)
+	}
+	if c.isNodeNetworkPendingDelete(handler.netName, node.Name) {
+		t.Fatal("expected pending delete state to be cleared")
 	}
 }
