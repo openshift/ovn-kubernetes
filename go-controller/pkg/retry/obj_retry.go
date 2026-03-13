@@ -22,6 +22,9 @@ import (
 )
 
 const RetryObjInterval = 30 * time.Second
+// RetryObjAnnotationWaitInterval is used for faster retries when waiting for cluster manager
+// to allocate pod annotations. This reduces pod startup latency from 30s to 2s for annotation waits.
+const RetryObjAnnotationWaitInterval = 2 * time.Second
 const MaxFailedAttempts = 15 // same value used for the services level-driven controller
 const initialBackoff = 1 * time.Second
 const noBackoff = 0
@@ -44,6 +47,9 @@ type retryObjEntry struct {
 	// infiniteRetry indicates whether this object should be retried indefinitely, regardless of the number of failed attempts
 	// Used for pods only right now
 	infiniteRetry bool
+	// lastSuppressedError tracks if the last error was a suppressed error (e.g., waiting for annotation)
+	// Used to apply faster retry intervals for transient conditions vs real errors
+	lastSuppressedError bool
 }
 
 type EventHandler interface {
@@ -311,7 +317,23 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			forceRetry = true
 		}
 		backoff := entry.backoff + (time.Duration(rand.Intn(500)) * time.Millisecond)
-		objTimer := entry.timeStamp.Add(backoff)
+
+		// Use adaptive retry interval: faster retries for suppressed errors (e.g., waiting for annotations)
+		// vs normal retry interval for real errors
+		retryInterval := RetryObjInterval
+		if entry.lastSuppressedError {
+			retryInterval = RetryObjAnnotationWaitInterval
+			klog.V(5).Infof("Using fast retry interval (%v) for %s %s (waiting for annotation)",
+				retryInterval, r.ResourceHandler.ObjType, objKey)
+		}
+
+		// Check if enough time has passed since last retry attempt
+		// Use the minimum of exponential backoff or the retry interval
+		minBackoff := backoff
+		if backoff > retryInterval {
+			minBackoff = retryInterval
+		}
+		objTimer := entry.timeStamp.Add(minBackoff)
 		if !forceRetry && now.Before(objTimer) {
 			klog.V(5).Infof("Attempting retry of %s %s before timer (time: %s): skip", r.ResourceHandler.ObjType, objKey, objTimer)
 			return
@@ -571,12 +593,15 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					}
 					start := time.Now()
 					if err := r.ResourceHandler.AddResource(obj, false); err != nil {
-						if !ovntypes.IsSuppressedError(err) {
+						isSuppressed := ovntypes.IsSuppressedError(err)
+						if !isSuppressed {
 							klog.Errorf("Failed to create %s %s, error: %v", r.ResourceHandler.ObjType, key, err)
 							r.ResourceHandler.RecordErrorEvent(obj, "ErrorAddingResource", err)
 						} else {
 							klog.Infof("Failed to create %s %s, error: %v", r.ResourceHandler.ObjType, key, err)
 						}
+						// Track whether this was a suppressed error for adaptive retry interval
+						retryObj.lastSuppressedError = isSuppressed
 						r.increaseFailedAttemptsCounter(retryObj)
 						return
 					}
@@ -712,7 +737,8 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					if r.ResourceHandler.HasUpdateFunc {
 						// if this resource type has an update func, just call the update function
 						if err := r.ResourceHandler.UpdateResource(old, latest, found); err != nil {
-							if !ovntypes.IsSuppressedError(err) {
+							isSuppressed := ovntypes.IsSuppressedError(err)
+							if !isSuppressed {
 								klog.Errorf("Failed to update %s, old=%s, new=%s, error: %v",
 									r.ResourceHandler.ObjType, oldKey, newKey, err)
 								r.ResourceHandler.RecordErrorEvent(latest, "ErrorUpdatingResource", err)
@@ -726,14 +752,16 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 							} else {
 								retryEntry = r.initRetryObjWithAdd(latest, key)
 							}
+							// Track whether this was a suppressed error for adaptive retry interval
+							retryEntry.lastSuppressedError = isSuppressed
 							r.increaseFailedAttemptsCounter(retryEntry)
 							return
 						}
 					} else { // we previously deleted old object, now let's add the new one
 						if err := r.ResourceHandler.AddResource(latest, false); err != nil {
 							retryEntry := r.initRetryObjWithAdd(latest, key)
-							r.increaseFailedAttemptsCounter(retryEntry)
-							if !ovntypes.IsSuppressedError(err) {
+							isSuppressed := ovntypes.IsSuppressedError(err)
+							if !isSuppressed {
 								klog.Errorf("Failed to add %s %s, during update: %v",
 									r.ResourceHandler.ObjType, newKey, err)
 								r.ResourceHandler.RecordErrorEvent(latest, "ErrorAddingResource", err)
@@ -741,6 +769,9 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 								klog.Infof("Failed to add %s %s, during update: %v",
 									r.ResourceHandler.ObjType, newKey, err)
 							}
+							// Track whether this was a suppressed error for adaptive retry interval
+							retryEntry.lastSuppressedError = isSuppressed
+							r.increaseFailedAttemptsCounter(retryEntry)
 							return
 						}
 					}
