@@ -216,7 +216,8 @@ func (c *openflowManager) syncFlows() {
 		cacheKeys = append(cacheKeys, key)
 	}
 
-	klog.V(4).Infof("[syncFlows] Syncing %d total flows from %d cache entries: %v", len(flows), len(c.flowCache), cacheKeys)
+	klog.V(4).Infof("[syncFlows] Syncing %d total flows from %d cache entries", len(flows), len(c.flowCache))
+	klog.V(5).Infof("[syncFlows] Cache entries: %v", cacheKeys)
 
 	_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.GetBridgeName(), flows)
 	if err != nil {

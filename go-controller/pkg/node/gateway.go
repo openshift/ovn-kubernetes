@@ -545,11 +545,17 @@ func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if g.openflowManager != nil {
-			if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
-				return err
+			// When UDN is enabled, flows are managed incrementally via addNetworkFlows/deleteNetworkFlows.
+			// Skip the O(N) updateBridgeFlowCache which regenerates all flows.
+			if !util.IsNetworkSegmentationSupportEnabled() {
+				if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
+					return err
+				}
+				// let's sync these flows immediately
+				g.openflowManager.requestFlowSync()
+			} else {
+				klog.V(5).Info("Skipping updateBridgeFlowCache (UDN enabled, using incremental flows)")
 			}
-			// let's sync these flows immediately
-			g.openflowManager.requestFlowSync()
 		}
 	}
 	// TBD updateSNATRules() gets node host-cidr by accessing gateway.nodeIPManager, which does not
