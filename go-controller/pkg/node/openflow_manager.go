@@ -117,14 +117,106 @@ func (c *openflowManager) requestFlowSync() {
 	}
 }
 
+// initializeBaseFlows sets up the base OpenFlow rules that don't depend on any specific network.
+// This should be called once during gateway initialization.
+func (c *openflowManager) initializeBaseFlows(hostIPs []net.IP) error {
+	klog.V(4).Info("[initializeBaseFlows] Initializing base flows")
+
+	// Generate base flows
+	baseFlows, err := c.defaultBridge.BaseFlows(hostIPs)
+	if err != nil {
+		return fmt.Errorf("failed to generate base flows: %w", err)
+	}
+
+	// Update cache with base flows
+	c.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
+	c.updateFlowCacheEntry("BASE", baseFlows)
+
+	klog.V(4).Infof("[initializeBaseFlows] Added %d base flows to cache", len(baseFlows))
+
+	// Same for external gateway bridge if present
+	if c.externalGatewayBridge != nil {
+		exGWBaseFlows, err := c.externalGatewayBridge.BaseFlows(hostIPs)
+		if err != nil {
+			return fmt.Errorf("failed to generate external bridge base flows: %w", err)
+		}
+		c.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
+		c.updateExBridgeFlowCacheEntry("BASE", exGWBaseFlows)
+		klog.V(4).Infof("[initializeBaseFlows] Added %d external bridge base flows to cache", len(exGWBaseFlows))
+	}
+
+	klog.V(4).Info("[initializeBaseFlows] Base flows initialized successfully")
+	return nil
+}
+
+// addNetworkFlows adds OpenFlow rules specific to a single network.
+// This enables incremental flow updates instead of regenerating all flows.
+func (c *openflowManager) addNetworkFlows(networkName string, hostIPs []net.IP, hostSubnets []*net.IPNet) error {
+	// Defensive check: Ensure base flows are initialized
+	c.flowMutex.Lock()
+	if _, ok := c.flowCache["NORMAL"]; !ok {
+		c.flowMutex.Unlock()
+		return fmt.Errorf("base flows not initialized - cannot add network flows (call initializeBaseFlows first)")
+	}
+	if _, ok := c.flowCache["BASE"]; !ok {
+		c.flowMutex.Unlock()
+		return fmt.Errorf("base flows not initialized - cannot add network flows (call initializeBaseFlows first)")
+	}
+	c.flowMutex.Unlock()
+
+	klog.V(4).Infof("[addNetworkFlows] Adding flows for network %s", networkName)
+
+	// Generate flows for this network only
+	networkFlows, err := c.defaultBridge.NetworkFlows(networkName, hostSubnets, hostIPs)
+	if err != nil {
+		return fmt.Errorf("failed to generate flows for network %s: %w", networkName, err)
+	}
+
+	// Update cache with network-specific key
+	c.updateFlowCacheEntry(fmt.Sprintf("NETWORK-%s", networkName), networkFlows)
+	klog.V(4).Infof("[addNetworkFlows] Added %d flows for network %s to cache", len(networkFlows), networkName)
+
+	// Same for external gateway bridge if present
+	if c.externalGatewayBridge != nil {
+		exGWNetworkFlows, err := c.externalGatewayBridge.NetworkFlows(networkName, hostSubnets, hostIPs)
+		if err != nil {
+			return fmt.Errorf("failed to generate external bridge flows for network %s: %w", networkName, err)
+		}
+		c.updateExBridgeFlowCacheEntry(fmt.Sprintf("NETWORK-%s", networkName), exGWNetworkFlows)
+		klog.V(4).Infof("[addNetworkFlows] Added %d external bridge flows for network %s to cache", len(exGWNetworkFlows), networkName)
+	}
+
+	klog.V(4).Infof("[addNetworkFlows] Successfully added flows for network %s", networkName)
+	return nil
+}
+
+// deleteNetworkFlows removes OpenFlow rules specific to a network.
+func (c *openflowManager) deleteNetworkFlows(networkName string) {
+	klog.V(4).Infof("[deleteNetworkFlows] Removing flows for network %s", networkName)
+
+	c.deleteFlowsByKey(fmt.Sprintf("NETWORK-%s", networkName))
+
+	if c.externalGatewayBridge != nil {
+		c.exGWFlowMutex.Lock()
+		delete(c.exGWFlowCache, fmt.Sprintf("NETWORK-%s", networkName))
+		c.exGWFlowMutex.Unlock()
+	}
+
+	klog.V(4).Infof("[deleteNetworkFlows] Removed flows for network %s from cache", networkName)
+}
+
 func (c *openflowManager) syncFlows() {
 	c.flowMutex.Lock()
 	defer c.flowMutex.Unlock()
 
 	flows := []string{}
-	for _, entry := range c.flowCache {
+	cacheKeys := []string{}
+	for key, entry := range c.flowCache {
 		flows = append(flows, entry...)
+		cacheKeys = append(cacheKeys, key)
 	}
+
+	klog.V(4).Infof("[syncFlows] Syncing %d total flows from %d cache entries: %v", len(flows), len(c.flowCache), cacheKeys)
 
 	_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.GetBridgeName(), flows)
 	if err != nil {

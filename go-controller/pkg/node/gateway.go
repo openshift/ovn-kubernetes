@@ -336,11 +336,24 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 
 func (g *gateway) Start() error {
 	if g.openflowManager != nil {
-		klog.Info("Spawning Conntrack Rule Check Thread")
-		err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses())
+		klog.Info("Initializing base OpenFlow rules and starting OpenFlow manager")
+
+		// Initialize base flows (network-independent)
+		hostIPs, _ := g.nodeIPManager.ListAddresses()
+		err := g.openflowManager.initializeBaseFlows(hostIPs)
 		if err != nil {
-			return fmt.Errorf("failed to update bridge flow cache: %w", err)
+			return fmt.Errorf("failed to initialize base flows: %w", err)
 		}
+
+		// If UDN is enabled, add default network flows as a network
+		if util.IsNetworkSegmentationSupportEnabled() {
+			hostIPs, hostSubnets := g.nodeIPManager.ListAddresses()
+			err := g.openflowManager.addNetworkFlows(types.DefaultNetworkName, hostIPs, hostSubnets)
+			if err != nil {
+				klog.Warningf("Failed to add default network flows: %v (will retry during reconcile)", err)
+			}
+		}
+
 		g.openflowManager.Run(g.stopChan, g.wg)
 	}
 
