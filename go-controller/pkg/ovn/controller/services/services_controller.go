@@ -249,6 +249,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 	c.startupDoneLock.Lock()
 	c.startupDone = true
 	c.startupDoneLock.Unlock()
+	klog.Infof("OCPBUGS-74973-DEBUG: startupDone=true for network=%s, nodeInfos count: %d", c.netInfo.GetNetworkName(), len(c.nodeInfos))
 
 	// Start the workers after the repair loop to avoid races
 	klog.Infof("Starting workers for network=%s", c.netInfo.GetNetworkName())
@@ -402,6 +403,8 @@ func (c *Controller) syncService(key string) error {
 	// Handle default network services enabled for UDN in shared gateway mode
 	if c.netInfo.IsPrimaryNetwork() &&
 		util.IsUDNEnabledService(key) {
+		klog.Infof("OCPBUGS-74973-DEBUG: syncService processing UDN-enabled service %s for network=%s, nodeInfos count: %d",
+			key, c.netInfo.GetNetworkName(), len(c.nodeInfos))
 
 		if service == nil {
 			return c.cleanupUDNEnabledServiceRoute(key)
@@ -571,7 +574,7 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 
 // RequestFullSync re-syncs every service that currently exists
 func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
-	klog.Infof("Full service sync requested for network=%s", c.netInfo.GetNetworkName())
+	klog.Infof("OCPBUGS-74973-DEBUG: RequestFullSync called for network=%s with %d nodeInfos", c.netInfo.GetNetworkName(), len(nodeInfos))
 
 	// Resync node infos and node IP templates.
 	c.syncNodeInfos(nodeInfos)
@@ -581,6 +584,8 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 	// aren't up yet anyway: no need to do it during node tracker startup then)
 	c.startupDoneLock.RLock()
 	defer c.startupDoneLock.RUnlock()
+	klog.Infof("OCPBUGS-74973-DEBUG: RequestFullSync for network=%s, startupDone=%v, nodeInfos after sync: %d",
+		c.netInfo.GetNetworkName(), c.startupDone, len(c.nodeInfos))
 	if c.startupDone {
 		services, err := c.serviceLister.List(labels.Everything())
 		if err != nil {
@@ -795,7 +800,16 @@ func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
 }
 
 func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) error {
-	klog.Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, c.netInfo.GetNetworkName())
+	klog.Infof("OCPBUGS-74973-DEBUG: configureUDNEnabledServiceRoute called for %s/%s in network %s, nodeInfos count: %d",
+		service.Namespace, service.Name, c.netInfo.GetNetworkName(), len(c.nodeInfos))
+	if len(c.nodeInfos) == 0 {
+		klog.Warningf("OCPBUGS-74973-DEBUG: nodeInfos is EMPTY for network %s while configuring service %s/%s — this is the race condition! No static routes will be created.",
+			c.netInfo.GetNetworkName(), service.Namespace, service.Name)
+	} else {
+		for name := range c.nodeInfos {
+			klog.Infof("OCPBUGS-74973-DEBUG: nodeInfo present: %s (network %s)", name, c.netInfo.GetNetworkName())
+		}
+	}
 
 	extIDs := map[string]string{
 		types.NetworkExternalID:           c.netInfo.GetNetworkName(),

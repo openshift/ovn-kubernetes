@@ -177,6 +177,8 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 	}
 
 	nt.nodes[nodeName] = ni
+	klog.Infof("OCPBUGS-74973-DEBUG: updateNodeInfo added/updated node %s in network %q, total tracked nodes now: %d",
+		nodeName, nt.netInfo.GetNetworkName(), len(nt.nodes))
 
 	// Resync all services
 	nt.resyncFn(nt.getZoneNodes())
@@ -218,6 +220,8 @@ func (nt *nodeTracker) updateNode(node *corev1.Node) {
 	if err != nil || hsn == nil || util.NoHostSubnet(node) {
 		// usually normal; means the node's gateway hasn't been initialized yet
 		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)
+		klog.Infof("OCPBUGS-74973-DEBUG: updateNode removing node %s from network %q due to missing/invalid subnet annotations — this can cause empty nodeInfos race",
+			node.Name, nt.netInfo.GetNetworkName())
 		nt.removeNode(node.Name)
 		return
 	}
