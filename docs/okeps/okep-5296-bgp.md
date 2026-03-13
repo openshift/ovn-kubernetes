@@ -1,6 +1,6 @@
 # OKEP-5296: OVN-Kubernetes BGP Integration
 
-* Issue: [#5296](https://github.com/ovn-org/ovn-kubernetes/issues/5296)
+* Issue: [#5296](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5296)
 
 ## Networking Glossary
 
@@ -622,7 +622,7 @@ leak routes to the pod subnets from each user-defined VRF into the default VRF r
 
 ### Testing Details
 
-* E2E upstream with a framework (potentially [containerlab.dev](containerlab.dev) to simulate a routed spine and leaf
+* E2E upstream with a framework (potentially [containerlab.dev](https://containerlab.dev/) to simulate a routed spine and leaf
   topology with integration using OVN-Kubernetes.
 * Testing using transport none for some networks, and Geneve for non-BGP enabled networks.
 * Testing to cover BGP functionality including MEG, Egress IP, Egress QoS, etc.

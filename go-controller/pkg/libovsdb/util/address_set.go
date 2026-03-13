@@ -7,19 +7,37 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
 // DeleteAddrSetsWithoutACLRef deletes the address sets related to the predicateIDs without any acl reference.
 func DeleteAddrSetsWithoutACLRef(predicateIDs *libovsdbops.DbObjectIDs, nbClient libovsdbclient.Client) error {
+	return deleteAddrSetsWithoutACLRef(predicateIDs, nil, nbClient)
+}
+
+func DeleteAddrSetsWithoutACLRefAnyController(dbOwnerType *libovsdbops.ObjectIDsType, nbClient libovsdbclient.Client) error {
+	return deleteAddrSetsWithoutACLRef(nil, dbOwnerType, nbClient)
+}
+
+func deleteAddrSetsWithoutACLRef(predicateIDs *libovsdbops.DbObjectIDs, dbOwnerType *libovsdbops.ObjectIDsType, nbClient libovsdbclient.Client) error {
 	// Get the list of existing address sets for the predicateIDs. Fill the address set
 	// names and mark them as unreferenced.
 	addrSetReferenced := map[string]bool{}
-	predicate := libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, func(item *nbdb.AddressSet) bool {
-		addrSetReferenced[item.Name] = false
-		return false
-	})
+	// this is used for new style controllers that work for all controller/network names
+	var predicate func(item *nbdb.AddressSet) bool
+	if predicateIDs == nil {
+		predicate = libovsdbops.GetAnyControllerPredicate[*nbdb.AddressSet](dbOwnerType, func(item *nbdb.AddressSet) bool {
+			addrSetReferenced[item.Name] = false
+			return false
+		})
+	} else {
+		predicate = libovsdbops.GetPredicate[*nbdb.AddressSet](predicateIDs, func(item *nbdb.AddressSet) bool {
+			addrSetReferenced[item.Name] = false
+			return false
+		})
+	}
+
 	_, err := libovsdbops.FindAddressSetsWithPredicate(nbClient, predicate)
 	if err != nil {
 		return fmt.Errorf("failed to find address sets with predicate: %w", err)
