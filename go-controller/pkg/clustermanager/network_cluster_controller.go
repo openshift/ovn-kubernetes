@@ -249,6 +249,11 @@ func (ncc *networkClusterController) allowPersistentIPs() bool {
 }
 
 func (ncc *networkClusterController) init() error {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished initializing network cluster controller %q, took %v", ncc.GetNetworkName(), time.Since(startTime))
+	}()
+
 	// report no errors on restart, then propagate any new errors by the started handlers
 	if err := ncc.resetStatus(); err != nil {
 		return fmt.Errorf("failed to reset network status: %w", err)

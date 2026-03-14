@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -23,6 +24,13 @@ import (
 )
 
 func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.NetworkAttachmentDefinition, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished updateNAD for %s/%s, took %v", namespace, obj.GetName(), time.Since(startTime))
+	}()
+
+	// Phase 1: Check if primary network and validate namespace
+	phaseStart := time.Now()
 	if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
 		// check if required UDN label is on namespace
 		ns, err := c.namespaceInformer.Lister().Get(namespace)
@@ -35,31 +43,47 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 			return nil, util.NewInvalidPrimaryNetworkError(namespace)
 		}
 	}
+	klog.V(4).Infof("[updateNAD %s/%s] phase 1 (check primary network) took %v", namespace, obj.GetName(), time.Since(phaseStart))
 
+	// Phase 2: Get existing NAD from cache
+	phaseStart = time.Now()
 	existingNAD, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(obj.GetName())
 	if err != nil && !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to get NetworkAttachmentDefinition %s/%s from cache: %v", namespace, obj.GetName(), err)
 	}
+	klog.V(4).Infof("[updateNAD %s/%s] phase 2 (get existing NAD) took %v, exists=%v", namespace, obj.GetName(), time.Since(phaseStart), existingNAD != nil)
 
+	// Phase 3: Allocate EVPN VIDs if needed
+	phaseStart = time.Now()
 	renderOpts, err := c.allocateEVPNVIDsIfNeeded(obj)
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate EVPN VIDs: %w", err)
 	}
+	klog.V(4).Infof("[updateNAD %s/%s] phase 3 (allocate EVPN VIDs) took %v", namespace, obj.GetName(), time.Since(phaseStart))
 
+	// Phase 4: Render desired NAD
+	phaseStart = time.Now()
 	desiredNAD, err := c.renderNadFn(obj, namespace, renderOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate NetworkAttachmentDefinition: %w", err)
 	}
+	klog.V(4).Infof("[updateNAD %s/%s] phase 4 (render NAD) took %v", namespace, obj.GetName(), time.Since(phaseStart))
 
+	// Phase 5: Create or update NAD
+	phaseStart = time.Now()
 	nadCopy := existingNAD.DeepCopy()
 
 	if nadCopy == nil {
+		// Phase 5a: Create new NAD
 		// creating NAD in case no primary network exist should be atomic and synchronized with
 		// any other thread that create NADs.
+		lockStart := time.Now()
 		c.createNetworkLock.Lock()
 		defer c.createNetworkLock.Unlock()
+		klog.V(4).Infof("[updateNAD %s/%s] phase 5a (acquire create lock) took %v", namespace, obj.GetName(), time.Since(lockStart))
 
 		if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
+			listStart := time.Now()
 			actualNads, err := c.nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
 			if err != nil {
 				return nil, fmt.Errorf("failed to list  NetworkAttachmentDefinition: %w", err)
@@ -69,22 +93,28 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 			if err := PrimaryNetAttachDefNotExist(actualNads); err != nil {
 				return nil, err
 			}
+			klog.V(4).Infof("[updateNAD %s/%s] phase 5a (check primary NAD exists) took %v", namespace, obj.GetName(), time.Since(listStart))
 		}
 
+		createStart := time.Now()
 		newNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
 		}
 		klog.Infof("Created NetworkAttachmentDefinition [%s/%s]", newNAD.Namespace, newNAD.Name)
+		klog.V(4).Infof("[updateNAD %s/%s] phase 5a (API create NAD) took %v", namespace, obj.GetName(), time.Since(createStart))
+		klog.V(4).Infof("[updateNAD %s/%s] phase 5 (create new NAD) took %v", namespace, obj.GetName(), time.Since(phaseStart))
 
 		return newNAD, nil
 	}
 
+	// Phase 5b: Update existing NAD
 	if !metav1.IsControlledBy(nadCopy, obj) {
 		return nil, fmt.Errorf("foreign NetworkAttachmentDefinition with the desired name already exist [%s/%s]", nadCopy.Namespace, nadCopy.Name)
 	}
 
 	// NAD update path, need to merge internal (k8s.ovn.org) current annotations with desired
+	mergeStart := time.Now()
 	for k, v := range nadCopy.Annotations {
 		if strings.HasPrefix(k, types.OvnK8sPrefix) {
 			if desiredNAD.Annotations == nil {
@@ -93,19 +123,25 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 			desiredNAD.Annotations[k] = v
 		}
 	}
+	klog.V(4).Infof("[updateNAD %s/%s] phase 5b (merge annotations) took %v", namespace, obj.GetName(), time.Since(mergeStart))
 
 	if reflect.DeepEqual(nadCopy.Spec.Config, desiredNAD.Spec.Config) && reflect.DeepEqual(nadCopy.ObjectMeta.Labels, desiredNAD.ObjectMeta.Labels) &&
 		reflect.DeepEqual(desiredNAD.Annotations, nadCopy.Annotations) {
+		klog.V(4).Infof("[updateNAD %s/%s] phase 5b (no update needed) took %v", namespace, obj.GetName(), time.Since(phaseStart))
 		return nadCopy, nil
 	}
 
 	nadCopy.Spec.Config = desiredNAD.Spec.Config
 	nadCopy.ObjectMeta.Labels = desiredNAD.ObjectMeta.Labels
 	nadCopy.Annotations = desiredNAD.Annotations
+
+	updateStart := time.Now()
 	updatedNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nadCopy.Namespace).Update(context.Background(), nadCopy, metav1.UpdateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update NetworkAttachmentDefinition: %w", err)
 	}
+	klog.V(4).Infof("[updateNAD %s/%s] phase 5b (API update NAD) took %v", namespace, obj.GetName(), time.Since(updateStart))
+	klog.V(4).Infof("[updateNAD %s/%s] phase 5 (update existing NAD) took %v", namespace, obj.GetName(), time.Since(phaseStart))
 	klog.Infof("Updated NetworkAttachmentDefinition [%s/%s]", updatedNAD.Namespace, updatedNAD.Name)
 
 	return updatedNAD, nil
@@ -158,6 +194,11 @@ func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 // (either during recovery or a previous reconciliation), AllocateID returns the same VID.
 // This means VIDs are stable across reconciliations without needing to parse the existing NAD.
 func (c *Controller) allocateEVPNVIDsIfNeeded(obj client.Object) ([]template.RenderOption, error) {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished allocateEVPNVIDsIfNeeded for %s, took %v", obj.GetName(), time.Since(startTime))
+	}()
+
 	spec := template.GetSpec(obj)
 	if spec.GetTransport() != userdefinednetworkv1.TransportOptionEVPN {
 		return nil, nil
