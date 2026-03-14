@@ -458,6 +458,17 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	lsp *nbdb.LogicalSwitchPort, podAnnotation *util.PodAnnotation, newlyCreatedPort bool, err error) {
 	var ls *nbdb.LogicalSwitch
 
+	// Timing instrumentation for P99 analysis
+	var waitSwitchTime, getLSPTime, getSwitchTime, nodeInfoTime, ipAllocTime time.Duration
+	funcStart := time.Now()
+
+	defer func() {
+		klog.V(4).Infof("[%s/%s/%s] addLogicalPortToNetwork took %v "+
+			"(waitSwitch=%v, getLSP=%v, getSwitch=%v, nodeInfo=%v, ipAlloc=%v)",
+			nadKey, pod.Namespace, pod.Name, time.Since(funcStart),
+			waitSwitchTime, getLSPTime, getSwitchTime, nodeInfoTime, ipAllocTime)
+	}()
+
 	podDesc := fmt.Sprintf("%s/%s/%s", nadKey, pod.Namespace, pod.Name)
 	switchName, err := bnc.getExpectedSwitchName(pod)
 	if err != nil {
@@ -478,7 +489,9 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 			pod.Namespace, pod.Name, pod.Spec.NodeName, podState)
 	}
 
+	t1 := time.Now()
 	ls, err = bnc.waitForNodeLogicalSwitch(switchName)
+	waitSwitchTime = time.Since(t1)
 	if err != nil {
 		return nil, nil, nil, false, err
 	}
@@ -493,8 +506,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	// does don't re-add the port to OVN as this will change its
 	// UUID and and the port cache, address sets, and port groups
 	// will still have the old UUID.
+	t2 := time.Now()
 	lsp = &nbdb.LogicalSwitchPort{Name: portName}
 	existingLSP, err := libovsdbops.GetLogicalSwitchPort(bnc.nbClient, lsp)
+	getLSPTime = time.Since(t2)
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return nil, nil, nil, false, fmt.Errorf("unable to get the lsp %s from the nbdb: %s", portName, err)
 	}
@@ -503,7 +518,9 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	// Sanity check. If port exists, it should be in the logical switch obtained from the pod spec.
 	if lspExist {
 		portFound := false
+		t3 := time.Now()
 		ls, err = libovsdbops.GetLogicalSwitch(bnc.nbClient, ls)
+		getSwitchTime = time.Since(t3)
 		if err != nil {
 			return nil, nil, nil, false, fmt.Errorf("[%s] unable to find logical switch %s in NBDB",
 				podDesc, switchName)
@@ -538,6 +555,8 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	if !lspExist || len(existingLSP.Options["iface-id-ver"]) != 0 {
 		lsp.Options["iface-id-ver"] = string(pod.UID)
 	}
+
+	t4 := time.Now()
 	// let's calculate if this network controller's role for this pod
 	// and pass that information while determining the podAnnotations
 	networkRole, err := bnc.GetNetworkRole(pod)
@@ -571,6 +590,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 		}
 		lsp.Options[libovsdbops.RequestedChassis] = chassisID
 	}
+	nodeInfoTime = time.Since(t4)
 
 	// Although we have different code to allocate the pod annotation for the
 	// default network and user-defined networks, at the time of this writing they
@@ -579,11 +599,13 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	// it for the default network as well. If at all possible, keep them
 	// functionally equivalent going forward.
 	var annotationUpdated bool
+	t5 := time.Now()
 	if bnc.IsUserDefinedNetwork() {
 		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotationForUserDefinedNetwork(pod, existingLSP, nadKey, network, networkRole)
 	} else {
 		podAnnotation, annotationUpdated, err = bnc.allocatePodAnnotation(pod, existingLSP, podDesc, nadKey, network, networkRole)
 	}
+	ipAllocTime = time.Since(t5)
 
 	if err != nil {
 		return nil, nil, nil, false, err
@@ -819,9 +841,22 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 	var podMac net.HardwareAddr
 	var podIfAddrs []*net.IPNet
 
+	// Timing instrumentation for P99 analysis
+	var ensureAnnotTime, existingIPAllocTime, portAddrTime, newIPAllocTime, assignAddrTime, updateAnnotTime time.Duration
+	funcStart := time.Now()
+
+	defer func() {
+		klog.V(4).Infof("[%s] allocatePodAnnotation took %v "+
+			"(ensureAnnot=%v, existingIPAlloc=%v, portAddr=%v, newIPAlloc=%v, assignAddr=%v, updateAnnot=%v)",
+			podDesc, time.Since(funcStart),
+			ensureAnnotTime, existingIPAllocTime, portAddrTime, newIPAllocTime, assignAddrTime, updateAnnotTime)
+	}()
+
 	switchName := pod.Spec.NodeName
 
+	t1 := time.Now()
 	podAnnotation, zoneContainsPodSubnet, err := bnc.ensurePodAnnotation(pod, nadKey)
+	ensureAnnotTime = time.Since(t1)
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to ensure pod annotation: %v", err)
 	}
@@ -851,10 +886,13 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 		if bnc.doesNetworkRequireIPAM() {
 			if zoneContainsPodSubnet {
 				// ensure we have reserved the IPs in the annotation
+				t2 := time.Now()
 				if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+					existingIPAllocTime = time.Since(t2)
 					return nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
 						podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
 				}
+				existingIPAllocTime = time.Since(t2)
 			}
 			return podAnnotation, false, nil
 
@@ -870,7 +908,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 	// when it tries to override the pod IP annotation. Newly allocated IPs will be released then.
 	if existingLSP != nil {
 		// try to get the MAC and IPs from existing OVN port first
+		t3 := time.Now()
 		podMac, podIfAddrs, err = bnc.getPortAddresses(switchName, existingLSP)
+		portAddrTime = time.Since(t3)
 		if err != nil {
 			return nil, false, fmt.Errorf("failed to get pod addresses for pod %s on node: %s, err: %v",
 				podDesc, switchName, err)
@@ -882,11 +922,15 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 	if len(podIfAddrs) == 0 {
 		needsNewMacOrIPAllocation = true
 	} else if bnc.doesNetworkRequireIPAM() {
+		t4 := time.Now()
 		if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+			newIPAllocTime = time.Since(t4)
 			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), bnc.GetLogicalPortName(pod, nadKey), podDesc, switchName, err)
 
 			needsNewMacOrIPAllocation = true
+		} else {
+			newIPAllocTime = time.Since(t4)
 		}
 	}
 	if needsNewMacOrIPAllocation {
@@ -899,7 +943,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 			podMac = util.IPAddrToHWAddr(podIfAddrs[0].IP)
 		} else {
 			// Previous attempts to use already configured IPs failed, need to assign new
+			t5 := time.Now()
 			generatedPodMac, generatedPodIfAddrs, err := bnc.assignPodAddresses(switchName)
+			assignAddrTime = time.Since(t5)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to assign pod addresses for pod %s on switch: %s, err: %v",
 					podDesc, switchName, err)
@@ -945,10 +991,9 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 
 	klog.V(5).Infof("Annotation values: ip=%v ; mac=%s ; gw=%s",
 		podIfAddrs, podMac, podAnnotation.Gateways)
-	annoStart := time.Now()
+	t6 := time.Now()
 	err = bnc.updatePodAnnotationWithRetry(pod, podAnnotation, nadKey)
-	podAnnoTime := time.Since(annoStart)
-	klog.Infof("[%s] addLogicalPort annotation time took %v", podDesc, podAnnoTime)
+	updateAnnotTime = time.Since(t6)
 	if err != nil {
 		return nil, false, err
 	}
