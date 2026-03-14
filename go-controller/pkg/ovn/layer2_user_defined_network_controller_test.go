@@ -1352,11 +1352,21 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 		return fmt.Errorf("failed to initialize %s controller: %w", userDefinedNetworkName, err)
 	}
 
-	if err = fakeOvn.controller.WatchNamespaces(); err != nil {
-		return err
-	}
-	if err = fakeOvn.controller.WatchPods(); err != nil {
-		return err
+	if !config.OVNKubernetesFeature.EnableInterconnect {
+		// In non-IC unit tests, seed the default-network pod annotation directly.
+		// This helper only validates UDN topology in NBDB, so starting the default
+		// controller path here would add unrelated default-network objects. IC tests
+		// do not assert the full default annotation in this setup path.
+		pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		defaultNetworkPodInfo := podInfo
+		defaultNetworkPodInfo.udnPodInfos = map[string]*udnPodInfo{}
+		setPodAnnotations(pod, defaultNetworkPodInfo)
+		if _, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Update(context.Background(), pod, metav1.UpdateOptions{}); err != nil {
+			return err
+		}
 	}
 	By("asserting the pod (once reconciled) *features* the OVN pod networks annotation")
 	userDefinedNetController, doesControllerExist := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
