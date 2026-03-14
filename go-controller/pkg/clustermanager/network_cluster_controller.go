@@ -91,6 +91,9 @@ type networkClusterController struct {
 	nadKeysLock sync.Mutex
 	lastNADKeys sets.Set[string]
 
+	// nodeAnnotationBatcher batches node annotation updates across networks
+	nodeAnnotationBatcher *node.NodeAnnotationBatcher
+
 	util.ReconcilableNetInfo
 }
 
@@ -174,6 +177,7 @@ func newNetworkClusterController(
 	recorder record.EventRecorder,
 	networkManager networkmanager.Interface,
 	errorReporter NetworkStatusReporter,
+	batcher *node.NodeAnnotationBatcher,
 ) *networkClusterController {
 	kube := &kube.KubeOVN{
 		Kube: kube.Kube{
@@ -185,22 +189,23 @@ func newNetworkClusterController(
 	wg := &sync.WaitGroup{}
 
 	ncc := &networkClusterController{
-		ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
-		watchFactory:        wf,
-		kube:                kube,
-		stopChan:            make(chan struct{}),
-		wg:                  wg,
-		recorder:            recorder,
-		networkManager:      networkManager,
-		statusReporter:      errorReporter,
-		nodeErrors:          make(map[string]string),
-		nodeErrorsLock:      sync.Mutex{},
+		ReconcilableNetInfo:   util.NewReconcilableNetInfo(netInfo),
+		watchFactory:          wf,
+		kube:                  kube,
+		stopChan:              make(chan struct{}),
+		wg:                    wg,
+		recorder:              recorder,
+		networkManager:        networkManager,
+		statusReporter:        errorReporter,
+		nodeErrors:            make(map[string]string),
+		nodeErrorsLock:        sync.Mutex{},
+		nodeAnnotationBatcher: batcher,
 	}
 
 	return ncc
 }
 
-func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *networkClusterController {
+func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder, batcher *node.NodeAnnotationBatcher) *networkClusterController {
 	// use an allocator that can only allocate a single network ID for the
 	// defaiult network
 	networkIDAllocator := id.NewIDAllocator(types.DefaultNetworkName, 1)
@@ -210,7 +215,7 @@ func newDefaultNetworkClusterController(netInfo util.NetInfo, ovnClient *util.OV
 		panic(fmt.Errorf("could not reserve default network ID: %w", err))
 	}
 
-	return newNetworkClusterController(netInfo, ovnClient, wf, recorder, networkmanager.Default().Interface(), nil)
+	return newNetworkClusterController(netInfo, ovnClient, wf, recorder, networkmanager.Default().Interface(), nil, batcher)
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
@@ -298,7 +303,7 @@ func (ncc *networkClusterController) init() error {
 	if ncc.hasNodeAllocation() {
 		ncc.retryNodes = ncc.newRetryFramework(factory.NodeType, true)
 
-		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.GetNetInfo(), ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.GetNetInfo(), ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator, ncc.nodeAnnotationBatcher)
 		err := ncc.nodeAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)

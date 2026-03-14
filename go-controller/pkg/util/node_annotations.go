@@ -535,6 +535,43 @@ func ParseUDNLayer2NodeGRLRPTunnelIDs(node *corev1.Node, netName string) (int, e
 	return strconv.Atoi(tunnelID)
 }
 
+// ParseUDNLayer2NodeGRLRPTunnelIDsWithCache parses the 'ovnUDNLayer2NodeGRLRPTunnelIDs'
+// annotation using the provided cache if available.
+func ParseUDNLayer2NodeGRLRPTunnelIDsWithCache(node *corev1.Node, netName string, cache NodeAnnotationCache) (int, error) {
+	tunnelIDsMap, err := parseNetworkMapAnnotationWithCache(node, ovnUDNLayer2NodeGRLRPTunnelIDs, cache)
+	if err != nil {
+		return types.InvalidID, err
+	}
+
+	tunnelID, ok := tunnelIDsMap[netName]
+	if !ok {
+		return types.InvalidID, newAnnotationNotSetError("node %q has no %q annotation for network %s", node.Name, ovnUDNLayer2NodeGRLRPTunnelIDs, netName)
+	}
+
+	return strconv.Atoi(tunnelID)
+}
+
+// ParseUDNLayer2NodeGRLRPTunnelIDsAllWithCache parses the 'ovnUDNLayer2NodeGRLRPTunnelIDs'
+// annotation for all networks using the provided cache if available.
+// Returns the full map of network name -> tunnel ID.
+func ParseUDNLayer2NodeGRLRPTunnelIDsAllWithCache(node *corev1.Node, cache NodeAnnotationCache) (map[string]int, error) {
+	tunnelIDsMap, err := parseNetworkMapAnnotationWithCache(node, ovnUDNLayer2NodeGRLRPTunnelIDs, cache)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert string values to integers
+	result := make(map[string]int, len(tunnelIDsMap))
+	for netName, idStr := range tunnelIDsMap {
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse tunnel ID for network %s: %v", netName, err)
+		}
+		result[netName] = id
+	}
+	return result, nil
+}
+
 // UpdateUDNLayer2NodeGRLRPTunnelIDs updates the ovnUDNLayer2NodeGRLRPTunnelIDs annotation for the network name 'netName' with the tunnel id 'tunnelID'.
 // If 'tunnelID' is invalid tunnel ID (-1), then it deletes that network from the tunnel ids annotation.
 func UpdateUDNLayer2NodeGRLRPTunnelIDs(annotations map[string]string, netName string, tunnelID int) (map[string]string, error) {
@@ -544,6 +581,35 @@ func UpdateUDNLayer2NodeGRLRPTunnelIDs(annotations map[string]string, netName st
 	if err := updateNetworkAnnotation(annotations, netName, tunnelID, ovnUDNLayer2NodeGRLRPTunnelIDs); err != nil {
 		return nil, err
 	}
+	return annotations, nil
+}
+
+// UpdateUDNLayer2NodeGRLRPTunnelIDsMap updates the ovnUDNLayer2NodeGRLRPTunnelIDs annotation
+// with a complete map of all tunnel IDs. This is more efficient than updating networks individually.
+func UpdateUDNLayer2NodeGRLRPTunnelIDsMap(annotations map[string]string, tunnelIDsMap map[string]int) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
+	// Filter out invalid IDs (represents deletion)
+	filteredMap := make(map[string]string)
+	for netName, tunnelID := range tunnelIDsMap {
+		if tunnelID != types.InvalidID {
+			filteredMap[netName] = strconv.Itoa(tunnelID)
+		}
+	}
+
+	if len(filteredMap) == 0 {
+		delete(annotations, ovnUDNLayer2NodeGRLRPTunnelIDs)
+		return annotations, nil
+	}
+
+	// Marshal the complete map
+	bytes, err := json.Marshal(filteredMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal tunnel-ids map: %v", err)
+	}
+	annotations[ovnUDNLayer2NodeGRLRPTunnelIDs] = string(bytes)
 	return annotations, nil
 }
 
@@ -1171,7 +1237,49 @@ func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
 	}
+	return parseNetworkMapAnnotationValue(annotationName, annotation)
+}
 
+// parseNetworkMapAnnotationWithCache parses a JSON map annotation from node and
+// optionally reuses cache entries keyed by (node name, annotation name, raw
+// annotation string). It always returns a copy of the parsed map so callers can
+// modify the result without mutating cached/shared state.
+func parseNetworkMapAnnotationWithCache(node *corev1.Node, annotationName string, cache NodeAnnotationCache) (map[string]string, error) {
+	idsStrMap, err := parseNetworkMapAnnotationWithCacheNoCopy(node, annotationName, cache)
+	if err != nil {
+		return nil, err
+	}
+	return copyStringMap(idsStrMap), nil
+}
+
+// parseNetworkMapAnnotationWithCacheNoCopy parses a JSON map annotation from
+// node and optionally reuses cache entries keyed by (node name, annotation
+// name, raw annotation string). It returns the cached/internal map directly
+// without copying; callers must treat the returned map as read-only.
+func parseNetworkMapAnnotationWithCacheNoCopy(node *corev1.Node, annotationName string, cache NodeAnnotationCache) (map[string]string, error) {
+	annotation, ok := node.Annotations[annotationName]
+	if !ok {
+		return nil, newAnnotationNotSetError("could not find %q annotation", annotationName)
+	}
+	if cache != nil {
+		if cached, ok := cache.GetNetworkMap(node.Name, annotationName, annotation); ok {
+			return cached, nil
+		}
+	}
+	idsStrMap, err := parseNetworkMapAnnotationValue(annotationName, annotation)
+	if err != nil {
+		return nil, err
+	}
+	if cache != nil {
+		cache.SetNetworkMap(node.Name, annotationName, annotation, idsStrMap)
+	}
+	return idsStrMap, nil
+}
+
+// parseNetworkMapAnnotationValue decodes annotation as a JSON object of
+// `networkName -> string value` pairs and returns it as a Go map.
+// It returns an error when JSON decoding fails or when the parsed map is empty.
+func parseNetworkMapAnnotationValue(annotationName, annotation string) (map[string]string, error) {
 	idsStrMap := map[string]string{}
 	ids := make(map[string]string)
 	if err := json.Unmarshal([]byte(annotation), &ids); err != nil {
@@ -1181,12 +1289,18 @@ func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName
 	for netName, v := range ids {
 		idsStrMap[netName] = v
 	}
-
 	if len(idsStrMap) == 0 {
 		return nil, fmt.Errorf("unexpected empty %s annotation", annotationName)
 	}
-
 	return idsStrMap, nil
+}
+
+func copyStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // ParseNetworkIDAnnotation parses the 'OvnNetworkIDs' annotation for the specified
@@ -1259,6 +1373,55 @@ func UpdateNetworkIDAnnotation(annotations map[string]string, netName string, ne
 	if err != nil {
 		return nil, err
 	}
+	return annotations, nil
+}
+
+// ParseNetworkIDAnnotationWithCache parses the 'OvnNetworkIDs' annotation for all networks
+// using the provided cache if available. Returns the full map of network name -> network ID.
+func ParseNetworkIDAnnotationWithCache(node *corev1.Node, cache NodeAnnotationCache) (map[string]int, error) {
+	networkIDsMap, err := parseNetworkMapAnnotationWithCache(node, OvnNetworkIDs, cache)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert string values to integers
+	result := make(map[string]int, len(networkIDsMap))
+	for netName, idStr := range networkIDsMap {
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse network ID for network %s: %v", netName, err)
+		}
+		result[netName] = id
+	}
+	return result, nil
+}
+
+// UpdateNetworkIDAnnotationMap updates the OvnNetworkIDs annotation with a complete map
+// of all network IDs. This is more efficient than updating networks individually.
+func UpdateNetworkIDAnnotationMap(annotations map[string]string, networkIDsMap map[string]int) (map[string]string, error) {
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+
+	// Filter out invalid IDs (represents deletion)
+	filteredMap := make(map[string]string)
+	for netName, networkID := range networkIDsMap {
+		if networkID != types.InvalidID {
+			filteredMap[netName] = strconv.Itoa(networkID)
+		}
+	}
+
+	if len(filteredMap) == 0 {
+		delete(annotations, OvnNetworkIDs)
+		return annotations, nil
+	}
+
+	// Marshal the complete map
+	bytes, err := json.Marshal(filteredMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal network-ids map: %v", err)
+	}
+	annotations[OvnNetworkIDs] = string(bytes)
 	return annotations, nil
 }
 

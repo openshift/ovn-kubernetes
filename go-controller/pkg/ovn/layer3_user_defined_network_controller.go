@@ -177,7 +177,7 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, 
 		}
 		newNodeIsLocalZoneNode := h.oc.isLocalZoneNode(newNode)
 		zoneClusterChanged := h.oc.nodeZoneClusterChanged(oldNode, newNode)
-		nodeSubnetChange := nodeSubnetChanged(oldNode, newNode, h.oc.GetNetworkName())
+		nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, h.oc.GetNetworkName(), h.oc.nodeAnnotationCache, nil, nil)
 		if newNodeIsLocalZoneNode {
 			var nodeSyncsParam *nodeSyncs
 			if h.oc.isLocalZoneNode(oldNode) {
@@ -470,19 +470,11 @@ func (oc *Layer3UserDefinedNetworkController) newRetryFramework(
 // Start starts the UDN layer3 controller, handles all events and creates all needed logical entities
 func (oc *Layer3UserDefinedNetworkController) Start(_ context.Context) error {
 	klog.Infof("Start %s UDN controller for network %s", oc.TopologyType(), oc.GetNetworkName())
-
-	// Phase 1: Initialize controller
-	phaseStart := time.Now()
 	if err := oc.init(); err != nil {
 		return err
 	}
-	klog.V(4).Infof("[Start %s] phase 1 (init) took %v", oc.GetNetworkName(), time.Since(phaseStart))
-
-	// Phase 2: Run controller (start watchers and sync)
-	phaseStart = time.Now()
-	err := oc.run()
-	klog.V(4).Infof("[Start %s] phase 2 (run) took %v", oc.GetNetworkName(), time.Since(phaseStart))
-	return err
+	oc.RegisterNodeHandler()
+	return oc.run()
 }
 
 // Stop gracefully stops the controller, and delete all logical entities for this network if requested
@@ -591,74 +583,55 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 
 func (oc *Layer3UserDefinedNetworkController) run() error {
 	klog.Infof("Starting all the Watchers for network %s ...", oc.GetNetworkName())
-	networkName := oc.GetNetworkName()
+	start := time.Now()
 
 	// WatchNamespaces() should be started first because it has no other
-	// dependencies, and WatchNodes() depends on it
-	phaseStart := time.Now()
+	// dependencies.
 	if err := oc.WatchNamespaces(); err != nil {
 		return err
 	}
-	klog.V(4).Infof("[run %s] WatchNamespaces took %v", networkName, time.Since(phaseStart))
-
-	phaseStart = time.Now()
-	if err := oc.WatchNodes(); err != nil {
-		return err
-	}
-	klog.V(4).Infof("[run %s] WatchNodes took %v", networkName, time.Since(phaseStart))
 
 	if oc.svcController != nil {
-		phaseStart = time.Now()
+		startSvc := time.Now()
 		// Services should be started after nodes to prevent LB churn
 		err := oc.StartServiceController(oc.wg, true)
-		svcDuration := time.Since(phaseStart)
+		endSvc := time.Since(startSvc)
 
-		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service_" + networkName).Set(svcDuration.Seconds())
-		klog.V(4).Infof("[run %s] StartServiceController took %v", networkName, svcDuration)
+		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service_" + oc.GetNetworkName()).Set(endSvc.Seconds())
 		if err != nil {
 			return err
 		}
 	}
 
-	phaseStart = time.Now()
 	if err := oc.WatchPods(); err != nil {
 		return err
 	}
-	klog.V(4).Infof("[run %s] WatchPods took %v", networkName, time.Since(phaseStart))
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() && !oc.IsPrimaryNetwork() {
 		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces
-		phaseStart = time.Now()
 		if err := oc.WatchMultiNetworkPolicy(); err != nil {
 			return err
 		}
-		klog.V(4).Infof("[run %s] WatchMultiNetworkPolicy took %v", networkName, time.Since(phaseStart))
 	}
 
 	if oc.IsPrimaryNetwork() {
 		// WatchNetworkPolicy depends on WatchPods and WatchNamespaces
-		phaseStart = time.Now()
 		if err := oc.WatchNetworkPolicy(); err != nil {
 			return err
 		}
-		klog.V(4).Infof("[run %s] WatchNetworkPolicy took %v", networkName, time.Since(phaseStart))
 	}
 
 	// Add ourselves to the route import manager
 	if oc.routeImportManager != nil {
-		phaseStart = time.Now()
 		err := oc.routeImportManager.AddNetwork(oc.GetNetInfo())
-		klog.V(4).Infof("[run %s] AddNetwork to routeImportManager took %v", networkName, time.Since(phaseStart))
 		if err != nil {
-			return fmt.Errorf("failed to add network %s to the route import manager: %v", networkName, err)
+			return fmt.Errorf("failed to add network %s to the route import manager: %v", oc.GetNetworkName(), err)
 		}
 	}
 
 	// start NetworkQoS controller if feature is enabled
 	if config.OVNKubernetesFeature.EnableNetworkQoS {
-		phaseStart = time.Now()
 		err := oc.newNetworkQoSController()
-		klog.V(4).Infof("[run %s] newNetworkQoSController took %v", networkName, time.Since(phaseStart))
 		if err != nil {
 			return fmt.Errorf("unable to create network qos controller, err: %w", err)
 		}
@@ -669,6 +642,8 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 			oc.nqosController.Run(1, oc.stopChan)
 		}()
 	}
+
+	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
 
 	return nil
 }
@@ -697,49 +672,35 @@ func (oc *Layer3UserDefinedNetworkController) WatchNodes() error {
 }
 
 func (oc *Layer3UserDefinedNetworkController) init() error {
-	networkName := oc.GetNetworkName()
-
-	phaseStart := time.Now()
 	if err := oc.gatherJoinSwitchIPs(); err != nil {
-		return fmt.Errorf("failed to gather join switch IPs for network %s: %v", networkName, err)
+		return fmt.Errorf("failed to gather join switch IPs for network %s: %v", oc.GetNetworkName(), err)
 	}
-	klog.V(4).Infof("[init %s] gatherJoinSwitchIPs took %v", networkName, time.Since(phaseStart))
 
 	// Create default Control Plane Protection (COPP) entry for routers
-	phaseStart = time.Now()
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
 		return fmt.Errorf("unable to create router control plane protection: %w", err)
 	}
 	oc.defaultCOPPUUID = defaultCOPPUUID
-	klog.V(4).Infof("[init %s] EnsureDefaultCOPP took %v", networkName, time.Since(phaseStart))
 
-	phaseStart = time.Now()
 	clusterRouter, err := oc.newClusterRouter()
 	if err != nil {
-		return fmt.Errorf("failed to create OVN cluster router for network %q: %v", networkName, err)
+		return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
 	}
-	klog.V(4).Infof("[init %s] newClusterRouter took %v", networkName, time.Since(phaseStart))
 
 	// Only configure join switch, GR, cluster port groups and multicast default policies for user defined primary networks.
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
-		phaseStart = time.Now()
 		if err := oc.gatewayTopologyFactory.NewJoinSwitch(clusterRouter, oc.GetNetInfo(), oc.ovnClusterLRPToJoinIfAddrs); err != nil {
-			return fmt.Errorf("failed to create join switch for network %q: %v", networkName, err)
+			return fmt.Errorf("failed to create join switch for network %q: %v", oc.GetNetworkName(), err)
 		}
-		klog.V(4).Infof("[init %s] NewJoinSwitch took %v", networkName, time.Since(phaseStart))
 
-		phaseStart = time.Now()
 		if err := oc.setupClusterPortGroups(); err != nil {
-			return fmt.Errorf("failed to create cluster port groups for network %q: %w", networkName, err)
+			return fmt.Errorf("failed to create cluster port groups for network %q: %w", oc.GetNetworkName(), err)
 		}
-		klog.V(4).Infof("[init %s] setupClusterPortGroups took %v", networkName, time.Since(phaseStart))
 
-		phaseStart = time.Now()
 		if err := oc.syncDefaultMulticastPolicies(); err != nil {
-			return fmt.Errorf("failed to sync default multicast policies for network %q: %w", networkName, err)
+			return fmt.Errorf("failed to sync default multicast policies for network %q: %w", oc.GetNetworkName(), err)
 		}
-		klog.V(4).Infof("[init %s] syncDefaultMulticastPolicies took %v", networkName, time.Since(phaseStart))
 	}
 
 	// FIXME: When https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed,
@@ -747,7 +708,6 @@ func (oc *Layer3UserDefinedNetworkController) init() error {
 	if _, _, err := util.RunOVNNbctl("--columns=_uuid", "list", "Load_Balancer_Group"); err != nil {
 		klog.Warningf("Load Balancer Group support enabled, however version of OVN in use does not support Load Balancer Groups.")
 	} else {
-		phaseStart = time.Now()
 		clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 		if err != nil {
 			return err
@@ -755,7 +715,6 @@ func (oc *Layer3UserDefinedNetworkController) init() error {
 		oc.clusterLoadBalancerGroupUUID = clusterLBGroupUUID
 		oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
 		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
-		klog.V(4).Infof("[init %s] initLoadBalancerGroups took %v", networkName, time.Since(phaseStart))
 	}
 	return nil
 }
@@ -1209,6 +1168,9 @@ func (oc *Layer3UserDefinedNetworkController) gatewayOptions() []GatewayOption {
 	}
 	if resolver := oc.getNetworkNameForNADKeyFunc(); resolver != nil {
 		opts = append(opts, WithNetworkNameForNADKeyResolver(resolver))
+	}
+	if oc.nodeAnnotationCache != nil {
+		opts = append(opts, WithNodeAnnotationCache(oc.nodeAnnotationCache))
 	}
 	return opts
 }
