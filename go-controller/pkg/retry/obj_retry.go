@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"runtime"
 	"sync"
 	"time"
 
@@ -29,6 +30,31 @@ const MaxFailedAttempts = 15 // same value used for the services level-driven co
 const initialBackoff = 1 * time.Second
 const noBackoff = 0
 const maxBackoff = 60 * time.Second
+
+// PHASE 1.6: CPU-aware concurrency limiting
+// GoroutinesPerCPU defines how many concurrent retry goroutines per CPU core.
+// Value of 25 provides good balance between parallelism and context switch overhead.
+const GoroutinesPerCPU = 25
+
+// getMaxConcurrentRetries calculates the maximum number of concurrent retry goroutines
+// based on available CPU cores. This prevents CPU saturation on resource-constrained nodes.
+func getMaxConcurrentRetries() int {
+	numCPU := runtime.NumCPU()
+	maxConcurrent := numCPU * GoroutinesPerCPU
+
+	// Ensure minimum of 50 (for very small nodes)
+	if maxConcurrent < 50 {
+		maxConcurrent = 50
+	}
+
+	// Cap at 500 (for very large nodes, diminishing returns)
+	if maxConcurrent > 500 {
+		maxConcurrent = 500
+	}
+
+	klog.V(5).Infof("Calculated max concurrent retries: %d (CPU cores: %d)", maxConcurrent, numCPU)
+	return maxConcurrent
+}
 
 // retryObjEntry is a generic object caching with retry mechanism
 // that resources can use to eventually complete their intended operations.
@@ -492,19 +518,30 @@ func (r *RetryFramework) iterateRetryResources() {
 	now := time.Now()
 	wg := &sync.WaitGroup{}
 
+	// PHASE 1.6: CPU-aware concurrency limiting
+	// Create semaphore to limit concurrent goroutines based on CPU cores
+	maxConcurrent := getMaxConcurrentRetries()
+	semaphore := make(chan struct{}, maxConcurrent)
+
 	// Process the above list of objects that need retry by holding the lock for each one of them.
-	klog.V(5).Infof("Going to retry %v resource setup for %d objects: %s", r.ResourceHandler.ObjType, len(entriesKeys), entriesKeys)
+	klog.V(5).Infof("Going to retry %v resource setup for %d objects (max %d concurrent): %s",
+		r.ResourceHandler.ObjType, len(entriesKeys), maxConcurrent, entriesKeys)
 
 	for _, entryKey := range entriesKeys {
+		// Acquire semaphore slot (blocks if maxConcurrent goroutines already running)
+		semaphore <- struct{}{}
+
 		wg.Add(1)
 		go func(entryKey string) {
 			defer wg.Done()
+			defer func() { <-semaphore }() // Release semaphore slot when done
 			r.resourceRetry(entryKey, now)
 		}(entryKey)
 	}
 	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.ResourceHandler.ObjType)
 	wg.Wait()
-	klog.V(5).Infof("Function iterateRetryResources for %s ended (in %v)", r.ResourceHandler.ObjType, time.Since(now))
+	klog.V(5).Infof("Function iterateRetryResources for %s ended (in %v, max concurrent: %d)",
+		r.ResourceHandler.ObjType, time.Since(now), maxConcurrent)
 }
 
 // periodicallyRetryResources tracks RetryFramework and checks if any object needs to be retried for add or delete every
