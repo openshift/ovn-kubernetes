@@ -242,7 +242,9 @@ func (oc *LocalnetUserDefinedNetworkController) Start(_ context.Context) error {
 	if err := oc.init(); err != nil {
 		return err
 	}
-	oc.RegisterNodeHandler()
+	if err := oc.RegisterNodeHandler(); err != nil {
+		return err
+	}
 	if err := oc.run(); err != nil {
 		oc.DeregisterNodeHandler()
 		return err
@@ -303,8 +305,8 @@ func (oc *LocalnetUserDefinedNetworkController) Reconcile(netInfo util.NetInfo) 
 	)
 }
 
-func (oc *LocalnetUserDefinedNetworkController) RegisterNodeHandler() {
-	oc.nodeReconciler.RegisterNetworkController(oc)
+func (oc *LocalnetUserDefinedNetworkController) RegisterNodeHandler() error {
+	return oc.nodeReconciler.RegisterNetworkController(oc)
 }
 
 // ReconcileNode reconciles a node for a localnet UDN controller.

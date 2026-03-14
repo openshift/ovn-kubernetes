@@ -672,16 +672,13 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 
 func (o *FakeOVN) registerUDNNodeHandler(networkName string) error {
 	if c, ok := o.fullL3UDNControllers[networkName]; ok {
-		c.RegisterNodeHandler()
-		return nil
+		return c.RegisterNodeHandler()
 	}
 	if c, ok := o.fullL2UDNControllers[networkName]; ok {
-		c.RegisterNodeHandler()
-		return nil
+		return c.RegisterNodeHandler()
 	}
 	if c, ok := o.fullLocalnetUDNControllers[networkName]; ok {
-		c.RegisterNodeHandler()
-		return nil
+		return c.RegisterNodeHandler()
 	}
 	return fmt.Errorf("no concrete UDN controller found for network %s", networkName)
 }

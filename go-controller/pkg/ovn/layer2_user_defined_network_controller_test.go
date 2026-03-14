@@ -557,7 +557,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			udnNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
 			Expect(ok).To(BeTrue())
 			udnNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
-			l2Controller.RegisterNodeHandler()
+			Expect(l2Controller.RegisterNodeHandler()).To(Succeed())
 			Expect(l2Controller.WatchNamespaces()).To(Succeed())
 			Expect(l2Controller.WatchPods()).To(Succeed())
 			Expect(l2Controller.WatchNetworkPolicy()).To(Succeed())
@@ -671,7 +671,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// start watching nodes to trigger initial node cleanup
-			udnNetController.RegisterNodeHandler()
+			Expect(udnNetController.RegisterNodeHandler()).To(Succeed())
 			Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDB))
 			// check if the remoteNodesNoRouter map is empty
 			isEmpty := true

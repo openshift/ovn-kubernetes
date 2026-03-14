@@ -350,7 +350,9 @@ func (oc *Layer3UserDefinedNetworkController) Start(_ context.Context) error {
 	if err := oc.init(); err != nil {
 		return err
 	}
-	oc.RegisterNodeHandler()
+	if err := oc.RegisterNodeHandler(); err != nil {
+		return err
+	}
 	if err := oc.run(); err != nil {
 		oc.DeregisterNodeHandler()
 		return err
@@ -597,8 +599,8 @@ func (oc *Layer3UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) er
 	)
 }
 
-func (oc *Layer3UserDefinedNetworkController) RegisterNodeHandler() {
-	oc.nodeReconciler.RegisterNetworkController(oc)
+func (oc *Layer3UserDefinedNetworkController) RegisterNodeHandler() error {
+	return oc.nodeReconciler.RegisterNetworkController(oc)
 }
 
 // ReconcileNode reconciles a node for a layer3 UDN controller.

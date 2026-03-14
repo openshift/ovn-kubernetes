@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
@@ -156,18 +155,19 @@ func (c *NodeController) AnnotationCache() *NodeAnnotationCache {
 
 // RegisterNetworkController registers or replaces a per-network node handler.
 // Registration is the activation signal for node handling.
-func (c *NodeController) RegisterNetworkController(handler NodeHandler) {
+func (c *NodeController) RegisterNetworkController(handler NodeHandler) error {
 	if handler == nil {
-		return
+		return fmt.Errorf("%s: nil node handler registration", c.name)
 	}
 	netName := handler.GetNetworkName()
-	_ = c.handlers.DoWithLock(netName, func(key string) error {
+	return c.handlers.DoWithLock(netName, func(key string) error {
 		if existing, ok := c.handlers.Load(key); ok && existing != nil {
 			panic(fmt.Sprintf("%s: duplicate node handler registration for network %q", c.name, key))
 		}
 		c.handlers.Store(key, handler)
 		if err := c.bootstrapNetwork(key, handler); err != nil {
-			klog.Errorf("%s: failed to bootstrap network %s: %v", c.name, netName, err)
+			c.handlers.Delete(key)
+			return fmt.Errorf("%s: failed to bootstrap network %s: %w", c.name, netName, err)
 		}
 		return nil
 	})

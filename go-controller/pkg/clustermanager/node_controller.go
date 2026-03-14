@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -93,15 +92,16 @@ func (c *clusterManagerNodeController) Stop() {
 	controller.Stop(c.nodeController)
 }
 
-func (c *clusterManagerNodeController) RegisterNetworkController(handler clusterManagerNodeHandler) {
+func (c *clusterManagerNodeController) RegisterNetworkController(handler clusterManagerNodeHandler) error {
 	netName := handler.GetNetworkName()
-	_ = c.handlers.DoWithLock(netName, func(key string) error {
+	return c.handlers.DoWithLock(netName, func(key string) error {
 		if existing, ok := c.handlers.Load(key); ok && existing != nil {
 			panic(fmt.Sprintf("%s: duplicate node handler registration for network %q", c.name, key))
 		}
 		c.handlers.Store(key, handler)
 		if err := c.bootstrapNetwork(key, handler); err != nil {
-			klog.Errorf("%s: failed to bootstrap network %s: %v", c.name, netName, err)
+			c.handlers.Delete(key)
+			return fmt.Errorf("%s: failed to bootstrap network %s: %w", c.name, netName, err)
 		}
 		return nil
 	})

@@ -559,7 +559,9 @@ func (ncc *networkClusterController) Start(_ context.Context) error {
 		if ncc.nodeReconciler == nil {
 			return fmt.Errorf("cluster manager network controller %q has node allocation but no shared node controller", ncc.GetNetworkName())
 		}
-		ncc.nodeReconciler.RegisterNetworkController(ncc)
+		if err := ncc.nodeReconciler.RegisterNetworkController(ncc); err != nil {
+			return err
+		}
 		klog.Infof("Cluster manager network controller %q completed shared node registration. Took: %v", ncc.GetNetworkName(), time.Since(start))
 	}
 

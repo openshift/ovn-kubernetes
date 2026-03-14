@@ -111,9 +111,15 @@ func TestRegisterNetworkControllerBootstrapFailure(t *testing.T) {
 		annotationCache: NewNodeAnnotationCache(),
 	}
 
-	c.RegisterNetworkController(handler)
+	err := c.RegisterNetworkController(handler)
+	if err == nil {
+		t.Fatal("expected bootstrap failure to be returned")
+	}
 	if handler.syncCalls != 1 {
 		t.Fatalf("expected first bootstrap attempt, got %d SyncNodes calls", handler.syncCalls)
+	}
+	if got, ok := c.handlers.Load(handler.netName); ok || got != nil {
+		t.Fatalf("expected failed bootstrap to roll back handler registration for %q", handler.netName)
 	}
 }
 
@@ -129,14 +135,16 @@ func TestRegisterNetworkControllerPanicsOnDuplicateNetworkHandler(t *testing.T) 
 	h1 := &fakeNodeHandler{netName: "net-a"}
 	h2 := &fakeNodeHandler{netName: "net-a"}
 
-	c.RegisterNetworkController(h1)
+	if err := c.RegisterNetworkController(h1); err != nil {
+		t.Fatalf("unexpected register error: %v", err)
+	}
 
 	defer func() {
 		if r := recover(); r == nil {
 			t.Fatal("expected duplicate handler registration to panic")
 		}
 	}()
-	c.RegisterNetworkController(h2)
+	_ = c.RegisterNetworkController(h2)
 }
 
 func TestDeregisterNetworkControllerClearsNetworkState(t *testing.T) {

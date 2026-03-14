@@ -520,7 +520,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			l3Controller, ok := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
 			Expect(ok).To(BeTrue())
 			Expect(l3Controller.init()).To(Succeed())
-			l3Controller.RegisterNodeHandler()
+			Expect(l3Controller.RegisterNodeHandler()).To(Succeed())
 			Expect(l3Controller.WatchNamespaces()).To(Succeed())
 			Expect(l3Controller.WatchPods()).To(Succeed())
 			Expect(l3Controller.WatchNetworkPolicy()).To(Succeed())
