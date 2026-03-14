@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -173,8 +174,15 @@ func (c *clusterManagerNodeController) reconcileUpdate(oldNode, newNode *corev1.
 
 func (c *clusterManagerNodeController) reconcileDelete(nodeName, netName string) error {
 	oldNode := c.nodeCache.Get(nodeName)
+	var oldState *sharednode.NodeAnnotationState
 	if oldNode == nil {
-		return nil
+		oldNode = &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		}
+	} else {
+		oldState = c.annotationCache.UpdateNodeAnnotationState(oldNode, false)
 	}
 
 	handlerKeys := c.handlers.GetKeys()
@@ -184,8 +192,6 @@ func (c *clusterManagerNodeController) reconcileDelete(nodeName, netName string)
 	if len(handlerKeys) == 0 {
 		return nil
 	}
-
-	oldState := c.annotationCache.UpdateNodeAnnotationState(oldNode, false)
 
 	var errs []error
 	for _, handlerKey := range handlerKeys {

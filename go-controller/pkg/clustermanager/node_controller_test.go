@@ -17,16 +17,22 @@ import (
 )
 
 type fakeClusterManagerNodeHandler struct {
-	netName   string
-	syncErr   error
-	syncCalls int
+	netName         string
+	syncErr         error
+	syncCalls       int
+	deleteCalls     int
+	lastDeletedNode string
 }
 
 func (f *fakeClusterManagerNodeHandler) GetNetworkName() string {
 	return f.netName
 }
 
-func (f *fakeClusterManagerNodeHandler) ReconcileNode(_, _ *corev1.Node, _, _ *sharednode.NodeAnnotationState) error {
+func (f *fakeClusterManagerNodeHandler) ReconcileNode(oldNode, newNode *corev1.Node, _, _ *sharednode.NodeAnnotationState) error {
+	if newNode == nil && oldNode != nil {
+		f.deleteCalls++
+		f.lastDeletedNode = oldNode.Name
+	}
 	return nil
 }
 
@@ -81,5 +87,28 @@ func TestRegisterNetworkControllerBootstrapFailureRollsBackHandler(t *testing.T)
 	}
 	if got, ok := c.handlers.Load(handler.netName); ok || got != nil {
 		t.Fatalf("expected failed bootstrap to roll back handler registration for %q", handler.netName)
+	}
+}
+
+func TestReconcileDeleteCacheMissStillInvokesHandler(t *testing.T) {
+	handler := &fakeClusterManagerNodeHandler{netName: "net-a"}
+	handlers := syncmap.NewSyncMap[clusterManagerNodeHandler]()
+	handlers.Store(handler.netName, handler)
+
+	c := &clusterManagerNodeController{
+		handlers:        handlers,
+		bootstrapNodes:  map[string]map[string]struct{}{},
+		nodeCache:       newClusterManagerNodeCache(),
+		annotationCache: sharednode.NewNodeAnnotationCache(),
+	}
+
+	if err := c.reconcileDelete("node-a", handler.netName); err != nil {
+		t.Fatalf("reconcileDelete returned error: %v", err)
+	}
+	if handler.deleteCalls != 1 {
+		t.Fatalf("expected delete handler to be called once, got %d", handler.deleteCalls)
+	}
+	if handler.lastDeletedNode != "node-a" {
+		t.Fatalf("expected stub node name %q, got %q", "node-a", handler.lastDeletedNode)
 	}
 }
