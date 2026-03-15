@@ -52,7 +52,7 @@ func getMaxConcurrentRetries() int {
 		maxConcurrent = 500
 	}
 
-	klog.V(5).Infof("Calculated max concurrent retries: %d (CPU cores: %d)", maxConcurrent, numCPU)
+	klog.V(4).Infof("Phase 1.6: Calculated max concurrent retries: %d (CPU cores: %d)", maxConcurrent, numCPU)
 	return maxConcurrent
 }
 
@@ -524,7 +524,7 @@ func (r *RetryFramework) iterateRetryResources() {
 	semaphore := make(chan struct{}, maxConcurrent)
 
 	// Process the above list of objects that need retry by holding the lock for each one of them.
-	klog.V(5).Infof("Going to retry %v resource setup for %d objects (max %d concurrent): %s",
+	klog.V(4).Infof("Going to retry %v resource setup for %d objects (max %d concurrent): %s",
 		r.ResourceHandler.ObjType, len(entriesKeys), maxConcurrent, entriesKeys)
 
 	for _, entryKey := range entriesKeys {
@@ -538,9 +538,9 @@ func (r *RetryFramework) iterateRetryResources() {
 			r.resourceRetry(entryKey, now)
 		}(entryKey)
 	}
-	klog.V(5).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.ResourceHandler.ObjType)
+	klog.V(4).Infof("Waiting for all the %s retry setup to complete in iterateRetryResources", r.ResourceHandler.ObjType)
 	wg.Wait()
-	klog.V(5).Infof("Function iterateRetryResources for %s ended (in %v, max concurrent: %d)",
+	klog.V(4).Infof("Function iterateRetryResources for %s ended (in %v, max concurrent: %d)",
 		r.ResourceHandler.ObjType, time.Since(now), maxConcurrent)
 }
 

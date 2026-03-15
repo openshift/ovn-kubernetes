@@ -337,7 +337,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) WatchPodAnnotationUpdates() er
 
 			if oldAnnotation != newAnnotation && newAnnotation != "" {
 				// Annotation added/updated - immediately requeue pod for processing
-				klog.V(5).Infof("[%s] Pod %s/%s annotation updated, requeuing for immediate processing",
+				klog.V(4).Infof("[%s] Pod %s/%s annotation updated, requeuing for immediate processing",
 					networkName, newPod.Namespace, newPod.Name)
 
 				// Add pod to retry framework without backoff (immediate processing)
@@ -357,7 +357,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) WatchPodAnnotationUpdates() er
 		return fmt.Errorf("failed to setup pod annotation update watcher for network %s: %v", networkName, err)
 	}
 
-	klog.Infof("[%s] Started pod annotation update watcher", networkName)
+	klog.V(4).Infof("[%s] Phase 1: Started pod annotation update watcher", networkName)
 	return nil
 }
 
