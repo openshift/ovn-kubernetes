@@ -190,6 +190,14 @@ func (c *openflowManager) addNetworkFlows(networkName string, hostIPs []net.IP, 
 	return nil
 }
 
+// hasNetworkFlows checks if flows for a network are already cached.
+func (c *openflowManager) hasNetworkFlows(networkName string) bool {
+	c.flowMutex.Lock()
+	defer c.flowMutex.Unlock()
+	_, exists := c.flowCache[fmt.Sprintf("NETWORK-%s", networkName)]
+	return exists
+}
+
 // deleteNetworkFlows removes OpenFlow rules specific to a network.
 func (c *openflowManager) deleteNetworkFlows(networkName string) {
 	klog.V(4).Infof("[deleteNetworkFlows] Removing flows for network %s", networkName)

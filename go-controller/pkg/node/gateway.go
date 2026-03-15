@@ -345,14 +345,9 @@ func (g *gateway) Start() error {
 			return fmt.Errorf("failed to initialize base flows: %w", err)
 		}
 
-		// If UDN is enabled, add default network flows as a network
-		if util.IsNetworkSegmentationSupportEnabled() {
-			hostIPs, hostSubnets := g.nodeIPManager.ListAddresses()
-			err := g.openflowManager.addNetworkFlows(types.DefaultNetworkName, hostIPs, hostSubnets)
-			if err != nil {
-				klog.Warningf("Failed to add default network flows: %v (will retry during reconcile)", err)
-			}
-		}
+		// Note: Default network flows will be added during Reconcile() or when
+		// the default network is registered via AddNetwork(). We don't add them
+		// here because the network configuration may not be ready yet at startup.
 
 		g.openflowManager.Run(g.stopChan, g.wg)
 	}
@@ -554,7 +549,20 @@ func (g *gateway) Reconcile() error {
 				// let's sync these flows immediately
 				g.openflowManager.requestFlowSync()
 			} else {
-				klog.V(5).Info("Skipping updateBridgeFlowCache (UDN enabled, using incremental flows)")
+				// For UDN mode: ensure default network flows are added if not already present
+				if !g.openflowManager.hasNetworkFlows(types.DefaultNetworkName) {
+					klog.V(4).Infof("Adding default network flows during reconcile (not present at startup)")
+					hostIPs, hostSubnets := g.nodeIPManager.ListAddresses()
+					if err := g.openflowManager.addNetworkFlows(types.DefaultNetworkName, hostIPs, hostSubnets); err != nil {
+						// This may fail if network config not ready yet, will retry on next reconcile
+						klog.V(4).Infof("Failed to add default network flows during reconcile: %v (will retry)", err)
+					} else {
+						g.openflowManager.requestFlowSync()
+						klog.V(4).Infof("Successfully added default network flows during reconcile")
+					}
+				} else {
+					klog.V(5).Info("Default network flows already present, skipping")
+				}
 			}
 		}
 	}
