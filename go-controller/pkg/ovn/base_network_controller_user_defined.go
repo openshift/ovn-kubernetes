@@ -328,6 +328,53 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 		return nil
 	}
 
+	// OVSDB BATCHING: Use batch processor for UDN networks (initial pod creation only)
+	// Only applies to UDN networks (podBatchProcessor != nil)
+	// Skip for: port updates, live migration, or when batching disabled
+	if bsnc.podBatchProcessor != nil && addPort && !updatePort {
+		klog.V(4).Infof("[OVSDB BATCHING] Attempting to batch pod %s/%s for network %s",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName())
+
+		// Parse pod annotation (needed for batch processing)
+		podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, bsnc.GetNetworkName())
+		if err != nil {
+			// If annotation parsing fails, fall back to sequential processing
+			klog.V(4).Infof("[OVSDB BATCHING] Failed to parse annotations for pod %s/%s, using sequential: %v",
+				pod.Namespace, pod.Name, err)
+			// Fall through to sequential processing below
+		} else {
+			// Create batch item and add to batch processor
+			batchItem := NewPodBatchItem(pod, podAnnotation, bsnc.GetNetworkName())
+
+			// Add to batch (will trigger processing when batch full or timeout)
+			bsnc.podBatchProcessor.Add(batchItem)
+
+			klog.V(4).Infof("[OVSDB BATCHING] Added pod %s/%s to batch, waiting for processing",
+				pod.Namespace, pod.Name)
+
+			// Wait for batch processing result (with timeout)
+			err = batchItem.Wait(10 * time.Second)
+			if err == nil {
+				// Batch processing succeeded
+				klog.V(4).Infof("[OVSDB BATCHING] Pod %s/%s processed successfully via batch",
+					pod.Namespace, pod.Name)
+				return nil
+			}
+
+			// Batch processing failed or timed out - fall back to sequential
+			klog.Warningf("[OVSDB BATCHING] Batch processing failed/timeout for pod %s/%s, "+
+				"falling back to sequential: %v", pod.Namespace, pod.Name, err)
+			// Fall through to sequential processing below
+		}
+	}
+
+	// Sequential processing (fallback or when batching not applicable)
+	// Used for:
+	// - Primary network pods (no podBatchProcessor)
+	// - Port updates (updatePort=true)
+	// - Live migration scenarios
+	// - Batch processing failures
+	// - When annotation parsing fails
 	var errs []error
 	for nadKey, network := range networkMap {
 		if err = bsnc.addLogicalPortToNetworkForNAD(pod, nadKey, switchName, network, kubevirtLiveMigrationStatus); err != nil {
