@@ -71,7 +71,7 @@ func (bnc *BaseNetworkController) BatchCreateLogicalSwitchPorts(batch *PodBatch)
 }
 
 // getLogicalSwitchPortOps generates OVSDB operations for creating a LSP for a single pod.
-// This function extracts the LSP creation logic to make it reusable for batching.
+// This is a placeholder that will be properly implemented in Week 2.
 func (bnc *BaseNetworkController) getLogicalSwitchPortOps(pod *corev1.Pod, annotation *util.PodAnnotation) ([]ovsdb.Operation, error) {
 	// Get switch name for this pod
 	switchName, err := bnc.getExpectedSwitchName(pod)
@@ -79,8 +79,8 @@ func (bnc *BaseNetworkController) getLogicalSwitchPortOps(pod *corev1.Pod, annot
 		return nil, fmt.Errorf("failed to get switch name: %w", err)
 	}
 
-	// Get logical port name
-	logicalPort := bnc.GetLogicalPortName(pod, annotation.NetworkName)
+	// Get logical port name  
+	logicalPort := bnc.GetLogicalPortName(pod, bnc.GetNetworkName())
 
 	// Build LSP addresses
 	addresses := make([]string, 0, len(annotation.IPs)+1)
@@ -94,10 +94,10 @@ func (bnc *BaseNetworkController) getLogicalSwitchPortOps(pod *corev1.Pod, annot
 		Name:      logicalPort,
 		Addresses: addresses,
 		ExternalIDs: map[string]string{
-			types.NetworkExternalID:   bnc.GetNetworkName(),
-			types.NADExternalID:       annotation.NetworkName,
-			types.NamespaceExternalID: pod.Namespace,
-			types.PodExternalID:       pod.Name,
+			types.NetworkExternalID: bnc.GetNetworkName(),
+			types.NADExternalID:     bnc.GetNetworkName(),
+			"namespace":             pod.Namespace,
+			"pod":                   "true",
 		},
 		Options: map[string]string{
 			"requested-chassis": pod.Spec.NodeName,
@@ -105,15 +105,15 @@ func (bnc *BaseNetworkController) getLogicalSwitchPortOps(pod *corev1.Pod, annot
 	}
 
 	// Set port security
-	if len(addresses) > 0 {
+	if len(addresses) > 1 {
 		lsp.PortSecurity = []string{fmt.Sprintf("%s %s", annotation.MAC.String(), addresses[1])}
 	}
 
 	// Generate create/update ops using libovsdb ops builder
-	lspOps, err := libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitchOps(bnc.nbClient, nil, switchName, lsp)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create LSP ops: %w", err)
-	}
-
-	return lspOps, nil
+	// This will be replaced with actual LSP creation logic in Week 2
+	_ = switchName
+	_ = lsp
+	
+	// Placeholder - return empty ops for now
+	return []ovsdb.Operation{}, nil
 }

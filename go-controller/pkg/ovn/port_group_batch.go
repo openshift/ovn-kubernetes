@@ -7,7 +7,6 @@ import (
 	"k8s.io/klog/v2"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
 // BatchUpdatePortGroups updates port groups for multiple pods in a single OVSDB transaction.
@@ -37,11 +36,11 @@ func (bnc *BaseNetworkController) BatchUpdatePortGroups(batch *PodBatch) error {
 	for ns, items := range portGroupMap {
 		portNames := make([]string, len(items))
 		for i, item := range items {
-			portNames[i] = bnc.GetLogicalPortName(item.Pod, item.Annotations.NetworkName)
+			portNames[i] = bnc.GetLogicalPortName(item.Pod, bnc.GetNetworkName())
 		}
 
 		// Get or create port group for this namespace
-		portGroupName := bnc.getNetworkScopedName(nbdb.PortGroup{}, ns)
+		portGroupName := bnc.GetNetworkScopedName(ns)
 
 		// Generate ops to add ports to port group
 		pgOps, err := bnc.getPortGroupAddPortsOps(portGroupName, portNames)
