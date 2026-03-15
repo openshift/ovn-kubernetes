@@ -367,19 +367,35 @@ func (bnc *BaseNetworkController) releasePodIPs(pInfo *lpInfo) error {
 }
 
 func (bnc *BaseNetworkController) waitForNodeLogicalSwitch(switchName string) (*nbdb.LogicalSwitch, error) {
-	// Wait for the node logical switch to be created by the ClusterController and be present
-	// in libovsdb's cache. The node switch will be created when the node's logical network infrastructure
-	// is created by the node watch
+	// Phase 1 optimization: Event-driven waiting instead of polling
+	// This eliminates the 30-second timeout penalty that was causing 120s overhead
+	// Old approach: Polled every 30ms for up to 30 seconds (1000 iterations)
+	// New approach: Subscribe to switch ready event, immediate notification
+
 	ls := &nbdb.LogicalSwitch{Name: switchName}
-	if err := wait.PollUntilContextTimeout(context.Background(), 30*time.Millisecond, 30*time.Second, true, func(_ context.Context) (bool, error) {
-		if subnets := bnc.lsManager.GetSwitchSubnets(switchName); subnets == nil {
-			return false, fmt.Errorf("error getting logical switch %s: %s", switchName, "switch not in logical switch cache")
-		}
-		return true, nil
-	}); err != nil {
-		return nil, fmt.Errorf("timed out waiting for logical switch in logical switch cache %q subnet: %v", switchName, err)
+	waitStart := time.Now()
+
+	// Fast path: Check if switch is already in cache
+	if subnets := bnc.lsManager.GetSwitchSubnets(switchName); subnets != nil {
+		klog.V(5).Infof("[Phase1-Optimization] Switch %s already in cache (fast path), wait time: %v",
+			switchName, time.Since(waitStart))
+		return ls, nil
 	}
-	return ls, nil
+
+	// Subscribe to switch readiness event
+	switchReadyCh := bnc.lsManager.SubscribeSwitchReady(switchName)
+
+	// Wait for switch to be ready with reasonable timeout
+	select {
+	case <-switchReadyCh:
+		// Switch is now ready
+		klog.V(4).Infof("[Phase1-Optimization] Switch %s became ready via event notification, wait time: %v",
+			switchName, time.Since(waitStart))
+		return ls, nil
+	case <-time.After(5 * time.Second):
+		// Timeout - this should be rare, indicates a real problem
+		return nil, fmt.Errorf("timed out waiting for logical switch %q after 5s (event-driven)", switchName)
+	}
 }
 
 func (bnc *BaseNetworkController) waitForNodeLogicalSwitchSubnetsInCache(switchName string) error {

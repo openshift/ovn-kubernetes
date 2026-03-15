@@ -6,6 +6,7 @@ import (
 	"net"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
@@ -328,12 +329,52 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 		return nil
 	}
 
-	var errs []error
+	// Phase 1 optimization: Parallelize NAD processing using goroutines
+	// Old approach: Sequential loop, each NAD blocks until completion (30s timeout × N NADs)
+	// New approach: All NADs processed concurrently, completion time = max(NAD times)
+	// Expected impact: With 2 NADs, reduces 60s to 30s (50% improvement)
+
+	var (
+		errs   []error
+		errMux sync.Mutex
+		wg     sync.WaitGroup
+	)
+
+	parallelStart := time.Now()
+	nadCount := len(networkMap)
+
+	// Process each NAD in parallel using goroutines
 	for nadKey, network := range networkMap {
-		if err = bsnc.addLogicalPortToNetworkForNAD(pod, nadKey, switchName, network, kubevirtLiveMigrationStatus); err != nil {
-			errs = append(errs, fmt.Errorf("failed to add logical port of Pod %s/%s for NAD key %s: %w", pod.Namespace, pod.Name, nadKey, err))
-		}
+		wg.Add(1)
+		go func(nadKey string, network *nadapi.NetworkSelectionElement) {
+			defer wg.Done()
+
+			nadStart := time.Now()
+			err := bsnc.addLogicalPortToNetworkForNAD(pod, nadKey, switchName, network, kubevirtLiveMigrationStatus)
+			nadDuration := time.Since(nadStart)
+
+			if err != nil {
+				errMux.Lock()
+				errs = append(errs, fmt.Errorf("failed to add logical port of Pod %s/%s for NAD key %s: %w",
+					pod.Namespace, pod.Name, nadKey, err))
+				errMux.Unlock()
+				klog.V(5).Infof("[Phase1-Optimization] NAD processing failed for pod %s/%s, NAD %s, duration: %v, error: %v",
+					pod.Namespace, pod.Name, nadKey, nadDuration, err)
+			} else {
+				klog.V(5).Infof("[Phase1-Optimization] NAD processing succeeded for pod %s/%s, NAD %s, duration: %v",
+					pod.Namespace, pod.Name, nadKey, nadDuration)
+			}
+		}(nadKey, network)
 	}
+
+	// Wait for all NADs to complete
+	wg.Wait()
+	totalDuration := time.Since(parallelStart)
+
+	klog.V(4).Infof("[Phase1-Optimization] Parallel NAD processing completed for pod %s/%s: "+
+		"%d NADs processed in %v (parallel), average per-NAD time: %v",
+		pod.Namespace, pod.Name, nadCount, totalDuration, totalDuration/time.Duration(nadCount))
+
 	if len(errs) != 0 {
 		return utilerrors.Join(errs...)
 	}
