@@ -308,6 +308,11 @@ type BaseUserDefinedNetworkController struct {
 	netPolicyHandler *factory.Handler
 	// multi-network policy events factory handler
 	multiNetPolicyHandler *factory.Handler
+
+	// EARLY EXIT FIX: Lightweight cache for pod annotations
+	// Updated immediately when annotations are added (Phase 1 watcher), avoiding
+	// informer cache lag that causes unnecessary retries
+	podAnnotationCache *PodAnnotationCache
 }
 
 func (oc *BaseUserDefinedNetworkController) FilterOutResource(objType reflect.Type, obj interface{}) bool {

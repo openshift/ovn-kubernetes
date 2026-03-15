@@ -147,6 +147,16 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 		if err := oc.WatchPodAnnotationUpdates(); err != nil {
 			return err
 		}
+
+		// EARLY EXIT FIX: Watch pod deletions to clean up annotation cache
+		if err := oc.WatchPodDeletions(); err != nil {
+			return err
+		}
+
+		// EARLY EXIT FIX: Start background cleanup routine for annotation cache
+		// This prevents memory leaks from deleted pods that we didn't get deletion notifications for
+		go oc.podAnnotationCache.StartCleanupRoutine(oc.stopChan)
+		klog.V(4).Infof("[run %s] Started pod annotation cache cleanup routine", networkName)
 	}
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() && !oc.IsPrimaryNetwork() {
@@ -336,6 +346,11 @@ func (oc *BaseLayer2UserDefinedNetworkController) WatchPodAnnotationUpdates() er
 			newAnnotation := newPod.Annotations[util.OvnPodAnnotationName]
 
 			if oldAnnotation != newAnnotation && newAnnotation != "" {
+				// EARLY EXIT FIX: Immediately mark pod as annotated in cache
+				// This allows retry framework to detect annotation without informer lag
+				podKey := newPod.Namespace + "/" + newPod.Name
+				oc.podAnnotationCache.Set(podKey, networkName)
+
 				// Annotation added/updated - immediately requeue pod for processing
 				klog.V(4).Infof("[%s] Pod %s/%s annotation updated, requeuing for immediate processing",
 					networkName, newPod.Namespace, newPod.Name)
@@ -358,6 +373,38 @@ func (oc *BaseLayer2UserDefinedNetworkController) WatchPodAnnotationUpdates() er
 	}
 
 	klog.V(4).Infof("[%s] Phase 1: Started pod annotation update watcher", networkName)
+	return nil
+}
+
+// WatchPodDeletions sets up a handler to clean up annotation cache when pods are deleted.
+// This is part of the Early Exit Fix to prevent memory leaks.
+func (oc *BaseLayer2UserDefinedNetworkController) WatchPodDeletions() error {
+	// Only watch if this controller doesn't allocate annotations itself
+	if oc.allocatesPodAnnotation() {
+		return nil
+	}
+
+	networkName := oc.GetNetworkName()
+
+	// Add delete handler to clean up annotation cache
+	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		DeleteFunc: func(obj interface{}) {
+			pod, ok := obj.(*corev1.Pod)
+			if !ok {
+				return
+			}
+
+			// EARLY EXIT FIX: Remove pod from annotation cache when deleted
+			podKey := pod.Namespace + "/" + pod.Name
+			oc.podAnnotationCache.Delete(podKey)
+		},
+	}, nil)
+
+	if err != nil {
+		return fmt.Errorf("failed to setup pod deletion watcher for network %s: %v", networkName, err)
+	}
+
+	klog.V(4).Infof("[%s] EARLY EXIT FIX: Started pod deletion watcher for cache cleanup", networkName)
 	return nil
 }
 
