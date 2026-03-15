@@ -100,19 +100,6 @@ type EventHandler interface {
 	FilterOutResource(obj interface{}) bool
 }
 
-// QuickExitChecker is an optional interface that EventHandler implementers can
-// implement to provide a fast path for checking if a retry can exit early
-// WITHOUT fetching the object from the informer cache. This is useful for
-// avoiding informer cache lag in scenarios like waiting for pod annotations.
-//
-// EARLY EXIT FIX: Layer 1 - Lightweight cache check
-type QuickExitChecker interface {
-	// CanQuickExit checks if the retry condition has been resolved without
-	// fetching from informer cache. Returns true if retry can exit immediately.
-	// This should be a very fast, lock-free check (e.g., checking a lightweight cache).
-	CanQuickExit(objKey string) bool
-}
-
 // DefaultEventHandler has the default implementations for some EventHandler
 // methods, that are not required for every handler
 type DefaultEventHandler struct{}
@@ -393,23 +380,6 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 		}
 
 		klog.Infof("Retry object setup: %s %s", r.ResourceHandler.ObjType, objKey)
-
-		// EARLY EXIT FIX - Layer 1: Quick exit check using lightweight cache
-		// Check if handler implements QuickExitChecker for fast path without informer fetch
-		if entry.newObj != nil && entry.lastSuppressedError {
-			if checker, ok := r.ResourceHandler.EventHandler.(QuickExitChecker); ok {
-				if checker.CanQuickExit(objKey) {
-					klog.V(4).Infof("EARLY EXIT FIX - Layer 1: Quick exit for %s %s (annotation cache hit, no informer fetch needed)",
-						r.ResourceHandler.ObjType, objKey)
-					entry.newObj = nil
-					if initObj != nil {
-						r.ResourceHandler.RecordSuccessEvent(initObj)
-					}
-					r.DeleteRetryObj(key)
-					return
-				}
-			}
-		}
 
 		if entry.newObj != nil {
 			// get the latest version of the object from the informer;
