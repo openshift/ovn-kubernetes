@@ -3,8 +3,10 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -104,15 +106,21 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 }
 
 func (oc *BaseLayer2UserDefinedNetworkController) run() error {
+	networkName := oc.GetNetworkName()
+
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies, and WatchNodes() depends on it
+	phaseStart := time.Now()
 	if err := oc.WatchNamespaces(); err != nil {
 		return err
 	}
+	klog.V(4).Infof("[run %s] WatchNamespaces took %v", networkName, time.Since(phaseStart))
 
+	phaseStart = time.Now()
 	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
+	klog.V(4).Infof("[run %s] WatchNodes took %v", networkName, time.Since(phaseStart))
 
 	// when on IC, it will be the NetworkController that returns the IPAMClaims
 	// IPs back to the pool
@@ -120,13 +128,25 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 		// WatchIPAMClaims should be started before WatchPods to prevent OVN-K
 		// master assigning IPs to pods without taking into account the persistent
 		// IPs set aside for the IPAMClaims
+		phaseStart = time.Now()
 		if err := oc.WatchIPAMClaims(); err != nil {
 			return err
 		}
+		klog.V(4).Infof("[run %s] WatchIPAMClaims took %v", networkName, time.Since(phaseStart))
 	}
 
+	phaseStart = time.Now()
 	if err := oc.WatchPods(); err != nil {
 		return err
+	}
+	klog.V(4).Infof("[run %s] WatchPods took %v", networkName, time.Since(phaseStart))
+
+	// Watch for pod annotation updates to immediately requeue pods when cluster manager
+	// allocates their network annotations, reducing retry latency from 30s to near-instant
+	if !oc.allocatesPodAnnotation() {
+		if err := oc.WatchPodAnnotationUpdates(); err != nil {
+			return err
+		}
 	}
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() && !oc.IsPrimaryNetwork() {
@@ -283,6 +303,62 @@ func (oc *BaseLayer2UserDefinedNetworkController) syncIPAMClaims(ipamClaims []in
 		return err
 	}
 	return oc.ipamClaimsReconciler.Sync(ipamClaims, oc.lsManager.ForSwitch(switchName))
+}
+
+// WatchPodAnnotationUpdates watches for pod annotation changes and immediately requeues pods
+// when cluster manager allocates their network annotations. This eliminates the 30-second
+// retry delay when pods are processed before cluster manager annotation allocation completes.
+func (oc *BaseLayer2UserDefinedNetworkController) WatchPodAnnotationUpdates() error {
+	// Only watch if this controller doesn't allocate annotations itself
+	// (i.e., cluster manager allocates them)
+	if oc.allocatesPodAnnotation() {
+		return nil
+	}
+
+	networkName := oc.GetNetworkName()
+
+	// Add update handler to existing pod informer to detect annotation changes
+	_, err := oc.watchFactory.AddPodHandler(cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldPod, ok1 := oldObj.(*corev1.Pod)
+			newPod, ok2 := newObj.(*corev1.Pod)
+			if !ok1 || !ok2 {
+				return
+			}
+
+			// Filter pods not in our network
+			if !oc.doesNetworkRequireIPAM() || !oc.isPodScheduledinLocalZone(newPod) {
+				return
+			}
+
+			// Check if OVN pod-networks annotation was added or updated
+			oldAnnotation := oldPod.Annotations[util.OvnPodAnnotationName]
+			newAnnotation := newPod.Annotations[util.OvnPodAnnotationName]
+
+			if oldAnnotation != newAnnotation && newAnnotation != "" {
+				// Annotation added/updated - immediately requeue pod for processing
+				klog.V(4).Infof("[%s] Pod %s/%s annotation updated, requeuing for immediate processing",
+					networkName, newPod.Namespace, newPod.Name)
+
+				// Add pod to retry framework without backoff (immediate processing)
+				if err := oc.retryPods.AddRetryObjWithAddNoBackoff(newPod); err != nil {
+					klog.Warningf("[%s] Failed to requeue pod %s/%s after annotation update: %v",
+						networkName, newPod.Namespace, newPod.Name, err)
+					return
+				}
+
+				// Request immediate retry processing
+				oc.retryPods.RequestRetryObjs()
+			}
+		},
+	}, nil) // No processExisting function needed for update-only handler
+
+	if err != nil {
+		return fmt.Errorf("failed to setup pod annotation update watcher for network %s: %v", networkName, err)
+	}
+
+	klog.V(4).Infof("[%s] Phase 1: Started pod annotation update watcher", networkName)
+	return nil
 }
 
 func dummyPod() *corev1.Pod {

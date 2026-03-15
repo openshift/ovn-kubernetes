@@ -227,6 +227,18 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 // ensurePodForUserDefinedNetwork tries to set up the User Defined Network for a pod. It returns nil on success and error
 // on failure; failure indicates the pod set up should be retried later.
 func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod *corev1.Pod, addPort bool) error {
+	startTime := time.Now()
+
+	// Timing instrumentation for P99 analysis - sub-phase tracking
+	var liveMigrationTime, switchLookupTime, nadMappingTime, networkManagerTime time.Duration
+
+	defer func() {
+		klog.V(4).Infof("Finished ensurePodForUserDefinedNetwork for pod %s/%s on network %s, "+
+			"took %v (liveMigration=%v, switchLookup=%v, networkManager=%v, nadMapping=%v)",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName(),
+			time.Since(startTime), liveMigrationTime, switchLookupTime, networkManagerTime, nadMappingTime)
+	}()
+
 	// Try unscheduled pods later
 	if !util.PodScheduled(pod) {
 		return nil
@@ -240,7 +252,9 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 	var err error
 
 	if kubevirt.IsPodAllowedForMigration(pod, bsnc.GetNetInfo()) {
+		t1 := time.Now()
 		kubevirtLiveMigrationStatus, err = kubevirt.DiscoverLiveMigrationStatus(bsnc.watchFactory, pod)
+		liveMigrationTime = time.Since(t1)
 		if err != nil {
 			return fmt.Errorf("failed to discover Live-migration status: %w", err)
 		}
@@ -253,31 +267,38 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 
 	// If a node does not have an assigned hostsubnet don't wait for the logical switch to appear
 	var switchName string
+	t2 := time.Now()
 	switchName, err = bsnc.getExpectedSwitchName(pod)
+	switchLookupTime = time.Since(t2)
 	if err != nil {
 		return err
 	}
 
 	var activeNetwork util.NetInfo
 	if bsnc.IsPrimaryNetwork() {
+		t3 := time.Now()
 		// check to see if the primary NAD is even applicable to our controller
 		foundNamespaceNAD, err := bsnc.networkManager.GetPrimaryNADForNamespace(pod.Namespace)
 		if err != nil {
 			return fmt.Errorf("failed to get primary network namespace NAD: %w", err)
 		}
 		if foundNamespaceNAD == types.DefaultNetworkName {
+			networkManagerTime = time.Since(t3)
 			return nil
 		}
 		networkName := bsnc.networkManager.GetNetworkNameForNADKey(foundNamespaceNAD)
 		if networkName != "" && networkName != bsnc.GetNetworkName() {
+			networkManagerTime = time.Since(t3)
 			return nil
 		}
 		activeNetwork, err = bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
+		networkManagerTime = time.Since(t3)
 		if err != nil {
 			return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
 		}
 	}
 
+	t4 := time.Now()
 	on, networkMap, err := util.GetPodNADToNetworkMappingWithActiveNetwork(
 		pod,
 		bsnc.GetNetInfo(),
@@ -285,6 +306,7 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 		bsnc.networkManager.GetNetworkNameForNADKey,
 		bsnc.networkManager.GetPrimaryNADForNamespace,
 	)
+	nadMappingTime = time.Since(t4)
 	if err != nil {
 		bsnc.recordPodErrorEvent(pod, err)
 		// configuration error, no need to retry, do not return error
@@ -306,6 +328,53 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 		return nil
 	}
 
+	// OVSDB BATCHING: Use batch processor for UDN networks (initial pod creation only)
+	// Only applies to UDN networks (podBatchProcessor != nil)
+	// Skip for: port updates, live migration, or when batching disabled
+	if bsnc.podBatchProcessor != nil && addPort && !updatePort {
+		klog.V(4).Infof("[OVSDB BATCHING] Attempting to batch pod %s/%s for network %s",
+			pod.Namespace, pod.Name, bsnc.GetNetworkName())
+
+		// Parse pod annotation (needed for batch processing)
+		podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, bsnc.GetNetworkName())
+		if err != nil {
+			// If annotation parsing fails, fall back to sequential processing
+			klog.V(4).Infof("[OVSDB BATCHING] Failed to parse annotations for pod %s/%s, using sequential: %v",
+				pod.Namespace, pod.Name, err)
+			// Fall through to sequential processing below
+		} else {
+			// Create batch item and add to batch processor
+			batchItem := NewPodBatchItem(pod, podAnnotation, bsnc.GetNetworkName())
+
+			// Add to batch (will trigger processing when batch full or timeout)
+			bsnc.podBatchProcessor.Add(batchItem)
+
+			klog.V(4).Infof("[OVSDB BATCHING] Added pod %s/%s to batch, waiting for processing",
+				pod.Namespace, pod.Name)
+
+			// Wait for batch processing result (with timeout)
+			err = batchItem.Wait(10 * time.Second)
+			if err == nil {
+				// Batch processing succeeded
+				klog.V(4).Infof("[OVSDB BATCHING] Pod %s/%s processed successfully via batch",
+					pod.Namespace, pod.Name)
+				return nil
+			}
+
+			// Batch processing failed or timed out - fall back to sequential
+			klog.Warningf("[OVSDB BATCHING] Batch processing failed/timeout for pod %s/%s, "+
+				"falling back to sequential: %v", pod.Namespace, pod.Name, err)
+			// Fall through to sequential processing below
+		}
+	}
+
+	// Sequential processing (fallback or when batching not applicable)
+	// Used for:
+	// - Primary network pods (no podBatchProcessor)
+	// - Port updates (updatePort=true)
+	// - Live migration scenarios
+	// - Batch processing failures
+	// - When annotation parsing fails
 	var errs []error
 	for nadKey, network := range networkMap {
 		if err = bsnc.addLogicalPortToNetworkForNAD(pod, nadKey, switchName, network, kubevirtLiveMigrationStatus); err != nil {
@@ -321,12 +390,15 @@ func (bsnc *BaseUserDefinedNetworkController) ensurePodForUserDefinedNetwork(pod
 func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod *corev1.Pod, nadKey, switchName string,
 	network *nadapi.NetworkSelectionElement, kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
 ) error {
-	var libovsdbExecuteTime time.Duration
+	// Timing instrumentation for P99 analysis - breakdown timing
+	var libovsdbExecuteTime, portCreateTime, namespaceOpsTime, dhcpTime time.Duration
 
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort for NAD key %s took %v, libovsdb time %v",
-			pod.Namespace, pod.Name, nadKey, time.Since(start), libovsdbExecuteTime)
+		klog.Infof("[%s/%s] addLogicalPort for NAD key %s took %v "+
+			"(portCreate=%v, libovsdb=%v, namespaceOps=%v, dhcp=%v)",
+			pod.Namespace, pod.Name, nadKey, time.Since(start),
+			portCreateTime, libovsdbExecuteTime, namespaceOpsTime, dhcpTime)
 	}()
 
 	var err error
@@ -351,7 +423,9 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 	requiresLogicalPort := isLocalPod || bsnc.isLayer2Interconnect()
 
 	if requiresLogicalPort {
+		t1 := time.Now()
 		ops, lsp, podAnnotation, newlyCreated, err = bsnc.addLogicalPortToNetwork(pod, nadKey, network, lspEnabled)
+		portCreateTime = time.Since(t1)
 		if err != nil {
 			return err
 		}
@@ -394,12 +468,14 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 
 	if bsnc.doesNetworkRequireIPAM() &&
 		(util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork())) {
+		t2 := time.Now()
 		// Ensure the namespace/nsInfo exists
 		portUUID := ""
 		if lsp != nil {
 			portUUID = lsp.UUID
 		}
 		addOps, err := bsnc.addPodToNamespaceForUserDefinedNetwork(pod.Namespace, podAnnotation.IPs, portUUID)
+		namespaceOpsTime = time.Since(t2)
 		if err != nil {
 			return err
 		}
@@ -423,9 +499,11 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 	if lsp != nil {
 		_ = bsnc.logicalPortCache.add(pod, switchName, nadKey, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
 		if bsnc.requireDHCP(pod) {
+			t3 := time.Now()
 			if err := bsnc.ensureDHCP(pod, podAnnotation, lsp); err != nil {
 				return err
 			}
+			dhcpTime = time.Since(t3)
 		}
 	}
 
@@ -611,6 +689,12 @@ func (bsnc *BaseUserDefinedNetworkController) hasIPAMClaim(pod *corev1.Pod, nadK
 }
 
 func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods []interface{}) error {
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished syncPodsForUserDefinedNetwork for network %s (%d pods), took %v",
+			bsnc.GetNetworkName(), len(pods), time.Since(startTime))
+	}()
+
 	annotatedLocalPods := map[*corev1.Pod]map[string]*util.PodAnnotation{}
 	// get the list of logical switch ports (equivalent to pods). Reserve all existing Pod IPs to
 	// avoid subsequent new Pods getting the same duplicate Pod IP.

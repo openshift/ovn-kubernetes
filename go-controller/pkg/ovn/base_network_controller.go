@@ -308,6 +308,11 @@ type BaseUserDefinedNetworkController struct {
 	netPolicyHandler *factory.Handler
 	// multi-network policy events factory handler
 	multiNetPolicyHandler *factory.Handler
+
+	// OVSDB BATCHING: Batch processor for UDN pod operations
+	// Reduces OVSDB transaction overhead by batching multiple pod operations together
+	// Only used for UDN networks, not primary network (for safety)
+	podBatchProcessor *BatchProcessor
 }
 
 func (oc *BaseUserDefinedNetworkController) FilterOutResource(objType reflect.Type, obj interface{}) bool {

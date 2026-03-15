@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -115,6 +116,12 @@ func allocatePodAnnotation(
 	updatedPod *corev1.Pod,
 	podAnnotation *util.PodAnnotation,
 	err error) {
+
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished allocatePodAnnotation for pod %s/%s on network %s, took %v",
+			pod.Namespace, pod.Name, netInfo.GetNetworkName(), time.Since(startTime))
+	}()
 
 	// no id allocation
 	var idAllocator id.NamedAllocator
