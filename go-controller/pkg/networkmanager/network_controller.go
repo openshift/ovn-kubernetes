@@ -402,45 +402,61 @@ func (c *networkController) syncNetwork(network string) error {
 		klog.V(4).Infof("%s: finished syncing network %s, took %v", c.name, network, time.Since(startTime))
 	}()
 
+	// Phase 1: Get network states
+	phaseStart := time.Now()
 	have, stoppedAndDeleting := c.getReconcilableNetworkState(network)
 	want := c.getNetwork(network)
+	klog.V(4).Infof("%s: [syncNetwork %s] phase 1 (get network states) took %v", c.name, network, time.Since(phaseStart))
 
+	// Phase 2: Check compatibility
+	phaseStart = time.Now()
 	compatible := util.AreNetworksCompatible(have, want)
+	klog.V(4).Infof("%s: [syncNetwork %s] phase 2 (check compatibility) took %v, compatible=%v", c.name, network, time.Since(phaseStart), compatible)
 
-	// we will dispose of the old network if deletion is in progress or if
-	// non-reconcilable configuration changed
+	// Phase 3: Delete network if needed
 	dispose := stoppedAndDeleting || !compatible
 	if dispose {
+		phaseStart = time.Now()
 		err := c.deleteNetwork(network)
 		if err != nil {
 			return err
 		}
 		have = nil
+		klog.V(4).Infof("%s: [syncNetwork %s] phase 3 (delete network) took %v", c.name, network, time.Since(phaseStart))
 	}
 
-	// fetch other relevant network information
+	// Phase 4: Gather network information
+	phaseStart = time.Now()
 	err := c.gatherNetwork(want)
 	if err != nil {
 		return fmt.Errorf("failed to fetch other network information for network %s: %w", network, err)
 	}
+	klog.V(4).Infof("%s: [syncNetwork %s] phase 4 (gather network) took %v", c.name, network, time.Since(phaseStart))
 
+	// Phase 5: Ensure network if needed
 	ensureNetwork := !compatible || util.DoesNetworkNeedReconciliation(have, want)
 	if ensureNetwork {
-		// inform controller manager of upcoming changes so other controllers are
-		// aware
+		// Phase 5a: Reconcile controller manager
+		phaseStart = time.Now()
 		err = c.cm.Reconcile(network, have, want)
 		if err != nil {
 			return fmt.Errorf("failed to reconcile controller manager for network %s: %w", network, err)
 		}
+		klog.V(4).Infof("%s: [syncNetwork %s] phase 5a (cm.Reconcile) took %v", c.name, network, time.Since(phaseStart))
 
-		// ensure the network controller
+		// Phase 5b: Ensure network controller
+		phaseStart = time.Now()
 		err = c.ensureNetwork(want)
 		if err != nil {
 			return fmt.Errorf("%s: failed to ensure network %s: %w", c.name, network, err)
 		}
+		klog.V(4).Infof("%s: [syncNetwork %s] phase 5b (ensureNetwork) took %v", c.name, network, time.Since(phaseStart))
 	}
 
+	// Phase 6: Reconcile pending network ref changes
+	phaseStart = time.Now()
 	c.reconcilePendingNetworkRefChanges(network)
+	klog.V(4).Infof("%s: [syncNetwork %s] phase 6 (reconcile pending refs) took %v", c.name, network, time.Since(phaseStart))
 
 	return nil
 }
@@ -451,28 +467,49 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	}
 
 	networkName := network.GetNetworkName()
+	startTime := time.Now()
+	klog.V(5).Infof("%s: ensuring network %s", c.name, networkName)
+	defer func() {
+		klog.V(4).Infof("%s: finished ensuring network %s, took %v", c.name, networkName, time.Since(startTime))
+	}()
+
+	// Phase 1: Check if reconcilable network exists
+	phaseStart := time.Now()
 	reconcilable, _ := c.getReconcilableNetworkState(networkName)
+	klog.V(4).Infof("%s: [ensureNetwork %s] phase 1 (get reconcilable state) took %v, exists=%v", c.name, networkName, time.Since(phaseStart), reconcilable != nil)
 
 	// this might just be an update of reconcilable network configuration
 	if reconcilable != nil {
+		// Phase 2a: Reconcile existing controller
+		phaseStart = time.Now()
 		err := reconcilable.Reconcile(network)
 		if err != nil {
 			return fmt.Errorf("failed to reconcile controller for network %s: %w", networkName, err)
 		}
+		klog.V(4).Infof("%s: [ensureNetwork %s] phase 2a (reconcile existing) took %v", c.name, networkName, time.Since(phaseStart))
 		return nil
 	}
 
-	// otherwise setup & start the new network controller
+	// Phase 2b: Create new network controller
+	phaseStart = time.Now()
 	nc, err := c.cm.NewNetworkController(network)
 	if err != nil {
 		return fmt.Errorf("failed to create network %s: %w", networkName, err)
 	}
+	klog.V(4).Infof("%s: [ensureNetwork %s] phase 2b (create new controller) took %v", c.name, networkName, time.Since(phaseStart))
 
+	// Phase 3: Start network controller
+	phaseStart = time.Now()
 	err = nc.Start(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to start network %s: %w", networkName, err)
 	}
+	klog.V(4).Infof("%s: [ensureNetwork %s] phase 3 (start controller) took %v", c.name, networkName, time.Since(phaseStart))
+
+	// Phase 4: Set network state
+	phaseStart = time.Now()
 	c.setNetworkState(network.GetNetworkName(), &networkControllerState{controller: nc})
+	klog.V(4).Infof("%s: [ensureNetwork %s] phase 4 (set network state) took %v", c.name, networkName, time.Since(phaseStart))
 
 	return nil
 }

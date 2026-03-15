@@ -3,6 +3,7 @@ package logicalswitchmanager
 import (
 	"fmt"
 	"net"
+	"sync"
 
 	knet "k8s.io/utils/net"
 
@@ -19,14 +20,24 @@ type LogicalSwitchManager struct {
 	gatewayIPs []*net.IPNet
 	mgmtIPs    []*net.IPNet
 	reserveIPs bool
+
+	// Event channels for switch readiness notifications (Phase 1 optimization)
+	switchReadyChannels map[string][]chan struct{}
+	switchReadyMux      sync.RWMutex
+
+	// Phase 1 optimization metrics
+	cacheHits   int64
+	cacheMisses int64
+	statsMux    sync.RWMutex
 }
 
 // NewLogicalSwitchManager initializes a new logical switch manager for L3
 // networks.
 func NewLogicalSwitchManager() *LogicalSwitchManager {
 	return &LogicalSwitchManager{
-		allocator:  subnet.NewAllocator(),
-		reserveIPs: true,
+		allocator:           subnet.NewAllocator(),
+		reserveIPs:          true,
+		switchReadyChannels: make(map[string][]chan struct{}),
 	}
 }
 
@@ -40,7 +51,8 @@ func NewLogicalSwitchManager() *LogicalSwitchManager {
 //     management port
 func NewL2SwitchManager() *LogicalSwitchManager {
 	return &LogicalSwitchManager{
-		allocator: subnet.NewAllocator(),
+		allocator:           subnet.NewAllocator(),
+		switchReadyChannels: make(map[string][]chan struct{}),
 	}
 }
 
@@ -52,6 +64,7 @@ func NewL2SwitchManagerForUserDefinedPrimaryNetwork(gatewayIPs, mgmtIPs []*net.I
 	lsm := NewLogicalSwitchManager()
 	lsm.gatewayIPs = gatewayIPs
 	lsm.mgmtIPs = mgmtIPs
+	lsm.switchReadyChannels = make(map[string][]chan struct{})
 	return lsm
 }
 
@@ -78,12 +91,19 @@ func (manager *LogicalSwitchManager) AddOrUpdateSwitch(switchName string, hostSu
 			}
 		}
 	}
-	return manager.allocator.AddOrUpdateSubnet(subnet.SubnetConfig{
+	err := manager.allocator.AddOrUpdateSubnet(subnet.SubnetConfig{
 		Name:            switchName,
 		Subnets:         hostSubnets,
 		ReservedSubnets: reservedSubnets,
 		ExcludeSubnets:  excludeSubnets,
 	})
+
+	// Phase 1 optimization: Notify all subscribers that switch is now ready
+	if err == nil && len(hostSubnets) > 0 {
+		manager.notifySwitchReady(switchName)
+	}
+
+	return err
 }
 
 // AddNoHostSubnetSwitch adds/updates a switch without any host subnets
@@ -194,4 +214,81 @@ func (manager *LogicalSwitchManager) ForSwitch(switchName string) subnet.NamedAl
 // from "subnets" if not it will return "", false
 func (manager *LogicalSwitchManager) GetSubnetName(subnets []*net.IPNet) (string, bool) {
 	return manager.allocator.GetSubnetName(subnets)
+}
+
+// SubscribeSwitchReady returns a channel that will be closed when the specified
+// switch is ready (present in cache with subnets allocated). This implements
+// event-driven waiting instead of polling, eliminating the 30-second timeout
+// penalty that was the primary bottleneck in UDN L2 performance (Phase 1 optimization).
+//
+// If the switch is already ready, the channel is closed immediately.
+// Callers should use this in a select statement with a timeout:
+//
+//	ch := manager.SubscribeSwitchReady(switchName)
+//	select {
+//	case <-ch:
+//	    // Switch is ready
+//	case <-time.After(5 * time.Second):
+//	    // Timeout
+//	}
+func (manager *LogicalSwitchManager) SubscribeSwitchReady(switchName string) <-chan struct{} {
+	manager.switchReadyMux.Lock()
+	defer manager.switchReadyMux.Unlock()
+
+	// Fast path: check if switch is already ready (has subnets)
+	subnets, _ := manager.allocator.GetSubnets(switchName)
+	if subnets != nil {
+		// Switch already exists in cache, return closed channel immediately
+		// Track cache hit for metrics
+		manager.statsMux.Lock()
+		manager.cacheHits++
+		manager.statsMux.Unlock()
+
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+
+	// Switch not ready yet, subscribe to future notification
+	// Track cache miss for metrics
+	manager.statsMux.Lock()
+	manager.cacheMisses++
+	manager.statsMux.Unlock()
+
+	ch := make(chan struct{})
+	manager.switchReadyChannels[switchName] = append(manager.switchReadyChannels[switchName], ch)
+	return ch
+}
+
+// notifySwitchReady notifies all subscribers that a switch is now ready.
+// This is called internally when a switch is added to the cache.
+// All waiting goroutines will be unblocked immediately instead of polling.
+func (manager *LogicalSwitchManager) notifySwitchReady(switchName string) {
+	manager.switchReadyMux.Lock()
+	defer manager.switchReadyMux.Unlock()
+
+	// Close all channels waiting for this switch
+	for _, ch := range manager.switchReadyChannels[switchName] {
+		close(ch)
+	}
+	// Remove the channels to free memory
+	delete(manager.switchReadyChannels, switchName)
+}
+
+// GetCacheStats returns cache hit/miss statistics for Phase 1 optimization analysis.
+// Returns (hits, misses, hit rate percentage).
+func (manager *LogicalSwitchManager) GetCacheStats() (int64, int64, float64) {
+	manager.statsMux.RLock()
+	defer manager.statsMux.RUnlock()
+
+	hits := manager.cacheHits
+	misses := manager.cacheMisses
+	total := hits + misses
+
+	var hitRate float64
+	if total > 0 {
+		hitRate = float64(hits) / float64(total) * 100.0
+	}
+
+	return hits, misses, hitRate
 }
