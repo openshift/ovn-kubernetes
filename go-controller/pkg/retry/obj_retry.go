@@ -100,6 +100,30 @@ type EventHandler interface {
 	FilterOutResource(obj interface{}) bool
 }
 
+// QuickExitChecker is an optional interface that EventHandler implementers can
+// implement to provide a fast path for checking if a retry can exit early
+// WITHOUT fetching the object from the informer cache. This is useful for
+// avoiding informer cache lag in scenarios like waiting for pod configuration.
+//
+// EARLY EXIT FIX: Layer 1 - Lightweight cache check (before informer fetch)
+type QuickExitChecker interface {
+	// CanQuickExit checks if the retry condition has been resolved without
+	// fetching from informer cache. Returns true if retry can exit immediately.
+	// This should be a very fast, lock-free check (e.g., checking a lightweight cache).
+	CanQuickExit(objKey string) bool
+}
+
+// CachePopulator is an optional interface for populating the early exit cache
+// AFTER AddResource() successfully completes. This ensures cache is only populated
+// when the resource is fully configured (e.g., LSP created in OVS).
+//
+// EARLY EXIT FIX: Cache population on success
+type CachePopulator interface {
+	// PopulateCache marks an object as successfully configured in the cache.
+	// Called AFTER AddResource() succeeds.
+	PopulateCache(objKey string)
+}
+
 // DefaultEventHandler has the default implementations for some EventHandler
 // methods, that are not required for every handler
 type DefaultEventHandler struct{}
@@ -381,6 +405,24 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 
 		klog.Infof("Retry object setup: %s %s", r.ResourceHandler.ObjType, objKey)
 
+		// EARLY EXIT FIX - Layer 1: Quick exit check using lightweight cache
+		// Check if handler implements QuickExitChecker for fast path without informer fetch
+		// This only applies to suppressed errors (waiting for configuration to complete)
+		if entry.newObj != nil && entry.lastSuppressedError {
+			if checker, ok := r.ResourceHandler.EventHandler.(QuickExitChecker); ok {
+				if checker.CanQuickExit(objKey) {
+					klog.V(4).Infof("EARLY EXIT FIX - Layer 1: Quick exit for %s %s (cache hit, no informer fetch needed)",
+						r.ResourceHandler.ObjType, objKey)
+					entry.newObj = nil
+					if initObj != nil {
+						r.ResourceHandler.RecordSuccessEvent(initObj)
+					}
+					r.DeleteRetryObj(key)
+					return
+				}
+			}
+		}
+
 		if entry.newObj != nil {
 			// get the latest version of the object from the informer;
 			// if it doesn't exist we are not going to create the new object.
@@ -408,6 +450,13 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 					// Success! The previously suppressed condition (missing annotation) is now resolved
 					klog.V(4).Infof("Early exit: retry successful for %s %s after suppressed error cleared (saved redundant retries)",
 						r.ResourceHandler.ObjType, objKey)
+
+					// EARLY EXIT FIX: Populate cache AFTER successful AddResource
+					// This ensures cache is only populated when resource is fully configured (LSP created)
+					if populator, ok := r.ResourceHandler.EventHandler.(CachePopulator); ok {
+						populator.PopulateCache(objKey)
+					}
+
 					entry.newObj = nil
 					if initObj != nil {
 						r.ResourceHandler.RecordSuccessEvent(initObj)

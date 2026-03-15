@@ -308,6 +308,11 @@ type BaseUserDefinedNetworkController struct {
 	netPolicyHandler *factory.Handler
 	// multi-network policy events factory handler
 	multiNetPolicyHandler *factory.Handler
+
+	// EARLY EXIT FIX: Lightweight cache for successfully configured pods
+	// Populated AFTER AddResource() succeeds (when LSP is created in OVS)
+	// Used by Layer 1 quick exit to avoid redundant retries
+	podAnnotationCache *PodAnnotationCache
 }
 
 func (oc *BaseUserDefinedNetworkController) FilterOutResource(objType reflect.Type, obj interface{}) bool {
