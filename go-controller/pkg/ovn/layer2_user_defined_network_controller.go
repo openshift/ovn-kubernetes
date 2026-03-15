@@ -294,41 +294,6 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) IsObjectInTerminalState
 	return h.baseHandler.isObjectInTerminalState(h.objType, obj)
 }
 
-// CanQuickExit implements retry.QuickExitChecker for fast early exit checks.
-// EARLY EXIT FIX - Layer 1: Check lightweight annotation cache without informer fetch.
-// This is only relevant for pods on non-allocating controllers (cluster manager allocates).
-func (h *layer2UserDefinedNetworkControllerEventHandler) CanQuickExit(objKey string) bool {
-	// Only applies to pod objects
-	if h.objType != factory.PodType {
-		return false
-	}
-
-	// Only applies if this controller doesn't allocate annotations (cluster manager does)
-	if h.oc.allocatesPodAnnotation() {
-		return false
-	}
-
-	// Check lightweight cache - if pod is configured, we can exit immediately
-	return h.oc.podAnnotationCache.Has(objKey)
-}
-
-// PopulateCache implements retry.CachePopulator to mark a pod as successfully configured.
-// EARLY EXIT FIX: This is called AFTER AddResource() succeeds (LSP created in OVS).
-func (h *layer2UserDefinedNetworkControllerEventHandler) PopulateCache(objKey string) {
-	// Only applies to pod objects
-	if h.objType != factory.PodType {
-		return
-	}
-
-	// Only applies if this controller doesn't allocate annotations
-	if h.oc.allocatesPodAnnotation() {
-		return
-	}
-
-	// Mark pod as successfully configured in cache
-	h.oc.podAnnotationCache.Set(objKey, h.oc.GetNetworkName())
-}
-
 // Layer2UserDefinedNetworkController is created for logical network infrastructure and policy
 // for a layer2 UDN
 type Layer2UserDefinedNetworkController struct {
@@ -424,8 +389,6 @@ func NewLayer2UserDefinedNetworkController(
 					networkManager:              networkManager,
 					routeImportManager:          routeImportManager,
 				},
-				// EARLY EXIT FIX: Initialize pod annotation cache
-				podAnnotationCache: NewPodAnnotationCache(),
 			},
 		},
 		mgmtPortFailed:         sync.Map{},
