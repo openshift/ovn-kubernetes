@@ -336,11 +336,19 @@ func (g *gateway) Init(stopChan <-chan struct{}, wg *sync.WaitGroup) error {
 
 func (g *gateway) Start() error {
 	if g.openflowManager != nil {
-		klog.Info("Spawning Conntrack Rule Check Thread")
-		err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses())
+		klog.Info("Initializing base OpenFlow rules and starting OpenFlow manager")
+
+		// Initialize base flows (network-independent)
+		hostIPs, _ := g.nodeIPManager.ListAddresses()
+		err := g.openflowManager.initializeBaseFlows(hostIPs)
 		if err != nil {
-			return fmt.Errorf("failed to update bridge flow cache: %w", err)
+			return fmt.Errorf("failed to initialize base flows: %w", err)
 		}
+
+		// Note: Default network flows will be added during Reconcile() or when
+		// the default network is registered via AddNetwork(). We don't add them
+		// here because the network configuration may not be ready yet at startup.
+
 		g.openflowManager.Run(g.stopChan, g.wg)
 	}
 
@@ -532,11 +540,30 @@ func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if g.openflowManager != nil {
-			if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
-				return err
+			// When UDN is enabled, flows are managed incrementally via addNetworkFlows/deleteNetworkFlows.
+			// Skip the O(N) updateBridgeFlowCache which regenerates all flows.
+			if !util.IsNetworkSegmentationSupportEnabled() {
+				if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
+					return err
+				}
+				// let's sync these flows immediately
+				g.openflowManager.requestFlowSync()
+			} else {
+				// For UDN mode: ensure default network flows are added if not already present
+				if !g.openflowManager.hasNetworkFlows(types.DefaultNetworkName) {
+					klog.V(4).Infof("Adding default network flows during reconcile (not present at startup)")
+					hostIPs, hostSubnets := g.nodeIPManager.ListAddresses()
+					if err := g.openflowManager.addNetworkFlows(types.DefaultNetworkName, hostIPs, hostSubnets); err != nil {
+						// This may fail if network config not ready yet, will retry on next reconcile
+						klog.V(4).Infof("Failed to add default network flows during reconcile: %v (will retry)", err)
+					} else {
+						g.openflowManager.requestFlowSync()
+						klog.V(4).Infof("Successfully added default network flows during reconcile")
+					}
+				} else {
+					klog.V(5).Info("Default network flows already present, skipping")
+				}
 			}
-			// let's sync these flows immediately
-			g.openflowManager.requestFlowSync()
 		}
 	}
 	// TBD updateSNATRules() gets node host-cidr by accessing gateway.nodeIPManager, which does not

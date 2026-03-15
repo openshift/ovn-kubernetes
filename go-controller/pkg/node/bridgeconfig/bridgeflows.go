@@ -39,6 +39,158 @@ func (b *BridgeConfiguration) ExternalBridgeFlows(hostSubnets []*net.IPNet) ([]s
 	return b.commonFlows(hostSubnets)
 }
 
+// BaseFlows generates bridge flows that are independent of any specific network.
+// These flows are set once during gateway initialization and don't change when
+// networks are added or removed. This enables incremental flow updates.
+//
+// Returns: ~10 base flows for Geneve forwarding, SVC replies, etc.
+func (b *BridgeConfiguration) BaseFlows(extraIPs []net.IP) ([]string, error) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	var flows []string
+
+	// Base flows don't depend on any netConfig
+	ofPortPhys := b.ofPortPhys
+	bridgeMacAddress := b.macAddress.String()
+	ofPortHost := b.ofPortHost
+	_ = b.ips // bridgeIPs not used in base flows
+
+	// IPv4 Geneve base flows
+	if config.IPv4Mode && ofPortPhys != "" {
+		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
+		// if dest mac is the shared mac send directly to host.
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp, udp_dst=%d, "+
+				"actions=output:%s", nodetypes.DefaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
+				ofPortHost))
+		// perform NORMAL action otherwise.
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
+				"actions=NORMAL", nodetypes.DefaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
+
+		// table0, Geneve packets coming from LOCAL/Host OFPort. Skip conntrack and go directly to external
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
+				"actions=output:%s", nodetypes.DefaultOpenFlowCookie, ofPortHost, config.Default.EncapPort, ofPortPhys))
+
+		// table 0, Reply SVC traffic from Host -> OVN, unSNAT and goto table 5
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s,"+
+				"actions=ct(zone=%d,nat,table=5)",
+				nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefixV4, protoPrefixV4,
+				config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String(), config.Default.OVNMasqConntrackZone))
+	}
+
+	// IPv6 Geneve base flows
+	if config.IPv6Mode && ofPortPhys != "" {
+		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
+		// if dest mac is the shared mac send directly to host.
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp6, udp_dst=%d, "+
+				"actions=output:%s", nodetypes.DefaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
+				ofPortHost))
+		// perform NORMAL action otherwise.
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
+				"actions=NORMAL", nodetypes.DefaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
+
+		// table0, Geneve packets coming from LOCAL. Skip conntrack and send to external
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
+				"actions=output:%s", nodetypes.DefaultOpenFlowCookie, nodetypes.OvsLocalPort, config.Default.EncapPort, ofPortPhys))
+
+		// table 0, Reply SVC traffic from Host -> OVN, unSNAT and goto table 5
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s,"+
+				"actions=ct(zone=%d,nat,table=5)",
+				nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefixV6, protoPrefixV6,
+				config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String(), config.Default.OVNMasqConntrackZone))
+	}
+
+	// GARP drop flows (if enabled)
+	if b.dropGARP {
+		// priority 499 flows to allow GARP pkts when src IP is a Node IP
+		flows = append(flows, b.allowNodeIPGARPFlows(extraIPs)...)
+		// priority 498 flows to drop GARP pkts with no regards to src IP
+		flows = append(flows, b.dropGARPFlows()...)
+	}
+
+	// Host to Service flows (applies to default network and UDN masquerade subnet)
+	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
+		var protoPrefix, masqIP, masqSubnet string
+		if utilnet.IsIPv4CIDR(svcCIDR) {
+			protoPrefix = protoPrefixV4
+			masqIP = config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String()
+			masqSubnet = config.Gateway.V4MasqueradeSubnet
+		} else {
+			protoPrefix = protoPrefixV6
+			masqIP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String()
+			masqSubnet = config.Gateway.V6MasqueradeSubnet
+		}
+
+		// table 0, Host (default network) -> OVN towards SVC, SNAT to special IP.
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s, "+
+				"actions=ct(commit,zone=%d,nat(src=%s),table=2)",
+				nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix,
+				svcCIDR, config.Default.HostMasqConntrackZone, masqIP))
+
+		// table 0, Host (UDNs) -> OVN towards SVC, SNAT to special IP.
+		// For packets originating from UDN, commit without NATing, those
+		// have already been SNATed to the masq IP of the UDN.
+		if util.IsNetworkSegmentationSupportEnabled() {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=550, in_port=%s, %s, %s_src=%s, %s_dst=%s, "+
+					"actions=ct(commit,zone=%d,table=2)",
+					nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix,
+					masqSubnet, protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone))
+		}
+	}
+
+	klog.V(5).Infof("[BaseFlows] generated %d base flows", len(flows))
+	return flows, nil
+}
+
+// NetworkFlows generates flows specific to a single network.
+// This enables incremental flow updates - only the new network's flows are generated,
+// not all networks.
+//
+// Parameters:
+//   - networkName: Name of the network to generate flows for
+//   - hostSubnets: Node subnets for this network
+//   - extraIPs: Additional host IPs to consider
+//
+// Returns: ~50-100 flows specific to this network
+func (b *BridgeConfiguration) NetworkFlows(networkName string, hostSubnets []*net.IPNet, extraIPs []net.IP) ([]string, error) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	// Get network configuration
+	netConfig, found := b.netConfig[networkName]
+	if !found {
+		return nil, fmt.Errorf("network %s not found in bridge configuration", networkName)
+	}
+
+	if netConfig.OfPortPatch == "" {
+		return nil, fmt.Errorf("network %s patch port not ready", networkName)
+	}
+
+	var flows []string
+	bridgeMacAddress := b.macAddress.String()
+	ofPortPhys := b.ofPortPhys
+	bridgeIPs := b.ips
+
+	// Generate network-specific flows from flowsForDefaultBridge
+	flows = append(flows, b.networkSpecificDefaultBridgeFlows(netConfig, extraIPs, bridgeIPs)...)
+
+	// Generate network-specific flows from commonFlows
+	flows = append(flows, b.networkSpecificCommonFlows(netConfig, hostSubnets, bridgeMacAddress, ofPortPhys)...)
+
+	klog.V(5).Infof("[NetworkFlows] generated %d flows for network %s", len(flows), networkName)
+	return flows, nil
+}
+
 // must be called with bridge.mutex held
 func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
@@ -1106,5 +1258,338 @@ func hostNetworkNormalActionFlows(netConfig *BridgeUDNConfiguration, srcMAC stri
 			flows = append(flows, formatICMPFlow(nodetypes.OvsLocalPort, nodetypes.CtMarkHost, icmpType))
 		}
 	}
+	return flows
+}
+
+// networkSpecificDefaultBridgeFlows extracts flows from flowsForDefaultBridge that are specific to one network.
+// This is called by NetworkFlows() to generate flows for a single network incrementally.
+// must be called with bridge.mutex held
+func (b *BridgeConfiguration) networkSpecificDefaultBridgeFlows(netConfig *BridgeUDNConfiguration, extraIPs []net.IP, bridgeIPs []*net.IPNet) []string {
+	var flows []string
+
+	// IPv4 network-specific flows
+	if config.IPv4Mode {
+		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
+		if err != nil {
+			klog.Warningf("Unable to determine IPv4 physical IP of host for network flows: %v", err)
+			return flows
+		}
+
+		// table 0, SVC Hairpin from OVN destined to local host, DNAT and go to table 4
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s, %s_src=%s,"+
+				"actions=ct(commit,zone=%d,nat(dst=%s),table=4)",
+				nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefixV4, protoPrefixV4,
+				config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String(), protoPrefixV4, physicalIP.IP,
+				config.Default.HostMasqConntrackZone, physicalIP.IP))
+
+		// table 0, hairpin from OVN destined to local host (but an additional node IP), send to table 4
+		for _, ip := range extraIPs {
+			if ip.To4() == nil {
+				continue
+			}
+			if ip.Equal(physicalIP.IP) {
+				continue
+			}
+			if ip.Equal(config.Gateway.MasqueradeIPs.V4HostMasqueradeIP) {
+				continue
+			}
+
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s, %s_src=%s,"+
+					"actions=ct(commit,zone=%d,table=4)",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefixV4,
+					protoPrefixV4, ip.String(), protoPrefixV4, physicalIP.IP,
+					config.Default.HostMasqConntrackZone))
+		}
+	}
+
+	// IPv6 network-specific flows
+	if config.IPv6Mode {
+		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
+		if err != nil {
+			klog.Warningf("Unable to determine IPv6 physical IP of host for network flows: %v", err)
+			return flows
+		}
+
+		// table 0, SVC Hairpin from OVN destined to local host, DNAT to host, send to table 4
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s, %s_src=%s,"+
+				"actions=ct(commit,zone=%d,nat(dst=%s),table=4)",
+				nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefixV6, protoPrefixV6,
+				config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String(), protoPrefixV6, physicalIP.IP,
+				config.Default.HostMasqConntrackZone, physicalIP.IP))
+
+		// table 0, hairpin from OVN destined to local host (but an additional node IP), send to table 4
+		for _, ip := range extraIPs {
+			if ip.To4() != nil {
+				continue
+			}
+			if ip.Equal(physicalIP.IP) {
+				continue
+			}
+			if ip.Equal(config.Gateway.MasqueradeIPs.V6HostMasqueradeIP) {
+				continue
+			}
+
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s, %s_src=%s,"+
+					"actions=ct(commit,zone=%d,table=4)",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefixV6, protoPrefixV6,
+					ip.String(), protoPrefixV6, physicalIP.IP,
+					config.Default.HostMasqConntrackZone))
+		}
+	}
+
+	// Service CIDR specific flows
+	for _, svcCIDR := range config.Kubernetes.ServiceCIDRs {
+		var protoPrefix, masqIP, masqSubnet string
+		if utilnet.IsIPv4CIDR(svcCIDR) {
+			protoPrefix = protoPrefixV4
+			masqIP = config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String()
+			masqSubnet = config.Gateway.V4MasqueradeSubnet
+		} else {
+			protoPrefix = protoPrefixV6
+			masqIP = config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String()
+			masqSubnet = config.Gateway.V6MasqueradeSubnet
+		}
+
+		masqDst := masqIP
+		if util.IsNetworkSegmentationSupportEnabled() {
+			masqDst = masqSubnet
+		}
+
+		// table 0, Reply hairpin traffic to host, coming from OVN, unSNAT
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_src=%s, %s_dst=%s,"+
+				"actions=ct(zone=%d,nat,table=3)",
+				nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefix, protoPrefix, svcCIDR,
+				protoPrefix, masqDst, config.Default.HostMasqConntrackZone))
+
+		// table 0, Reply traffic coming from OVN to outside, drop it if DNAT wasn't done
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=115, in_port=%s, %s, %s_dst=%s,"+
+				"actions=drop", nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefix, protoPrefix, svcCIDR))
+
+		// Advertised UDN flows (if applicable)
+		if util.IsNetworkSegmentationSupportEnabled() && util.IsRouteAdvertisementsEnabled() {
+			if !netConfig.IsDefaultNetwork() && netConfig.Advertised.Load() {
+				ofPortHost := b.ofPortHost
+				for _, subnet := range netConfig.Subnets {
+					if (utilnet.IsIPv4CIDR(subnet.CIDR) && utilnet.IsIPv4CIDR(svcCIDR)) ||
+						(utilnet.IsIPv6CIDR(subnet.CIDR) && utilnet.IsIPv6CIDR(svcCIDR)) {
+						flows = append(flows,
+							fmt.Sprintf("cookie=%s, priority=550, %s, in_port=%s, %s_src=%s, %s_dst=%s, "+
+								"actions=ct(commit,table=2,zone=%d)",
+								nodetypes.DefaultOpenFlowCookie, protoPrefix, ofPortHost, protoPrefix,
+								subnet.CIDR, protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone))
+					}
+				}
+			}
+		}
+	}
+
+	return flows
+}
+
+// networkSpecificCommonFlows extracts flows from commonFlows that are specific to one network.
+// This is called by NetworkFlows() to generate flows for a single network incrementally.
+// must be called with bridge.mutex held
+func (b *BridgeConfiguration) networkSpecificCommonFlows(netConfig *BridgeUDNConfiguration, hostSubnets []*net.IPNet, bridgeMacAddress, ofPortPhys string) []string {
+	var flows []string
+
+	// table 0, check packets coming from OVN have the correct mac address
+	flows = append(flows,
+		fmt.Sprintf("cookie=%s, priority=10, table=0, in_port=%s, dl_src=%s, actions=output:NORMAL",
+			nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress))
+	flows = append(flows,
+		fmt.Sprintf("cookie=%s, priority=9, table=0, in_port=%s, actions=drop",
+			nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch))
+
+	// Network-specific flows from commonFlows
+	if ofPortPhys == "" {
+		return flows
+	}
+
+	maxPktLength := getMaxFrameLength()
+	if config.IPv4Mode {
+		physicalIP, err := util.MatchFirstIPNetFamily(false, b.ips)
+		if err != nil {
+			klog.Warningf("Unable to determine IPv4 physical IP for network common flows: %v", err)
+			return flows
+		}
+
+		var actions string
+		if config.Gateway.Mode != config.GatewayModeLocal || config.Gateway.DisablePacketMTUCheck {
+			actions = fmt.Sprintf("output:%s", netConfig.OfPortPatch)
+		} else {
+			actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
+		}
+
+		// table 1, established and related connections with ct_mark go to OVN
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=100, table=1, %s, ct_state=+trk+est, ct_mark=%s, "+
+				"actions=%s", nodetypes.DefaultOpenFlowCookie, protoPrefixV4, netConfig.MasqCTMark, actions))
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=100, table=1, %s, ct_state=+trk+rel, ct_mark=%s, "+
+				"actions=%s", nodetypes.DefaultOpenFlowCookie, protoPrefixV4, netConfig.MasqCTMark, actions))
+
+		// Egress flows
+		if netConfig.IsDefaultNetwork() {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, %s, "+
+					"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress, protoPrefixV4,
+					config.Default.ConntrackZone, netConfig.MasqCTMark, ofPortPhys))
+
+			if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
+				flows = append(flows, hostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, false)...)
+			}
+		} else {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, %s, %s_src=%s, "+
+					"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress, protoPrefixV4, protoPrefixV4,
+					netConfig.V4MasqIPs.GatewayRouter.IP, config.Default.ConntrackZone,
+					physicalIP.IP, netConfig.MasqCTMark, ofPortPhys))
+		}
+
+		// EgressIP flows
+		if config.OVNKubernetesFeature.EnableEgressIP {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, %s, pkt_mark=%s "+
+					"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress, protoPrefixV4,
+					nodetypes.OvnKubeNodeSNATMark, config.Default.ConntrackZone, physicalIP.IP, netConfig.MasqCTMark, ofPortPhys))
+
+			for _, clusterEntry := range netConfig.Subnets {
+				cidr := clusterEntry.CIDR
+				if utilnet.IsIPv4CIDR(cidr) {
+					flows = append(flows,
+						fmt.Sprintf("cookie=%s, priority=103, in_port=%s, %s, %s_src=%s, actions=drop",
+							nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefixV4, protoPrefixV4, cidr))
+				}
+			}
+		}
+
+		// LGW mode specific flows
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, tcp, nw_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, physicalIP.IP, config.Default.HostMasqConntrackZone))
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, udp, nw_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, physicalIP.IP, config.Default.HostMasqConntrackZone))
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, sctp, nw_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, physicalIP.IP, config.Default.HostMasqConntrackZone))
+		}
+	}
+
+	if config.IPv6Mode {
+		physicalIP, err := util.MatchFirstIPNetFamily(true, b.ips)
+		if err != nil {
+			klog.Warningf("Unable to determine IPv6 physical IP for network common flows: %v", err)
+			return flows
+		}
+
+		var actions string
+		if config.Gateway.Mode != config.GatewayModeLocal || config.Gateway.DisablePacketMTUCheck {
+			actions = fmt.Sprintf("output:%s", netConfig.OfPortPatch)
+		} else {
+			actions = fmt.Sprintf("check_pkt_larger(%d)->reg0[0],resubmit(,11)", maxPktLength)
+		}
+
+		// table 1, established and related connections with ct_mark go to OVN
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=100, table=1, %s, ct_state=+trk+est, ct_mark=%s, "+
+				"actions=%s", nodetypes.DefaultOpenFlowCookie, protoPrefixV6, netConfig.MasqCTMark, actions))
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=100, table=1, %s, ct_state=+trk+rel, ct_mark=%s, "+
+				"actions=%s", nodetypes.DefaultOpenFlowCookie, protoPrefixV6, netConfig.MasqCTMark, actions))
+
+		// Egress flows
+		if netConfig.IsDefaultNetwork() {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, %s, "+
+					"actions=ct(commit, zone=%d, exec(set_field:%s->ct_mark)), output:%s",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress, protoPrefixV6,
+					config.Default.ConntrackZone, netConfig.MasqCTMark, ofPortPhys))
+
+			if config.Gateway.Mode == config.GatewayModeShared || config.Gateway.Mode == config.GatewayModeLocal {
+				flows = append(flows, hostNetworkNormalActionFlows(netConfig, bridgeMacAddress, hostSubnets, true)...)
+			}
+		} else {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=100, in_port=%s, dl_src=%s, %s, %s_src=%s, "+
+					"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress, protoPrefixV6, protoPrefixV6,
+					netConfig.V6MasqIPs.GatewayRouter.IP, config.Default.ConntrackZone,
+					physicalIP.IP, netConfig.MasqCTMark, ofPortPhys))
+		}
+
+		// EgressIP flows
+		if config.OVNKubernetesFeature.EnableEgressIP {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=105, in_port=%s, dl_src=%s, %s, pkt_mark=%s "+
+					"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)),output:%s",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress, protoPrefixV6,
+					nodetypes.OvnKubeNodeSNATMark, config.Default.ConntrackZone, physicalIP.IP, netConfig.MasqCTMark, ofPortPhys))
+
+			for _, clusterEntry := range netConfig.Subnets {
+				cidr := clusterEntry.CIDR
+				if utilnet.IsIPv6CIDR(cidr) {
+					flows = append(flows,
+						fmt.Sprintf("cookie=%s, priority=103, in_port=%s, %s, %s_src=%s, actions=drop",
+							nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefixV6, protoPrefixV6, cidr))
+				}
+			}
+		}
+
+		// LGW mode specific flows
+		if config.Gateway.Mode == config.GatewayModeLocal {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, tcp6, ipv6_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, physicalIP.IP, config.Default.HostMasqConntrackZone))
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, udp6, ipv6_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, physicalIP.IP, config.Default.HostMasqConntrackZone))
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=175, in_port=%s, sctp6, ipv6_src=%s, "+
+					"actions=ct(table=4,zone=%d)",
+					nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, physicalIP.IP, config.Default.HostMasqConntrackZone))
+		}
+	}
+
+	// Additional network-specific flows for non-DPU mode
+	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		for _, subnet := range hostSubnets {
+			isIPv6 := utilnet.IsIPv6CIDR(subnet)
+			var protoPrefix string
+			if isIPv6 {
+				protoPrefix = protoPrefixV6
+			} else {
+				protoPrefix = protoPrefixV4
+			}
+
+			// table 1, host network to OVN, not a service, do not SNAT
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=10, table=1, %s, %s_src=%s, "+
+					"actions=output:%s", nodetypes.DefaultOpenFlowCookie, protoPrefix, protoPrefix,
+					subnet, netConfig.OfPortPatch))
+
+			// table 2, host network to OVN for service traffic
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=10, table=2, %s, %s_src=%s, "+
+					"actions=output:%s", nodetypes.DefaultOpenFlowCookie, protoPrefix, protoPrefix,
+					subnet, netConfig.OfPortPatch))
+		}
+	}
+
 	return flows
 }

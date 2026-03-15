@@ -303,9 +303,17 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 			return true, nil
 		}
 		postFunc := func() error {
-			if err := udng.gateway.Reconcile(); err != nil {
-				return fmt.Errorf("failed to reconcile flows on bridge for network %s; error: %v", udng.GetNetworkName(), err)
+			// Add flows for this network only (incremental update)
+			klog.V(4).Infof("[AddNetwork %s] Adding network-specific flows incrementally", udng.GetNetworkName())
+			hostIPs, hostSubnets := udng.gateway.nodeIPManager.ListAddresses()
+			if err := udng.gateway.openflowManager.addNetworkFlows(udng.GetNetworkName(), hostIPs, hostSubnets); err != nil {
+				return fmt.Errorf("failed to add flows for network %s: %v", udng.GetNetworkName(), err)
 			}
+
+			// Request flow sync to OVS
+			udng.gateway.openflowManager.requestFlowSync()
+			klog.V(4).Infof("[AddNetwork %s] Network flows added and sync requested", udng.GetNetworkName())
+
 			return nil
 		}
 		waiter.AddWait(readyFunc, postFunc)
@@ -313,9 +321,16 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 			return err
 		}
 	} else {
-		if err := udng.gateway.Reconcile(); err != nil {
-			return fmt.Errorf("failed to reconcile flows on bridge for network %s; error: %v", udng.GetNetworkName(), err)
+		// Add flows for this network only (incremental update - DPU mode)
+		klog.V(4).Infof("[AddNetwork %s] Adding network-specific flows incrementally (DPU mode)", udng.GetNetworkName())
+		hostIPs, hostSubnets := udng.gateway.nodeIPManager.ListAddresses()
+		if err := udng.gateway.openflowManager.addNetworkFlows(udng.GetNetworkName(), hostIPs, hostSubnets); err != nil {
+			return fmt.Errorf("failed to add flows for network %s: %v", udng.GetNetworkName(), err)
 		}
+
+		// Request flow sync to OVS
+		udng.gateway.openflowManager.requestFlowSync()
+		klog.V(4).Infof("[AddNetwork %s] Network flows added and sync requested (DPU mode)", udng.GetNetworkName())
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
@@ -351,14 +366,17 @@ func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 		}
 	}
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		// delete the openflows for this network
+		// delete the openflow configuration for this network
 		if udng.openflowManager != nil {
 			udng.openflowManager.delNetwork(udng.NetInfo)
-		}
-	}
-	if udng.openflowManager != nil || config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		if err := udng.gateway.Reconcile(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err))
+
+			// Delete flows for this network only (incremental update)
+			klog.V(4).Infof("[DelNetwork %s] Deleting network-specific flows incrementally", udng.GetNetworkName())
+			udng.openflowManager.deleteNetworkFlows(udng.GetNetworkName())
+
+			// Request flow sync to OVS
+			udng.openflowManager.requestFlowSync()
+			klog.V(4).Infof("[DelNetwork %s] Network flows deleted and sync requested", udng.GetNetworkName())
 		}
 	}
 
@@ -789,11 +807,16 @@ func (udng *UserDefinedNetworkGateway) doReconcile() error {
 		// table=1, n_packets=0, n_bytes=0, priority=16,ip,nw_dst=128.192.0.2 actions=LOCAL (Both gateway modes)
 		// table=1, n_packets=0, n_bytes=0, priority=15,ip,nw_dst=128.192.0.0/14 actions=output:3 (shared gateway mode)
 		// necessary service isolation flows based on whether network is advertised or not
-		if err := udng.openflowManager.updateBridgeFlowCache(udng.nodeIPManager.ListAddresses()); err != nil {
-			return fmt.Errorf("error while updating logical flow for UDN %s: %s", udng.GetNetworkName(), err)
+		// Use incremental flow update: delete old flows for this network and re-add with updated advertised flag
+		klog.V(4).Infof("[doReconcile %s] Updating network flows incrementally (advertised changed)", udng.GetNetworkName())
+		udng.openflowManager.deleteNetworkFlows(udng.GetNetworkName())
+		hostIPs, hostSubnets := udng.nodeIPManager.ListAddresses()
+		if err := udng.openflowManager.addNetworkFlows(udng.GetNetworkName(), hostIPs, hostSubnets); err != nil {
+			return fmt.Errorf("error while updating flows for UDN %s: %w", udng.GetNetworkName(), err)
 		}
 		// let's sync these flows immediately
 		udng.openflowManager.requestFlowSync()
+		klog.V(4).Infof("[doReconcile %s] Network flows updated and sync requested", udng.GetNetworkName())
 	}
 
 	if config.OvnKubeNode.Mode != types.NodeModeDPU {
