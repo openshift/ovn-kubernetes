@@ -79,6 +79,7 @@ OVN_EVPN_ENABLE=
 OVN_ADVERTISE_DEFAULT_NETWORK=
 OVN_ADVERTISED_UDN_ISOLATION_MODE=
 OVN_NO_OVERLAY_ENABLE=
+OVN_NO_OVERLAY_OUTBOUND_SNAT_ENABLE=
 OVN_V4_JOIN_SUBNET=""
 OVN_V6_JOIN_SUBNET=""
 OVN_V4_MASQUERADE_SUBNET=""
@@ -106,6 +107,8 @@ OVN_NETWORK_QOS_ENABLE=
 OVN_ENABLE_DNSNAMERESOLVER="false"
 OVN_NOHOSTSUBNET_LABEL=""
 OVN_DISABLE_REQUESTEDCHASSIS="false"
+OVN_ALLOW_ICMP_NETPOL="false"
+
 # IN_UPGRADE is true only if called by upgrade-ovn.sh during the upgrade test,
 # it will render only the parts in ovn-setup.yaml related to RBAC permissions.
 IN_UPGRADE=
@@ -306,6 +309,9 @@ while [ "$1" != "" ]; do
   --no-overlay-enable)
     OVN_NO_OVERLAY_ENABLE=$VALUE
     ;;
+  --no-overlay-enable-snat)
+    OVN_NO_OVERLAY_OUTBOUND_SNAT_ENABLE=$VALUE
+    ;;
   --egress-service-enable)
     OVN_EGRESSSERVICE_ENABLE=$VALUE
     ;;
@@ -401,6 +407,9 @@ while [ "$1" != "" ]; do
     ;;
   --enable-dnsnameresolver)
     OVN_ENABLE_DNSNAMERESOLVER=$VALUE
+    ;;
+  --allow-icmp-netpol)
+    OVN_ALLOW_ICMP_NETPOL=$VALUE
     ;;
   --enable-observ)
     OVN_OBSERV_ENABLE=$VALUE
@@ -540,6 +549,8 @@ ovn_advertised_udn_isolation_mode=${OVN_ADVERTISED_UDN_ISOLATION_MODE}
 echo "ovn_advertised_udn_isolation_mode: ${ovn_advertised_udn_isolation_mode}"
 ovn_no_overlay_enable=${OVN_NO_OVERLAY_ENABLE}
 echo "ovn_no_overlay_enable: ${ovn_no_overlay_enable}"
+ovn_no_overlay_outbound_snat_enable=${OVN_NO_OVERLAY_OUTBOUND_SNAT_ENABLE}
+echo "ovn_no_overlay_outbound_snat_enable: ${ovn_no_overlay_outbound_snat_enable}"
 ovn_hybrid_overlay_net_cidr=${OVN_HYBRID_OVERLAY_NET_CIDR}
 echo "ovn_hybrid_overlay_net_cidr: ${ovn_hybrid_overlay_net_cidr}"
 ovn_disable_snat_multiple_gws=${OVN_DISABLE_SNAT_MULTIPLE_GWS}
@@ -652,6 +663,9 @@ echo "ovn_network_qos_enable: ${ovn_network_qos_enable}"
 
 ovn_enable_dnsnameresolver=${OVN_ENABLE_DNSNAMERESOLVER}
 echo "ovn_enable_dnsnameresolver: ${ovn_enable_dnsnameresolver}"
+
+ovn_allow_icmp_netpol=${OVN_ALLOW_ICMP_NETPOL}
+echo "ovn_allow_icmp_netpol: ${ovn_allow_icmp_netpol}"
 
 ovn_observ_enable=${OVN_OBSERV_ENABLE}
 echo "ovn_observ_enable: ${ovn_observ_enable}"
@@ -892,6 +906,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+  ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
   ovn_observ_enable=${ovn_observ_enable} \
   ovn_nohostsubnet_label=${ovn_nohostsubnet_label} \
   ovn_disable_requestedchassis=${ovn_disable_requestedchassis} \
@@ -948,6 +963,7 @@ ovn_image=${ovnkube_image} \
   ovn_v6_transit_subnet=${ovn_v6_transit_subnet} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+  ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
   ovn_observ_enable=${ovn_observ_enable} \
   enable_coredumps=${enable_coredumps} \
   metrics_ip=${metrics_ip} \
@@ -1056,6 +1072,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+  ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
   ovn_observ_enable=${ovn_observ_enable} \
   enable_coredumps=${enable_coredumps} \
   jinjanate ../templates/ovnkube-single-node-zone.yaml.j2 -o ${output_dir}/ovnkube-single-node-zone.yaml
@@ -1226,6 +1243,7 @@ ovn_image=${ovnkube_image} \
   ovn_enable_persistent_ips=${ovn_enable_persistent_ips} \
   ovn_enable_svc_template_support=${ovn_enable_svc_template_support} \
   ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+  ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
   ovn_observ_enable=${ovn_observ_enable} \
   enable_coredumps=${enable_coredumps} \
   metrics_ip=${metrics_ip} \
@@ -1287,16 +1305,19 @@ net_cidr=${net_cidr} svc_cidr=${svc_cidr} \
   in_upgrade=${in_upgrade} \
   advertise_default_network=${ovn_advertise_default_network} \
   ovn_no_overlay_enable=${ovn_no_overlay_enable} \
+  ovn_no_overlay_outbound_snat_enable=${ovn_no_overlay_outbound_snat_enable} \
   jinjanate ../templates/ovn-setup.yaml.j2 -o ${output_dir}/ovn-setup.yaml
 
 ovn_enable_interconnect=${ovn_enable_interconnect} \
 ovn_enable_ovnkube_identity=${ovn_enable_ovnkube_identity} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
   jinjanate ../templates/rbac-ovnkube-node.yaml.j2 -o ${output_dir}/rbac-ovnkube-node.yaml
 
 ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
 ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
 ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
 ovn_evpn_enable=${ovn_evpn_enable} \
 ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
@@ -1304,6 +1325,7 @@ ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \
 
 ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
+ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
 ovn_route_advertisements_enable=${ovn_route_advertisements_enable} \
 ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
 ovn_advertised_udn_isolation_mode=${ovn_advertised_udn_isolation_mode} \

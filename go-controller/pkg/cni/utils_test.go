@@ -13,10 +13,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -145,8 +145,6 @@ var _ = Describe("CNI Utils tests", func() {
 		It("Returns Pod annotation if annotation condition is met", func() {
 			podAnnot := map[string]string{"foo": "bar"}
 			pod.Annotations = podAnnot
-			ctx, cancelFunc := context.WithTimeout(context.Background(), 20*time.Millisecond)
-			defer cancelFunc()
 
 			cond := func(pod *corev1.Pod, _ string) (*util.PodAnnotation, bool, error) {
 				if _, ok := pod.Annotations["foo"]; ok {
@@ -156,7 +154,8 @@ var _ = Describe("CNI Utils tests", func() {
 			}
 
 			clientset := newFakeClientSet(pod, &podNamespaceLister)
-
+			ctx, cancelFunc := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancelFunc()
 			podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(pod, nil)
 			returnedPod, annot, _, err := GetPodWithAnnotations(ctx, clientset, namespace, podName, ovntypes.DefaultNetworkName, cond)
 			Expect(err).ToNot(HaveOccurred())

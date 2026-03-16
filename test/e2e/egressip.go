@@ -17,14 +17,14 @@ import (
 	"github.com/onsi/ginkgo/v2/dsl/table"
 	"github.com/onsi/gomega"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
-	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/ipalloc"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -807,14 +807,6 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 		// configure and add additional network to worker containers for EIP multi NIC feature
 		secondaryProviderNetwork, err := providerCtx.CreateNetwork(secondaryNetworkName, secondarySubnet)
 		framework.ExpectNoError(err, "creation of network %q with subnet %s must succeed", secondaryNetworkName, secondarySubnet)
-		// this is only required for KinD infra provider
-		if isIPv6TestRun && infraprovider.Get().Name() == "kind" {
-			// HACK: ensure bridges don't talk to each other. For IPv6, docker support for isolated networks is experimental.
-			// Remove when it is no longer experimental. See func description for full details.
-			if err := isolateKinDIPv6Networks(primaryProviderNetwork.Name(), secondaryProviderNetwork.Name()); err != nil {
-				framework.Failf("failed to isolate IPv6 networks: %v", err)
-			}
-		}
 		nodes, err = f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 		framework.ExpectNoError(err, "must list all Nodes")
 		for _, node := range nodes.Items {
@@ -869,6 +861,15 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 	})
 
 	ginkgo.AfterEach(func() {
+		// ensure all nodes are ready and reachable before any other cleanup;
+		// tests may have left nodes NotReady or unreachable intentionally
+		for _, node := range []string{egress1Node.name, egress2Node.name} {
+			setNodeReady(providerCtx, node, true)
+			setNodeReachable(node, true)
+			waitForNoTaint(node, "node.kubernetes.io/unreachable")
+			waitForNoTaint(node, "node.kubernetes.io/not-ready")
+		}
+
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 3 {
@@ -881,14 +882,6 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", egressIPName2, "--ignore-not-found=true")
 		e2ekubectl.RunKubectlOrDie("default", "label", "node", egress1Node.name, "k8s.ovn.org/egress-assignable-")
 		e2ekubectl.RunKubectlOrDie("default", "label", "node", egress2Node.name, "k8s.ovn.org/egress-assignable-")
-
-		// ensure all nodes are ready and reachable
-		for _, node := range []string{egress1Node.name, egress2Node.name} {
-			setNodeReady(providerCtx, node, true)
-			setNodeReachable(node, true)
-			waitForNoTaint(node, "node.kubernetes.io/unreachable")
-			waitForNoTaint(node, "node.kubernetes.io/not-ready")
-		}
 	})
 	// Validate the egress IP by creating a httpd container on the kind networking
 	// (effectively seen as "outside" the cluster) and curl it from a pod in the cluster
@@ -2160,35 +2153,24 @@ spec:
 		providerPrimaryNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "failed to get providers primary network")
 		externalContainerPrimary := infraapi.ExternalContainer{Name: "external-container-for-egressip-mtu-test", Image: images.AgnHost(),
-			Network: providerPrimaryNetwork, CmdArgs: []string{"pause"}, ExtPort: externalContainerPrimaryPort}
+			Network: providerPrimaryNetwork, RuntimeArgs: []string{"--sysctl", "net.ipv4.ip_no_pmtu_disc=2"},
+			CmdArgs: []string{"netexec", httpPort, udpPort}, ExtPort: externalContainerPrimaryPort}
 		externalContainerPrimary, err = providerCtx.CreateExternalContainer(externalContainerPrimary)
 		framework.ExpectNoError(err, "failed to create external container: %s", externalContainerPrimary.String())
 
-		// First disable PMTUD
-		_, err = infraprovider.Get().ExecExternalContainerCommand(externalContainerPrimary, []string{"sysctl", "-w", "net.ipv4.ip_no_pmtu_disc=2"})
-		framework.ExpectNoError(err, "disabling PMTUD in the external kind container failed: %v", err)
-		providerCtx.AddCleanUpFn(func() error {
-			_, err = infraprovider.Get().ExecExternalContainerCommand(externalContainerPrimary, []string{"sysctl", "-w", "net.ipv4.ip_no_pmtu_disc=0"})
-			return err
-		})
-
-		go func() {
-			_, _ = infraprovider.Get().ExecExternalContainerCommand(externalContainerPrimary, []string{"/agnhost", "netexec", httpPort, udpPort})
-		}()
-
 		ginkgo.By("Checking connectivity to the external kind container and verify that the source IP is the egress IP")
 		var curlErr error
-		_ = wait.PollUntilContextTimeout(
+		err = wait.PollUntilContextTimeout(
 			context.Background(),
 			retryInterval,
 			retryTimeout,
 			true,
 			func(ctx context.Context) (bool, error) {
-				curlErr := curlAgnHostClientIPFromPod(podNamespace.Name, pod1Name, egressIP1.String(), externalContainerPrimary.GetIPv4(), externalContainerPrimary.GetPortStr())
+				curlErr = curlAgnHostClientIPFromPod(podNamespace.Name, pod1Name, egressIP1.String(), externalContainerPrimary.GetIPv4(), externalContainerPrimary.GetPortStr())
 				return curlErr == nil, nil
 			},
 		)
-		framework.ExpectNoError(curlErr, "connectivity check to the external kind container failed: %v", curlErr)
+		framework.ExpectNoError(err, "connectivity check to the external kind container failed: %v", curlErr)
 
 		// We will ask the server to reply with a UDP packet bigger than the pod
 		// network MTU. Since PMTUD has been disabled on the server, the reply

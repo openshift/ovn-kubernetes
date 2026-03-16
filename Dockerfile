@@ -5,7 +5,7 @@
 # The standard name for this image is ovn-kube
 
 # Build RHEL-9 binaries
-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-openshift-4.22 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.22 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
@@ -15,7 +15,7 @@ RUN cd openshift; CGO_ENABLED=0 ./hack/build-tests-ext.sh && \
     gzip ./bin/ovn-kubernetes-tests-ext
 
 # Build RHEL-8 binaries (for upgrades from 4.12 and earlier)
-FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.24-openshift-4.22 AS rhel8
+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.25-openshift-4.22 AS rhel8
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
 RUN cd go-controller; CGO_ENABLED=1 make

@@ -1,10 +1,9 @@
 package unidling
 
 import (
+	"context"
 	"testing"
 	"time"
-
-	"golang.org/x/net/context"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,10 +14,10 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/sbdb"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -102,7 +101,8 @@ var _ = Describe("Unidling Controller", func() {
 		// Controller_Event is deleted
 		Eventually(
 			func() int {
-				ctx, _ := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+				ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+				defer cancel()
 				var events []sbdb.ControllerEvent
 				err = sbClient.List(ctx, &events)
 				Expect(err).NotTo(HaveOccurred())

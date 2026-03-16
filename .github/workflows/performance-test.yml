@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  K8S_VERSION: v1.34.0
+  K8S_VERSION: v1.35.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -208,6 +208,20 @@ jobs:
     - name: Disable ufw
       run: |
         sudo ufw disable
+
+    - name: Disable containerd image store
+      # Workaround for https://github.com/kubernetes-sigs/kind/issues/3795
+      run: |
+        sudo mkdir -p /etc/docker
+        docker --version || true
+        containerd --version || true
+        [ -s "/etc/docker/daemon.json" ] && {
+          cat "/etc/docker/daemon.json" | jq '. + {"features":{"containerd-snapshotter": false}}' | sudo tee /etc/docker/daemon.$$
+        } || {
+          echo '{"features":{"containerd-snapshotter": false}}' | sudo tee /etc/docker/daemon.$$
+        }
+        sudo mv -f /etc/docker/daemon.$$ /etc/docker/daemon.json
+        sudo systemctl restart docker
 
     - name: Download test-image-pr
       uses: actions/download-artifact@v4

@@ -25,25 +25,25 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressfirewallfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
-	egressipfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
-	egressqosfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
-	egressservicefake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/sbdb"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	egressfirewallfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
+	egressipfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
+	egressqosfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
+	egressservicefake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/sbdb"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // Please use following subnets for various networks that we have
@@ -1088,6 +1088,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			wg,
 			nil,
 			NewPortCache(stopChan),
+			nil,
 		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(oc).NotTo(gomega.BeNil())
@@ -1274,8 +1275,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// create a pod on this node
-				ns := newNamespace("namespace-1")
-				pod := *newPodWithLabels(ns.Name, podName, node1.Name, "10.0.0.3", egressPodLabel)
+				ns := ovntest.NewNamespace("namespace-1")
+				pod := *ovntest.NewPodWithLabels(ns.Name, podName, node1.Name, "10.0.0.3", egressPodLabel)
 				_, err = fakeClient.KubeClient.CoreV1().Pods(ns.Name).Create(context.TODO(), &pod, metav1.CreateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1879,13 +1880,13 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				ts,
 			)
 
-			// https://github.com/ovn-org/ovn-kubernetes/blob/master/go-controller/pkg/ovn/namespace.go#L312
+			// https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/go-controller/pkg/ovn/namespace.go#L312
 			// adds management port and gateway router LRP IP to HostNetworkNamespace address set whenever
 			// the namespace gets created. Hence starting OVN with an empty NodeList and adding the node
 			// after the namespace is created successfully
 			fakeOvn.startWithDBSetup(dbSetup,
 				&corev1.NamespaceList{
-					Items: []corev1.Namespace{*newNamespace(config.Kubernetes.HostNetworkNamespace)},
+					Items: []corev1.Namespace{*ovntest.NewNamespace(config.Kubernetes.HostNetworkNamespace)},
 				},
 				&corev1.NodeList{
 					Items: []corev1.Node{},
@@ -2201,6 +2202,7 @@ func TestController_syncNodes(t *testing.T) {
 				wg,
 				nil,
 				NewPortCache(stopChan),
+				nil,
 			)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			err = controller.syncNodes([]interface{}{&testNode})
@@ -2306,6 +2308,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				wg,
 				nil,
 				NewPortCache(stopChan),
+				nil,
 			)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
