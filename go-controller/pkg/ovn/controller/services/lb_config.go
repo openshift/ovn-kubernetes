@@ -21,6 +21,7 @@ import (
 // magic string used in vips to indicate that the node's physical
 // ips should be substituted in
 const placeholderNodeIPs = "node"
+const localWithFallbackAnnotation = "traffic-policy.network.alpha.openshift.io/local-with-fallback"
 
 // lbConfig is the abstract desired load balancer configuration.
 // vips and endpoints are mixed families.
