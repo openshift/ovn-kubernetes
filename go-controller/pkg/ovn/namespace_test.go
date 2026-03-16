@@ -268,7 +268,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 				},
 			)
 			fakeOvn.controller.multicastSupport = false
-			fakeOvn.controller.SCTPSupport = true
 
 			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

@@ -382,7 +382,6 @@ func generateUDNPostInitDB(testData []libovsdbtest.TestData) []libovsdbtest.Test
 
 func setupClusterController(clusterController *DefaultNetworkController, setupCOPP bool) {
 	var err error
-	clusterController.SCTPSupport = true
 
 	clusterLBGroup := &nbdb.LoadBalancerGroup{Name: types.ClusterLBGroupName}
 	err = clusterController.nbClient.Get(context.Background(), clusterLBGroup)
@@ -472,7 +471,6 @@ func NewOvnController(
 		libovsdbOvnNBClient,
 		libovsdbOvnSBClient,
 		&podRecorder,
-		false, // sctp support
 		false, // multicast support
 		true,  // templates support
 	)
@@ -597,7 +595,6 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 			o.nbClient,
 			o.sbClient,
 			&podRecorder,
-			false, // sctp support
 			false, // multicast support
 			true,  // templates support
 		)
