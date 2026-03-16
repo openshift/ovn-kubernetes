@@ -14,25 +14,26 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/pod"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
-	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/pod"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
+	svccontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
+	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/topology"
+	zoneic "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 type Layer3UserDefinedNetworkControllerEventHandler struct {
@@ -347,6 +348,7 @@ func NewLayer3UserDefinedNetworkController(
 	routeImportManager routeimport.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) (*Layer3UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
@@ -367,13 +369,13 @@ func NewLayer3UserDefinedNetworkController(
 				addressSetFactory:           addressSetFactory,
 				networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 				sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-				podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 				stopChan:                    stopChan,
 				wg:                          &sync.WaitGroup{},
 				localZoneNodes:              &sync.Map{},
 				cancelableCtx:               util.NewCancelableContext(),
 				networkManager:              networkManager,
 				routeImportManager:          routeImportManager,
+				addressSetManager:           addressSetManager,
 			},
 		},
 		mgmtPortFailed:              sync.Map{},
@@ -384,6 +386,12 @@ func NewLayer3UserDefinedNetworkController(
 		gatewayTopologyFactory:      topology.NewGatewayTopologyFactory(cnci.nbClient),
 		gatewayManagers:             sync.Map{},
 		eIPController:               eIPController,
+	}
+
+	if oc.IsPrimaryNetwork() && oc.eIPController != nil {
+		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
+			oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update")
+		}
 	}
 
 	if config.OVNKubernetesFeature.EnableInterconnect {
@@ -460,6 +468,7 @@ func (oc *Layer3UserDefinedNetworkController) newRetryFramework(
 		EventHandler:           eventHandler,
 	}
 	return retry.NewRetryFramework(
+		oc.GetNetworkName()+"/networkController",
 		oc.stopChan,
 		oc.wg,
 		oc.watchFactory,
@@ -518,6 +527,19 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	// Note : Cluster manager removes the subnet annotation for the node.
 	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
+
+	// For primary L3 UDN only: when this is a cleanup-only controller (dummy for stale UDN
+	// cleanup; GetNetworkID() is InvalidID because netInfo was never reconciled from a NAD),
+	// discover and cleanup all gateway routers from the NB DB. DB-driven cleanup works even
+	// when nodes are already gone.
+	if oc.IsPrimaryNetwork() && oc.GetNetworkID() == types.InvalidID {
+		if err := cleanupGatewayRoutersForNetworkFromDB(oc.nbClient, oc.GetNetInfo(),
+			oc.GetNetworkScopedClusterRouterName(), oc.GetNetworkScopedJoinSwitchName()); err != nil {
+			return fmt.Errorf("failed to cleanup gateway routers for network %s: %w", netName, err)
+		}
+	}
+
+	// Node switches (which hold management port LSPs) are deleted below; LSPs are cascade-deleted with the logical switch.
 	// first delete node logical switches
 	ops, err = libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, ops,
 		func(item *nbdb.LogicalSwitch) bool {
@@ -557,6 +579,16 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 		return err
 	}
 
+	// Delete QoS rows for this network (e.g. from NetworkQoS controller). Applies to primary and
+	// secondary Layer3 UDNs when EnableNetworkQoS is set.
+	ops, err = libovsdbops.DeleteQoSesWithPredicateOps(oc.nbClient, ops,
+		func(item *nbdb.QoS) bool {
+			return item.ExternalIDs[types.NetworkExternalID] == netName
+		})
+	if err != nil {
+		return fmt.Errorf("failed to get ops for deleting QoSes of network %s: %v", netName, err)
+	}
+
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("failed to deleting routers/switches of network %s: %v", netName, err)
@@ -568,14 +600,24 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 		}
 	}
 
+	// Delete all load balancers owned by this network to prevent orphaned LBs.
+	// When network is deleted, all switches and routers are also deleted, but load balancers are not.
+	// Load_Balancer is a root table in OVSDB, so rows are never auto-deleted
+	// when the switch or LB group referencing them is removed.
+	lbs, err := libovsdbops.FindLoadBalancersWithPredicate(oc.nbClient, func(lb *nbdb.LoadBalancer) bool {
+		return lb.ExternalIDs[types.NetworkExternalID] == netName
+	})
+	if err != nil {
+		klog.Errorf("Failed to find load balancers for network %q: %v", netName, err)
+	} else if len(lbs) > 0 {
+		if err := libovsdbops.DeleteLoadBalancers(oc.nbClient, lbs); err != nil {
+			klog.Errorf("Failed to delete load balancers on network %q: %v", netName, err)
+		}
+	}
+
 	// remove load balancer groups
-	lbGroups := make([]*nbdb.LoadBalancerGroup, 0, 3)
-	for _, lbGroupUUID := range []string{oc.switchLoadBalancerGroupUUID, oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID} {
-		lbGroups = append(lbGroups, &nbdb.LoadBalancerGroup{UUID: lbGroupUUID})
-	}
-	if err := libovsdbops.DeleteLoadBalancerGroups(oc.nbClient, lbGroups); err != nil {
-		klog.Errorf("Failed to delete load balancer groups on network: %q, error: %v", oc.GetNetworkName(), err)
-	}
+	cleanupLoadBalancerGroups(oc.nbClient, oc.GetNetInfo(),
+		oc.switchLoadBalancerGroupUUID, oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID)
 
 	return nil
 }
@@ -639,11 +681,11 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 			return fmt.Errorf("unable to create network qos controller, err: %w", err)
 		}
 		oc.wg.Add(1)
-		go func() {
+		go func(ch <-chan struct{}) {
 			defer oc.wg.Done()
 			// Until we have scale issues in future let's spawn only one thread
-			oc.nqosController.Run(1, oc.stopChan)
-		}()
+			oc.nqosController.Run(1, ch)
+		}(oc.stopChan)
 	}
 
 	klog.Infof("Completing all the Watchers for network %s took %v", oc.GetNetworkName(), time.Since(start))
@@ -825,7 +867,7 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 		}
 	}
 
-	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+	if oc.hasInterconnectTransport() && nSyncs.syncZoneIC {
 		if err := oc.zoneICHandler.AddLocalZoneNode(node); err != nil {
 			errs = append(errs, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
@@ -868,7 +910,7 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateRemoteNodeEvent(node *cor
 	}
 
 	var err error
-	if syncZoneIc && config.OVNKubernetesFeature.EnableInterconnect {
+	if oc.hasInterconnectTransport() && syncZoneIc {
 		if err = oc.zoneICHandler.AddRemoteZoneNode(node); err != nil {
 			err = fmt.Errorf("failed to add the remote zone node [%s] to the zone interconnect handler, err : %w", node.Name, err)
 			oc.syncZoneICFailed.Store(node.Name, true)
@@ -895,7 +937,7 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateRemoteNodeEvent(node *cor
 // "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/24"
 func (oc *Layer3UserDefinedNetworkController) addOrUpdateUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node, isUDNAdvertised bool) error {
 	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
-	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, isUDNAdvertised)
+	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, node.Name, isUDNAdvertised)
 	if err != nil {
 		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
 			oc.GetNetworkName(), node.Name, err)
@@ -970,7 +1012,7 @@ func (oc *Layer3UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node)
 		oc.nodeClusterRouterPortFailed.Delete(node.Name)
 		oc.gatewaysFailed.Delete(node.Name)
 	} else {
-		if config.OVNKubernetesFeature.EnableInterconnect {
+		if oc.hasInterconnectTransport() {
 			if err := oc.zoneICHandler.DeleteNode(node); err != nil {
 				return err
 			}
@@ -1047,7 +1089,7 @@ func (oc *Layer3UserDefinedNetworkController) syncNodes(nodes []interface{}) err
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect {
+	if oc.hasInterconnectTransport() {
 		if err := oc.zoneICHandler.CleanupStaleNodes(activeNodes); err != nil {
 			return fmt.Errorf("zoneICHandler failed to cleanup stale nodes: error: %w", err)
 		}

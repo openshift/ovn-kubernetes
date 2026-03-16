@@ -9,9 +9,9 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type managementPortConfig struct {
@@ -49,7 +49,7 @@ func newManagementPortConfig(node *corev1.Node, hostSubnets []*net.IPNet, netInf
 		if len(hostSubnets) == 0 {
 			return nil, fmt.Errorf("cannot determine subnets while configuring management port for network: %s", types.DefaultNetworkName)
 		}
-		mpMAC = util.IPAddrToHWAddr(netInfo.GetNodeManagementIP(hostSubnets[0]).IP)
+		mpMAC = netInfo.GetNodeManagementPortMAC(node.Name, hostSubnets[0])
 	}
 
 	mpcfg := &managementPortConfig{

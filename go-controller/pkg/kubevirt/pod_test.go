@@ -11,9 +11,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -63,7 +63,7 @@ var _ = Describe("Kubevirt Pod", func() {
 		defer wf.Shutdown()
 
 		currentPod := params.pods[0]
-		migrationStatus, err := DiscoverLiveMigrationStatus(wf, &currentPod)
+		migrationStatus, err := DiscoverLiveMigrationStatus(wf.PodCoreInformer().Lister(), &currentPod)
 		if params.expectedError == nil {
 			Expect(err).ToNot(HaveOccurred())
 		} else {

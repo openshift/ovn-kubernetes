@@ -3,7 +3,6 @@ package ovn
 import (
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,16 +16,16 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 type netpolDefaultDenyACLType string
@@ -35,7 +34,10 @@ const (
 	// netpolDefaultDenyACLType is used to distinguish default deny and arp allow acls create for the same port group
 	defaultDenyACL netpolDefaultDenyACLType = "defaultDeny"
 	arpAllowACL    netpolDefaultDenyACLType = "arpAllow"
+	icmpAllowACL   netpolDefaultDenyACLType = "icmpAllow"
 
+	// icmpAllowPolicyMatch is the match used when creating default allow ICMP and ICMPv6 ACLs for a namespace
+	icmpAllowPolicyMatch = "(icmp || icmp6)"
 	// arpAllowPolicyMatch is the match used when creating default allow ARP ACLs for a namespace
 	arpAllowPolicyMatch   = "(arp || nd)"
 	allowHairpinningACLID = "allow-hairpinning"
@@ -383,16 +385,22 @@ func (bnc *BaseNetworkController) defaultDenyPortGroupName(namespace string, acl
 }
 
 func (bnc *BaseNetworkController) buildDenyACLs(namespace, pgName string, aclLogging *libovsdbutil.ACLLoggingLevels,
-	aclDir libovsdbutil.ACLDirection) (denyACL, allowACL *nbdb.ACL) {
+	aclDir libovsdbutil.ACLDirection) []*nbdb.ACL {
 	denyMatch := libovsdbutil.GetACLMatch(pgName, "", aclDir)
-	allowMatch := libovsdbutil.GetACLMatch(pgName, arpAllowPolicyMatch, aclDir)
+	allowARPMatch := libovsdbutil.GetACLMatch(pgName, arpAllowPolicyMatch, aclDir)
 	aclPipeline := libovsdbutil.ACLDirectionToACLPipeline(aclDir)
 
-	denyACL = libovsdbutil.BuildACLWithDefaultTier(bnc.getDefaultDenyPolicyACLIDs(namespace, aclDir, defaultDenyACL),
-		types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, aclPipeline)
-	allowACL = libovsdbutil.BuildACLWithDefaultTier(bnc.getDefaultDenyPolicyACLIDs(namespace, aclDir, arpAllowACL),
-		types.DefaultAllowPriority, allowMatch, nbdb.ACLActionAllow, nil, aclPipeline)
-	return
+	acls := make([]*nbdb.ACL, 0, 3)
+	acls = append(acls, libovsdbutil.BuildACLWithDefaultTier(bnc.getDefaultDenyPolicyACLIDs(namespace, aclDir, defaultDenyACL),
+		types.DefaultDenyPriority, denyMatch, nbdb.ACLActionDrop, aclLogging, aclPipeline))
+	acls = append(acls, libovsdbutil.BuildACLWithDefaultTier(bnc.getDefaultDenyPolicyACLIDs(namespace, aclDir, arpAllowACL),
+		types.DefaultAllowPriority, allowARPMatch, nbdb.ACLActionAllow, nil, aclPipeline))
+	if config.OVNKubernetesFeature.AllowICMPNetworkPolicy {
+		allowICMPMatch := libovsdbutil.GetACLMatch(pgName, icmpAllowPolicyMatch, aclDir)
+		acls = append(acls, libovsdbutil.BuildACLWithDefaultTier(bnc.getDefaultDenyPolicyACLIDs(namespace, aclDir, icmpAllowACL),
+			types.DefaultAllowPriority, allowICMPMatch, nbdb.ACLActionAllow, nil, aclPipeline))
+	}
+	return acls
 }
 
 func (bnc *BaseNetworkController) addPolicyToDefaultPortGroups(np *networkPolicy, aclLogging *libovsdbutil.ACLLoggingLevels) error {
@@ -439,17 +447,18 @@ func (bnc *BaseNetworkController) delPolicyFromDefaultPortGroups(np *networkPoli
 func (bnc *BaseNetworkController) createDefaultDenyPGAndACLs(namespace, policy string, aclLogging *libovsdbutil.ACLLoggingLevels) error {
 	ingressPGIDs := bnc.getDefaultDenyPolicyPortGroupIDs(namespace, libovsdbutil.ACLIngress)
 	ingressPGName := libovsdbutil.GetPortGroupName(ingressPGIDs)
-	ingressDenyACL, ingressAllowACL := bnc.buildDenyACLs(namespace, ingressPGName, aclLogging, libovsdbutil.ACLIngress)
+	ingressACLs := bnc.buildDenyACLs(namespace, ingressPGName, aclLogging, libovsdbutil.ACLIngress)
 	egressPGIDs := bnc.getDefaultDenyPolicyPortGroupIDs(namespace, libovsdbutil.ACLEgress)
 	egressPGName := libovsdbutil.GetPortGroupName(egressPGIDs)
-	egressDenyACL, egressAllowACL := bnc.buildDenyACLs(namespace, egressPGName, aclLogging, libovsdbutil.ACLEgress)
-	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), ingressDenyACL, ingressAllowACL, egressDenyACL, egressAllowACL)
+	egressACLs := bnc.buildDenyACLs(namespace, egressPGName, aclLogging, libovsdbutil.ACLEgress)
+	allACLs := append(ingressACLs, egressACLs...)
+	ops, err := libovsdbops.CreateOrUpdateACLsOps(bnc.nbClient, nil, bnc.GetSamplingConfig(), allACLs...)
 	if err != nil {
 		return err
 	}
 
-	ingressPG := libovsdbutil.BuildPortGroup(ingressPGIDs, nil, []*nbdb.ACL{ingressDenyACL, ingressAllowACL})
-	egressPG := libovsdbutil.BuildPortGroup(egressPGIDs, nil, []*nbdb.ACL{egressDenyACL, egressAllowACL})
+	ingressPG := libovsdbutil.BuildPortGroup(ingressPGIDs, nil, ingressACLs)
+	egressPG := libovsdbutil.BuildPortGroup(egressPGIDs, nil, egressACLs)
 	ops, err = libovsdbops.CreateOrUpdatePortGroupsOps(bnc.nbClient, ops, ingressPG, egressPG)
 	if err != nil {
 		return err
@@ -1160,8 +1169,8 @@ func (bnc *BaseNetworkController) setupGressPolicy(np *networkPolicy, gp *gressP
 		podSelector = &metav1.LabelSelector{}
 	}
 	// np.namespace will be used when fromJSON.NamespaceSelector = nil
-	asKey, ipv4as, ipv6as, err := bnc.EnsurePodSelectorAddressSet(
-		podSelector, peer.NamespaceSelector, np.namespace, np.getKeyWithKind())
+	asKey, ipv4as, ipv6as, err := bnc.addressSetManager.EnsureAddressSet(
+		podSelector, peer.NamespaceSelector, np.namespace, np.getKeyWithKind(), bnc.controllerName, bnc.GetNetInfo())
 	// even if GetPodSelectorAddressSet failed, add key for future cleanup or retry.
 	np.peerAddressSets = append(np.peerAddressSets, asKey)
 	if err != nil {
@@ -1307,7 +1316,6 @@ func (bnc *BaseNetworkController) deleteNetworkPolicy(policy *knet.NetworkPolicy
 	err := bnc.networkPolicies.DoWithLock(npKey, func(npKey string) error {
 		np, ok := bnc.networkPolicies.Load(npKey)
 		if !ok {
-			klog.Infof("Deleting policy %s that is already deleted", npKey)
 			return nil
 		}
 		if err := bnc.cleanupNetworkPolicy(np); err != nil {
@@ -1364,7 +1372,7 @@ func (bnc *BaseNetworkController) cleanupNetworkPolicy(np *networkPolicy) error 
 	// delete from peer address set, this may cause address set deletion, so we need to
 	// do that after ACLs are deleted to avoid ovn-controller errors
 	for i, asKey := range np.peerAddressSets {
-		if err := bnc.DeletePodSelectorAddressSet(asKey, np.getKeyWithKind()); err != nil {
+		if err := bnc.addressSetManager.DeleteAddressSet(asKey, np.getKeyWithKind()); err != nil {
 			// remove deleted address sets from the list
 			np.peerAddressSets = np.peerAddressSets[i:]
 			return fmt.Errorf("failed to delete network policy from peer address set %s: %v", asKey, err)
@@ -1625,17 +1633,6 @@ func PortGroupHasPorts(nbClient libovsdbclient.Client, pgName string, portUUIDs 
 	}
 
 	return sets.NewString(pg.Ports...).HasAll(portUUIDs...)
-}
-
-// getStaleNetpolAddrSetDbIDs returns the ids for address sets that were owned by network policy before we
-// switched to shared address sets with PodSelectorAddressSet. Should only be used for sync and testing.
-func getStaleNetpolAddrSetDbIDs(policyNamespace, policyName, policyType, idx, controller string) *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNetworkPolicy, controller, map[libovsdbops.ExternalIDKey]string{
-		libovsdbops.ObjectNameKey: policyNamespace + "_" + policyName,
-		// direction and idx uniquely identify address set (= gress policy rule)
-		libovsdbops.PolicyDirectionKey: strings.ToLower(policyType),
-		libovsdbops.GressIdxKey:        idx,
-	})
 }
 
 func (bnc *BaseNetworkController) getNetpolDefaultACLDbIDs(direction string) *libovsdbops.DbObjectIDs {

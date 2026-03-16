@@ -103,6 +103,7 @@ set_common_default_params() {
   OVN_ENABLE_DNSNAMERESOLVER=${OVN_ENABLE_DNSNAMERESOLVER:-false}
   ENABLE_COREDUMPS=${ENABLE_COREDUMPS:-false}
   METRICS_IP=${METRICS_IP:-""}
+  OVN_ALLOW_ICMP_NETPOL=${OVN_ALLOW_ICMP_NETPOL:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
@@ -178,6 +179,11 @@ set_common_default_params() {
     echo "EVPN requires Route advertisements to be enabled (-rae)"
     exit 1
   fi
+  if [ "$ENABLE_EVPN" == true ] && [ "$OVN_GATEWAY_MODE" != "local" ]; then
+    echo "EVPN requires local gateway mode (-gm local)"
+    exit 1
+  fi
+  
 
   ENABLE_NO_OVERLAY=${ENABLE_NO_OVERLAY:-false}
   if [ "$ENABLE_NO_OVERLAY" == true ] && [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
@@ -195,6 +201,11 @@ set_common_default_params() {
   else
     # Set default MTU for overlay mode (1400) if not already set
     OVN_MTU=${OVN_MTU:-1400}
+  fi
+  ENABLE_NO_OVERLAY_OUTBOUND_SNAT=${ENABLE_NO_OVERLAY_OUTBOUND_SNAT:-false}
+  if [ "$ENABLE_NO_OVERLAY_OUTBOUND_SNAT" == true ] && [ "$ENABLE_NO_OVERLAY" != true ]; then
+    echo "No-overlay outbound SNAT can only be enabled when no-overlay mode is enabled (-noe)"
+    exit 1
   fi
 }
 
@@ -234,7 +245,11 @@ build_ovn_image() {
 }
 
 run_kubectl() {
-  kind export kubeconfig --name ${KIND_CLUSTER_NAME} 
+  # Skip kubeconfig export in container mode - it overwrites container IPs with localhost.
+  if [ "$RUN_IN_CONTAINER" != true ]; then
+    kind export kubeconfig --name ${KIND_CLUSTER_NAME}
+  fi
+
   local retries=0
   local attempts=10
   while true; do
@@ -835,6 +850,12 @@ install_dnsnameresolver_operator() {
     -e 's/^\(.*--dns-name-resolver-namespace=\).*/\1ovn-kubernetes/' \
     -e 's/^\(.*--coredns-port=\).*/\153/' config/default/manager_auth_proxy_patch.yaml
 
+  # gcr.io Container Registry shutdown issue
+  # See https://github.com/kubernetes-sigs/kubebuilder/discussions/3907#discussioncomment-11477582 for more details.
+  # REVERT ME: when coredns team fixes image in upstream, we can revert this patch.
+  sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
+    config/default/manager_auth_proxy_patch.yaml
+
   make install CONTROLLER_TOOLS_VERSION=v0.19.0
   make deploy IMG=${DNSNAMERESOLVER_OPERATOR} CONTROLLER_TOOLS_VERSION=v0.19.0
   popd
@@ -944,6 +965,20 @@ clone_frr() {
     # Change into the cloned repo directory before applying patches
     pushd frr-k8s
     git apply ../patches/*
+
+    # The upstream frr-k8s demo.sh hardcodes quay.io/frrouting/frr:9.1.0,
+    # which crashes on musl libc (Alpine) due to a race condition in
+    # pthread_setname_np during BGP keepalive thread startup
+    # (https://github.com/FRRouting/frr/issues/15699, fixed in FRR 10.1 by
+    # https://github.com/FRRouting/frr/pull/15714).
+    #
+    # Bump to 10.4.1 for upstream demo was posted here: https://github.com/metallb/frr-k8s/pull/404
+    # We bump further to 10.4.3 to include additional fixes for EVPN:
+    # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3907335193
+    # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3898408592
+    # https://github.com/FRRouting/frr/pull/20496
+    sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' hack/demo/demo.sh
+
     popd
 
     popd || exit 1
@@ -990,6 +1025,30 @@ deploy_frr_external_container() {
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     # Enable IPv6 forwarding in FRR
     $OCI_BIN exec frr sysctl -w net.ipv6.conf.all.forwarding=1
+    # Enable keep_addr_on_down to preserve IPv6 addresses during VRF enslavement.
+    # Without this, IPv6 global addresses are removed when interfaces are moved to a VRF,
+    # causing FRR/zebra to fail creating FIB nexthop groups ("no fib nhg" bug).
+    # See: https://docs.kernel.org/networking/vrf.html (section 4: Enslave L3 interfaces)
+    #      https://github.com/FRRouting/frr/issues/1666
+    $OCI_BIN exec frr sysctl -w net.ipv6.conf.all.keep_addr_on_down=1
+  fi
+
+  if [ "$ENABLE_EVPN" == true ]; then
+    echo "Configuring global EVPN BGP on external FRR (advertise-all-vni + neighbor activation)..."
+    # Enable l2vpn evpn address-family, activate all neighbors, and advertise-all-vni.
+    # Neighbors are already configured by demo.sh; extract them from the running config.
+    # This is cluster-level infrastructure shared across all EVPN tests; configured once
+    # at install time so individual tests don't need to manage it.
+    local bgp_neighbors vtysh_cmds
+    bgp_neighbors=$($OCI_BIN exec frr vtysh -c "show running-config" | grep "^ neighbor.*remote-as" | awk '{print $2}')
+    vtysh_cmds=(-c "configure terminal" -c "router bgp 64512" -c "address-family l2vpn evpn")
+    for neighbor in $bgp_neighbors; do
+      vtysh_cmds+=(-c "neighbor $neighbor activate")
+      vtysh_cmds+=(-c "neighbor $neighbor route-reflector-client")
+    done
+    vtysh_cmds+=(-c "advertise-all-vni" -c "exit-address-family" -c "end" -c "write memory")
+    $OCI_BIN exec frr vtysh "${vtysh_cmds[@]}"
+    echo "Global EVPN BGP config complete on external FRR"
   fi
 }
 
@@ -1088,6 +1147,22 @@ install_frr_k8s() {
   clone_frr
 
   # apply frr-k8s
+  # The all-in-one manifest is only consumed here (deploy_frr_external_container
+  # uses CRDs and the demo scripts, not this manifest), so the fix lives here
+  # rather than in clone_frr. This covers both kind.sh and kind-helm.sh since
+  # both call install_frr_k8s.
+  #
+  # gcr.io/kubebuilder/kube-rbac-proxy is unavailable after Google's Container
+  # Registry shutdown (https://cloud.google.com/container-registry/docs/deprecations/container-registry-deprecation).
+  # Upstream bug: https://github.com/metallb/metallb/issues/2619
+  # Use the same image from the Kubernetes community registry instead.
+  # REVERT ME: when https://github.com/metallb/metallb/issues/2619 is fixed
+  sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
+    "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+  # Bump frr in frr-k8s to 10.4.3 to consume the following fix
+  # https://github.com/FRRouting/frr/pull/20496
+  sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' \
+    "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
   kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
   kubectl wait -n frr-k8s-system deployment frr-k8s-statuscleaner --for condition=Available --timeout 2m
   kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
@@ -1308,6 +1383,43 @@ try_extract_binary() {
   return 1
 }
 
+# Save the container image metadata for a collected binary
+# Used by collect_coredump_binaries() to record which image the binary came from
+# Extracts:
+#   - OVN image reference from container metadata (crictl inspect)
+#   - Fedora base image digest from /root/fedora_base_image (embedded at build time)
+collect_container_image_info() {
+  local node=$1
+  local container_id=$2
+  local exe=$3
+  local binary_dir=$4
+
+  local inspect_out
+  inspect_out=$(${OCI_BIN} exec "$node" crictl inspect "$container_id" 2>/dev/null) || true
+
+  local image_ref
+  image_ref=$(echo "$inspect_out" | jq -r '.status.imageRef // empty')
+  if [ -n "$image_ref" ]; then
+    echo "${exe}: ${image_ref}" >> "${binary_dir}/image-info.txt"
+    echo "  Image ref: ${image_ref}"
+  fi
+
+  # Extract the Fedora base image digest embedded during docker build
+  # (only needs to be collected once since all containers share the same base)
+  if [ ! -f "${binary_dir}/fedora-base-image.txt" ]; then
+    local pid
+    pid=$(echo "$inspect_out" | jq -r '.info.pid // empty')
+    if [ -n "$pid" ] && [ "$pid" != "null" ] && [ "$pid" != "0" ]; then
+      local digest
+      digest=$(${OCI_BIN} exec "$node" cat "/proc/${pid}/root/root/fedora_base_image" 2>/dev/null) || true
+      if [ -n "$digest" ]; then
+        echo "$digest" > "${binary_dir}/fedora-base-image.txt"
+        echo "  Fedora base image: ${digest}"
+      fi
+    fi
+  fi
+}
+
 collect_coredump_binaries() {
   # Collect binaries that caused coredumps for post-mortem debugging
   # Parses coredump filenames (core.%P.%e.%h.%s) to identify executables
@@ -1362,6 +1474,7 @@ collect_coredump_binaries() {
       for container_id in $containers; do
         if try_extract_binary "$node" "$container_id" "$exe" "$binary_dir"; then
           echo "  Collected $exe from container $container_id on node $node"
+          collect_container_image_info "$node" "$container_id" "$exe" "$binary_dir"
           found=true
           break 2
         fi

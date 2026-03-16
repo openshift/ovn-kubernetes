@@ -24,13 +24,13 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
-	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func TestNADNeedsUpdate_NotifiesReconcilersOnNoopUpdate(t *testing.T) {
@@ -172,6 +172,9 @@ func (tnc *testNetworkController) Start(context.Context) error {
 	defer tnc.tcm.Unlock()
 	fmt.Printf("starting network: %s\n", testNetworkKey(tnc))
 	tnc.tcm.started = append(tnc.tcm.started, testNetworkKey(tnc))
+	if tnc.tcm.raiseErrorWhenStartingController != nil {
+		return tnc.tcm.raiseErrorWhenStartingController
+	}
 	return nil
 }
 
@@ -322,6 +325,7 @@ type testControllerManager struct {
 	cleaned []string
 
 	raiseErrorWhenCreatingController error
+	raiseErrorWhenStartingController error
 
 	valid []util.NetInfo
 }
