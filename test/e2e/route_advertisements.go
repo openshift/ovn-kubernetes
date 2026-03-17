@@ -3028,22 +3028,13 @@ func createNamespaceWithPrimaryNetworkOfType(
 		frrConfigurationLabels = map[string]string{"network": networkName}
 	}
 
-	namespace := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: networkName,
-			Labels: map[string]string{
-				"e2e-framework": testName,
-			},
-		},
+	nsLabels := map[string]string{
+		"e2e-framework": testName,
 	}
 	if networkType != defaultNetwork {
-		namespace.Labels[RequiredUDNNamespaceLabel] = ""
+		nsLabels[RequiredUDNNamespaceLabel] = ""
 	}
-	namespace, err := f.ClientSet.CoreV1().Namespaces().Create(
-		context.Background(),
-		namespace,
-		metav1.CreateOptions{},
-	)
+	namespace, err := framework.CreateTestingNS(context.Background(), networkName, f.ClientSet, nsLabels)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create namespace: %w", err)
 	}
