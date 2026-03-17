@@ -152,6 +152,7 @@ func (k *kind) PreloadImages(imgs []string) {
 	ce := containerengine.Get()
 	pullBackoff := wait.Backoff{Duration: 5 * time.Second, Factor: 2, Steps: 5}
 	for _, img := range imgs {
+		framework.Logf("Preloading image %s into KIND cluster %s", img, clusterName)
 		var out []byte
 		err := wait.ExponentialBackoff(pullBackoff, func() (bool, error) {
 			var pullErr error
@@ -179,7 +180,9 @@ func (k *kind) PreloadImages(imgs []string) {
 		}
 		if err != nil {
 			framework.Logf("Warning: failed to load image %s into KIND cluster %s: %v (%s)", img, clusterName, err, out)
+			continue
 		}
+		framework.Logf("Preloaded image %s into KIND cluster %s", img, clusterName)
 	}
 }
 
