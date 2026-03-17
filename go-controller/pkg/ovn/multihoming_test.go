@@ -453,6 +453,8 @@ func icClusterTestConfiguration(opts ...testConfigOpt) testConfiguration {
 func newMultiHomedKubevirtPod(vmName string, liveMigrationInfo liveMigrationPodInfo, testPod testPod, multiHomingConfigs ...userDefinedNetInfo) *corev1.Pod {
 	pod := newMultiHomedPod(testPod, multiHomingConfigs...)
 	pod.Labels[kubevirtv1.VirtualMachineNameLabel] = vmName
+	pod.Labels[kubevirtv1.AppLabel] = "virt-launcher"
+	pod.Annotations[kubevirtv1.DomainAnnotation] = vmName
 	pod.Status.Phase = liveMigrationInfo.podPhase
 	for key, val := range liveMigrationInfo.annotation {
 		pod.Annotations[key] = val

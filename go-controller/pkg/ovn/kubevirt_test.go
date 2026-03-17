@@ -488,12 +488,14 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			labels := map[string]string{
 				kubevirtv1.VirtualMachineNameLabel: t.vmName,
 				kubevirtv1.NodeNameLabel:           t.nodeName,
+				kubevirtv1.AppLabel:                "virt-launcher",
 			}
 			for k, v := range t.extraLabels {
 				labels[k] = v
 			}
 			annotations := map[string]string{
 				kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: "",
+				kubevirtv1.DomainAnnotation:                             t.vmName,
 			}
 			for k, v := range t.extraAnnotations {
 				annotations[k] = v
