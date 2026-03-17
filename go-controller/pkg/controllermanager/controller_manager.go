@@ -307,7 +307,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 		cm.routeImportManager = routeimport.New(config.Default.Zone, cm.nbClient)
 	}
 	cm.addressSetManager = addresssetmanager.NewAddressSetManager(cm.watchFactory.PodCoreInformer(),
-		cm.watchFactory.NamespaceInformer(), cm.nbClient, cm.networkManager.Interface().GetNetworkNameForNADKey)
+		cm.watchFactory.NamespaceInformer(), cm.watchFactory.NodeCoreInformer(), cm.nbClient, cm.networkManager.Interface().GetNetworkNameForNADKey)
 
 	return cm, nil
 }
