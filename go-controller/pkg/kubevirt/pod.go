@@ -139,7 +139,7 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 	}
 
 	var modifiedPod *corev1.Pod
-	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
+	resultErr := retry.OnError(util.OvnConflictBackoff, util.IsPodAnnotationUpdateRetryable, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := watchFactory.GetPod(pod.Namespace, pod.Name)
 		if err != nil {
@@ -153,7 +153,7 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 				return err
 			}
 		}
-		return kube.UpdatePodStatus(modifiedPod)
+		return kube.PatchPodStatusAnnotations(pod, modifiedPod)
 	})
 	if resultErr != nil {
 		return nil, fmt.Errorf("failed to update labels and annotations on pod %s/%s: %v", pod.Namespace, pod.Name, resultErr)
