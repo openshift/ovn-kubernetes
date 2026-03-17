@@ -198,10 +198,10 @@ func (c *NodeController) reconcileNode(key string) error {
 		return err
 	}
 
-	oldNode := c.nodeCache.Get(nodeName)
+	oldNode := c.nodeCache.get(nodeName)
 	err = c.reconcileUpdate(oldNode, node, netName)
 	if err == nil {
-		c.nodeCache.Set(node)
+		c.nodeCache.set(node)
 	}
 	return err
 }
@@ -323,7 +323,7 @@ func determineNodeNetworkReconcileAction(deleteRequested, bootstrapPending, need
 
 // reconcileDelete handles deletion using cached state.
 func (c *NodeController) reconcileDelete(nodeName, netName string) error {
-	oldNode := c.nodeCache.Get(nodeName)
+	oldNode := c.nodeCache.get(nodeName)
 	if oldNode == nil {
 		return nil
 	}
@@ -369,7 +369,7 @@ func (c *NodeController) reconcileDelete(nodeName, netName string) error {
 	// Scoped delete reconciliations are best-effort cleanup for a single network.
 	// Keep node cache/state for the regular node delete event to process all networks.
 	if len(errs) == 0 && netName == "" {
-		c.nodeCache.Delete(nodeName)
+		c.nodeCache.delete(nodeName)
 		c.annotationCache.deleteNode(nodeName)
 		c.deleteNodeNetworkState(nodeName)
 	}
@@ -567,7 +567,7 @@ func newNodeCache() nodeCache {
 }
 
 // Get returns a deep copy of a cached node by name.
-func (c *nodeCache) Get(name string) *corev1.Node {
+func (c *nodeCache) get(name string) *corev1.Node {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	node := c.nodes[name]
@@ -578,7 +578,7 @@ func (c *nodeCache) Get(name string) *corev1.Node {
 }
 
 // Set stores a deep copy of a node.
-func (c *nodeCache) Set(node *corev1.Node) {
+func (c *nodeCache) set(node *corev1.Node) {
 	if node == nil {
 		return
 	}
@@ -588,7 +588,7 @@ func (c *nodeCache) Set(node *corev1.Node) {
 }
 
 // Delete removes a node from the cache.
-func (c *nodeCache) Delete(name string) {
+func (c *nodeCache) delete(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.nodes, name)

@@ -128,10 +128,10 @@ func (c *clusterManagerNodeController) reconcileNode(key string) error {
 		return err
 	}
 
-	oldNode := c.nodeCache.Get(nodeName)
+	oldNode := c.nodeCache.get(nodeName)
 	err = c.reconcileUpdate(oldNode, node, netName)
 	if err == nil {
-		c.nodeCache.Set(node)
+		c.nodeCache.set(node)
 	}
 	return err
 }
@@ -173,7 +173,7 @@ func (c *clusterManagerNodeController) reconcileUpdate(oldNode, newNode *corev1.
 }
 
 func (c *clusterManagerNodeController) reconcileDelete(nodeName, netName string) error {
-	oldNode := c.nodeCache.Get(nodeName)
+	oldNode := c.nodeCache.get(nodeName)
 	var oldState *sharednode.NodeAnnotationState
 	if oldNode == nil {
 		oldNode = &corev1.Node{
@@ -212,7 +212,7 @@ func (c *clusterManagerNodeController) reconcileDelete(nodeName, netName string)
 	}
 
 	if len(errs) == 0 && netName == "" {
-		c.nodeCache.Delete(nodeName)
+		c.nodeCache.delete(nodeName)
 		c.annotationCache.DeleteNode(nodeName)
 		c.deleteBootstrapNode(nodeName)
 	}
@@ -311,7 +311,7 @@ func newClusterManagerNodeCache() clusterManagerNodeCache {
 	return clusterManagerNodeCache{nodes: map[string]*corev1.Node{}}
 }
 
-func (c *clusterManagerNodeCache) Get(name string) *corev1.Node {
+func (c *clusterManagerNodeCache) get(name string) *corev1.Node {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	node := c.nodes[name]
@@ -321,7 +321,7 @@ func (c *clusterManagerNodeCache) Get(name string) *corev1.Node {
 	return node.DeepCopy()
 }
 
-func (c *clusterManagerNodeCache) Set(node *corev1.Node) {
+func (c *clusterManagerNodeCache) set(node *corev1.Node) {
 	if node == nil {
 		return
 	}
@@ -330,7 +330,7 @@ func (c *clusterManagerNodeCache) Set(node *corev1.Node) {
 	c.nodes[node.Name] = node.DeepCopy()
 }
 
-func (c *clusterManagerNodeCache) Delete(name string) {
+func (c *clusterManagerNodeCache) delete(name string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.nodes, name)
