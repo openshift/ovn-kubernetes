@@ -52,8 +52,6 @@ type ControllerManager struct {
 	nbClient libovsdbclient.Client
 	// libovsdb southbound client interface
 	sbClient libovsdbclient.Client
-	// has SCTP support
-	SCTPSupport bool
 	// Supports multicast?
 	multicastSupport bool
 	// Supports OVN Template Load Balancers?
@@ -299,21 +297,6 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 	return cm, nil
 }
 
-func (cm *ControllerManager) configureSCTPSupport() error {
-	hasSCTPSupport, err := util.DetectSCTPSupport()
-	if err != nil {
-		return err
-	}
-
-	if !hasSCTPSupport {
-		klog.Warningf("SCTP unsupported by this version of OVN. Kubernetes service creation with SCTP will not work ")
-	} else {
-		klog.Info("SCTP support detected in OVN")
-	}
-	cm.SCTPSupport = hasSCTPSupport
-	return nil
-}
-
 func (cm *ControllerManager) configureSvcTemplateSupport() {
 	if !config.OVNKubernetesFeature.EnableServiceTemplateSupport {
 		cm.svcTemplateSupport = false
@@ -366,7 +349,7 @@ func (cm *ControllerManager) createACLLoggingMeter() error {
 // newCommonNetworkControllerInfo creates and returns the common networkController info
 func (cm *ControllerManager) newCommonNetworkControllerInfo(wf *factory.WatchFactory) (*ovn.CommonNetworkControllerInfo, error) {
 	return ovn.NewCommonNetworkControllerInfo(cm.client, cm.kube, wf, cm.recorder, cm.nbClient,
-		cm.sbClient, cm.podRecorder, cm.SCTPSupport, cm.multicastSupport, cm.svcTemplateSupport)
+		cm.sbClient, cm.podRecorder, cm.multicastSupport, cm.svcTemplateSupport)
 }
 
 // initDefaultNetworkController creates the controller for default network
@@ -454,11 +437,6 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	}
 
 	cm.configureMetrics(cm.stopChan)
-
-	err = cm.configureSCTPSupport()
-	if err != nil {
-		return err
-	}
 
 	cm.configureSvcTemplateSupport()
 

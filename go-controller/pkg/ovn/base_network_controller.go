@@ -66,9 +66,6 @@ type CommonNetworkControllerInfo struct {
 	// libovsdb southbound client interface
 	sbClient libovsdbclient.Client
 
-	// has SCTP support
-	SCTPSupport bool
-
 	// has multicast support; set to false for secondary networks.
 	// TBD: Changes need to be made to support multicast for secondary networks
 	multicastSupport bool
@@ -368,7 +365,7 @@ func (bnc *BaseNetworkController) getNetworkNameForNADKeyFunc() func(nadKey stri
 // NewCommonNetworkControllerInfo creates CommonNetworkControllerInfo shared by controllers
 func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeOVN, wf *factory.WatchFactory,
 	recorder record.EventRecorder, nbClient libovsdbclient.Client, sbClient libovsdbclient.Client,
-	podRecorder *metrics.PodRecorder, SCTPSupport, multicastSupport, svcTemplateSupport bool,
+	podRecorder *metrics.PodRecorder, multicastSupport, svcTemplateSupport bool,
 ) (*CommonNetworkControllerInfo, error) {
 	zone, err := libovsdbutil.GetNBZone(nbClient)
 	if err != nil {
@@ -382,7 +379,6 @@ func NewCommonNetworkControllerInfo(client clientset.Interface, kube *kube.KubeO
 		nbClient:           nbClient,
 		sbClient:           sbClient,
 		podRecorder:        podRecorder,
-		SCTPSupport:        SCTPSupport,
 		multicastSupport:   multicastSupport,
 		svcTemplateSupport: svcTemplateSupport,
 		zone:               zone,
