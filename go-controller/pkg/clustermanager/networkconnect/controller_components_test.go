@@ -745,6 +745,7 @@ func TestController_reconcileClusterNetworkConnect(t *testing.T) {
 			// Create fake network manager and auto-configure from nads and namespaces
 			fakeNM := &networkmanager.FakeNetworkManager{
 				PrimaryNetworks: make(map[string]util.NetInfo),
+				NADNetworks:     make(map[string]util.NetInfo),
 			}
 
 			// Auto-populate PrimaryNetworks from NADs with IsUDN=true and IsPrimary=true
@@ -769,6 +770,14 @@ func TestController_reconcileClusterNetworkConnect(t *testing.T) {
 					mutableNetInfo.AddNADs(fmt.Sprintf("%s/%s", n.Namespace, n.Name))
 				}
 				fakeNM.PrimaryNetworks[namespace] = mutableNetInfo
+			}
+			for _, nad := range tt.nads {
+				nadKey := fmt.Sprintf("%s/%s", nad.Namespace, nad.Name)
+				nadObj, err := wf.NADInformer().Lister().NetworkAttachmentDefinitions(nad.Namespace).Get(nad.Name)
+				g.Expect(err).ToNot(gomega.HaveOccurred(), "NAD %s should exist", nadKey)
+				netInfo, err := util.ParseNADInfo(nadObj)
+				g.Expect(err).ToNot(gomega.HaveOccurred(), "ParseNADInfo for %s failed", nadKey)
+				fakeNM.NADNetworks[nadKey] = netInfo
 			}
 
 			// Auto-configure UDN namespaces from namespaces with RequiresUDN=true
@@ -1162,6 +1171,16 @@ func TestController_reconcileNAD(t *testing.T) {
 
 			fakeNM := &networkmanager.FakeNetworkManager{
 				PrimaryNetworks: make(map[string]util.NetInfo),
+				NADNetworks:     make(map[string]util.NetInfo),
+			}
+
+			for _, nad := range tt.nads {
+				nadKey := fmt.Sprintf("%s/%s", nad.Namespace, nad.Name)
+				nadObj, err := wf.NADInformer().Lister().NetworkAttachmentDefinitions(nad.Namespace).Get(nad.Name)
+				g.Expect(err).ToNot(gomega.HaveOccurred(), "NAD %s should exist", nadKey)
+				netInfo, err := util.ParseNADInfo(nadObj)
+				g.Expect(err).ToNot(gomega.HaveOccurred(), "ParseNADInfo for %s failed", nadKey)
+				fakeNM.NADNetworks[nadKey] = netInfo
 			}
 
 			tunnelKeysAllocator := id.NewTunnelKeyAllocator("TunnelKeys")
@@ -1757,6 +1776,7 @@ func TestMustProcessCNCForNAD(t *testing.T) {
 
 			fakeNM := &networkmanager.FakeNetworkManager{
 				PrimaryNetworks: make(map[string]util.NetInfo),
+				NADNetworks:     make(map[string]util.NetInfo),
 			}
 
 			// Auto-configure primary network from NAD when IsUDN && IsPrimary
@@ -1770,6 +1790,13 @@ func TestMustProcessCNCForNAD(t *testing.T) {
 				mutableNetInfo := util.NewMutableNetInfo(netInfo)
 				mutableNetInfo.SetNADs(tt.nad.Namespace + "/" + tt.nad.Name)
 				fakeNM.PrimaryNetworks[tt.nad.Namespace] = mutableNetInfo
+			}
+			if tt.nad != nil {
+				nadKey := fmt.Sprintf("%s/%s", tt.nad.Namespace, tt.nad.Name)
+				nadObj := tt.nad.NAD()
+				netInfo, err := util.ParseNADInfo(nadObj)
+				g.Expect(err).ToNot(gomega.HaveOccurred(), "ParseNADInfo for %s failed", nadKey)
+				fakeNM.NADNetworks[nadKey] = netInfo
 			}
 
 			tunnelKeysAllocator := id.NewTunnelKeyAllocator("TunnelKeys")
@@ -2451,6 +2478,7 @@ func TestController_reconcileNamespace(t *testing.T) {
 			// Create fake network manager and auto-configure from nads
 			fakeNM := &networkmanager.FakeNetworkManager{
 				PrimaryNetworks: make(map[string]util.NetInfo),
+				NADNetworks:     make(map[string]util.NetInfo),
 			}
 
 			// Auto-populate PrimaryNetworks from NADs with IsUDN=true and IsPrimary=true
@@ -2472,6 +2500,14 @@ func TestController_reconcileNamespace(t *testing.T) {
 					mutableNetInfo.AddNADs(fmt.Sprintf("%s/%s", n.Namespace, n.Name))
 				}
 				fakeNM.PrimaryNetworks[namespace] = mutableNetInfo
+			}
+			for _, nad := range tt.nads {
+				nadKey := fmt.Sprintf("%s/%s", nad.Namespace, nad.Name)
+				nadObj, err := wf.NADInformer().Lister().NetworkAttachmentDefinitions(nad.Namespace).Get(nad.Name)
+				g.Expect(err).ToNot(gomega.HaveOccurred(), "NAD %s should exist", nadKey)
+				netInfo, err := util.ParseNADInfo(nadObj)
+				g.Expect(err).ToNot(gomega.HaveOccurred(), "ParseNADInfo for %s failed", nadKey)
+				fakeNM.NADNetworks[nadKey] = netInfo
 			}
 
 			tunnelKeysAllocator := id.NewTunnelKeyAllocator("TunnelKeys")

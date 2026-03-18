@@ -51,37 +51,34 @@ func getPrimaryNADForNamespace(networkMgr networkmanager.Interface, namespaceNam
 		// No primary UDN in this namespace
 		return "", nil, nil
 	}
-	// Get the NAD key for the primary network in this namespace.
-	// Since this is for namespace-scoped UDNs, we expect exactly one NAD per network.
-	// Today we don't support multiple primary NADs for a namespace, so this is safe.
-	// Also note if the user misconfigures and ends up with CUDN and UDN for the same namespace,
-	// and if the CUDN was created first - which means the UDN won't be created successfully,
-	// then the user uses the P-UDN selector, the CUDN's NAD will be chosen here for this selector
-	// but that's a design flaw in the user's configuration, and expectation is for users to use
-	// the selectors correctly.
-	primaryNADs := namespacePrimaryNetwork.GetNADs()
-	if len(primaryNADs) != 1 {
-		return "", nil, fmt.Errorf("expected exactly one primary NAD for namespace %s, got %d", namespaceName, len(primaryNADs))
-	}
-	// There is a race condition where NAD is already deleted from kapi
-	// but network manager is too slow to update the network manager cache.
-	// In this case, GetNADs() will return the NADs even though they are deleted.
-	// So let's fetch the NAD again from the kapi to double confirm it exists
-	// before returning it.
-	nadNamespace, nadName, err := cache.SplitMetaNamespaceKey(primaryNADs[0])
+	primaryNADKey, err := networkMgr.GetPrimaryNADForNamespace(namespaceName)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to split NAD key %s: %w", primaryNADs[0], err)
-	}
-	_, err = nadLister.NetworkAttachmentDefinitions(nadNamespace).Get(nadName)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			klog.Warningf("NAD %s not found in kapi, returning empty network info even if network manager cache says it exists", primaryNADs[0])
+		if util.IsInvalidPrimaryNetworkError(err) || util.IsUnprocessedActiveNetworkError(err) {
 			return "", nil, nil
 		}
 		return "", nil, err
 	}
-	// GetNADs() returns NADs in "namespace/name" format, so use directly
-	return primaryNADs[0], namespacePrimaryNetwork, nil
+	if primaryNADKey == ovntypes.DefaultNetworkName {
+		return "", nil, nil
+	}
+	// There is a race condition where NAD is already deleted from kapi
+	// but network manager is too slow to update the network manager cache.
+	// In this case, the primary NAD key may still be cached even though it is deleted.
+	// So let's fetch the NAD again from the kapi to double confirm it exists
+	// before returning it.
+	nadNamespace, nadName, err := cache.SplitMetaNamespaceKey(primaryNADKey)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to split NAD key %s: %w", primaryNADKey, err)
+	}
+	_, err = nadLister.NetworkAttachmentDefinitions(nadNamespace).Get(nadName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			klog.Warningf("NAD %s not found in kapi, returning empty network info even if network manager cache says it exists", primaryNADKey)
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+	return primaryNADKey, namespacePrimaryNetwork, nil
 }
 
 func (c *Controller) reconcileClusterNetworkConnect(key string) error {
@@ -269,22 +266,6 @@ func (c *Controller) discoverSelectedNetworks(cnc *networkconnectv1.ClusterNetwo
 	return discoveredNetworks, allMatchingNADKeys, kerrors.NewAggregate(errs)
 }
 
-func computeNetworkOwner(networkType string, networkID int) string {
-	return fmt.Sprintf("%s_%d", networkType, networkID)
-}
-
-// parseNetworkOwnerTopology extracts the topology type from an owner key.
-// Owner keys are formatted as "{topology}_{networkID}" (e.g., "layer3_1", "layer2_2").
-func parseNetworkOwnerTopology(owner string) (topologyType string, ok bool) {
-	if len(owner) > len(ovntypes.Layer3Topology)+1 && owner[:len(ovntypes.Layer3Topology)] == ovntypes.Layer3Topology {
-		return ovntypes.Layer3Topology, true
-	}
-	if len(owner) > len(ovntypes.Layer2Topology)+1 && owner[:len(ovntypes.Layer2Topology)] == ovntypes.Layer2Topology {
-		return ovntypes.Layer2Topology, true
-	}
-	return "", false
-}
-
 // allocateSubnets allocates subnets for the given discovered networks
 // It returns a map of owner to subnets
 // NOTE: If owner already had its subnets allocated, it will simply return those existing subnets
@@ -302,14 +283,14 @@ func (c *Controller) allocateSubnets(discoveredNetworks []util.NetInfo, allocato
 		}
 		var err error
 		if network.TopologyType() == ovntypes.Layer3Topology {
-			owner = computeNetworkOwner(ovntypes.Layer3Topology, networkID)
+			owner = util.ComputeNetworkOwner(ovntypes.Layer3Topology, networkID)
 			subnets, err = allocator.AllocateLayer3Subnet(owner)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("failed to allocate Layer3 subnet for network %s: %w", network.GetNetworkName(), err))
 				continue
 			}
 		} else if network.TopologyType() == ovntypes.Layer2Topology {
-			owner = computeNetworkOwner(ovntypes.Layer2Topology, networkID)
+			owner = util.ComputeNetworkOwner(ovntypes.Layer2Topology, networkID)
 			subnets, err = allocator.AllocateLayer2Subnet(owner)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("failed to allocate Layer2 subnet for network %s: %w", network.GetNetworkName(), err))
@@ -333,8 +314,8 @@ func (c *Controller) releaseSubnets(networksNeedingRelease sets.Set[string],
 	allocator HybridConnectSubnetAllocator) error {
 	var errs []error
 	for networkKey := range networksNeedingRelease {
-		topologyType, ok := parseNetworkOwnerTopology(networkKey)
-		if !ok {
+		topologyType, _, err := util.ParseNetworkOwner(networkKey)
+		if err != nil {
 			errs = append(errs, fmt.Errorf("invalid network key format: %s", networkKey))
 			continue
 		}

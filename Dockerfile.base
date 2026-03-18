@@ -5,7 +5,7 @@
 # The standard name for this image is ovn-kubernetes-base
 
 # build base image shared by both OpenShift and MicroShift
-FROM registry.ci.openshift.org/ocp/4.21:base-rhel9
+FROM registry.ci.openshift.org/ocp/4.22:base-rhel9
 
 # install selinux-policy first to avoid a race
 RUN dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs \
@@ -13,12 +13,12 @@ RUN dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs \
 	dnf clean all
 
 ARG ovsver=3.5
-ARG ovnver=25.03
+ARG ovnver=25.09
 # NOTE: Ensure that the versions of OVS and OVN are overriden for OKD in each of the subsequent layers.
 # Centos and RHEL releases for ovn are built out of sync, so please make sure to bump for OKD with
 # the corresponding Centos version when updating the OCP version.
 ARG ovsver_okd=3.5
-ARG ovnver_okd=25.03
+ARG ovnver_okd=25.09
 
 RUN INSTALL_PKGS="iptables nftables" && \
     source /etc/os-release && \

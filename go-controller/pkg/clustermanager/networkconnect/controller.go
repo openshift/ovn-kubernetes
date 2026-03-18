@@ -415,7 +415,8 @@ func (c *Controller) mustProcessCNCForNAD(nad *nadv1.NetworkAttachmentDefinition
 						klog.Errorf("Failed to get active network for namespace %s: %v", namespace.Name, err)
 						continue
 					}
-					if primaryNAD.HasNAD(nadKey) {
+					networkName := c.networkManager.GetNetworkNameForNADKey(nadKey)
+					if networkName != "" && networkName == primaryNAD.GetNetworkName() {
 						isSelected = true
 						break selectorLoop
 					}
