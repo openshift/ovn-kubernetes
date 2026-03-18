@@ -34,6 +34,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 		zone:               zone,
 		cm:                 cm,
 		networks:           map[string]util.MutableNetInfo{},
+		networksByID:       map[int]string{},
 		networkControllers: map[string]*networkControllerState{},
 	}
 
@@ -91,6 +92,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 type networkControllerState struct {
 	controller         NetworkController
 	stoppedAndDeleting bool
+	forceReconcile     bool
 }
 
 type networkController struct {
@@ -110,6 +112,7 @@ type networkController struct {
 
 	cm                 ControllerManager
 	networks           map[string]util.MutableNetInfo
+	networksByID       map[int]string // reverse index: network ID -> network name for O(1) lookup
 	networkControllers map[string]*networkControllerState
 }
 
@@ -168,11 +171,21 @@ func (c *networkController) DeleteNetwork(network string) {
 func (c *networkController) setNetwork(network string, netInfo util.MutableNetInfo) {
 	c.Lock()
 	defer c.Unlock()
+	// Remove old ID mapping if network existed
+	if old, exists := c.networks[network]; exists {
+		if oldID := old.GetNetworkID(); oldID != types.InvalidID {
+			delete(c.networksByID, oldID)
+		}
+	}
 	if netInfo == nil {
 		delete(c.networks, network)
 		return
 	}
 	c.networks[network] = netInfo
+	// Add new ID mapping
+	if id := netInfo.GetNetworkID(); id != types.InvalidID {
+		c.networksByID[id] = network
+	}
 }
 
 func (c *networkController) getNetwork(network string) util.MutableNetInfo {
@@ -189,6 +202,25 @@ func (c *networkController) getAllNetworks() []util.NetInfo {
 		networks = append(networks, network)
 	}
 	return networks
+}
+
+func (c *networkController) clearForceReconcile(network string) {
+	c.Lock()
+	defer c.Unlock()
+	if _, ok := c.networkControllers[network]; !ok {
+		return
+	}
+	c.networkControllers[network].forceReconcile = false
+}
+
+func (c *networkController) SetForceReconcile(network string) {
+	c.Lock()
+	defer c.Unlock()
+	if _, ok := c.networkControllers[network]; !ok {
+		return
+	}
+	klog.V(4).Infof("%s: force reconcile set for network %s", c.name, network)
+	c.networkControllers[network].forceReconcile = true
 }
 
 func (c *networkController) setNetworkState(network string, state *networkControllerState) {
@@ -211,12 +243,17 @@ func (c *networkController) getNetworkState(network string) *networkControllerSt
 	return state
 }
 
-func (c *networkController) getReconcilableNetworkState(network string) (ReconcilableNetworkController, bool) {
+func (c *networkController) getReconcilableNetworkState(network string) (ReconcilableNetworkController, bool, bool) {
 	if network == types.DefaultNetworkName {
-		return c.cm.GetDefaultNetworkController(), false
+		return c.cm.GetDefaultNetworkController(), false, false
 	}
-	state := c.getNetworkState(network)
-	return state.controller, state.stoppedAndDeleting
+	c.RLock()
+	defer c.RUnlock()
+	state := c.networkControllers[network]
+	if state == nil {
+		return nil, false, false
+	}
+	return state.controller, state.stoppedAndDeleting, state.forceReconcile
 }
 
 func (c *networkController) getAllNetworkStates() []*networkControllerState {
@@ -275,7 +312,7 @@ func (c *networkController) syncNetwork(network string) error {
 		klog.V(4).Infof("%s: finished syncing network %s, took %v", c.name, network, time.Since(startTime))
 	}()
 
-	have, stoppedAndDeleting := c.getReconcilableNetworkState(network)
+	have, stoppedAndDeleting, forceReconcile := c.getReconcilableNetworkState(network)
 	want := c.getNetwork(network)
 
 	compatible := util.AreNetworksCompatible(have, want)
@@ -297,7 +334,7 @@ func (c *networkController) syncNetwork(network string) error {
 		return fmt.Errorf("failed to fetch other network information for network %s: %w", network, err)
 	}
 
-	ensureNetwork := !compatible || util.DoesNetworkNeedReconciliation(have, want)
+	ensureNetwork := !compatible || util.DoesNetworkNeedReconciliation(have, want) || forceReconcile
 	if !ensureNetwork {
 		// no network changes
 		return nil
@@ -325,7 +362,7 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	}
 
 	networkName := network.GetNetworkName()
-	reconcilable, _ := c.getReconcilableNetworkState(networkName)
+	reconcilable, _, _ := c.getReconcilableNetworkState(networkName)
 
 	// this might just be an update of reconcilable network configuration
 	if reconcilable != nil {
@@ -333,6 +370,7 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 		if err != nil {
 			return fmt.Errorf("failed to reconcile controller for network %s: %w", networkName, err)
 		}
+		c.clearForceReconcile(networkName)
 		return nil
 	}
 
@@ -541,4 +579,18 @@ func (c *networkController) getRunningNetwork(id int) string {
 		}
 	}
 	return ""
+}
+
+// GetNetworkByID returns the network with the given ID or nil if not found.
+// This is an O(1) lookup using an internal index.
+func (c *networkController) GetNetworkByID(id int) util.NetInfo {
+	if id == types.DefaultNetworkID {
+		return &util.DefaultNetInfo{}
+	}
+	c.RLock()
+	defer c.RUnlock()
+	if name, ok := c.networksByID[id]; ok {
+		return c.networks[name]
+	}
+	return nil
 }

@@ -2,7 +2,7 @@ name: ovn-docker-images
 
 on:
   push:
-    branches: [ master,release-1.0,release-1.1 ]
+    branches: [ master,release-1.0,release-1.1,release-1.2 ]
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ env:
   REPOSITORY: ovn-kubernetes
   FEDORA_IMAGE_NAME: ovn-kube-fedora
   UBUNTU_IMAGE_NAME: ovn-kube-ubuntu
-  BUILDER_IMAGE: quay.io/lib/golang:1.24
+  BUILDER_IMAGE: quay.io/projectquay/golang:1.24
 jobs:
   build:
     name: Build Images

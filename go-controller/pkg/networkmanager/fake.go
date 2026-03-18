@@ -2,10 +2,14 @@ package networkmanager
 
 import (
 	"context"
+	"fmt"
 	"sync"
+
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
@@ -24,7 +28,7 @@ func (fnc *FakeNetworkController) Cleanup() error {
 	return nil
 }
 
-func (nc *FakeNetworkController) Reconcile(util.NetInfo) error {
+func (fnc *FakeNetworkController) Reconcile(util.NetInfo) error {
 	return nil
 }
 
@@ -46,28 +50,50 @@ func (fcm *FakeControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
 }
 
+func (fcm *FakeControllerManager) Filter(_ *nettypes.NetworkAttachmentDefinition) (bool, error) {
+	return false, nil
+}
+
 type FakeNetworkManager struct {
 	sync.Mutex
 	// namespace -> netInfo
 	// if netInfo is nil, it represents a namespace which contains the required UDN label but with no valid network. It will return invalid network error.
 	PrimaryNetworks map[string]util.NetInfo
-	HandlerFuncs    []handlerFunc
+	Reconcilers     []reconcilerRegistration
+	nextID          uint64
 	// UDNNamespaces are a list of namespaces that require UDN for primary network
 	UDNNamespaces sets.Set[string]
+	Reconciled    []string
 }
 
-func (fnm *FakeNetworkManager) RegisterNADHandler(h handlerFunc) error {
+func (fnm *FakeNetworkManager) RegisterNADReconciler(r NADReconciler) (uint64, error) {
 	fnm.Lock()
 	defer fnm.Unlock()
-	fnm.HandlerFuncs = append(fnm.HandlerFuncs, h)
-	return nil
+	fnm.nextID++
+	id := fnm.nextID
+	fnm.Reconcilers = append(fnm.Reconcilers, reconcilerRegistration{id: id, r: r})
+	return id, nil
+}
+
+func (fnm *FakeNetworkManager) DeRegisterNADReconciler(id uint64) error {
+	fnm.Lock()
+	defer fnm.Unlock()
+	for i, rec := range fnm.Reconcilers {
+		if rec.id == id {
+			fnm.Reconcilers = append(fnm.Reconcilers[:i], fnm.Reconcilers[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("reconciler not found")
 }
 
 func (fnm *FakeNetworkManager) TriggerHandlers(nadName string, info util.NetInfo, removed bool) {
 	fnm.Lock()
 	defer fnm.Unlock()
-	for _, h := range fnm.HandlerFuncs {
-		h(nadName, info, removed)
+	_ = info
+	_ = removed
+	for _, entry := range fnm.Reconcilers {
+		entry.r.Reconcile(nadName)
 	}
 }
 
@@ -85,6 +111,22 @@ func (fnm *FakeNetworkManager) GetActiveNetworkForNamespace(namespace string) (u
 		return nil, util.NewInvalidPrimaryNetworkError(namespace)
 	}
 	return network, nil
+}
+
+func (fnm *FakeNetworkManager) GetPrimaryNADForNamespace(namespace string) (string, error) {
+	fnm.Lock()
+	defer fnm.Unlock()
+	if primaryNetwork, ok := fnm.PrimaryNetworks[namespace]; ok {
+		if primaryNetwork == nil {
+			return "", util.NewInvalidPrimaryNetworkError(namespace)
+		}
+		nads := primaryNetwork.GetNADs()
+		if len(nads) == 0 {
+			return "", util.NewInvalidPrimaryNetworkError(namespace)
+		}
+		return nads[0], nil
+	}
+	return types.DefaultNetworkName, nil
 }
 
 func (fnm *FakeNetworkManager) GetActiveNetworkForNamespaceFast(namespace string) util.NetInfo {
@@ -112,6 +154,23 @@ func (fnm *FakeNetworkManager) GetActiveNetwork(networkName string) util.NetInfo
 	return fnm.GetNetwork(networkName)
 }
 
+func (fnm *FakeNetworkManager) GetNetInfoForNADKey(nadKey string) util.NetInfo {
+	fnm.Lock()
+	defer fnm.Unlock()
+	for _, ni := range fnm.PrimaryNetworks {
+		for _, n := range ni.GetNADs() {
+			if n == nadKey {
+				return ni
+			}
+		}
+	}
+	return nil
+}
+
+func (fnm *FakeNetworkManager) ForceReconcile(key, _ string, _, _ bool) {
+	fnm.Reconciled = append(fnm.Reconciled, key)
+}
+
 func (fnm *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
 	namespaces := make([]string, 0)
 	for namespaceName, primaryNAD := range fnm.PrimaryNetworks {
@@ -132,4 +191,19 @@ func (fnm *FakeNetworkManager) DoWithLock(f func(network util.NetInfo) error) er
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (fnm *FakeNetworkManager) GetNetworkByID(id int) util.NetInfo {
+	fnm.Lock()
+	defer fnm.Unlock()
+	for _, ni := range fnm.PrimaryNetworks {
+		if ni.GetNetworkID() == id {
+			return ni
+		}
+	}
+	return nil
+}
+
+func (fnm *FakeNetworkManager) Reconcile(name string) {
+	fnm.Reconciled = append(fnm.Reconciled, name)
 }

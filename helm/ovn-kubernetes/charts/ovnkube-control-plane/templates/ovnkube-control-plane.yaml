@@ -76,7 +76,7 @@ spec:
           value: "crash"
         {{ end -}}
         - name: OVN_DAEMONSET_VERSION
-          value: "1.1.0"
+          value: "1.2.0"
         - name: OVNKUBE_LOGLEVEL
           value: {{ default 4 .Values.logLevel | quote }}
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -134,6 +134,10 @@ spec:
           value: {{ default "" .Values.global.enableNetworkConnect | quote }}
         - name: OVN_PRE_CONF_UDN_ADDR_ENABLE
           value: {{ default "" .Values.global.enablePreconfiguredUDNAddresses | quote }}
+        - name: OVN_DYNAMIC_UDN_ALLOCATION
+          value: {{ hasKey .Values.global "enableDynamicUDNAllocation" | ternary .Values.global.enableDynamicUDNAllocation false | quote }}
+        - name: OVN_DYNAMIC_UDN_GRACE_PERIOD
+          value: {{ default "" .Values.global.dynamicUDNGracePeriod | quote }}
         - name: OVN_ADVERTISED_UDN_ISOLATION_MODE
           value: {{ default "strict" .Values.global.advertisedUDNIsolationMode | quote }}
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
