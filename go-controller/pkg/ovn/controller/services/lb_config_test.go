@@ -4610,7 +4610,7 @@ func Test_makeNodeSwitchTargetIPs(t *testing.T) {
 	}
 	for i, tt := range tc {
 		t.Run(fmt.Sprintf("%d_%s", i, tt.name), func(t *testing.T) {
-			actualTargetIPsV4, actualTargetIPsV6, actualV4Changed, actualV6Changed := makeNodeSwitchTargetIPs(tt.node, tt.config)
+			actualTargetIPsV4, actualTargetIPsV6, actualV4Changed, actualV6Changed := makeNodeSwitchTargetIPs(tt.service, tt.node, tt.config)
 			assert.Equal(t, tt.expectedTargetIPsV4, actualTargetIPsV4)
 			assert.Equal(t, tt.expectedTargetIPsV6, actualTargetIPsV6)
 			assert.Equal(t, tt.expectedV4Changed, actualV4Changed)
