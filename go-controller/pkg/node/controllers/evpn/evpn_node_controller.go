@@ -310,6 +310,11 @@ func (c *Controller) reconcile(key string) error {
 		return c.deleteVTEPDevices(key)
 	}
 
+	if config.HybridOverlay.Enabled && config.HybridOverlay.VXLANPort == config.DefaultVXLANPort {
+		return fmt.Errorf("hybrid overlay is enabled with VXLAN port %d which conflicts with EVPN VXLAN; "+
+			"configure a different hybrid-overlay-vxlan-port to avoid the conflict", config.DefaultVXLANPort)
+	}
+
 	node, err := c.watchFactory.GetNode(c.nodeName)
 	if err != nil {
 		return fmt.Errorf("failed to get node %s: %w", c.nodeName, err)
@@ -675,7 +680,7 @@ func (c *Controller) ensureVXLAN(vxlanName string, bridgeName string, srcIP net.
 	err := c.ndm.EnsureLink(netlinkdevicemanager.DeviceConfig{
 		Link: &netlink.Vxlan{
 			LinkAttrs: netlink.LinkAttrs{Name: vxlanName, MTU: config.Default.MTU},
-			Port:      vxlanPort,
+			Port:      config.DefaultVXLANPort,
 			SrcAddr:   srcIP,
 			// FlowBased (ip link: external): destination VTEP is resolved per-flow from the FDB, populated by FRR via BGP EV
 			FlowBased: true,
