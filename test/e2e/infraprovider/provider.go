@@ -1,16 +1,28 @@
 package infraprovider
 
 import (
+	"fmt"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/internal/kind"
 )
 
-type Name string
+var infraProvider api.Provider
 
-func (n Name) String() string {
-	return string(n)
+// New creates a new infrastructure provider by name.
+func New(providerName string) api.Provider {
+	switch providerName {
+	case "kind":
+		return kind.New()
+	default:
+		panic(fmt.Sprintf("unknown infra provider %q", providerName))
+	}
 }
 
-var infraProvider api.Provider
+// IsKindProvider returns true if clusters provider is KinD.
+func IsKindProvider() bool {
+	return kind.IsProvider()
+}
 
 // Set infrastructure provider.
 func Set(provider api.Provider) {

@@ -17,7 +17,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/label"
 
 	deploymentkind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/configs/kind"
-	infrakind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/kind"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
@@ -64,14 +63,10 @@ func TestMain(m *testing.M) {
 	// Set up infrastructure provider and deployment config
 	// Upstream currently uses KinD as its preferred platform infra, So TestMain
 	// is expected to run only there.
-	if !infrakind.IsProvider() {
+	if !infraprovider.IsKindProvider() {
 		klog.Fatal("Cluster provider must be KinD type")
 	}
-	infrastructure := infrakind.New()
-	if infrastructure == nil {
-		klog.Fatal("Failed to determine the infrastructure provider")
-	}
-	infraprovider.Set(infrastructure)
+	infraprovider.Set(infraprovider.New("kind"))
 	if !deploymentkind.IsKind() {
 		klog.Fatal("Deployment Config must be KinD type")
 	}
