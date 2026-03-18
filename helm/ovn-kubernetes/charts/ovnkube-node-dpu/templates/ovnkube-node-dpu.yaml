@@ -113,6 +113,10 @@ spec:
             cpu: 100m
             memory: 300Mi
         env:
+        {{ if .Values.global.enableCoredumps -}}
+        - name: GOTRACEBACK
+          value: "crash"
+        {{ end -}}
         - name: OVN_DAEMONSET_VERSION
           value: "1.1.0"
         - name: OVNKUBE_LOGLEVEL
@@ -211,8 +215,6 @@ spec:
           value: {{ hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true | quote }}
         - name: OVN_SSL_ENABLE
           value: {{ include "isSslEnabled" . | quote }}
-        - name: OVN_DISABLE_OVN_IFACE_ID_VER
-          value: {{ hasKey .Values.global "disableIfaceIdVer" | ternary .Values.global.disableIfaceIdVer false | quote }}
         - name: OVN_REMOTE_PROBE_INTERVAL
           value: {{ default 100000 .Values.global.remoteProbeInterval | quote }}
         - name: OVN_MONITOR_ALL
