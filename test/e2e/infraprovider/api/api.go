@@ -181,7 +181,7 @@ func (n NetworkInterface) GetIPv4Prefix() string {
 }
 
 func (n NetworkInterface) GetIPv6Gateway() string {
-	return n.IPv4Gateway
+	return n.IPv6Gateway
 }
 
 func (n NetworkInterface) GetIPv6() string {
