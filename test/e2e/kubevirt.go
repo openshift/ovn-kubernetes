@@ -2528,6 +2528,52 @@ password: fedora
 chpasswd: { expire: False }
 `
 		)
+		It("should start multiple VMs with same hostname", func() {
+			By("setting up the localnet underlay")
+			cudn, networkName := kubevirt.GenerateCUDN(namespace, "net1", udnv1.NetworkTopologyLocalnet, udnv1.NetworkRoleSecondary, udnv1.DualStackCIDRs{})
+			createCUDN(cudn)
+
+			Expect(providerCtx.SetupUnderlay(fr, infraapi.Underlay{LogicalNetworkName: networkName})).To(Succeed())
+
+			type vmConfig struct {
+				ipv4 string
+				ipv6 string
+				mac  string
+			}
+			configs := []vmConfig{
+				{ipv4: "172.31.0.101/24", ipv6: "2010:100:200::101/60", mac: "0A:58:0A:80:00:65"},
+				{ipv4: "172.31.0.102/24", ipv6: "2010:100:200::102/60", mac: "0A:58:0A:80:00:66"},
+				{ipv4: "172.31.0.103/24", ipv6: "2010:100:200::103/60", mac: "0A:58:0A:80:00:67"},
+			}
+
+			vmis := make([]*kubevirtv1.VirtualMachineInstance, len(configs))
+			for i, cfg := range configs {
+				filteredCIDRs := filterCIDRs(fr.ClientSet, cfg.ipv4, cfg.ipv6)
+				networkData, err := staticIPsNetworkData(filteredCIDRs)
+				Expect(err).NotTo(HaveOccurred())
+
+				vm := fedoraWithTestToolingVM(nil, nil, nil, kubevirtv1.NetworkSource{
+					Multus: &kubevirtv1.MultusNetwork{
+						NetworkName: cudn.Name,
+					},
+				}, userData, networkData)
+				vm.Spec.Template.Spec.Hostname = "shared-hostname"
+				vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = cfg.mac
+				createVirtualMachine(vm)
+
+				vmis[i] = &kubevirtv1.VirtualMachineInstance{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: namespace,
+						Name:      vm.Name,
+					},
+				}
+			}
+
+			By("Waiting for all 3 VMIs to become ready")
+			for _, vmi := range vmis {
+				waitVirtualMachineInstanceReadiness(vmi)
+			}
+		})
 		DescribeTable("should maintain tcp connection with minimal downtime", func(td func(vmi *kubevirtv1.VirtualMachineInstance)) {
 			By("setting up the localnet underlay")
 			cudn, networkName := kubevirt.GenerateCUDN(namespace, "net1", udnv1.NetworkTopologyLocalnet, udnv1.NetworkRoleSecondary, udnv1.DualStackCIDRs{})

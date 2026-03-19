@@ -24,7 +24,11 @@ func GenerateFakeVirtLauncherPod(namespace, vmName string) *corev1.Pod {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "virt-launcher-" + vmName,
 			Namespace: namespace,
+			Annotations: map[string]string{
+				kubevirtv1.DomainAnnotation: vmName,
+			},
 			Labels: map[string]string{
+				kubevirtv1.AppLabel:                "virt-launcher",
 				kubevirtv1.VirtualMachineNameLabel: vmName,
 			},
 		},
