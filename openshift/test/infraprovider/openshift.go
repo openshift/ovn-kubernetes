@@ -12,7 +12,9 @@ import (
 	"sync"
 	"time"
 
-	v1 "github.com/openshift/api/operator/v1"
+	configv1 "github.com/openshift/api/config/v1"
+	operv1 "github.com/openshift/api/operator/v1"
+	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -37,10 +39,17 @@ const (
 	primaryNetworkName         = "ostestbm_net"
 	frrContainerPrimaryNetIPv4 = "192.168.111.3"
 	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
+	externalFRRContainerName   = "frr"
+
+	// Environment variable names for test configuration
+	// These are set during infra provider initialization and consumed by test selection logic
+	EnvVarOVNGatewayMode     = "OVN_GATEWAY_MODE"
+	EnvVarEVPNFeatureEnabled = "EVPN_FEATURE_ENABLED"
 )
 
 type openshift struct {
 	container.Provider
+	config       *rest.Config
 	nodes        map[string]*ocpNode
 	host         *hypervisor
 	hostNetworks map[string]*container.ContainerEngineNetwork
@@ -65,18 +74,6 @@ func New(config *rest.Config) (api.Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to create kubernetes client: %w", err)
 	}
-	operatorClient, err := operatorv1client.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create operator client: %w", err)
-	}
-	network, err := operatorClient.OperatorV1().Networks().Get(context.Background(), "cluster", metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("unable to retrieve networks operator config: %w", err)
-	}
-	err = loadOvnConfig(network.Spec.DefaultNetwork.OVNKubernetesConfig)
-	if err != nil {
-		return nil, fmt.Errorf("unable to load ovn configuration: %w", err)
-	}
 	infraNodes, primaryNet, err := loadKubeNodes(kubeClient)
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize kube nodes: %w", err)
@@ -85,10 +82,11 @@ func New(config *rest.Config) (api.Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve primary network subnets: %w", err)
 	}
-	o := openshift{
+	o := &openshift{
 		Provider: container.Provider{
 			ExternalContainerPort: portalloc.New(30000, 32767),
 			HostPort:              portalloc.New(30000, 32767)},
+		config:       config,
 		kubeClient:   kubeClient,
 		nodes:        infraNodes,
 		hostNetworks: map[string]*container.ContainerEngineNetwork{primaryNetworkName: primaryNet}}
@@ -115,20 +113,8 @@ func New(config *rest.Config) (api.Provider, error) {
 			}
 		}
 	}
-	return &o, nil
-}
-
-func loadOvnConfig(conf *v1.OVNKubernetesConfig) error {
-	if conf == nil {
-		return fmt.Errorf("no ovn configuration found")
-	}
-	if conf.GatewayConfig == nil {
-		return fmt.Errorf("ovn gateway config not found")
-	}
-	if conf.GatewayConfig.RoutingViaHost {
-		os.Setenv("OVN_GATEWAY_MODE", "local")
-	}
-	return nil
+	o.loadTestConfigs()
+	return o, nil
 }
 
 func loadKubeNodes(kubeClient *kubernetes.Clientset) (map[string]*ocpNode, *container.ContainerEngineNetwork, error) {
@@ -225,6 +211,127 @@ func findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeName string) (st
 		}
 	}
 	return "", fmt.Errorf("failed to find network interface from ovnkube-node pod %s", ovnKubeNodePodName)
+}
+
+func (o *openshift) loadTestConfigs() {
+	// Fetch cluster configs once and reuse for all checks.
+	// This optimization makes it easy to add more feature gate or network config checks
+	// in the future without additional API calls.
+	operatorClient, err := operatorv1client.NewForConfig(o.config)
+	if err != nil {
+		ginkgo.GinkgoLogr.Info("Skipping test config detection", "error", err)
+		return
+	}
+
+	configClient, err := configclient.NewForConfig(o.config)
+	if err != nil {
+		ginkgo.GinkgoLogr.Info("Skipping test config detection", "error", err)
+		return
+	}
+
+	network, err := operatorClient.OperatorV1().Networks().Get(context.Background(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		ginkgo.GinkgoLogr.Info("Skipping network config detection", "error", err)
+		return
+	}
+
+	clusterFeatureGate, err := configClient.ConfigV1().FeatureGates().Get(context.Background(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		ginkgo.GinkgoLogr.Info("Skipping feature gate detection", "error", err)
+		return
+	}
+
+	// Configure test environment based on cluster configuration
+	o.configureOVNGatewayMode(network)
+	o.detectEVPNCapability(network, clusterFeatureGate)
+	// Future feature detection can be added here, reusing network and clusterFeatureGate
+}
+
+// configureOVNGatewayMode detects and configures the OVN gateway mode for tests
+func (o *openshift) configureOVNGatewayMode(network *operv1.Network) {
+	if network.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+		return
+	}
+
+	if network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
+		network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost {
+		os.Setenv(EnvVarOVNGatewayMode, "local")
+		ginkgo.GinkgoLogr.Info("OVN gateway mode configured", "mode", "local")
+	}
+}
+
+// detectEVPNCapability checks all EVPN prerequisites and enables EVPN tests if available
+func (o *openshift) detectEVPNCapability(network *operv1.Network, featureGate *configv1.FeatureGate) {
+	if !hasEVPNFeatureGate(featureGate) {
+		ginkgo.GinkgoLogr.Info("EVPN tests disabled: feature gate not enabled")
+		return
+	}
+	if !hasFRRRouteProvider(network) {
+		ginkgo.GinkgoLogr.Info("EVPN tests disabled: FRR route provider not configured")
+		return
+	}
+	if !isLocalGatewayMode(network) {
+		ginkgo.GinkgoLogr.Info("EVPN tests disabled: local gateway mode not enabled")
+		return
+	}
+	if !o.hasFRRExternalContainer() {
+		ginkgo.GinkgoLogr.Info("EVPN tests disabled: FRR external container not available")
+		return
+	}
+
+	// All prerequisites met - enable EVPN tests
+	os.Setenv(EnvVarEVPNFeatureEnabled, "true")
+	ginkgo.GinkgoLogr.Info("EVPN capability detected, enabling EVPN tests")
+}
+
+// hasEVPNFeatureGate checks if the EVPN feature gate is enabled in the cluster
+func hasEVPNFeatureGate(clusterFeatureGate *configv1.FeatureGate) bool {
+	for _, featureGate := range clusterFeatureGate.Status.FeatureGates {
+		for _, feature := range featureGate.Enabled {
+			if feature.Name == "EVPN" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasFRRRouteProvider checks if FRR is configured as a routing capability provider.
+func hasFRRRouteProvider(network *operv1.Network) bool {
+	if network.Spec.AdditionalRoutingCapabilities == nil {
+		return false
+	}
+
+	for _, raProvider := range network.Spec.AdditionalRoutingCapabilities.Providers {
+		if raProvider == operv1.RoutingCapabilitiesProviderFRR {
+			return true
+		}
+	}
+	return false
+}
+
+// isLocalGatewayMode checks if OVN is configured with local gateway mode (routing via host).
+func isLocalGatewayMode(network *operv1.Network) bool {
+	if network.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+		return false
+	}
+
+	return network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
+		network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost
+}
+
+// hasFRRExternalContainer checks if the FRR external container is available
+func (o *openshift) hasFRRExternalContainer() bool {
+	if o.ContainerOps == nil {
+		return false
+	}
+
+	_, err := o.ContainerOps.GetContainerState(externalFRRContainerName)
+	if err != nil {
+		ginkgo.GinkgoLogr.Info("FRR container not available", "name", externalFRRContainerName, "error", err)
+		return false
+	}
+	return true
 }
 
 func (o *openshift) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
