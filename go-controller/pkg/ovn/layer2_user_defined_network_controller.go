@@ -620,6 +620,15 @@ func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 	if oldNodeNoRouter && util.UDNLayer2NodeUsesTransitRouter(newNode) {
 		syncZoneIC = true
 	}
+	if oc.isLocalZoneNode(oldNode) {
+		syncZoneIC = true
+	}
+	if util.NodeChassisIDAnnotationChanged(oldNode, newNode) {
+		syncZoneIC = true
+	}
+	if nodecontroller.TunnelIDAnnotationChangedForNetworkWithState(oldState, newState, oc.GetNetworkName()) {
+		syncZoneIC = true
+	}
 	return oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC, newState)
 }
 
