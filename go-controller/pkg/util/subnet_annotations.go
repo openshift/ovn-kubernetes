@@ -121,6 +121,9 @@ func parseSubnetAnnotationValue(annotationName, annotation string) (map[string][
 
 	subnetMap := make(map[string][]*net.IPNet)
 	for netName, subnetsStr := range subnetsStrMap {
+		if len(subnetsStr) == 0 {
+			return nil, fmt.Errorf("unexpected empty %s annotation entry for network %s", annotationName, netName)
+		}
 		var ipnets []*net.IPNet
 		for _, subnet := range subnetsStr {
 			_, ipnet, err := net.ParseCIDR(subnet)

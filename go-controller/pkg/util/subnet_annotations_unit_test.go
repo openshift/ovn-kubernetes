@@ -349,6 +349,18 @@ func TestParseNodeHostSubnetAnnotation(t *testing.T) {
 				},
 			},
 		},
+		{
+			desc: "rejects empty subnet entry",
+			inpNode: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": "{\"default\":[]}",
+					},
+				},
+			},
+			errExp: true,
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {

@@ -140,3 +140,10 @@ func TestBuildNodeAnnotationStateDoesNotOverwriteLatestCacheWithOldSnapshot(t *t
 		t.Fatalf("expected latest cached value to be preserved, got=%v", got["blue"])
 	}
 }
+
+func TestParseSubnetMapValueRejectsEmptySubnetEntry(t *testing.T) {
+	_, err := parseSubnetMapValue(types.NodeSubnetsAnnotation, `{"isolatednet":[]}`)
+	if err == nil {
+		t.Fatal("expected empty subnet entry to be rejected")
+	}
+}
