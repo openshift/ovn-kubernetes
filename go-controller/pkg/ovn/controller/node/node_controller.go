@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -19,7 +20,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
-	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 // NodeHandler handles node reconciliation for a single network.
@@ -28,8 +28,11 @@ type NodeHandler interface {
 	GetNetworkName() string
 	// ReconcileNode reconciles the network-specific state for a node. oldNode and
 	// oldState may be nil when the node is first seen for the network or becomes
-	// active again. newNode and newState describe the latest desired state; they
-	// are nil when network-specific state for the node should be deleted.
+	// active again. For delete reconciliation, oldNode is the best available
+	// prior object: a real cached node when available, otherwise a name-only
+	// stub node; oldState is nil when no cached prior annotations exist. newNode
+	// and newState describe the latest desired state; they are nil when
+	// network-specific state for the node should be deleted.
 	ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *NodeAnnotationState) error
 	// SyncNodes performs the initial full-network sync before per-node
 	// reconciliation is queued for the handler.
@@ -47,22 +50,23 @@ type NodeController struct {
 	// handlers maps network name to node handler.
 	handlers *syncmap.SyncMap[NodeHandler]
 
-	// stateMu protects bootstrapNodes, nodeConfigured, and pendingDeletes.
+	// stateMu protects nodeReconciliation, nodeActive, nodeNetworks, and nodeCache.
 	stateMu sync.RWMutex
-	// bootstrapNodes tracks nodes that should be treated as "new" per network.
+	// nodeReconciliation tracks nodes that should be treated as "new" per network.
 	// keyed by network -> nodes
-	bootstrapNodes map[string]map[string]struct{}
-	// nodeConfigured tracks whether the last successfully applied state for a
-	// node/network was active/configured.
+	// bool is true when there was a previous reconciliation attempt with a delete event
+	nodeReconciliation map[string]map[string]bool
+	// nodeActive tracks whether a node/network is active
 	// keyed by network -> nodes
-	nodeConfigured map[string]map[string]bool
-	// pendingDeletes tracks delete intent from HandleNetworkRefChange(active=false)
-	// for a node/network. This preserves the old "inactive callback drives delete"
-	// semantics until the next reconcile observes the latest desired state.
-	// keyed by network -> nodes
-	pendingDeletes map[string]map[string]bool
-
-	nodeCache nodeCache
+	// presence indicates active
+	// absence indicates inactive/does not exist
+	nodeActive map[string]map[string]struct{}
+	// nodeNetworks is a reverse index of active networks per node.
+	// keyed by node -> networks
+	nodeNetworks map[string]map[string]struct{}
+	// nodeCache contains configured node state
+	// keyed by network -> nodeName
+	nodeCache map[string]map[string]*corev1.Node
 	// annotationCache stores parsed annotation maps keyed by node.
 	annotationCache *NodeAnnotationCache
 
@@ -70,30 +74,21 @@ type NodeController struct {
 	started bool
 }
 
-type nodeNetworkReconcileAction int
-
-const (
-	nodeNetworkReconcileNoop nodeNetworkReconcileAction = iota
-	nodeNetworkReconcileAdd
-	nodeNetworkReconcileUpdate
-	nodeNetworkReconcileDelete
-)
-
 const scopedNodeQueueKeySeparator = "|"
 
 // NewNodeController builds a controller that handles node events for all UDNs.
 func NewNodeController(wf *factory.WatchFactory, networkManager networkmanager.Interface) *NodeController {
 	nodeInformer := wf.NodeCoreInformer()
 	c := &NodeController{
-		name:            "udn-node-topology",
-		networkManager:  networkManager,
-		nodeLister:      nodeInformer.Lister(),
-		handlers:        syncmap.NewSyncMap[NodeHandler](),
-		bootstrapNodes:  map[string]map[string]struct{}{},
-		nodeConfigured:  map[string]map[string]bool{},
-		pendingDeletes:  map[string]map[string]bool{},
-		nodeCache:       newNodeCache(),
-		annotationCache: NewNodeAnnotationCache(),
+		name:               "udn-node-topology",
+		networkManager:     networkManager,
+		nodeLister:         nodeInformer.Lister(),
+		handlers:           syncmap.NewSyncMap[NodeHandler](),
+		nodeReconciliation: map[string]map[string]bool{},
+		nodeActive:         map[string]map[string]struct{}{},
+		nodeNetworks:       map[string]map[string]struct{}{},
+		nodeCache:          map[string]map[string]*corev1.Node{},
+		annotationCache:    NewNodeAnnotationCache(),
 	}
 
 	nodeControllerConfig := &controller.ControllerConfig[corev1.Node]{
@@ -137,14 +132,6 @@ func (c *NodeController) Stop() {
 
 // ReconcileNetwork queues reconciliation for a single node/network pair.
 func (c *NodeController) ReconcileNetwork(nodeName, netName string) {
-	c.setNodeNetworkPendingDelete(netName, nodeName, false)
-	c.nodeController.Reconcile(scopedNodeQueueKey(nodeName, netName))
-}
-
-// ReconcileNetworkDelete queues reconciliation for a single node/network pair
-// with explicit delete intent.
-func (c *NodeController) ReconcileNetworkDelete(nodeName, netName string) {
-	c.setNodeNetworkPendingDelete(netName, nodeName, true)
 	c.nodeController.Reconcile(scopedNodeQueueKey(nodeName, netName))
 }
 
@@ -179,9 +166,19 @@ func (c *NodeController) DeregisterNetworkController(netName string) {
 	_ = c.handlers.DoWithLock(netName, func(key string) error {
 		c.handlers.Delete(key)
 		c.stateMu.Lock()
-		delete(c.bootstrapNodes, key)
-		delete(c.nodeConfigured, key)
-		delete(c.pendingDeletes, key)
+		delete(c.nodeReconciliation, key)
+		if nodes, ok := c.nodeActive[key]; ok {
+			for nodeName := range nodes {
+				if networks, ok := c.nodeNetworks[nodeName]; ok {
+					delete(networks, key)
+					if len(networks) == 0 {
+						delete(c.nodeNetworks, nodeName)
+					}
+				}
+			}
+		}
+		delete(c.nodeActive, key)
+		delete(c.nodeCache, key)
 		c.stateMu.Unlock()
 		return nil
 	})
@@ -190,190 +187,142 @@ func (c *NodeController) DeregisterNetworkController(netName string) {
 // reconcileNode handles node add/update/delete by comparing cached state.
 func (c *NodeController) reconcileNode(key string) error {
 	nodeName, netName := parseScopedNodeQueueKey(key)
-	node, err := c.nodeLister.Get(nodeName)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return c.reconcileDelete(nodeName, netName)
+	// if netName is empty, then we always requeue keys based on network.
+	// This trick allows us to always process each network individually, allowing us to retry only
+	// specific networks, rather than retrying all later.
+	if netName == "" {
+		handlerKeys := c.handlers.GetKeys()
+		for _, networkName := range handlerKeys {
+			c.ReconcileNetwork(nodeName, networkName)
 		}
-		return err
+		return nil
 	}
 
-	oldNode := c.nodeCache.get(nodeName)
-	err = c.reconcileUpdate(oldNode, node, netName)
-	if err == nil {
-		c.nodeCache.set(node)
-	}
-	return err
+	return c.handlers.DoWithLock(netName, func(handlerKey string) error {
+		handler, ok := c.handlers.Load(handlerKey)
+		if !ok || handler == nil {
+			return nil
+		}
+
+		// Special case where we know we need to reconcile a node delete.
+		// We handle delete of old object first, before we try to reconcile update.
+		// This is the same behavior as the old retry framework for nodes.
+		needsDelete := c.nodeNeedsDeleteReconciliation(netName, nodeName)
+		needsAddUpdate := true
+
+		// Check for node existence
+		newNode, err := c.nodeLister.Get(nodeName)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+
+		// We don't normally update the anno cache on delete.
+		// Only exception is on a true node delete, where it makes sense to update
+		// cache for all network deletes
+		updateAnnoCacheOnDelete := false
+		if newNode == nil {
+			needsDelete = true
+			needsAddUpdate = false
+			updateAnnoCacheOnDelete = true
+		}
+
+		oldNode := c.getCachedNode(netName, nodeName)
+		nodeHadNetwork := c.nodeHasNetwork(netName, nodeName)
+		nodeHasNetwork := c.networkManager.NodeHasNetwork(nodeName, netName)
+
+		if c.shouldFilterByRemoteNetworkActivity(newNode) || c.shouldFilterByRemoteNetworkActivity(oldNode) {
+			// If the node is going inactive we need to delete it and not update
+			if nodeHadNetwork && !nodeHasNetwork {
+				needsAddUpdate = false
+				needsDelete = true
+				c.markNodeNeedsDeleteReconciliation(netName, nodeName)
+				c.deleteNodeActive(netName, nodeName)
+				// if we have no oldNode in the cache, and we are going inactive here, then populate the cache
+				if newNode != nil && oldNode == nil {
+					oldNode = newNode
+					c.setCachedNode(netName, oldNode)
+				}
+			} else if !nodeHadNetwork && nodeHasNetwork {
+				// node going active, but do not purge delete state (may need to retry previous failed delete)
+				needsAddUpdate = true
+				c.setNodeActive(netName, nodeName)
+				// set node for reconciliation in case we fail this add/update so we force a retry later
+				c.markNodeNeedsReconciliation(netName, nodeName)
+			}
+		} else if nodeHasNetwork {
+			c.setNodeActive(netName, nodeName)
+		} else {
+			c.deleteNodeActive(netName, nodeName)
+		}
+
+		oldState := c.annotationCache.updateNodeAnnotationState(oldNode, updateAnnoCacheOnDelete)
+		if needsDelete {
+			if delErr := c.reconcileDelete(handler, nodeName, netName, oldNode, oldState); delErr != nil {
+				return fmt.Errorf("%s: failed to delete node %s for network %s: %w", c.name, nodeName, netName, delErr)
+			}
+		}
+
+		if !needsAddUpdate || newNode == nil {
+			// remove any previous mark for needing an add reconciliation
+			c.deleteNodeReconciliation(netName, nodeName)
+			return nil
+		}
+
+		newState := c.annotationCache.updateNodeAnnotationState(newNode, true)
+
+		// if we are marked for reconciliation (first time going active/bootstrapping) treat as an add
+		if c.nodeNeedsReconciliation(netName, nodeName) {
+			oldNode = nil
+			oldState = nil
+		}
+
+		return c.reconcileUpdate(handler, oldNode, newNode, netName, oldState, newState)
+	})
 }
 
 // reconcileUpdate reconciles per-network node changes.
 // oldNode is derived from this controller's internal cache.
 // newNode is the latest state of the node from informer cache.
 // Reconciliation is level-driven.
-func (c *NodeController) reconcileUpdate(oldNode, newNode *corev1.Node, netName string) error {
-	keys := c.handlers.GetKeys()
-	if netName != "" {
-		keys = []string{netName}
-	}
-	if len(keys) == 0 {
-		return nil
+func (c *NodeController) reconcileUpdate(handler NodeHandler, oldNode, newNode *corev1.Node, netName string, oldState, newState *NodeAnnotationState) error {
+	if err := handler.ReconcileNode(oldNode, newNode, oldState, newState); err != nil {
+		return err
 	}
 
-	oldState := c.annotationCache.updateNodeAnnotationState(oldNode, false)
-	newState := c.annotationCache.updateNodeAnnotationState(newNode, true)
+	// successful update, now update caches
+	c.setCachedNode(netName, newNode)
+	c.deleteNodeReconciliation(netName, newNode.Name)
 
-	var errs []error
-	for _, netName := range keys {
-		err := c.handlers.DoWithLock(netName, func(key string) error {
-			handler, ok := c.handlers.Load(key)
-			if !ok || handler == nil {
-				return nil
-			}
-			nodeName := newNode.Name
-			nodeNeedsBootstrap := c.nodeNeedsBootstrap(key, nodeName)
-			// Dynamic UDN activity filtering only applies to remote-zone nodes for this controller.
-			// The presence of the handler indicates the local node is active to us.
-			needsDynamicFiltering := c.shouldFilterByRemoteNetworkActivity(newNode)
-			desiredActive := c.nodeHasNetwork(nodeName, key)
-			appliedActive := c.isNodeNetworkConfigured(key, nodeName)
-			pendingDelete := c.isNodeNetworkPendingDelete(key, nodeName)
-
-			switch determineNodeNetworkReconcileAction(pendingDelete, nodeNeedsBootstrap, needsDynamicFiltering, desiredActive, appliedActive) {
-			case nodeNetworkReconcileNoop:
-				if pendingDelete {
-					c.setNodeNetworkPendingDelete(key, nodeName, false)
-				}
-				if nodeNeedsBootstrap {
-					c.setNodeNetworkConfigured(key, nodeName, false)
-					c.markBootstrapNodeDone(key, nodeName)
-				}
-			case nodeNetworkReconcileAdd:
-				if pendingDelete {
-					c.setNodeNetworkPendingDelete(key, nodeName, false)
-				}
-				if err := handler.ReconcileNode(nil, newNode, nil, newState); err != nil {
-					return err
-				}
-				c.setNodeNetworkConfigured(key, nodeName, true)
-				if nodeNeedsBootstrap {
-					c.markBootstrapNodeDone(key, nodeName)
-				}
-			case nodeNetworkReconcileUpdate:
-				if err := handler.ReconcileNode(oldNode, newNode, oldState, newState); err != nil {
-					return err
-				}
-				c.setNodeNetworkConfigured(key, nodeName, true)
-			case nodeNetworkReconcileDelete:
-				deleteNode := oldNode
-				deleteState := oldState
-				if deleteNode == nil {
-					deleteNode = newNode
-					deleteState = newState
-				}
-				if err := handler.ReconcileNode(deleteNode, nil, deleteState, nil); err != nil {
-					return err
-				}
-				c.setNodeNetworkConfigured(key, nodeName, false)
-				if pendingDelete {
-					c.setNodeNetworkPendingDelete(key, nodeName, false)
-				}
-				if nodeNeedsBootstrap {
-					c.markBootstrapNodeDone(key, nodeName)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			errs = append(errs, fmt.Errorf("network %s: %w", netName, err))
-			continue
-		}
-	}
-	return utilerrors.Join(errs...)
-}
-
-func determineNodeNetworkReconcileAction(deleteRequested, bootstrapPending, needsDynamicFiltering, desiredActive, appliedActive bool) nodeNetworkReconcileAction {
-	if deleteRequested {
-		if !desiredActive {
-			return nodeNetworkReconcileDelete
-		}
-	}
-
-	if bootstrapPending {
-		if needsDynamicFiltering && !desiredActive {
-			return nodeNetworkReconcileNoop
-		}
-		return nodeNetworkReconcileAdd
-	}
-
-	if !needsDynamicFiltering {
-		return nodeNetworkReconcileUpdate
-	}
-
-	switch {
-	case desiredActive && appliedActive:
-		return nodeNetworkReconcileUpdate
-	case desiredActive:
-		return nodeNetworkReconcileAdd
-	case appliedActive:
-		return nodeNetworkReconcileDelete
-	default:
-		return nodeNetworkReconcileNoop
-	}
+	return nil
 }
 
 // reconcileDelete handles deletion using cached state.
-func (c *NodeController) reconcileDelete(nodeName, netName string) error {
-	oldNode := c.nodeCache.get(nodeName)
+func (c *NodeController) reconcileDelete(handler NodeHandler, nodeName, netName string, oldNode *corev1.Node, oldState *NodeAnnotationState) error {
 	if oldNode == nil {
-		return nil
-	}
-
-	handlerKeys := c.handlers.GetKeys()
-	// Normally we should not get a netName here when a controller is first starting to add all nodes.
-	// However, it is possible that after queuing the key for a new controller, the node is deleted.
-	// In that case we still try to delete the node, but we do not update global (network unaware) caches
-	if netName != "" {
-		handlerKeys = []string{netName}
-	}
-	if len(handlerKeys) == 0 {
-		return nil
-	}
-
-	oldState := c.annotationCache.updateNodeAnnotationState(oldNode, true)
-
-	var errs []error
-	for _, netName := range handlerKeys {
-		netName := netName
-		err := c.handlers.DoWithLock(netName, func(handlerKey string) error {
-			handler, ok := c.handlers.Load(handlerKey)
-			if !ok || handler == nil {
-				return nil
-			}
-			if c.shouldFilterByRemoteNetworkActivity(oldNode) &&
-				!c.isNodeNetworkConfigured(handlerKey, oldNode.Name) &&
-				!c.nodeNeedsBootstrap(handlerKey, oldNode.Name) {
-				return nil
-			}
-			if err := handler.ReconcileNode(oldNode, nil, oldState, nil); err != nil {
-				return err
-			}
-			c.setNodeNetworkConfigured(handlerKey, oldNode.Name, false)
-			c.setNodeNetworkPendingDelete(handlerKey, oldNode.Name, false)
-			c.markBootstrapNodeDone(handlerKey, oldNode.Name)
-			return nil
-		})
-		if err != nil {
-			errs = append(errs, fmt.Errorf("network %s: %w", netName, err))
+		oldNode = &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
 		}
 	}
-	// Scoped delete reconciliations are best-effort cleanup for a single network.
-	// Keep node cache/state for the regular node delete event to process all networks.
-	if len(errs) == 0 && netName == "" {
-		c.nodeCache.delete(nodeName)
-		c.annotationCache.deleteNode(nodeName)
-		c.deleteNodeNetworkState(nodeName)
+	if err := handler.ReconcileNode(oldNode, nil, oldState, nil); err != nil {
+		return err
 	}
-	return utilerrors.Join(errs...)
+
+	// Update per network maps
+	c.deleteNodeActive(netName, nodeName)
+	c.clearNodeDeleteReconciliation(netName, nodeName)
+	c.deleteCachedNode(netName, nodeName)
+
+	// We delete nodes per network, so we need to clear global caches when no networks reference it anymore.
+	// A cheap trick to do this is to leverage a map that is referenced by network.
+	if c.nodeHasAnyNetwork(nodeName) {
+		return nil
+	}
+
+	// node is no longer being used by any network cleanup
+	c.annotationCache.deleteNode(nodeName)
+	return nil
 }
 
 // bootstrapNetwork handles syncing, initializing bootstrap node cache, and queuing up nodes for reconciliation
@@ -398,19 +347,20 @@ func (c *NodeController) setBootstrapNodes(netName string, nodes []*corev1.Node)
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	if len(nodes) != 0 {
-		nodeSet := make(map[string]struct{}, len(nodes))
+		nodeSet := make(map[string]bool, len(nodes))
+		// setup reconciliation to emulate adds
 		for _, node := range nodes {
-			nodeSet[node.Name] = struct{}{}
+			nodeSet[node.Name] = false
 		}
-		c.bootstrapNodes[netName] = nodeSet
+		c.nodeReconciliation[netName] = nodeSet
 	}
 }
 
-// nodeNeedsBootstrap returns true if a node should be treated as new for a network.
-func (c *NodeController) nodeNeedsBootstrap(netName, nodeName string) bool {
+// nodeNeedsReconciliation returns true if a node should be treated as new for a network.
+func (c *NodeController) nodeNeedsReconciliation(netName, nodeName string) bool {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
-	nodes := c.bootstrapNodes[netName]
+	nodes := c.nodeReconciliation[netName]
 	if len(nodes) == 0 {
 		return false
 	}
@@ -418,107 +368,139 @@ func (c *NodeController) nodeNeedsBootstrap(netName, nodeName string) bool {
 	return ok
 }
 
-// markBootstrapNodeDone clears bootstrap tracking for a node.
-func (c *NodeController) markBootstrapNodeDone(netName, nodeName string) {
+// nodeNeedsDeleteReconciliation returns true if a node should be treated as new for a network.
+func (c *NodeController) nodeNeedsDeleteReconciliation(netName, nodeName string) bool {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	nodes := c.nodeReconciliation[netName]
+	if len(nodes) == 0 {
+		return false
+	}
+	if needsDelete, ok := nodes[nodeName]; ok && needsDelete {
+		return true
+	}
+
+	return false
+}
+
+// clearNodeDeleteReconciliation resets node reconciliation needs delete flag
+func (c *NodeController) clearNodeDeleteReconciliation(netName, nodeName string) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
-	nodes := c.bootstrapNodes[netName]
+	nodes := c.nodeReconciliation[netName]
+	if len(nodes) == 0 {
+		return
+	}
+	if _, ok := nodes[nodeName]; ok {
+		nodes[nodeName] = false
+	}
+
+}
+
+// deleteNodeReconciliation removes the node from needing reconciliation for a network
+func (c *NodeController) deleteNodeReconciliation(netName, nodeName string) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	nodes := c.nodeReconciliation[netName]
 	if len(nodes) == 0 {
 		return
 	}
 	delete(nodes, nodeName)
+
 	if len(nodes) == 0 {
-		delete(c.bootstrapNodes, netName)
+		delete(c.nodeReconciliation, netName)
 	}
 }
 
-// isNodeNetworkConfigured returns whether the last successfully applied state
-// for nodeName/netName was active/configured.
-func (c *NodeController) isNodeNetworkConfigured(netName, nodeName string) bool {
-	c.stateMu.RLock()
-	defer c.stateMu.RUnlock()
-	nodes := c.nodeConfigured[netName]
-	if len(nodes) == 0 {
-		return false
-	}
-	return nodes[nodeName]
-}
-
-// setNodeNetworkConfigured records whether the last successfully applied state
-// for a node/network was active/configured.
-func (c *NodeController) setNodeNetworkConfigured(netName, nodeName string, configured bool) {
+// markNodeNeedsReconciliation marks the node as needing reconciliation
+func (c *NodeController) markNodeNeedsReconciliation(netName, nodeName string) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
-	c.setNodeNetworkConfiguredLocked(netName, nodeName, configured)
-}
-
-func (c *NodeController) setNodeNetworkConfiguredLocked(netName, nodeName string, configured bool) {
-	if c.nodeConfigured == nil {
-		c.nodeConfigured = map[string]map[string]bool{}
-	}
-	nodes := c.nodeConfigured[netName]
+	nodes := c.nodeReconciliation[netName]
 	if nodes == nil {
 		nodes = map[string]bool{}
-		c.nodeConfigured[netName] = nodes
+		c.nodeReconciliation[netName] = nodes
 	}
-	nodes[nodeName] = configured
-}
-
-func (c *NodeController) isNodeNetworkPendingDelete(netName, nodeName string) bool {
-	c.stateMu.RLock()
-	defer c.stateMu.RUnlock()
-	nodes := c.pendingDeletes[netName]
-	if len(nodes) == 0 {
-		return false
-	}
-	return nodes[nodeName]
-}
-
-func (c *NodeController) setNodeNetworkPendingDelete(netName, nodeName string, pendingDelete bool) {
-	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
-	if c.pendingDeletes == nil {
-		c.pendingDeletes = map[string]map[string]bool{}
-	}
-	if !pendingDelete {
-		nodes := c.pendingDeletes[netName]
-		if len(nodes) == 0 {
-			return
-		}
-		delete(nodes, nodeName)
-		if len(nodes) == 0 {
-			delete(c.pendingDeletes, netName)
-		}
+	// if it already exists, do nothing
+	if _, ok := nodes[nodeName]; ok {
 		return
 	}
-	nodes := c.pendingDeletes[netName]
+	// doesn't exist, set it with false indicating there is no pending delete
+	nodes[nodeName] = false
+}
+
+// markNodeNeedsDeleteReconciliation marks the node as needing reconciliation with delete
+func (c *NodeController) markNodeNeedsDeleteReconciliation(netName, nodeName string) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	nodes := c.nodeReconciliation[netName]
 	if nodes == nil {
 		nodes = map[string]bool{}
-		c.pendingDeletes[netName] = nodes
+		c.nodeReconciliation[netName] = nodes
 	}
 	nodes[nodeName] = true
 }
 
-// deleteNodeNetworkState removes configured-state tracking across all networks.
-func (c *NodeController) deleteNodeNetworkState(nodeName string) {
-	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
-	for netName, nodes := range c.nodeConfigured {
-		delete(nodes, nodeName)
-		if len(nodes) == 0 {
-			delete(c.nodeConfigured, netName)
-		}
-	}
-	for netName, nodes := range c.pendingDeletes {
-		delete(nodes, nodeName)
-		if len(nodes) == 0 {
-			delete(c.pendingDeletes, netName)
-		}
-	}
+// nodeHasAnyNetwork returns whether there is any cached state for this node on any network.
+func (c *NodeController) nodeHasAnyNetwork(nodeName string) bool {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	return len(c.nodeNetworks[nodeName]) > 0
 }
 
-func (c *NodeController) nodeHasNetwork(nodeName, netName string) bool {
-	return c.networkManager.NodeHasNetwork(nodeName, netName)
+// nodeHasNetwork returns whether the last cached state of the nodeName/netName was active/configured.
+func (c *NodeController) nodeHasNetwork(netName, nodeName string) bool {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	nodes := c.nodeActive[netName]
+	if len(nodes) == 0 {
+		return false
+	}
+	_, ok := nodes[nodeName]
+	return ok
+}
+
+// setNodeActive records whether the last successfully applied state
+// for a node/network was active/configured.
+func (c *NodeController) setNodeActive(netName, nodeName string) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if c.nodeActive == nil {
+		c.nodeActive = map[string]map[string]struct{}{}
+	}
+	if c.nodeNetworks == nil {
+		c.nodeNetworks = map[string]map[string]struct{}{}
+	}
+	nodes := c.nodeActive[netName]
+	if nodes == nil {
+		nodes = map[string]struct{}{}
+		c.nodeActive[netName] = nodes
+	}
+	nodes[nodeName] = struct{}{}
+	networks := c.nodeNetworks[nodeName]
+	if networks == nil {
+		networks = map[string]struct{}{}
+		c.nodeNetworks[nodeName] = networks
+	}
+	networks[netName] = struct{}{}
+}
+
+// deleteNodeNetworkState removes configured-state tracking across all networks.
+func (c *NodeController) deleteNodeActive(netName, nodeName string) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if nodes, ok := c.nodeActive[netName]; ok {
+		delete(nodes, nodeName)
+		if len(nodes) == 0 {
+			delete(c.nodeActive, netName)
+		}
+	}
+	if networks, ok := c.nodeNetworks[nodeName]; ok {
+		delete(networks, netName)
+		if len(networks) == 0 {
+			delete(c.nodeNetworks, nodeName)
+		}
+	}
 }
 
 // shouldFilterByRemoteNetworkActivity returns true when dynamic UDN activity
@@ -556,21 +538,11 @@ func parseScopedNodeQueueKey(key string) (nodeName, netName string) {
 	return parts[0], parts[1]
 }
 
-type nodeCache struct {
-	mu    sync.RWMutex
-	nodes map[string]*corev1.Node
-}
-
-// newNodeCache returns an empty node cache.
-func newNodeCache() nodeCache {
-	return nodeCache{nodes: map[string]*corev1.Node{}}
-}
-
 // Get returns a deep copy of a cached node by name.
-func (c *nodeCache) get(name string) *corev1.Node {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	node := c.nodes[name]
+func (c *NodeController) getCachedNode(netName, nodeName string) *corev1.Node {
+	c.stateMu.RLock()
+	defer c.stateMu.RUnlock()
+	node := c.nodeCache[netName][nodeName]
 	if node == nil {
 		return nil
 	}
@@ -578,18 +550,33 @@ func (c *nodeCache) get(name string) *corev1.Node {
 }
 
 // Set stores a deep copy of a node.
-func (c *nodeCache) set(node *corev1.Node) {
-	if node == nil {
-		return
+func (c *NodeController) setCachedNode(netName string, node *corev1.Node) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	if c.nodeCache == nil {
+		c.nodeCache = make(map[string]map[string]*corev1.Node)
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.nodes[node.Name] = node.DeepCopy()
+	if c.nodeCache[netName] == nil {
+		c.nodeCache[netName] = make(map[string]*corev1.Node)
+	}
+
+	c.nodeCache[netName][node.Name] = node.DeepCopy()
 }
 
 // Delete removes a node from the cache.
-func (c *nodeCache) delete(name string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.nodes, name)
+func (c *NodeController) deleteCachedNode(netName, nodeName string) {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+
+	nodes := c.nodeCache[netName]
+	if nodes == nil {
+		return
+	}
+
+	delete(nodes, nodeName)
+
+	if len(nodes) == 0 {
+		delete(c.nodeCache, netName)
+	}
 }
