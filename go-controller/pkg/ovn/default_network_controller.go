@@ -976,6 +976,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
+				nodeSync = nodeSync || nodeSubnetChange
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChange
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)

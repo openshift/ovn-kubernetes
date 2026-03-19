@@ -645,6 +645,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 			nodeSubnetChange := nodeSubnetChangedForUDN(oldNode, newNode, oc.GetNetworkName(), oldState, newState)
 
 			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
+			nodeSync = nodeSync || nodeSubnetChange
 			_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 			clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChange
 			_, failed = oc.mgmtPortFailed.Load(newNode.Name)
