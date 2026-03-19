@@ -82,6 +82,7 @@ func newNodeControllerForTest(threadiness int, reconcileAllCounter *int) control
 func TestNodeControllerStartFailure(t *testing.T) {
 	c := &NodeController{
 		name:               "topology-test",
+		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
 		nodeController:     newNodeControllerForTest(0, nil),
 		handlers:           syncmap.NewSyncMap[NodeHandler](),
 		nodeReconciliation: map[string]map[string]bool{},
@@ -106,6 +107,7 @@ func TestRegisterNetworkControllerBootstrapFailure(t *testing.T) {
 	}
 	c := &NodeController{
 		name:               "topology-test",
+		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
 		nodeController:     newNodeControllerForTest(1, nil),
 		nodeLister:         newNodeLister(t, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}),
 		handlers:           syncmap.NewSyncMap[NodeHandler](),
@@ -130,6 +132,7 @@ func TestRegisterNetworkControllerBootstrapFailure(t *testing.T) {
 func TestRegisterNetworkControllerPanicsOnDuplicateNetworkHandler(t *testing.T) {
 	c := &NodeController{
 		name:               "topology-test",
+		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
 		nodeController:     newNodeControllerForTest(1, nil),
 		nodeLister:         newNodeLister(t, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}),
 		handlers:           syncmap.NewSyncMap[NodeHandler](),
@@ -158,6 +161,7 @@ func TestDeregisterNetworkControllerClearsNetworkState(t *testing.T) {
 	handlers := syncmap.NewSyncMap[NodeHandler]()
 	handlers.Store(handler.netName, handler)
 	c := &NodeController{
+		policy:   &udnPolicy{networkManager: networkmanager.Default().Interface()},
 		handlers: handlers,
 		nodeReconciliation: map[string]map[string]bool{
 			handler.netName: {"node-a": false},
@@ -196,7 +200,7 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 	handlers.Store(handlerB.netName, handlerB)
 
 	c := &NodeController{
-		networkManager:     networkmanager.Default().Interface(),
+		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{},
 		nodeActive:         map[string]map[string]struct{}{},
@@ -228,15 +232,15 @@ func TestReconcileNodeRemoteNodeBecomesActiveTreatsAsAdd(t *testing.T) {
 	handlers := syncmap.NewSyncMap[NodeHandler]()
 	handlers.Store(handler.netName, handler)
 
+	fakeNM := &fakeNodeActivityNetworkManager{active: true}
 	c := &NodeController{
-		networkManager:     &fakeNodeActivityNetworkManager{active: false},
+		policy:             &udnPolicy{networkManager: fakeNM},
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{},
 		nodeActive:         map[string]map[string]struct{}{},
 		nodeCache:          map[string]map[string]*corev1.Node{},
 		annotationCache:    NewNodeAnnotationCache(),
 	}
-	c.networkManager = &fakeNodeActivityNetworkManager{active: true}
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node-a",
@@ -285,7 +289,7 @@ func TestReconcileNodeRemoteNodeBecomesInactiveDeletes(t *testing.T) {
 	}
 
 	c := &NodeController{
-		networkManager:     &fakeNodeActivityNetworkManager{active: false},
+		policy:             &udnPolicy{networkManager: &fakeNodeActivityNetworkManager{active: false}},
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{},
 		nodeActive: map[string]map[string]struct{}{
@@ -330,7 +334,7 @@ func TestReconcileNodeDeleteCacheMissStillClearsState(t *testing.T) {
 
 	c := &NodeController{
 		name:               "topology-test",
-		networkManager:     &fakeNodeActivityNetworkManager{active: false},
+		policy:             &udnPolicy{networkManager: &fakeNodeActivityNetworkManager{active: false}},
 		nodeLister:         newNodeLister(t),
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{handler.netName: {"node-a": true}},
