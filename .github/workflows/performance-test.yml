@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  K8S_VERSION: v1.34.0
+  K8S_VERSION: v1.35.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
