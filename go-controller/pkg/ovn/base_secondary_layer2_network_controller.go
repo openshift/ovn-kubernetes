@@ -33,6 +33,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 		return
 	}
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	oc.DeregisterNodeHandler()
 	close(oc.stopChan)
 	oc.stopChan = nil
 	oc.cancelableCtx.Cancel()
@@ -106,12 +107,8 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 
 func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 	// WatchNamespaces() should be started first because it has no other
-	// dependencies, and WatchNodes() depends on it
+	// dependencies.
 	if err := oc.WatchNamespaces(); err != nil {
-		return err
-	}
-
-	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
 

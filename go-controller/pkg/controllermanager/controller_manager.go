@@ -22,6 +22,7 @@ import (
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
@@ -65,6 +66,7 @@ type ControllerManager struct {
 	// networkManager creates and deletes network controllers
 	networkManager     networkmanager.Controller
 	routeImportManager routeimport.Controller
+	udnNodeController  *nodecontroller.NodeController
 
 	// eIPController programs OVN to support EgressIP
 	eIPController *ovn.EgressIPController
@@ -82,13 +84,23 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 	topoType := nInfo.TopologyType()
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewLayer3UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.eIPController, cm.portCache, cm.addressSetManager)
+		oc, err := ovn.NewLayer3UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
+			cm.eIPController, cm.portCache, cm.addressSetManager, cm.udnNodeController)
+		if err != nil {
+			return nil, err
+		}
+		return oc, nil
 	case ovntypes.Layer2Topology:
-		return ovn.NewLayer2UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.portCache, cm.eIPController, cm.addressSetManager)
+		oc, err := ovn.NewLayer2UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
+			cm.portCache, cm.eIPController, cm.addressSetManager, cm.udnNodeController)
+		if err != nil {
+			return nil, err
+		}
+		return oc, nil
 	case ovntypes.LocalnetTopology:
-		return ovn.NewLocalnetUserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.addressSetManager), nil
+		oc := ovn.NewLocalnetUserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.addressSetManager,
+			cm.udnNodeController)
+		return oc, nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -106,11 +118,13 @@ func (cm *ControllerManager) newDummyNetworkController(topoType, netName, role s
 	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType, Role: role})
 	switch topoType {
 	case ovntypes.Layer3Topology:
-		return ovn.NewLayer3UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache, cm.addressSetManager)
+		return ovn.NewLayer3UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager,
+			cm.eIPController, cm.portCache, cm.addressSetManager, nil)
 	case ovntypes.Layer2Topology:
-		return ovn.NewLayer2UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager, cm.portCache, cm.eIPController, cm.addressSetManager)
+		return ovn.NewLayer2UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager,
+			cm.portCache, cm.eIPController, cm.addressSetManager, nil)
 	case ovntypes.LocalnetTopology:
-		return ovn.NewLocalnetUserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.addressSetManager), nil
+		return ovn.NewLocalnetUserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.addressSetManager, nil), nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
 }
@@ -283,6 +297,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 		if err != nil {
 			return nil, err
 		}
+		cm.udnNodeController = nodecontroller.NewNodeController(cm.watchFactory, cm.networkManager.Interface())
 	}
 
 	if util.IsRouteAdvertisementsEnabled() {
@@ -501,6 +516,11 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	}
 
 	if cm.networkManager != nil {
+		if cm.udnNodeController != nil {
+			if err = cm.udnNodeController.Start(); err != nil {
+				return fmt.Errorf("failed to start UDN node topology controller: %v", err)
+			}
+		}
 		if err = cm.networkManager.Start(); err != nil {
 			return fmt.Errorf("failed to start NAD Controller :%v", err)
 		}
@@ -533,6 +553,9 @@ func (cm *ControllerManager) Stop() {
 
 	// stop the NAD controller
 	if cm.networkManager != nil {
+		if cm.udnNodeController != nil {
+			cm.udnNodeController.Stop()
+		}
 		cm.networkManager.Stop()
 	}
 
