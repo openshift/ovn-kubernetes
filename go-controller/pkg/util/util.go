@@ -29,8 +29,8 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // OvnConflictBackoff is the backoff used for pod annotation update conflict
@@ -157,6 +157,12 @@ func GetExtPortName(bridgeID, nodeName string) string {
 	return bridgeID + "_" + nodeName
 }
 
+// GetMACVRFPortName returns the logical switch port name used for a MACVRF
+// attachment.
+func GetMACVRFPortName(switchName string) string {
+	return types.MACVRFPortPrefix + switchName
+}
+
 // GetPatchPortName determines the name of the patch port on the external
 // bridge, which connects to br-int
 func GetPatchPortName(bridgeID, nodeName string) string {
@@ -245,6 +251,11 @@ func (anse *annotationNotSetError) Error() string {
 // newAnnotationNotSetError returns an error for an annotation that is not set
 func newAnnotationNotSetError(format string, args ...interface{}) error {
 	return &annotationNotSetError{msg: fmt.Sprintf(format, args...)}
+}
+
+// NewAnnotationNotSetError returns an error that satisfies IsAnnotationNotSetError.
+func NewAnnotationNotSetError(format string, args ...interface{}) error {
+	return newAnnotationNotSetError(format, args...)
 }
 
 // IsAnnotationNotSetError returns true if the error indicates that an annotation is not set
@@ -1075,4 +1086,12 @@ func getPortName(name *string) string {
 		return ""
 	}
 	return *name
+}
+
+// IsNoOverlaySNATExemptionNeeded returns true when:
+// no-overlay transport mode, outbound SNAT enabled, and shared gateway mode.
+func IsNoOverlaySNATExemptionNeeded(netInfo NetInfo) bool {
+	return netInfo.Transport() == types.NetworkTransportNoOverlay &&
+		netInfo.OutboundSNAT() == types.NoOverlaySNATEnabled &&
+		config.Gateway.Mode == config.GatewayModeShared
 }

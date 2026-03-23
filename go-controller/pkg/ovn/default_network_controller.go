@@ -15,38 +15,37 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
-	hotypes "github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressqoslisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics/recorders"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/observability"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	anpcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
-	apbroutecontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
-	efcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressfirewall"
-	egresssvc "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
-	networkconnectcontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/networkconnect"
-	svccontroller "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
-	dnsnameresolver "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/logical_router_policy"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/nat"
-	lsm "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/topology"
-	zoneic "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/syncmap"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressqoslisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/listers/egressqos/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics/recorders"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/observability"
+	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
+	anpcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/admin_network_policy"
+	apbroutecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
+	efcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/egressfirewall"
+	egresssvc "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/egressservice"
+	networkconnectcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/networkconnect"
+	svccontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	dnsnameresolver "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/dns_name_resolver"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/logical_router_policy"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/external_ids_syncer/nat"
+	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/topology"
+	zoneic "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
-
-const DefaultNetworkControllerName = "default-network-controller"
 
 // DefaultNetworkController structure is the object which holds the controls for starting
 // and reacting upon the watched resources (e.g. pods, endpoints) for default l3 network
@@ -150,10 +149,11 @@ func NewDefaultNetworkController(
 	routeImportManager routeimport.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) (*DefaultNetworkController, error) {
 	stopChan := make(chan struct{})
 	wg := &sync.WaitGroup{}
-	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, routeImportManager, observManager, eIPController, portCache)
+	return newDefaultNetworkControllerCommon(cnci, stopChan, wg, nil, networkManager, routeImportManager, observManager, eIPController, portCache, addressSetManager)
 }
 
 func newDefaultNetworkControllerCommon(
@@ -166,6 +166,7 @@ func newDefaultNetworkControllerCommon(
 	observManager *observability.Manager,
 	eIPController *EgressIPController,
 	portCache *PortCache,
+	addressSetManager *addresssetmanager.AddressSetManager,
 ) (*DefaultNetworkController, error) {
 	defaultNetInfo := &util.DefaultNetInfo{}
 
@@ -201,7 +202,7 @@ func newDefaultNetworkControllerCommon(
 		cnci.watchFactory.NodeCoreInformer().Lister(),
 		cnci.nbClient,
 		addressSetFactory,
-		DefaultNetworkControllerName,
+		types.DefaultNetworkControllerName,
 		cnci.zone,
 	)
 	if err != nil {
@@ -211,7 +212,7 @@ func newDefaultNetworkControllerCommon(
 	oc := &DefaultNetworkController{
 		BaseNetworkController: BaseNetworkController{
 			CommonNetworkControllerInfo: *cnci,
-			controllerName:              DefaultNetworkControllerName,
+			controllerName:              types.DefaultNetworkControllerName,
 			ReconcilableNetInfo:         defaultNetInfo,
 			lsManager:                   lsm.NewLogicalSwitchManager(),
 			logicalPortCache:            portCache,
@@ -220,7 +221,6 @@ func newDefaultNetworkControllerCommon(
 			addressSetFactory:           addressSetFactory,
 			networkPolicies:             syncmap.NewSyncMap[*networkPolicy](),
 			sharedNetpolPortGroups:      syncmap.NewSyncMap[*defaultDenyPortGroups](),
-			podSelectorAddressSets:      syncmap.NewSyncMap[*PodSelectorAddressSet](),
 			stopChan:                    defaultStopChan,
 			wg:                          defaultWg,
 			localZoneNodes:              &sync.Map{},
@@ -229,6 +229,7 @@ func newDefaultNetworkControllerCommon(
 			observManager:               observManager,
 			networkManager:              networkManager,
 			routeImportManager:          routeImportManager,
+			addressSetManager:           addressSetManager,
 		},
 		externalGatewayRouteInfo:   apbExternalRouteController.ExternalGWRouteInfoCache,
 		eIPC:                       eIPController,
@@ -288,6 +289,7 @@ func (oc *DefaultNetworkController) newRetryFramework(
 		EventHandler:           eventHandler,
 	}
 	r := retry.NewRetryFramework(
+		oc.GetNetworkName()+"/networkController",
 		oc.stopChan,
 		oc.wg,
 		oc.watchFactory,
@@ -299,11 +301,6 @@ func (oc *DefaultNetworkController) newRetryFramework(
 func (oc *DefaultNetworkController) syncDb() error {
 	var err error
 	// sync shared resources
-	// pod selector address sets
-	err = oc.cleanupPodSelectorAddressSets()
-	if err != nil {
-		return fmt.Errorf("cleaning up stale pod selector address sets for network %v failed : %w", oc.GetNetworkName(), err)
-	}
 	// LRP syncer must only be run once and because default controller always runs, it can perform LRP updates.
 	lrpSyncer := logical_router_policy.NewLRPSyncer(oc.nbClient, oc.controllerName)
 	if err = lrpSyncer.Sync(); err != nil {
@@ -428,7 +425,7 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 
 	// WatchNodes must be started next because it creates the node switch
 	// which most other watches depend on.
-	// https://github.com/ovn-org/ovn-kubernetes/pull/859
+	// https://github.com/ovn-kubernetes/ovn-kubernetes/pull/859
 	if err := WithSyncDurationMetric("node", oc.WatchNodes); err != nil {
 		return err
 	}
@@ -979,6 +976,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 			if h.oc.isLocalZoneNode(oldNode) {
 				// determine what actually changed in this update
 				_, nodeSync := h.oc.addNodeFailed.Load(newNode.Name)
+				nodeSync = nodeSync || nodeSubnetChange
 				_, failed := h.oc.nodeClusterRouterPortFailed.Load(newNode.Name)
 				clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || nodeSubnetChange
 				_, failed = h.oc.mgmtPortFailed.Load(newNode.Name)

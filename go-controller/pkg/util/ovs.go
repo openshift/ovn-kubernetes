@@ -18,8 +18,8 @@ import (
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 const (
@@ -842,31 +842,6 @@ func GetOVNDBServerInfo(timeout int, direction, database string) (*OVNDBServerSt
 	}
 
 	return serverStatus, nil
-}
-
-// DetectSCTPSupport checks if OVN supports SCTP for load balancer
-func DetectSCTPSupport() (bool, error) {
-	stdout, stderr, err := RunOVSDBClientOVNNB("list-columns", "--data=bare", "--no-heading",
-		"--format=json", "OVN_Northbound", "Load_Balancer")
-	if err != nil {
-		klog.Errorf("Failed to query OVN NB DB for SCTP support, "+
-			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
-		return false, err
-	}
-	type OvsdbData struct {
-		Data [][]interface{}
-	}
-	var lbData OvsdbData
-	err = json.Unmarshal([]byte(stdout), &lbData)
-	if err != nil {
-		return false, err
-	}
-	for _, entry := range lbData.Data {
-		if entry[0].(string) == "protocol" && strings.Contains(fmt.Sprintf("%v", entry[1]), "sctp") {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // DetectCheckPktLengthSupport checks if OVN supports check packet length action in OVS kernel datapath

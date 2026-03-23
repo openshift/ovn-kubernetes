@@ -27,7 +27,7 @@ else
 OVN_FROM := source
 OVN_GITSHA := $(shell git ls-remote "${OVN_REPO}" "${OVN_GITREF}" | sort -k2  -V  |tail -1 | awk '{ print $$1 }')
 endif
-GO_VERSION ?= 1.24
+GO_VERSION ?= 1.25
 GO_IMAGE = quay.io/projectquay/golang:${GO_VERSION}
 
 OCI_BIN ?= docker
@@ -46,13 +46,18 @@ ubuntu-shared-gw-deployment: ubuntu-image
 	# ${OCI_BIN} push docker.io/ovnkube/ovn-daemonset-ubuntu:latest
 	./daemonset.sh --image=docker.io/ovnkube/ovn-daemonset-ubuntu:latest
 
+FEDORA_BASE_IMAGE ?= quay.io/fedora/fedora:43
+
 fedora-image:
+	${OCI_BIN} pull --platform=linux/${ARCH} ${FEDORA_BASE_IMAGE} 2>/dev/null || true; \
+	FEDORA_BASE_DIGEST=$$(${OCI_BIN} inspect --format='{{index .RepoDigests 0}}' ${FEDORA_BASE_IMAGE} 2>/dev/null || echo ""); \
 	${OCI_BIN} build \
 		--build-arg OVN_FROM=${OVN_FROM} \
 		--build-arg OVN_REPO=${OVN_REPO} \
 		--build-arg OVN_GITREF=${OVN_GITSHA} \
 		--build-arg OVN_KUBERNETES_DIR=${OVN_KUBERNETES_DIR} \
 		--build-arg BUILDER_IMAGE=${GO_IMAGE} \
+		--build-arg FEDORA_BASE_DIGEST=$${FEDORA_BASE_DIGEST} \
 		--platform=linux/${ARCH} \
 		-t ${IMAGE} \
 		-f Dockerfile.fedora ./../..
