@@ -18,14 +18,18 @@ limitations under the License.
 package v1
 
 import (
-	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 )
 
 // NoOverlayConfigApplyConfiguration represents a declarative configuration of the NoOverlayConfig type for use
 // with apply.
+//
+// NoOverlayConfig contains configuration options for networks operating in no-overlay mode.
 type NoOverlayConfigApplyConfiguration struct {
-	OutboundSNAT *userdefinednetworkv1.SNATOption    `json:"outboundSNAT,omitempty"`
-	Routing      *userdefinednetworkv1.RoutingOption `json:"routing,omitempty"`
+	// OutboundSNAT defines the SNAT behavior for outbound traffic from pods.
+	OutboundSNAT *userdefinednetworkv1.SNATOption `json:"outboundSNAT,omitempty"`
+	// Routing specifies whether the pod network routing is managed by OVN-Kubernetes or users.
+	Routing *userdefinednetworkv1.RoutingOption `json:"routing,omitempty"`
 }
 
 // NoOverlayConfigApplyConfiguration constructs a declarative configuration of the NoOverlayConfig type for use with

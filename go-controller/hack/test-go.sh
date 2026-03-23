@@ -13,6 +13,12 @@ function gocmd {
     $cmd "$@"
 }
 
+# Disable WatchListClient feature gate for tests.
+# Fake clientsets from third-party libraries don't yet support WatchList semantics
+# introduced in K8s 1.35, causing informers to hang waiting for bookmark events.
+# See: https://github.com/kubernetes/kubernetes/issues/135895
+export KUBE_FEATURE_WatchListClient=false
+
 cd "${OVN_KUBE_ROOT}"
 
 PKGS=$(gocmd list -mod vendor -f '{{if len .TestGoFiles}} {{.ImportPath}} {{end}}' ${PKGS:-./cmd/... ./pkg/... ./hybrid-overlay/...} | xargs)
@@ -46,13 +52,13 @@ function testrun {
         if [ "$NOROOT" = "TRUE" ]; then
             go_test="${testfile}"
         else
-            go_test="sudo ${testfile}"
+            go_test="sudo -E ${testfile}"
         fi
     fi
     if [[ -n "$ginkgo_focus" ]]; then
         local ginkgoargs=${ginkgo_focus:-}
     fi
-    local path=${pkg#github.com/ovn-org/ovn-kubernetes/go-controller}
+    local path=${pkg#github.com/ovn-kubernetes/ovn-kubernetes/go-controller}
     if [ ! -z "${COVERALLS:-}" ]; then
         args="${args} -test.coverprofile=${idx}.coverprofile "
     fi
@@ -74,18 +80,18 @@ function testrun {
 
 # These packages requires root for network namespace manipulation in unit tests
 root_pkgs=(
-    "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controllermanager"
-    "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
-    "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
-    "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
-    "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
-    "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-    "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/rulemanager"
-    "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
+    "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllermanager"
+    "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
+    "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
+    "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iptables"
+    "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
+    "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
+    "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/rulemanager"
+    "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 )
 
 # These packages are big and require more than the 10m default to run the unit tests
-big_pkgs=("github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn")
+big_pkgs=("github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn")
 
 i=0
 for pkg in ${PKGS}; do

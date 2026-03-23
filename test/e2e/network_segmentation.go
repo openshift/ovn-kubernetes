@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
-	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
+	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/util/podutils"
@@ -281,7 +282,7 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 						udnPodConfig podConfiguration,
 					) {
 						if !isInterconnectEnabled() {
-							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4528"
+							const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4528"
 							e2eskipper.Skipf(
 								"These tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
 							)
@@ -1598,7 +1599,7 @@ spec:
 					"can be accessed to from the pods running in the Kubernetes cluster",
 					func(netConfigParams *networkAttachmentConfigParams, clientPodConfig podConfiguration) {
 						if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
-							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
+							const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4642"
 							e2eskipper.Skipf(
 								"Egress e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
 							)
@@ -2406,6 +2407,24 @@ func filterL3Subnets(cs clientset.Interface, l3Subnets []udnv1.Layer3Subnet) []u
 	return filteredL3Subnets
 }
 
+func matchL3SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1.Layer3Subnet) (out []udnv1.Layer3Subnet) {
+	for _, subnet := range in {
+		if families.Has(utilnet.IPFamilyOfCIDRString(string(subnet.CIDR))) {
+			out = append(out, subnet)
+		}
+	}
+	return
+}
+
+func matchL2SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1.CIDR) (out []udnv1.CIDR) {
+	for _, subnet := range in {
+		if families.Has(utilnet.IPFamilyOfCIDRString(string(subnet))) {
+			out = append(out, subnet)
+		}
+	}
+	return
+}
+
 func generateCIDRforClusterUDN(cs clientset.Interface, v4, v6 string) string {
 	cidr := `[{cidr: ` + v4 + `}]`
 	if isIPv6Supported(cs) && isIPv4Supported(cs) {
@@ -2549,4 +2568,21 @@ func unmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[strin
 		}
 	}
 	return podNetworks, nil
+}
+
+func getNetworkSubnetsFromSpec(networkSpec *udnv1.NetworkSpec) []string {
+	var subnets []string
+	switch {
+	case networkSpec.Layer2 != nil:
+		for _, cidr := range networkSpec.Layer2.Subnets {
+			subnets = append(subnets, string(cidr))
+		}
+	case networkSpec.Layer3 != nil:
+		for _, subnet := range networkSpec.Layer3.Subnets {
+			subnets = append(subnets, string(subnet.CIDR))
+		}
+	default:
+		panic("unsupported network type")
+	}
+	return subnets
 }

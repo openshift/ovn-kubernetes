@@ -22,9 +22,9 @@ import (
 	sync "sync"
 	time "time"
 
-	versioned "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
-	internalinterfaces "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/internalinterfaces"
-	routeadvertisements "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements"
+	versioned "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
+	internalinterfaces "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/internalinterfaces"
+	routeadvertisements "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
@@ -96,6 +96,7 @@ func NewSharedInformerFactory(client versioned.Interface, defaultResync time.Dur
 // NewFilteredSharedInformerFactory constructs a new instance of sharedInformerFactory.
 // Listers obtained via this SharedInformerFactory will be subject to the same filters
 // as specified here.
+//
 // Deprecated: Please use NewSharedInformerFactoryWithOptions instead
 func NewFilteredSharedInformerFactory(client versioned.Interface, defaultResync time.Duration, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) SharedInformerFactory {
 	return NewSharedInformerFactoryWithOptions(client, defaultResync, WithNamespace(namespace), WithTweakListOptions(tweakListOptions))
@@ -203,7 +204,7 @@ func (f *sharedInformerFactory) InformerFor(obj runtime.Object, newFunc internal
 //
 // It is typically used like this:
 //
-//	ctx, cancel := context.Background()
+//	ctx, cancel := context.WithCancel(context.Background())
 //	defer cancel()
 //	factory := NewSharedInformerFactory(client, resyncPeriod)
 //	defer factory.WaitForStop()    // Returns immediately if nothing was started.

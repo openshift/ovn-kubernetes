@@ -13,10 +13,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 
-	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func TestParseNetworkSubnets(t *testing.T) {
@@ -1830,9 +1830,9 @@ func TestAreNetworksCompatible(t *testing.T) {
 			expectationDescription: "we should reconcile on physical network name updates",
 		},
 		{
-			desc:                   "empty transport and geneve config should be compatible",
+			desc:                   "networks with empty (default) transport should be compatible",
 			aNetwork:               &userDefinedNetInfo{transport: ""},
-			anotherNetwork:         &userDefinedNetInfo{transport: "geneve"},
+			anotherNetwork:         &userDefinedNetInfo{transport: ""},
 			expectedResult:         true,
 			expectationDescription: "networks with no EVPN config should be compatible",
 		},
@@ -2025,7 +2025,7 @@ func TestEVPNConfig(t *testing.T) {
 				NetConf:  cnitypes.NetConf{Name: ovntypes.DefaultNetworkName},
 				Topology: ovntypes.Layer3Topology,
 			},
-			expectedTransport:         "geneve",
+			expectedTransport:         "",
 			expectedVTEPName:          "",
 			expectedMACVRFVNI:         0,
 			expectedMACVRFRouteTarget: "",
@@ -2038,7 +2038,7 @@ func TestEVPNConfig(t *testing.T) {
 				NetConf:  cnitypes.NetConf{Name: "l3-network"},
 				Topology: ovntypes.Layer3Topology,
 			},
-			expectedTransport:         "geneve",
+			expectedTransport:         "",
 			expectedVTEPName:          "",
 			expectedMACVRFVNI:         0,
 			expectedMACVRFRouteTarget: "",
@@ -2250,8 +2250,8 @@ func TestEVPNNetworkCompatibility(t *testing.T) {
 		},
 		{
 			desc:                   "both nil EVPN config should be compatible",
-			aNetwork:               &userDefinedNetInfo{transport: "geneve"},
-			anotherNetwork:         &userDefinedNetInfo{transport: "geneve"},
+			aNetwork:               &userDefinedNetInfo{transport: ""},
+			anotherNetwork:         &userDefinedNetInfo{transport: ""},
 			expectedResult:         true,
 			expectationDescription: "networks with no EVPN config should be compatible",
 		},

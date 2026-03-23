@@ -13,15 +13,15 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
-	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-	nodeutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
+	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	nodeutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func getGatewayNextHops() ([]net.IP, string, error) {
@@ -448,26 +448,13 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(kubeNodeIP ne
 		return fmt.Errorf("failed to remove stale masquerade resources: %w", err)
 	}
 
-	if err := setNodeMasqueradeIPOnExtBridge(kubeIntf); err != nil {
-		return fmt.Errorf("failed to set the node masquerade IP on the ext bridge %s: %v", kubeIntf, err)
-	}
-
-	if err := addMasqueradeRoute(nc.routeManager, kubeIntf, nc.name, ifAddrs, nc.watchFactory); err != nil {
-		return fmt.Errorf("failed to set the node masquerade route to OVN: %v", err)
+	if err := nc.masqReconciler.ensure(); err != nil {
+		return err
 	}
 
 	// Masquerade config mostly done on node, update annotation
 	if err := updateMasqueradeAnnotation(nc.name, nc.Kube); err != nil {
 		return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nc.name, err)
-	}
-
-	err = configureSvcRouteViaInterface(nc.routeManager, config.Gateway.Interface, DummyNextHopIPs())
-	if err != nil {
-		return err
-	}
-
-	if err = addHostMACBindings(kubeIntf); err != nil {
-		return fmt.Errorf("failed to add MAC bindings for service routing: %w", err)
 	}
 
 	gatewayNextHops, _, err := getGatewayNextHops()
@@ -496,8 +483,8 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 	klog.Info("Initializing Shared Gateway Functionality for Gateway Start on DPU host")
 	var err error
 
-	// TODO(adrianc): revisit if support for nodeIPManager is needed.
 	gw := nc.Gateway.(*gateway)
+	gw.nodeIPManager = newAddressManager(nc.name, nc.Kube, nil, nc.watchFactory, nil)
 	if config.Gateway.NodeportEnable {
 		if err := initSharedGatewayIPTables(); err != nil {
 			return err

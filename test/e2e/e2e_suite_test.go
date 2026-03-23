@@ -9,14 +9,15 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/diagnostics"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/ipalloc"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/label"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/diagnostics"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/label"
 
-	deploymentkind "github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig/configs/kind"
-	infrakind "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/providers/kind"
+	deploymentkind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/configs/kind"
+	infrakind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/providers/kind"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
@@ -39,6 +40,10 @@ func handleFlags() {
 var _ = ginkgo.BeforeSuite(func() {
 	// Make sure the framework's kubeconfig is set.
 	gomega.Expect(framework.TestContext.KubeConfig).NotTo(gomega.Equal(""), fmt.Sprintf("%s env var not set", clientcmd.RecommendedConfigPathEnvVar))
+
+	// Preload e2e test images into the cluster to avoid runtime pull
+	// failures and timeouts during test execution.
+	infraprovider.Get().PreloadImages(images.Required())
 
 	_, err := framework.LoadClientset()
 	framework.ExpectNoError(err)

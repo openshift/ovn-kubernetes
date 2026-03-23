@@ -19,14 +19,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	ovncnitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func convertNetPolicyToMultiNetPolicy(policy *knet.NetworkPolicy) *mnpapi.MultiNetworkPolicy {
@@ -300,7 +300,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		pods []testPod, podLabels map[string]string) {
 		var podsList []corev1.Pod
 		for _, testPod := range pods {
-			knetPod := newPod(testPod.namespace, testPod.podName, testPod.nodeName, testPod.podIP)
+			knetPod := ovntest.NewPod(testPod.namespace, testPod.podName, testPod.nodeName, testPod.podIP)
 			if len(podLabels) > 0 {
 				knetPod.Labels = podLabels
 			}
@@ -365,19 +365,17 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		gomega.Expect(asf.ControllerName).To(gomega.Equal(getNetworkControllerName(userDefinedNetworkName)))
 
 		for _, ocInfo := range fakeOvn.userDefinedNetworkControllers {
-			// localnet topology can't watch for nodes
-			if watchNodes && ocInfo.bnc.TopologyType() != ovntypes.LocalnetTopology {
+			if watchNodes {
 				if ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology && config.OVNKubernetesFeature.EnableInterconnect {
 					// add the transit switch port bindings on behalf of ovn-controller
-					// before WatchNodes so it does not synchrounously wait for them
+					// before registering the node handler so it does not synchronously wait for them
 					for _, node := range nodes {
 						transistSwitchPortName := ocInfo.bnc.GetNetworkScopedName(ovntypes.TransitSwitchToRouterPrefix + node.Name)
 						err = libovsdb.CreateTransitSwitchPortBindings(fakeOvn.sbClient, ovntypes.TransitSwitch, transistSwitchPortName)
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					}
 				}
-				err = ocInfo.bnc.WatchNodes()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(fakeOvn.registerUDNNodeHandler(ocInfo.bnc.GetNetworkName())).To(gomega.Succeed())
 			}
 
 			if namespaces != nil {
@@ -416,9 +414,9 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				subnets := "10.1.0.0/24"
 				setUserDefinedNetworkTestData(topology, subnets)
 
-				namespace1 := *newNamespace(namespaceName1)
-				namespace2 := *newNamespace(namespaceName2)
-				policy := getMatchLabelsNetworkPolicy(netPolicyName1, namespace1.Name,
+				namespace1 := *ovntest.NewNamespace(namespaceName1)
+				namespace2 := *ovntest.NewNamespace(namespaceName2)
+				policy := ovntest.NewMatchLabelsNetworkPolicy(netPolicyName1, namespace1.Name,
 					namespace2.Name, "", true, true)
 				policy.Annotations = map[string]string{PolicyForAnnotation: nadNamespacedName}
 				mpolicy := convertNetPolicyToMultiNetPolicy(policy)
@@ -464,7 +462,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					subnets := "10.1.0.0/24"
 					setUserDefinedNetworkTestData(topology, subnets)
 
-					namespace1 := *newNamespace(namespaceName1)
+					namespace1 := *ovntest.NewNamespace(namespaceName1)
 					nPodTest := getTestPod(namespace1.Name, nodeName)
 					nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, "", "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
 					networkPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)
@@ -584,7 +582,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 						}
 					}
 
-					namespace1 := *newNamespace(namespaceName1)
+					namespace1 := *ovntest.NewNamespace(namespaceName1)
 
 					config.EnableMulticast = false
 					startOvn(initialDB, watchNodes, []corev1.Node{node}, []corev1.Namespace{namespace1}, nil, nil,
@@ -602,7 +600,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 					nPodTest := getTestPod(namespace1.Name, nodeName)
 					nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, nodeSubnet, "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
-					knetPod := newPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
+					knetPod := ovntest.NewPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
 					addPodNetwork(knetPod, nPodTest.udnPodInfos)
 					setPodAnnotations(knetPod, nPodTest)
 					nPodTest.populateLogicalSwitchCache(fakeOvn)
@@ -652,8 +650,8 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				subnets := "10.1.0.0/24"
 				setUserDefinedNetworkTestData(topology, subnets)
 
-				namespace1 := *newNamespace(namespaceName1)
-				namespace2 := *newNamespace(namespaceName2)
+				namespace1 := *ovntest.NewNamespace(namespaceName1)
+				namespace2 := *ovntest.NewNamespace(namespaceName2)
 				nPodTest := getTestPod(namespace1.Name, nodeName)
 				nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, "", "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
 				networkPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)

@@ -93,6 +93,8 @@ existing CRs in the cluster.
 When the feature is enabled, the CRDs are installed on the cluster
 and the `AdminNetworkPolicy` controller is invoked.
 
+Always check the dependencies on the [Requirements page](../requirements.md)
+
 ```shell
 $ oc get crd adminnetworkpolicies.policy.networking.k8s.io
 NAME                                            CREATED AT
@@ -333,7 +335,7 @@ spec:
 ### OVN-Kubernetes Implementation Details
 
 We have a new level driven controller in OVN-Kubernetes
-called [admin_network_policy](https://github.com/ovn-org/ovn-kubernetes/tree/master/go-controller/pkg/ovn/controller/admin_network_policy)
+called [admin_network_policy](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/master/go-controller/pkg/ovn/controller/admin_network_policy)
 which watches for the following objects:
 
 * AdminNetworkPolicy
