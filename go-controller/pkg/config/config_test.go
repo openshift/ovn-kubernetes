@@ -1974,12 +1974,16 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		It("Overrides value from Config file", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeFull,
+					Mode:                      types.NodeModeFull,
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
 				},
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeDPU,
+					Mode:                      types.NodeModeDPU,
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
 				},
 			}
 			err := buildOvnKubeNodeConfig(&cliConfig, &file)
@@ -1990,9 +1994,11 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		It("Overrides value from CLI", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                   types.NodeModeDPUHost,
-					MgmtPortNetdev:         "enp1s0f0v0",
-					MgmtPortDPResourceName: "openshift.io/mgmtvf",
+					Mode:                      types.NodeModeDPUHost,
+					MgmtPortNetdev:            "enp1s0f0v0",
+					MgmtPortDPResourceName:    "openshift.io/mgmtvf",
+					DPUNodeLeaseRenewInterval: 5,
+					DPUNodeLeaseDuration:      20,
 				},
 			}
 			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
@@ -2000,6 +2006,8 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPUHost))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
 			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal("openshift.io/mgmtvf"))
+			gomega.Expect(OvnKubeNode.DPUNodeLeaseRenewInterval).To(gomega.Equal(5))
+			gomega.Expect(OvnKubeNode.DPUNodeLeaseDuration).To(gomega.Equal(20))
 		})
 
 		It("Fails with unsupported mode", func() {
@@ -2026,14 +2034,71 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 				"hybrid overlay is not supported with ovnkube-node mode"))
 		})
 
+		It("Fails if DPU node lease renew interval is negative", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:                      types.NodeModeFull,
+					DPUNodeLeaseRenewInterval: -1,
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+				},
+			}
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("dpu-node-lease-renew-interval"))
+		})
+
+		It("Succeeds if DPU node lease renew interval is zero", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:                      types.NodeModeFull,
+					DPUNodeLeaseRenewInterval: 0,
+					DPUNodeLeaseDuration:      10,
+				},
+			}
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.DPUNodeLeaseRenewInterval).To(gomega.Equal(0))
+			gomega.Expect(OvnKubeNode.DPUNodeLeaseDuration).To(gomega.Equal(10))
+		})
+
+		It("Fails if DPU node lease duration is non-positive", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:                 types.NodeModeFull,
+					DPUNodeLeaseDuration: 0,
+				},
+			}
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("dpu-node-lease-duration"))
+		})
+
+		It("Fails if DPU node lease duration is less than or equal to renew interval", func() {
+			cliConfig := config{
+				OvnKubeNode: OvnKubeNodeConfig{
+					Mode:                      types.NodeModeFull,
+					DPUNodeLeaseRenewInterval: 10,
+					DPUNodeLeaseDuration:      10,
+				},
+			}
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.Or(
+				gomega.ContainSubstring("dpu-node-lease-duration"),
+				gomega.ContainSubstring("dpu-node-lease-renew-interval"),
+			))
+		})
+
 		It("Fails if management port is provided and ovnkube node mode is dpu", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:           types.NodeModeDPU,
-					MgmtPortNetdev: "enp1s0f0v0",
+					Mode:                      types.NodeModeDPU,
+					MgmtPortNetdev:            "enp1s0f0v0",
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
 				},
 			}
-			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided"))
 		})
@@ -2041,10 +2106,12 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		It("Fails if management port is not provided and ovnkube node mode is dpu-host", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeDPUHost,
+					Mode:                      types.NodeModeDPUHost,
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
 				},
 			}
-			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided"))
 		})
@@ -2052,13 +2119,17 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		It("Succeeds if management netdev provided in the full mode", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:           types.NodeModeFull,
-					MgmtPortNetdev: "ens1f0v0",
+					Mode:                      types.NodeModeFull,
+					MgmtPortNetdev:            "ens1f0v0",
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
 				},
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeFull,
+					Mode:                      types.NodeModeFull,
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
 				},
 			}
 			err := buildOvnKubeNodeConfig(&cliConfig, &file)
@@ -2068,13 +2139,17 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		It("Succeeds if management port device plugin resource name provided in the full mode", func() {
 			cliConfig := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                   types.NodeModeFull,
-					MgmtPortDPResourceName: "openshift.io/mgmtvf",
+					Mode:                      types.NodeModeFull,
+					MgmtPortDPResourceName:    "openshift.io/mgmtvf",
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
 				},
 			}
 			file := config{
 				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeFull,
+					Mode:                      types.NodeModeFull,
+					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
+					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
 				},
 			}
 			err := buildOvnKubeNodeConfig(&cliConfig, &file)
@@ -2119,6 +2194,257 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 				"-sb-db-location=/cli/sb.db",
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
+	Describe("No-Overlay Configuration", func() {
+		BeforeEach(func() {
+			err := PrepareTestConfig()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// Enable route advertisements - required for no-overlay transport
+			OVNKubernetesFeature.EnableRouteAdvertisements = true
+		})
+
+		It("validates transport option correctly", func() {
+			// Test valid geneve transport
+			Default.Transport = types.NetworkTransportGeneve
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test valid no-overlay transport with required options
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.OutboundSNAT = NoOverlaySNATEnabled
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			err = validateNoOverlayConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test invalid transport
+			Default.Transport = "invalid-transport"
+			err = validateNoOverlayConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("invalid transport"))
+		})
+
+		It("requires outbound-snat when transport is no-overlay", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.OutboundSNAT = ""
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("outbound-snat is required"))
+		})
+
+		It("validates outbound-snat values", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+
+			// Test valid enable
+			NoOverlay.OutboundSNAT = NoOverlaySNATEnabled
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test valid disable
+			NoOverlay.OutboundSNAT = NoOverlaySNATDisabled
+			err = validateNoOverlayConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test invalid value
+			NoOverlay.OutboundSNAT = "maybe"
+			err = validateNoOverlayConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("invalid outbound-snat"))
+		})
+
+		It("requires routing when transport is no-overlay", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.OutboundSNAT = NoOverlaySNATEnabled
+			NoOverlay.Routing = ""
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("routing is required"))
+		})
+
+		It("validates routing values", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.OutboundSNAT = NoOverlaySNATEnabled
+
+			// Test valid managed (requires topology)
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test valid unmanaged (topology not required)
+			NoOverlay.Routing = NoOverlayRoutingUnmanaged
+			ManagedBGP.Topology = ""
+			err = validateNoOverlayConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test invalid value
+			NoOverlay.Routing = "automatic"
+			err = validateNoOverlayConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("invalid routing"))
+		})
+
+		It("builds no-overlay config from file only", func() {
+			fileConfig := config{
+				NoOverlay: NoOverlayConfig{
+					OutboundSNAT: NoOverlaySNATEnabled,
+					Routing:      NoOverlayRoutingManaged,
+				},
+				ManagedBGP: ManagedBGPConfig{
+					Topology: ManagedBGPTopologyFullMesh,
+				},
+			}
+			err := buildNoOverlayConfig(&fileConfig)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			err = buildManagedBGPConfig(&fileConfig)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			// Config file values should be applied
+			gomega.Expect(NoOverlay.OutboundSNAT).To(gomega.Equal(NoOverlaySNATEnabled))
+			gomega.Expect(NoOverlay.Routing).To(gomega.Equal(NoOverlayRoutingManaged))
+			gomega.Expect(ManagedBGP.Topology).To(gomega.Equal(ManagedBGPTopologyFullMesh))
+		})
+
+		It("requires topology when routing is managed", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.OutboundSNAT = NoOverlaySNATEnabled
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.Topology = ""
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("topology is required when routing=managed"))
+		})
+
+		It("validates topology values", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.OutboundSNAT = NoOverlaySNATEnabled
+			NoOverlay.Routing = NoOverlayRoutingManaged
+
+			// Test valid full-mesh
+			ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test invalid value
+			ManagedBGP.Topology = "route-reflector"
+			err = validateNoOverlayConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("invalid topology"))
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring(`must be "full-mesh"`))
+		})
+
+		It("does not require topology when routing is unmanaged", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.OutboundSNAT = NoOverlaySNATEnabled
+			NoOverlay.Routing = NoOverlayRoutingUnmanaged
+			ManagedBGP.Topology = ""
+			err := validateNoOverlayConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		})
+	})
+
+	Describe("BGP Configuration", func() {
+		BeforeEach(func() {
+			err := PrepareTestConfig()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		It("parses BGP config from file with all fields set", func() {
+			fileConfig := config{
+				ManagedBGP: ManagedBGPConfig{
+					Topology: ManagedBGPTopologyFullMesh,
+					ASNumber: 64500,
+				},
+			}
+			err := buildManagedBGPConfig(&fileConfig)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(ManagedBGP.Topology).To(gomega.Equal(ManagedBGPTopologyFullMesh))
+			gomega.Expect(ManagedBGP.ASNumber).To(gomega.Equal(uint32(64500)))
+		})
+
+		It("handles partial BGP config in file", func() {
+			fileConfig := config{
+				ManagedBGP: savedManagedBGP,
+			}
+			fileConfig.ManagedBGP.Topology = ManagedBGPTopologyFullMesh
+
+			err := buildManagedBGPConfig(&fileConfig)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(ManagedBGP.Topology).To(gomega.Equal(ManagedBGPTopologyFullMesh))
+			// ASNumber should retain default value from init
+			gomega.Expect(ManagedBGP.ASNumber).To(gomega.Equal(uint32(64512)))
+		})
+
+		It("handles empty BGP config in file", func() {
+			fileConfig := config{
+				ManagedBGP: savedManagedBGP,
+			}
+			err := buildManagedBGPConfig(&fileConfig)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			// Should retain default values without panicking
+			gomega.Expect(ManagedBGP.ASNumber).To(gomega.Equal(uint32(64512))) // default value
+		})
+
+		It("validates reserved AS number 0", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.ASNumber = 0
+			err := validateManagedBGPConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("0 is reserved"))
+		})
+
+		It("validates reserved AS number 23456 (AS_TRANS)", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.ASNumber = 23456
+			err := validateManagedBGPConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("23456 is reserved"))
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("AS_TRANS"))
+		})
+
+		It("validates reserved AS number 65535", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.ASNumber = 65535
+			err := validateManagedBGPConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("65535 is reserved"))
+		})
+
+		It("validates reserved AS number 4294967295", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.Routing = NoOverlayRoutingManaged
+			ManagedBGP.ASNumber = 4294967295
+			err := validateManagedBGPConfig()
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("4294967295 is reserved"))
+		})
+
+		It("accepts valid AS numbers", func() {
+			Default.Transport = types.NetworkTransportNoOverlay
+			NoOverlay.Routing = NoOverlayRoutingManaged
+
+			// Test valid 16-bit AS number
+			ManagedBGP.ASNumber = 64500
+			err := validateManagedBGPConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test default AS number
+			ManagedBGP.ASNumber = 64512
+			err = validateManagedBGPConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			// Test valid 32-bit AS number
+			ManagedBGP.ASNumber = 100000
+			err = validateManagedBGPConfig()
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
 	})
 })

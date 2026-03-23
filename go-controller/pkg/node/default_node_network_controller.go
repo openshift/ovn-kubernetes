@@ -38,10 +38,12 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/dpulease"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/ovspinning"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/podresourcesapi"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/apbroute"
@@ -124,6 +126,8 @@ type DefaultNodeNetworkController struct {
 
 	// retry framework for nodes, used for updating routes/nftables rules for node PMTUD guarding
 	retryNodes *retry.RetryFramework
+
+	dpuNodeLeaseManager *dpulease.Manager
 
 	apbExternalRouteNodeController *apbroute.ExternalGatewayNodeController
 
@@ -739,6 +743,22 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", nodeAddrStr)
 	}
 
+	if (config.OvnKubeNode.Mode == types.NodeModeDPUHost || config.OvnKubeNode.Mode == types.NodeModeDPU) &&
+		config.OvnKubeNode.DPUNodeLeaseRenewInterval > 0 {
+		nc.dpuNodeLeaseManager = dpulease.NewManager(
+			nc.client,
+			config.Kubernetes.OVNConfigNamespace,
+			node,
+			time.Duration(config.OvnKubeNode.DPUNodeLeaseRenewInterval)*time.Second,
+			time.Duration(config.OvnKubeNode.DPUNodeLeaseDuration)*time.Second,
+		)
+		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+			if _, err := nc.dpuNodeLeaseManager.EnsureLease(ctx); err != nil {
+				return err
+			}
+		}
+	}
+
 	// Make sure that the node zone matches with the Southbound db zone.
 	// Wait for 300s before giving up
 	var sbZone string
@@ -813,7 +833,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager, nc.ovsClient)
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager, nc.ovsClient, nc.dpuNodeLeaseManager)
 		if err != nil {
 			return err
 		}
@@ -968,11 +988,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			return err
 		}
 		nc.wg.Add(1)
-		go func() {
+		go func(stopCh <-chan struct{}) {
 			defer nc.wg.Done()
-			nodeController.Run(nc.stopChan)
-		}()
-	} else {
+			nodeController.Run(stopCh)
+		}(nc.stopChan)
+	} else if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// attempt to cleanup the possibly stale bridge
 		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", "br-ext")
 		if err != nil {
@@ -1024,6 +1044,25 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	if nc.healthzServer != nil {
 		nc.healthzServer.Start(nc.stopChan, nc.wg)
+	}
+
+	if nc.dpuNodeLeaseManager != nil {
+		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+			nc.wg.Add(1)
+			go func() {
+				defer nc.wg.Done()
+				nc.dpuNodeLeaseManager.RunUpdater(ctx)
+			}()
+		} else if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+			if err := nc.dpuNodeLeaseManager.CheckStatus(ctx); err != nil {
+				klog.Warningf("Initial DPU node lease check failed: %v", err)
+			}
+			nc.wg.Add(1)
+			go func() {
+				defer nc.wg.Done()
+				nc.dpuNodeLeaseManager.RunMonitor(ctx)
+			}()
+		}
 	}
 
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
@@ -1079,10 +1118,20 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	nc.linkManager.Run(nc.stopChan, nc.wg)
 
 	nc.wg.Add(1)
-	go func() {
+	go func(stopCh <-chan struct{}) {
 		defer nc.wg.Done()
-		ovspinning.Run(nc.stopChan)
-	}()
+		podResClient, err := podresourcesapi.New()
+		if err != nil {
+			klog.Errorf("Failed to initialize PodResourcesAPI client: %v", err)
+			return
+		}
+		defer func() {
+			if err := podResClient.Close(); err != nil {
+				klog.V(4).Infof("Error closing PodResourcesAPI client: %v", err)
+			}
+		}()
+		ovspinning.Run(ctx, stopCh, podResClient)
+	}(nc.stopChan)
 
 	klog.Infof("Default node network controller initialized and ready.")
 	return nil
@@ -1124,10 +1173,10 @@ func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPo
 	}
 
 	nc.wg.Add(1)
-	go func() {
+	go func(stopCh <-chan struct{}) {
 		defer nc.wg.Done()
-		healthServer.Run(nc.stopChan)
-	}()
+		healthServer.Run(stopCh)
+	}(nc.stopChan)
 	return nil
 }
 
@@ -1413,9 +1462,23 @@ func (nc *DefaultNodeNetworkController) syncNodes(objs []interface{}) error {
 }
 
 // validateVTEPInterfaceMTU checks if the MTU of the interface that has ovn-encap-ip is big
-// enough to carry the `config.Default.MTU` and the Geneve header. If the MTU is not big
-// enough, it will return an error
+// enough to carry the `config.Default.MTU` and the Geneve header (if overlay transport is used).
+// If the MTU is not big enough, it will return an error
 func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
+	// calc required MTU
+	var requiredMTU int
+	if config.Gateway.SingleNode || config.Default.Transport == types.NetworkTransportNoOverlay {
+		requiredMTU = config.Default.MTU
+	} else {
+		if config.IPv4Mode && !config.IPv6Mode {
+			// we run in single-stack IPv4 only
+			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
+		} else {
+			// we run in single-stack IPv6 or dual-stack mode
+			requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
+		}
+	}
+
 	// OVN allows `external_ids:ovn-encap-ip` to be a list of IPs separated by comma
 	ovnEncapIps := strings.Split(config.Default.EffectiveEncapIP, ",")
 	for _, ip := range ovnEncapIps {
@@ -1426,20 +1489,6 @@ func (nc *DefaultNodeNetworkController) validateVTEPInterfaceMTU() error {
 		interfaceName, mtu, err := util.GetIFNameAndMTUForAddress(ovnEncapIP)
 		if err != nil {
 			return fmt.Errorf("could not get MTU for the interface with address %s: %w", ovnEncapIP, err)
-		}
-
-		// calc required MTU
-		var requiredMTU int
-		if config.Gateway.SingleNode {
-			requiredMTU = config.Default.MTU
-		} else {
-			if config.IPv4Mode && !config.IPv6Mode {
-				// we run in single-stack IPv4 only
-				requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv4
-			} else {
-				// we run in single-stack IPv6 or dual-stack mode
-				requiredMTU = config.Default.MTU + types.GeneveHeaderLengthIPv6
-			}
 		}
 
 		if mtu < requiredMTU {

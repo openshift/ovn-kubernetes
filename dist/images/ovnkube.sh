@@ -10,7 +10,7 @@ fi
 . /root/ovndb-raft-functions.sh
 
 # This script is the entrypoint to the image.
-# Supports version 1.1.0 daemonsets
+# Supports version 1.2.0 daemonsets
 #    Keep the daemonset versioning aligned with the ovnkube release versions
 # Commands ($1 values)
 #    ovs-server     Runs the ovs daemons - ovsdb-server and ovs-switchd (v3)
@@ -28,7 +28,7 @@ fi
 #    ovn_debug      Displays ovn/ovs configuration and flows
 
 # NOTE: The script/image must be compatible with the daemonset.
-# This script supports version 1.1.0 daemonsets
+# This script supports version 1.2.0 daemonsets
 #      When called, it starts all needed daemons.
 # Currently the version here is used to match with the image version
 # It must be updated during every release
@@ -41,9 +41,11 @@ fi
 # OVN_KUBERNETES_NAMESPACE - k8s namespace - v3
 # K8S_NODE - hostname of the node - v3
 #
-# OVN_DAEMONSET_VERSION - version match daemonset and image - v1.1.0
+# OVN_DAEMONSET_VERSION - version match daemonset and image - v1.2.0
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
+# K8S_TOKEN_FILE - the apiserver token file. Automatically detected when running in a pod - v3
+# K8S_CACERT_DATA - the apiserver CA data.
 # OVN_CONTROLLER_OPTS - the options for ovn-ctl
 # OVN_NORTHD_OPTS - the options for the ovn northbound db
 # OVN_GATEWAY_MODE - the gateway mode (shared or local) - v3
@@ -96,6 +98,7 @@ fi
 # OVN_NORTHD_BACKOFF_INTERVAL - ovn northd backoff interval in ms (default 300)
 # OVN_ENABLE_SVC_TEMPLATE_SUPPORT - enable svc template support
 # OVN_ENABLE_DNSNAMERESOLVER - enable dns name resolver support
+# OVN_ALLOW_ICMP_NETPOL - allow ICMP and ICMPv6 regardless of network policy
 # OVN_OBSERV_ENABLE - enable observability for ovnkube
 
 # The argument to the command is the operation to be performed
@@ -121,11 +124,11 @@ ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE:-}
 
 # ovnkube.sh version (Update during each release)
-ovnkube_version="1.1.0"
+ovnkube_version="1.2.0"
 
 # The daemonset version must be compatible with this script.
 # The default when OVN_DAEMONSET_VERSION is not set is version 3
-ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.1.0"}
+ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.2.0"}
 
 # hostname is the host's hostname when using host networking,
 # This is useful on the master
@@ -145,7 +148,7 @@ else
 fi
 
 # certs and private keys for k8s and OVN
-K8S_CACERT=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+k8s_cacert=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
 
 ovn_ca_cert=/ovn-cert/ca-cert.pem
 ovn_nb_pk=/ovn-cert/ovnnb-privkey.pem
@@ -185,8 +188,8 @@ svc_cidr=${OVN_SVC_CIDR:-172.30.0.0/16}
 mtu=${OVN_MTU:-1400}
 routable_mtu=${OVN_ROUTABLE_MTU:-}
 
-# set metrics endpoint bind to K8S_NODE_IP.
-metrics_endpoint_ip=${K8S_NODE_IP:-0.0.0.0}
+# set metrics endpoint to METRICS_IP. if METRICS_IP not set K8S_NODE_IP or default to 0.0.0.0
+metrics_endpoint_ip="${METRICS_IP:-${K8S_NODE_IP:-0.0.0.0}}"
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 
 # set metrics master port
@@ -271,10 +274,16 @@ ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
 ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE:=false}
 #OVN_PRE_CONF_UDN_ADDR_ENABLE - enable connecting workloads with custom network configuration to UDNs
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
-#OVN_NROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
+#OVN_ROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
 ovn_route_advertisements_enable=${OVN_ROUTE_ADVERTISEMENTS_ENABLE:=false}
+#OVN_EVPN_ENABLE - enable EVPN for ovn-kubernetes
+ovn_evpn_enable=${OVN_EVPN_ENABLE:=false}
 #OVN_ADVERTISED_UDN_ISOLATION_MODE - pod network isolation between advertised UDN networks.
 ovn_advertised_udn_isolation_mode=${OVN_ADVERTISED_UDN_ISOLATION_MODE:=strict}
+#OVN_DYNAMIC_UDN_ALLOCATION - dynamic UDN allocation when a node requires it (pod or egress IP)
+ovn_enable_dynamic_udn_allocation=${OVN_DYNAMIC_UDN_ALLOCATION}
+#OVN_DYNAMIC_UDN_GRACE_PERIOD - period of time before an inactive UDN will be garbage collected
+ovn_dynamic_udn_grace_period=${OVN_DYNAMIC_UDN_GRACE_PERIOD:-}
 ovn_acl_logging_rate_limit=${OVN_ACL_LOGGING_RATE_LIMIT:-"20"}
 ovn_netflow_targets=${OVN_NETFLOW_TARGETS:-}
 ovn_sflow_targets=${OVN_SFLOW_TARGETS:-}
@@ -320,12 +329,14 @@ ovn_enable_svc_template_support=${OVN_ENABLE_SVC_TEMPLATE_SUPPORT:-true}
 ovn_network_qos_enable=${OVN_NETWORK_QOS_ENABLE:-false}
 # OVN_ENABLE_DNSNAMERESOLVER - enable dns name resolver support
 ovn_enable_dnsnameresolver=${OVN_ENABLE_DNSNAMERESOLVER:-false}
+# OVN_ALLOW_ICMP_NETPOL - allow ICMP/ICMPv6 with network policy
+ovn_allow_icmp_netpol=${OVN_ALLOW_ICMP_NETPOL:-false}
 # OVN_OBSERV_ENABLE - enable observability for ovnkube
 ovn_observ_enable=${OVN_OBSERV_ENABLE:-false}
 # OVN_NOHOSTSUBNET_LABEL - node label indicating nodes managing their own network
 ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
 # OVN_DISABLE_REQUESTEDCHASSIS - disable requested-chassis option during pod creation
-# should be set to true when dpu nodes are in the cluster
+# should be set to true when dpu nodes are in the cluster for OVN Central mode
 ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-false}
 
 # external_ids:host-k8s-nodename is set on an Open_vSwitch enabled system if the ovnkube stack
@@ -444,7 +455,7 @@ ready_to_start_node() {
   ovnkube_db_ep=$(get_ovnkube_zone_db_ep)
   echo "Getting the ${ovnkube_db_ep} ep"
   # See if ep is available ...
-  IFS=" " read -a ovn_db_hosts <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
+  IFS=" " read -a ovn_db_hosts <<<"$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
     get ep -n ${ovn_kubernetes_namespace} ${ovnkube_db_ep} -o=jsonpath='{range .subsets[0].addresses[*]}{.ip}{" "}')"
   if [[ ${#ovn_db_hosts[@]} == 0 ]]; then
     return 1
@@ -624,6 +635,32 @@ check_health() {
   fi
 
   return 1
+}
+
+get_dpu_gw_options() {
+  # If ovn_gateway_opts or ovn_gateway_router_subnet is not set as environment variable, gather them from ovs settings
+  if [[ ${ovn_gateway_opts} == "" ]]; then
+    # get the gateway interface
+    gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
+    if [[ ${gw_iface} == "" ]]; then
+      echo "Couldn't get OVN Gateway Interface from ovs external_ids setting"
+    else
+      ovn_gateway_opts="--gateway-interface=${gw_iface} "
+    fi
+
+    # get the gateway nexthop
+    gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
+    if [[ ${gw_nexthop} == "" ]]; then
+      echo "Couldn't get OVN Gateway NextHop from ovs external_ids setting"
+    else
+      ovn_gateway_opts+="--gateway-nexthop=${gw_nexthop} "
+    fi
+  fi
+
+  # this is only required if the DPU and DPU Host are in different subnets
+  if [[ ${ovn_gateway_router_subnet} == "" ]]; then
+    ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
+  fi
 }
 
 display_file() {
@@ -831,7 +868,7 @@ set_ovnkube_db_ep() {
   ovnkube_db_ep=$(get_ovnkube_zone_db_ep)
   echo "=============== setting ${ovnkube_db_ep} endpoints to ${ips[@]}"
   # create a new endpoint for the headless onvkube-db service without selectors
-  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} apply -f - <<EOF
+  kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} apply -f - <<EOF
 apiVersion: v1
 kind: Endpoints
 metadata:
@@ -868,8 +905,52 @@ function memory_trim_on_compaction_supported {
 }
 
 function get_node_zone() {
-  zone=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${K8S_CACERT} \
-     get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
+  createKubeconfig=false
+  # DPU might have K8S_TOKEN/K8S_TOKENFILE and K8S_CACERT/K8S_CACERT_DATA provided to access DPU host (K8S_NODE here)
+  # which is in a different cluster. So we might need to create kubeconfig accordingly.
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+    if [[ -n ${K8S_TOKEN} ]] || [[ -n ${K8S_TOKEN_FILE} ]] || [[ -n ${K8S_CACERT_DATA} ]] || [[ -n ${K8S_CACERT} ]]; then
+      createKubeconfig=true
+    fi
+  fi
+
+  if [[ ${createKubeconfig} == "false" ]]; then
+    zone=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
+       get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
+  else
+    local dpuhost_k8s_apiserver=${K8S_APISERVER}
+    local dpuhost_k8s_token=${K8S_TOKEN}
+    local dpuhost_ca_config=""
+    if [[ -n ${K8S_TOKEN_FILE} ]]; then
+      dpuhost_k8s_token=$(cat ${K8S_TOKEN_FILE})
+    fi
+    if [[ -n ${K8S_CACERT_DATA} ]]; then
+      dpuhost_ca_config="certificate-authority-data: ${K8S_CACERT_DATA}"
+    elif [[ -n ${K8S_CACERT} ]]; then
+      dpuhost_ca_config="certificate-authority: ${K8S_CACERT}"
+    fi
+    zone=$(kubectl --kubeconfig=<(cat <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: ${dpuhost_k8s_apiserver}
+    ${dpuhost_ca_config}
+  name: dpuhost-cluster
+contexts:
+- context:
+    cluster: dpuhost-cluster
+    user: dpu-user
+  name: dpuhost-context
+current-context: dpuhost-context
+users:
+- name: dpu-user
+  user:
+    token: ${dpuhost_k8s_token}
+EOF
+) get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
+
+  fi
   if [ -z "$zone" ]; then
     if [[ ${ovn_enable_interconnect} == "true" ]]; then
       zone="${K8S_NODE}"
@@ -889,10 +970,10 @@ function get_ovnkube_zone_db_ep() {
   fi
 }
 
-# v1.1.0 - run nb_ovsdb in a separate container
+# v1.2.0 - run nb_ovsdb in a separate container
 nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   if [[ ${ovn_db_host} == "" ]]; then
@@ -942,10 +1023,10 @@ nb-ovsdb() {
   echo "=============== run nb_ovsdb ========== terminated"
 }
 
-# v1.1.0 - run sb_ovsdb in a separate container
+# v1.2.0 - run sb_ovsdb in a separate container
 sb-ovsdb() {
   trap 'ovsdb_cleanup sb' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   if [[ ${ovn_db_host} == "" ]]; then
@@ -983,10 +1064,10 @@ sb-ovsdb() {
   echo "=============== run sb_ovsdb ========== terminated"
 }
 
-# v1.1.0 - Runs ovn-dbchecker on ovnkube-db pod.
+# v1.2.0 - Runs ovn-dbchecker on ovnkube-db pod.
 ovn-dbchecker() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovn-dbchecker.pid
 
   # wait for ready_to_start_node
@@ -1037,7 +1118,7 @@ ovn-dbchecker() {
 # unix sockets
 local-nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   echo "=============== run nb-ovsdb (unix sockets only) =========="
@@ -1071,7 +1152,7 @@ local-nb-ovsdb() {
 # unix sockets
 local-sb-ovsdb() {
   trap 'ovsdb_cleanup sb' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   echo "=============== run sb-ovsdb (unix sockets only) ========== "
@@ -1089,10 +1170,10 @@ local-sb-ovsdb() {
   echo "=============== run sb-ovsdb (unix sockets only) ========== terminated"
 }
 
-# v1.1.0 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
+# v1.2.0 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd() {
   trap 'ovn-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovn-northd.pid
   rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
 
@@ -1141,10 +1222,10 @@ run-ovn-northd() {
   exit 8
 }
 
-# v1.1.0 -  run ovnkube-identity
+# v1.2.0 -  run ovnkube-identity
 ovnkube-identity() {
     trap 'kill $(jobs -p); exit 0' TERM
-    check_ovn_daemonset_version "1.1.0"
+    check_ovn_daemonset_version "1.2.0"
     rm -f ${OVN_RUNDIR}/ovnkube-identity.pid
 
     ovnkube_enable_interconnect_flag=
@@ -1171,10 +1252,10 @@ ovnkube-identity() {
     exit 9
 }
 
-# v1.1.0 - run ovnkube --master (both cluster-manager and ovnkube-controller)
+# v1.2.0 - run ovnkube --master (both cluster-manager and ovnkube-controller)
 ovn-master() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovnkube-master.pid
 
   echo "=============== ovn-master (wait for ready_to_start_node) ========== MASTER ONLY"
@@ -1308,10 +1389,31 @@ ovn-master() {
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+  echo "evpn_enabled_flag=${evpn_enabled_flag}"
+
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
       advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
   fi
+
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
+
+  ovnkube_config_file_flag="--config-file=/run/ovnkube-config/ovnkube.conf"
+  echo "ovnkube_config_file_flag=${ovnkube_config_file_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -1319,7 +1421,6 @@ ovn-master() {
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:9409"
   ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
@@ -1403,6 +1504,12 @@ ovn-master() {
   fi
   echo "ovn_enable_dnsnameresolver_flag=${ovn_enable_dnsnameresolver_flag}"
 
+  ovn_allow_icmp_netpol_flag=
+  if [[ ${ovn_allow_icmp_netpol} == "true" ]]; then
+	  ovn_allow_icmp_netpol_flag="--allow-icmp-network-policy"
+  fi
+  echo "ovn_allow_icmp_netpol_flag=${ovn_allow_icmp_netpol_flag}"
+
   /usr/bin/ovnkube --init-master ${K8S_NODE} \
     ${anp_enabled_flag} \
     ${disable_forwarding_flag} \
@@ -1420,7 +1527,9 @@ ovn-master() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${route_advertisements_enabled_flag} \
+    ${evpn_enabled_flag} \
     ${advertised_udn_isolation_flag} \
+    ${ovnkube_config_file_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_enable_svc_template_support_flag} \
     ${ovn_observ_enable_flag} \
@@ -1437,9 +1546,12 @@ ovn-master() {
     ${persistent_ips_enabled_flag} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
+    ${ovn_allow_icmp_netpol_flag} \
     ${nohostsubnet_label_option} \
     ${ovn_stateless_netpol_enable_flag} \
     ${ovn_disable_requestedchassis_flag} \
+    ${dynamic_udn_allocation_flag} \
+    ${dynamic_udn_grace_period} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -1463,10 +1575,10 @@ ovn-master() {
   exit 9
 }
 
-# v1.1.0 - run ovnkube --ovnkube-controller
+# v1.2.0 - run ovnkube --ovnkube-controller
 ovnkube-controller() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller.pid
 
   echo "=============== ovnkube-controller (wait for ready_to_start_node) =========="
@@ -1623,17 +1735,38 @@ ovnkube-controller() {
   fi
   echo "pre_conf_udn_addr_enable_flag=${pre_conf_udn_addr_enable_flag}"
 
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
+
   route_advertisements_enabled_flag=
   if [[ ${ovn_route_advertisements_enable} == "true" ]]; then
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+  echo "evpn_enabled_flag=${evpn_enabled_flag}"
+
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
       advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
   fi
   echo "advertised_udn_isolation_flag=${advertised_udn_isolation_flag}"
+
+  ovnkube_config_file_flag="--config-file=/run/ovnkube-config/ovnkube.conf"
+  echo "ovnkube_config_file_flag=${ovnkube_config_file_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -1721,6 +1854,12 @@ ovnkube-controller() {
   fi
   echo "ovn_enable_dnsnameresolver_flag=${ovn_enable_dnsnameresolver_flag}"
 
+  ovn_allow_icmp_netpol_flag=
+  if [[ ${ovn_allow_icmp_netpol} == "true" ]]; then
+	  ovn_allow_icmp_netpol_flag="--allow-icmp-network-policy"
+  fi
+  echo "ovn_allow_icmp_netpol_flag=${ovn_allow_icmp_netpol_flag}"
+
   ovn_observ_enable_flag=
   if [[ ${ovn_observ_enable} == "true" ]]; then
     ovn_observ_enable_flag="--enable-observability"
@@ -1752,7 +1891,9 @@ ovnkube-controller() {
     ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${evpn_enabled_flag} \
     ${advertised_udn_isolation_flag} \
+    ${ovnkube_config_file_flag} \
     ${ovn_acl_logging_rate_limit_flag} \
     ${ovn_dbs} \
     ${ovn_enable_svc_template_support_flag} \
@@ -1771,6 +1912,9 @@ ovnkube-controller() {
     ${ovn_v6_masquerade_subnet_opt} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
+    ${dynamic_udn_allocation_flag} \
+    ${dynamic_udn_grace_period} \
+    ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -1796,7 +1940,7 @@ ovnkube-controller-with-node() {
   # currently we the process to background, therefore wait until that process removes its pid file on exit.
   # if the pid file doesnt exist, we exit immediately.
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; wait_ovnkube_controller_with_node_done; exit 0' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller-with-node.pid
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
@@ -1974,11 +2118,20 @@ ovnkube-controller-with-node() {
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+  echo "evpn_enabled_flag=${evpn_enabled_flag}"
+
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
       advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
   fi
   echo "advertised_udn_isolation_flag=${advertised_udn_isolation_flag}"
+
+  ovnkube_config_file_flag="--config-file=/run/ovnkube-config/ovnkube.conf"
+  echo "ovnkube_config_file_flag=${ovnkube_config_file_flag}"
 
   egressservice_enabled_flag=
   if [[ ${ovn_egressservice_enable} == "true" ]]; then
@@ -2065,6 +2218,11 @@ ovnkube-controller-with-node() {
         exit 1
       fi
     fi
+  fi
+
+  # Get gateway options for DPUs
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+      get_dpu_gw_options
   fi
 
   if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
@@ -2193,6 +2351,12 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_enable_dnsnameresolver_flag=${ovn_enable_dnsnameresolver_flag}"
 
+  ovn_allow_icmp_netpol_flag=
+  if [[ ${ovn_allow_icmp_netpol} == "true" ]]; then
+	  ovn_allow_icmp_netpol_flag="--allow-icmp-network-policy"
+  fi
+  echo "ovn_allow_icmp_netpol_flag=${ovn_allow_icmp_netpol_flag}"
+
   ovn_observ_enable_flag=
   if [[ ${ovn_observ_enable} == "true" ]]; then
     ovn_observ_enable_flag="--enable-observability"
@@ -2204,11 +2368,33 @@ ovnkube-controller-with-node() {
           ovn_stateless_netpol_enable_flag="--enable-stateless-netpol"
   fi
 
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
+
   ovn_disable_requestedchassis_flag=
   if [[ ${ovn_disable_requestedchassis} == "true" ]]; then
           ovn_disable_requestedchassis_flag="--disable-requestedchassis"
   fi
   echo "ovn_disable_requestedchassis_flag=${ovn_disable_requestedchassis_flag}"
+
+  # Pass DPU Host cluster access credentials provided via environment variables in case of DPU
+  cluster_access_opts=""
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+    [[ -n ${K8S_APISERVER} ]] && cluster_access_opts+="--k8s-apiserver=${K8S_APISERVER} "
+    [[ -n ${K8S_TOKEN} ]] && cluster_access_opts+="--k8s-token=${K8S_TOKEN} "
+    [[ -n ${K8S_TOKEN_FILE} ]] && cluster_access_opts+="--k8s-token-file=${K8S_TOKEN_FILE} "
+    [[ -n ${K8S_CACERT_DATA} ]] && cluster_access_opts+="--k8s-cacert-data=${K8S_CACERT_DATA} "
+    [[ -n ${K8S_CACERT} ]] && cluster_access_opts+="--k8s-cacert=${K8S_CACERT} "
+  fi
 
   echo "=============== ovnkube-controller-with-node --init-ovnkube-controller-with-node=========="
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} --init-node ${K8S_NODE} \
@@ -2237,7 +2423,9 @@ ovnkube-controller-with-node() {
     ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${evpn_enabled_flag} \
     ${advertised_udn_isolation_flag} \
+    ${ovnkube_config_file_flag} \
     ${netflow_targets} \
     ${ofctrl_wait_before_clear} \
     ${ovn_acl_logging_rate_limit_flag} \
@@ -2262,9 +2450,13 @@ ovnkube-controller-with-node() {
     ${routable_mtu_flag} \
     ${sflow_targets} \
     ${ssl_opts} \
+    ${dynamic_udn_allocation_flag} \
+    ${dynamic_udn_grace_period} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_disable_requestedchassis_flag} \
+    ${cluster_access_opts} \
+    ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --export-ovs-metrics \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
@@ -2298,7 +2490,7 @@ ovnkube-controller-with-node() {
 # run ovnkube --cluster-manager.
 ovn-cluster-manager() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
 
   ovn_encap_port_flag=
     if [[ -n "${ovn_encap_port}" ]]; then
@@ -2422,10 +2614,19 @@ ovn-cluster-manager() {
   fi
   echo "route_advertisements_enabled_flag=${route_advertisements_enabled_flag}"
 
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+  echo "evpn_enabled_flag=${evpn_enabled_flag}"
+
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
       advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
   fi
+
+  ovnkube_config_file_flag="--config-file=/run/ovnkube-config/ovnkube.conf"
+  echo "ovnkube_config_file_flag=${ovnkube_config_file_flag}"
 
   persistent_ips_enabled_flag=
   if [[ ${ovn_enable_persistent_ips} == "true" ]]; then
@@ -2475,6 +2676,24 @@ ovn-cluster-manager() {
   fi
   echo "ovn_enable_dnsnameresolver_flag=${ovn_enable_dnsnameresolver_flag}"
 
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
+
+  ovn_allow_icmp_netpol_flag=
+  if [[ ${ovn_allow_icmp_netpol} == "true" ]]; then
+	  ovn_allow_icmp_netpol_flag="--allow-icmp-network-policy"
+  fi
+  echo "ovn_allow_icmp_netpol_flag=${ovn_allow_icmp_netpol_flag}"
+
   echo "=============== ovn-cluster-manager ========== MASTER ONLY"
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -2491,7 +2710,9 @@ ovn-cluster-manager() {
     ${network_connect_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
+    ${evpn_enabled_flag} \
     ${advertised_udn_isolation_flag} \
+    ${ovnkube_config_file_flag} \
     ${persistent_ips_enabled_flag} \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
@@ -2504,7 +2725,10 @@ ovn-cluster-manager() {
     ${ovn_v4_transit_subnet_opt} \
     ${ovn_v6_transit_subnet_opt} \
     ${network_qos_enabled_flag} \
+    ${dynamic_udn_allocation_flag} \
+    ${dynamic_udn_grace_period} \
     ${ovn_enable_dnsnameresolver_flag} \
+    ${ovn_allow_icmp_netpol_flag} \
     --gateway-mode=${ovn_gateway_mode} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -2526,7 +2750,7 @@ ovn-cluster-manager() {
 
 # ovn-controller - all nodes
 ovn-controller() {
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovn-controller.pid
 
   echo "=============== ovn-controller - (wait for ovs)"
@@ -2569,20 +2793,18 @@ ovn-controller() {
 # ovn-node - all nodes
 ovn-node() {
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
+  # ready_to_start_node checks for the NB/SB readiness state.
+  # This is not available on the DPU host when interconnect is enabled,
+  # because the DBs will run locally on the DPU
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (wait for ovs)"
     wait_for_event ovs_ready
-  fi
-
-  if [[ ${ovnkube_node_mode} == "dpu-host" ]] && [[ ${ovn_enable_interconnect} == "true" ]]; then
-    # ready_to_start_node checks for the NB/SB readiness state.
-    # This is not available on the DPU host when interconnect is enabled,
-    # because the DBs will run locally on the DPU
-    echo "skipping ready_to_start_node on DPU Host and when interconnect is true"
-  else
+    echo "=============== ovn-node - (wait for ready_to_start_node)"
+    wait_for_event ready_to_start_node
+  elif [[ ${ovn_enable_interconnect} != "true" ]]; then
     echo "=============== ovn-node - (wait for ready_to_start_node)"
     wait_for_event ready_to_start_node
   fi
@@ -2679,10 +2901,18 @@ ovn-node() {
 	  route_advertisements_enabled_flag="--enable-route-advertisements"
   fi
 
+  evpn_enabled_flag=
+  if [[ ${ovn_evpn_enable} == "true" ]]; then
+	  evpn_enabled_flag="--enable-evpn"
+  fi
+
   advertised_udn_isolation_flag=
   if [[ -n ${ovn_advertised_udn_isolation_mode} ]]; then
       advertised_udn_isolation_flag="--advertised-udn-isolation-mode=${ovn_advertised_udn_isolation_mode}"
   fi
+
+  ovnkube_config_file_flag="--config-file=/run/ovnkube-config/ovnkube.conf"
+  echo "ovnkube_config_file_flag=${ovnkube_config_file_flag}"
 
   netflow_targets=
   if [[ -n ${ovn_netflow_targets} ]]; then
@@ -2773,31 +3003,9 @@ ovn-node() {
     ovnkube_node_mgmt_port_netdev_flag="--ovnkube-node-mgmt-port-dp-resource-name=${ovnkube_node_mgmt_port_dp_resource_name}"
   fi
 
+  # Get gateway options for DPUs
   if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-    if [[ ${ovn_gateway_opts} == "" ]]; then
-      # get the gateway interface
-      gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
-      if [[ ${gw_iface} == "" ]]; then
-        echo "Couldn't get the required OVN Gateway Interface. Exiting..."
-        exit 1
-      fi
-      ovn_gateway_opts="--gateway-interface=${gw_iface} "
-
-      # get the gateway nexthop
-      gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
-      if [[ ${gw_nexthop} == "" ]]; then
-        echo "Couldn't get the required OVN Gateway NextHop. Exiting..."
-        exit 1
-      fi
-      ovn_gateway_opts+="--gateway-nexthop=${gw_nexthop} "
-    fi
-
-    # this is required if the DPU and DPU Host are in different subnets
-    if [[ ${ovn_gateway_router_subnet} == "" ]]; then
-      # get the gateway router subnet
-      ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
-    fi
-
+      get_dpu_gw_options
   fi
 
   if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
@@ -2893,6 +3101,18 @@ ovn-node() {
     ovn_v6_masquerade_subnet_opt="--gateway-v6-masquerade-subnet=${ovn_v6_masquerade_subnet}"
   fi
 
+  dynamic_udn_allocation_flag=
+  if [[ ${ovn_enable_dynamic_udn_allocation} == "true" ]]; then
+    dynamic_udn_allocation_flag="--enable-dynamic-udn-allocation"
+  fi
+  echo "dynamic_udn_allocation_flag=${dynamic_udn_allocation_flag}"
+
+  dynamic_udn_grace_period=
+  if [[ -n ${ovn_dynamic_udn_grace_period} ]]; then
+    dynamic_udn_grace_period="--udn-deletion-grace-period ${ovn_dynamic_udn_grace_period}"
+  fi
+  echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -2916,7 +3136,9 @@ ovn-node() {
         ${network_connect_enabled_flag} \
         ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
+        ${evpn_enabled_flag} \
         ${advertised_udn_isolation_flag} \
+        ${ovnkube_config_file_flag} \
         ${netflow_targets} \
         ${ofctrl_wait_before_clear} \
         ${ovn_dbs} \
@@ -2935,6 +3157,8 @@ ovn-node() {
         ${ovn_unprivileged_flag} \
         ${routable_mtu_flag} \
         ${sflow_targets} \
+        ${dynamic_udn_allocation_flag} \
+        ${dynamic_udn_grace_period} \
         ${network_qos_enabled_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --export-ovs-metrics \
@@ -2967,7 +3191,7 @@ ovn-node() {
 
 # cleanup-ovn-node - all nodes
 cleanup-ovn-node() {
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
 
   rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
 
@@ -2985,15 +3209,15 @@ cleanup-ovn-node() {
 
   echo "=============== time: $(date +%d-%m-%H:%M:%S:%N) cleanup-ovn-node --cleanup-node"
   /usr/bin/ovnkube --cleanup-node ${K8S_NODE} --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
-    --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${K8S_CACERT} \
+    --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${k8s_cacert} \
     --loglevel=${ovnkube_loglevel} \
     --logfile /var/log/ovn-kubernetes/ovnkube.log
 
 }
 
-# v1.1.0 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
+# v1.2.0 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
 ovs-metrics() {
-  check_ovn_daemonset_version "1.1.0"
+  check_ovn_daemonset_version "1.2.0"
 
   echo "=============== ovs-metrics - (wait for ovs_ready)"
   wait_for_event ovs_ready

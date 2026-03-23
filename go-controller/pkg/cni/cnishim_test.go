@@ -49,7 +49,7 @@ func TestCmdAdd_PrivilegedMode(t *testing.T) {
 	}()
 
 	args := &skel.CmdArgs{
-		StdinData:   []byte(`{"cniVersion":"1.0.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+		StdinData:   []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
 		ContainerID: "cid",
 		Netns:       "/var/run/netns/test",
 		IfName:      "eth0",
@@ -66,7 +66,7 @@ func TestCmdAdd_PrivilegedMode(t *testing.T) {
 	}
 
 	expected := `{
-    "cniVersion": "1.0.0",
+    "cniVersion": "1.1.0",
     "interfaces": [
         {
             "name": "serverWired"
@@ -120,7 +120,7 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 				PodAnnotation: *defaultPodNADAnnotation,
 				MTU:           1400,
 				NetName:       "default",
-				NADName:       "foo-ns/default",
+				NADKey:        "foo-ns/default",
 				// hack to bypass OVS exec check
 				IsDPUHostMode: true,
 			},
@@ -128,7 +128,7 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 				PodAnnotation: *udnPodNADAnnotation,
 				MTU:           1400,
 				NetName:       "tenantred",
-				NADName:       "foo-ns/meganet",
+				NADKey:        "foo-ns/meganet",
 				// hack to bypass OVS exec check
 				IsDPUHostMode: true,
 			},
@@ -156,7 +156,7 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 		}()
 
 		args := &skel.CmdArgs{
-			StdinData:   []byte(`{"cniVersion":"1.0.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+			StdinData:   []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
 			ContainerID: "cid",
 			Netns:       "/var/run/netns/test",
 			IfName:      "eth0",
@@ -178,7 +178,7 @@ func TestCmdAdd_UnprivilegedMode(t *testing.T) {
 
 		// Expected output includes both interfaces wired by CNIShim
 		expected := `{
-  "cniVersion": "1.0.0",
+  "cniVersion": "1.1.0",
   "interfaces": [
     {
       "name": "eth0",
@@ -232,7 +232,7 @@ func TestCmdDel_PrivilegedMode(t *testing.T) {
 	}
 
 	args := &skel.CmdArgs{
-		StdinData:   []byte(`{"cniVersion":"1.0.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+		StdinData:   []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
 		ContainerID: "cid",
 		Netns:       "/var/run/netns/test",
 		IfName:      "eth0",
@@ -255,12 +255,12 @@ func TestCmdDel_UnprivilegedMode(t *testing.T) {
 			Result: nil,
 			PodIFInfo: &PodInterfaceInfo{
 				NetName:       "default",
-				NADName:       "foo-ns/default",
+				NADKey:        "foo-ns/default",
 				IsDPUHostMode: true,
 			},
 			PrimaryUDNPodInfo: &PodInterfaceInfo{
 				NetName:       "tenantred",
-				NADName:       "foo-ns/meganet",
+				NADKey:        "foo-ns/meganet",
 				IsDPUHostMode: true,
 			},
 			PrimaryUDNPodReq: &PodRequest{
@@ -277,7 +277,7 @@ func TestCmdDel_UnprivilegedMode(t *testing.T) {
 		}
 
 		args := &skel.CmdArgs{
-			StdinData:   []byte(`{"cniVersion":"1.0.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+			StdinData:   []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
 			ContainerID: "cid",
 			Netns:       "/var/run/netns/test",
 			IfName:      "eth0",
@@ -289,6 +289,16 @@ func TestCmdDel_UnprivilegedMode(t *testing.T) {
 			t.Fatalf("no unconfigured interfaces found")
 		}
 	})
+}
+
+func TestCmdGC(t *testing.T) {
+	p := &Plugin{}
+	args := &skel.CmdArgs{
+		StdinData: []byte(`{"cniVersion":"1.1.0","name":"mynet","type":"ovn-k8s-cni-overlay"}`),
+	}
+
+	err := p.CmdGC(args)
+	require.NoError(t, err)
 }
 
 func withCNIEnv(t *testing.T, fn func()) {

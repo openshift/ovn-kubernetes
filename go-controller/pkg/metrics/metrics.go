@@ -2,11 +2,9 @@ package metrics
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"path"
 	"regexp"
@@ -16,11 +14,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	utilwait "k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
@@ -100,7 +95,7 @@ func parseMetricToFloat(componentName, metricName, value string) float64 {
 
 // registerCoverageShowMetrics registers coverage/show metricss for
 // various components(ovn-northd, ovn-controller, and ovs-vswitchd) with prometheus
-func registerCoverageShowMetrics(target string, metricNamespace string, metricSubsystem string) {
+func registerCoverageShowMetrics(ovnRegistry prometheus.Registerer, target string, metricNamespace string, metricSubsystem string) {
 	coverageShowMetricsMap := componentCoverageShowMetricsMap[target]
 	for metricName, metricInfo := range coverageShowMetricsMap {
 		metricInfo.metric = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -191,50 +186,41 @@ func ovnKubeLogFileSizeMetricsUpdater(ovnKubeLogFileMetric *prometheus.GaugeVec,
 	}
 }
 
-// coverageShowMetricsUpdater updates the metric by obtaining values from
+// coverageShowMetricsUpdate updates the metric by obtaining values from
 // getCoverageShowOutputMap for specified component. The counters displayed
 // by coverage/show output are called events. It could be that the event never
 // happened, and therefore there will be no counter for it in the output. In such
 // cases the default value of the counter will be 0.
-func coverageShowMetricsUpdater(component string, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(metricsUpdateInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			coverageShowOutputMap, err := getCoverageShowOutputMap(component)
-			if err != nil {
-				klog.Errorf("Getting coverage/show metrics for %s failed: %s", component, err.Error())
-				continue
-			}
-			coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
-			for metricName, metricInfo := range coverageShowMetricsMap {
-				var metricValue float64
-				if metricInfo.srcName != "" {
-					metricName = metricInfo.srcName
-				}
-				if metricInfo.aggregateFrom != nil {
-					for _, aggregateMetricName := range metricInfo.aggregateFrom {
-						if value, ok := coverageShowOutputMap[aggregateMetricName]; ok {
-							metricValue += parseMetricToFloat(component, aggregateMetricName, value)
-						}
-					}
-				} else {
-					if value, ok := coverageShowOutputMap[metricName]; ok {
-						metricValue = parseMetricToFloat(component, metricName, value)
-					}
-				}
-				metricInfo.metric.Set(metricValue)
-			}
-		case <-stopChan:
-			return
+func coverageShowMetricsUpdate(component string) {
+	coverageShowOutputMap, err := getCoverageShowOutputMap(component)
+	if err != nil {
+		klog.Errorf("Getting coverage/show metrics for %s failed: %s", component, err.Error())
+		return
+	}
+	coverageShowMetricsMap := componentCoverageShowMetricsMap[component]
+	for metricName, metricInfo := range coverageShowMetricsMap {
+		var metricValue float64
+		if metricInfo.srcName != "" {
+			metricName = metricInfo.srcName
 		}
+		if metricInfo.aggregateFrom != nil {
+			for _, aggregateMetricName := range metricInfo.aggregateFrom {
+				if value, ok := coverageShowOutputMap[aggregateMetricName]; ok {
+					metricValue += parseMetricToFloat(component, aggregateMetricName, value)
+				}
+			}
+		} else {
+			if value, ok := coverageShowOutputMap[metricName]; ok {
+				metricValue = parseMetricToFloat(component, metricName, value)
+			}
+		}
+		metricInfo.metric.Set(metricValue)
 	}
 }
 
 // registerStopwatchShowMetrics registers stopwatch/show metrics for
 // various components(ovn-northd, ovn-controller) with prometheus
-func registerStopwatchShowMetrics(component string, metricNamespace string, metricSubsystem string) {
+func registerStopwatchShowMetrics(ovnRegistry prometheus.Registerer, component string, metricNamespace string, metricSubsystem string) {
 	stopwatchShowMetricsMap := componentStopwatchShowMetricsMap[component]
 	for metricName, metricInfo := range stopwatchShowMetricsMap {
 		metricInfo.metrics.totalSamples = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -359,58 +345,50 @@ func parseStopwatchShowOutput(output string) map[string]stopwatchStatistics {
 	return result
 }
 
-// stopwatchShowMetricsUpdater updates the metric by obtaining the stopwatch/show
+// stopwatchShowMetricsUpdate updates the metric by obtaining the stopwatch/show
 // metrics for the specified component.
-func stopwatchShowMetricsUpdater(component string, stopChan <-chan struct{}) {
-	ticker := time.NewTicker(metricsUpdateInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			stopwatchShowOutputMap, err := getStopwatchShowOutputMap(component)
-			if err != nil {
-				klog.Errorf("Getting stopwatch/show metrics for %s failed: %s", component, err.Error())
-				continue
-			}
-
-			if len(stopwatchShowOutputMap) == 0 {
-				klog.Warningf("No stopwatch/show metrics for component %s", component)
-				continue
-			}
-
-			stopwatchShowInterestingMetrics := componentStopwatchShowMetricsMap[component]
-			for metricName, metricInfo := range stopwatchShowInterestingMetrics {
-				var totalSamplesMetricValue, maxMetricValue, minMetricValue, percentile95thMetricValue, shortTermAvgMetricValue, longTermAvgMetricValue float64
-
-				if metricInfo.srcName != "" {
-					metricName = metricInfo.srcName
-				}
-
-				if value, ok := stopwatchShowOutputMap[metricName]; ok {
-					totalSamplesMetricValue = parseMetricToFloat(component, metricName, value.totalSamples)
-					minMetricValue = parseMetricToFloat(component, metricName, value.min)
-					maxMetricValue = parseMetricToFloat(component, metricName, value.max)
-					percentile95thMetricValue = parseMetricToFloat(component, metricName, value.percentile95th)
-					shortTermAvgMetricValue = parseMetricToFloat(component, metricName, value.shortTermAvg)
-					longTermAvgMetricValue = parseMetricToFloat(component, metricName, value.longTermAvg)
-				}
-
-				metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
-				metricInfo.metrics.min.Set(minMetricValue / 1000)
-				metricInfo.metrics.max.Set(maxMetricValue / 1000)
-				metricInfo.metrics.percentile95th.Set(percentile95thMetricValue / 1000)
-				metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue / 1000)
-				metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue / 1000)
-			}
-		case <-stopChan:
-			return
-		}
+func stopwatchShowMetricsUpdate(component string) {
+	stopwatchShowOutputMap, err := getStopwatchShowOutputMap(component)
+	if err != nil {
+		klog.Errorf("Getting stopwatch/show metrics for %s failed: %s", component, err.Error())
+		return
 	}
+
+	if len(stopwatchShowOutputMap) == 0 {
+		klog.Warningf("No stopwatch/show metrics for component %s", component)
+		return
+	}
+
+	stopwatchShowInterestingMetrics := componentStopwatchShowMetricsMap[component]
+	for metricName, metricInfo := range stopwatchShowInterestingMetrics {
+		var totalSamplesMetricValue, maxMetricValue, minMetricValue, percentile95thMetricValue, shortTermAvgMetricValue, longTermAvgMetricValue float64
+
+		if metricInfo.srcName != "" {
+			metricName = metricInfo.srcName
+		}
+
+		if value, ok := stopwatchShowOutputMap[metricName]; ok {
+			totalSamplesMetricValue = parseMetricToFloat(component, metricName, value.totalSamples)
+			minMetricValue = parseMetricToFloat(component, metricName, value.min)
+			maxMetricValue = parseMetricToFloat(component, metricName, value.max)
+			percentile95thMetricValue = parseMetricToFloat(component, metricName, value.percentile95th)
+			shortTermAvgMetricValue = parseMetricToFloat(component, metricName, value.shortTermAvg)
+			longTermAvgMetricValue = parseMetricToFloat(component, metricName, value.longTermAvg)
+		}
+
+		metricInfo.metrics.totalSamples.Set(totalSamplesMetricValue)
+		metricInfo.metrics.min.Set(minMetricValue / 1000)
+		metricInfo.metrics.max.Set(maxMetricValue / 1000)
+		metricInfo.metrics.percentile95th.Set(percentile95thMetricValue / 1000)
+		metricInfo.metrics.shortTermAvg.Set(shortTermAvgMetricValue / 1000)
+		metricInfo.metrics.longTermAvg.Set(longTermAvgMetricValue / 1000)
+	}
+
 }
 
 // The `keepTrying` boolean when set to true will not return an error if we can't find pods with one of the given labels.
 // This is so that the caller can re-try again to see if the pods have appeared in the k8s cluster.
-func checkPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8sNodeName string,
+func CheckPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8sNodeName string,
 	keepTrying bool) (bool, error) {
 	for _, label := range labels {
 		pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
@@ -432,26 +410,6 @@ func checkPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8
 	}
 	return false, fmt.Errorf("a Pod matching at least one of the labels %q doesn't exist on this node %s",
 		strings.Join(labels, ","), k8sNodeName)
-}
-
-// using the cyrpto/tls module's GetCertificate() callback function helps in picking up
-// the latest certificate (due to cert rotation on cert expiry)
-func getTLSServer(addr, certFile, privKeyFile string, handler http.Handler) *http.Server {
-	tlsConfig := &tls.Config{
-		GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
-			cert, err := tls.LoadX509KeyPair(certFile, privKeyFile)
-			if err != nil {
-				return nil, fmt.Errorf("error generating x509 certs for metrics TLS endpoint: %v", err)
-			}
-			return &cert, nil
-		},
-	}
-	server := &http.Server{
-		Addr:      addr,
-		Handler:   handler,
-		TLSConfig: tlsConfig,
-	}
-	return server
 }
 
 // stringFlagSetterFunc is a func used for setting string type flag.
@@ -499,109 +457,45 @@ func writePlainText(statusCode int, text string, w http.ResponseWriter) {
 	fmt.Fprintln(w, text)
 }
 
-// StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected
-// It puts the endpoint behind TLS if certFile and keyFile are defined.
+// StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected.
+// It now reuses the unified MetricServer implementation so it can share plumbing with the
+// OVN/OVS metrics server. TLS and pprof behaviour remain unchanged.
 func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, keyFile string,
 	stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
-
-	if enablePprof {
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-
-		// Allow changes to log level at runtime
-		mux.HandleFunc("/debug/flags/v", stringFlagPutHandler(klogSetter))
+	opts := MetricServerOptions{
+		BindAddress: bindAddress,
+		CertFile:    certFile,
+		KeyFile:     keyFile,
+		EnablePprof: enablePprof,
+		// Use default registry so existing metric registrations keep working.
+		Registerer: prometheus.DefaultRegisterer,
 	}
 
-	startMetricsServer(bindAddress, certFile, keyFile, mux, stopChan, wg)
-}
+	server := NewMetricServer(opts, nil, nil)
 
-var ovnRegistry = prometheus.NewRegistry()
-
-// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
-func StartOVNMetricsServer(bindAddress, certFile, keyFile string, stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	handler := promhttp.InstrumentMetricHandler(ovnRegistry,
-		promhttp.HandlerFor(ovnRegistry, promhttp.HandlerOpts{}))
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", handler)
-
-	startMetricsServer(bindAddress, certFile, keyFile, mux, stopChan, wg)
-}
-
-func startMetricsServer(bindAddress, certFile, keyFile string, handler http.Handler, stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	var server *http.Server
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		utilwait.Until(func() {
-			klog.Infof("Starting metrics server at address %q", bindAddress)
-			var listenAndServe func() error
-			if certFile != "" && keyFile != "" {
-				server = getTLSServer(bindAddress, certFile, keyFile, handler)
-				listenAndServe = func() error { return server.ListenAndServeTLS("", "") }
-			} else {
-				server = &http.Server{Addr: bindAddress, Handler: handler}
-				listenAndServe = func() error { return server.ListenAndServe() }
-			}
-
-			errCh := make(chan error)
-			go func() {
-				errCh <- listenAndServe()
-			}()
-			var err error
-			select {
-			case err = <-errCh:
-				err = fmt.Errorf("failed while running metrics server at address %q: %w", bindAddress, err)
-				utilruntime.HandleError(err)
-			case <-stopChan:
-				klog.Infof("Stopping metrics server at address %q", bindAddress)
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := server.Shutdown(shutdownCtx); err != nil {
-					klog.Errorf("Error stopping metrics server at address %q: %v", bindAddress, err)
-				}
-			}
-		}, 5*time.Second, stopChan)
+		server.Run(stopChan)
 	}()
 }
 
-func RegisterOvnMetrics(clientset kubernetes.Interface, k8sNodeName string, ovsDBClient libovsdbclient.Client,
-	metricsScrapeInterval int, stopChan <-chan struct{}) {
-	go RegisterOvnDBMetrics(
-		func() bool {
-			err := utilwait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
-				return checkPodRunsOnGivenNode(clientset, []string{"ovn-db-pod=true"}, k8sNodeName, false)
-			})
-			if err != nil {
-				if utilwait.Interrupted(err) {
-					klog.Errorf("Timed out while checking if OVN DB Pod runs on this %q K8s Node: %v. "+
-						"Not registering OVN DB Metrics on this Node.", k8sNodeName, err)
-				} else {
-					klog.Infof("Not registering OVN DB Metrics on this Node since OVN DBs are not running on this node.")
-				}
-				return false
-			}
-			return true
-		},
-		stopChan,
-	)
-	go RegisterOvnControllerMetrics(ovsDBClient, metricsScrapeInterval, stopChan)
-	go RegisterOvnNorthdMetrics(
-		func() bool {
-			err := utilwait.PollUntilContextTimeout(context.Background(), 1*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
-				return checkPodRunsOnGivenNode(clientset, []string{"ovn-db-pod=true"}, k8sNodeName, true)
-			})
-			if err != nil {
-				klog.Infof("Not registering OVN Northd Metrics because OVN DB Pod was not found running on this "+
-					"node (%s)", k8sNodeName)
-				return false
-			}
-			return true
-		},
-		stopChan,
-	)
+// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
+func StartOVNMetricsServer(opts MetricServerOptions,
+	ovsClient libovsdbclient.Client,
+	kubeClient kubernetes.Interface,
+	stopChan <-chan struct{}, wg *sync.WaitGroup) *MetricServer {
+
+	klog.Infof("Create OVN Metrics Server on address: %s", opts.BindAddress)
+	metricsServer := NewMetricServer(opts, ovsClient, kubeClient)
+	metricsServer.registerMetrics()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		klog.Infof("OVN Metrics Server starts to run ...")
+		metricsServer.Run(stopChan)
+	}()
+
+	return metricsServer
 }
