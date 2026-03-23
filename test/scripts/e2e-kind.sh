@@ -125,9 +125,6 @@ should function for service endpoints using hostNetwork
 
 # Skips when default pod network is advertised through BGP
 RA_SKIPPED_TESTS="
-# Pod to ETP local nodeport on a different node is broken
-# https://github.com/ovn-org/ovn-kubernetes/issues/4804
-\[sig-network\] Services should fallback to local terminating endpoints when there are no ready endpoints with externalTrafficPolicy=Local
 "
 
 # Github CI doesn´t offer IPv6 connectivity, so always skip IPv6 only tests.
