@@ -676,6 +676,11 @@ type ManagedBGPConfig struct {
 	// Supported values: "full-mesh".
 	// Required when transport=no-overlay and routing=managed.
 	Topology string `gcfg:"topology"`
+	// FRRNamespace specifies the namespace where FRR-K8s FRRConfiguration resources are created
+	// when routing is managed.
+	// In unmanaged mode, the namespace is determined automatically by detecting user-created
+	// FRR-K8s FRRConfiguration resources. Therefore this flag is not needed.
+	FRRNamespace string `gcfg:"frr-namespace"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -2485,6 +2490,9 @@ func validateNoOverlayConfig() error {
 			}
 			if ManagedBGP.Topology != ManagedBGPTopologyFullMesh {
 				return fmt.Errorf("invalid topology %q: must be %q", ManagedBGP.Topology, ManagedBGPTopologyFullMesh)
+			}
+			if errs := validation.ValidateNamespaceName(ManagedBGP.FRRNamespace, false); len(errs) != 0 {
+				return fmt.Errorf("invalid frr-namespace %q: %s", ManagedBGP.FRRNamespace, strings.Join(errs, ", "))
 			}
 		}
 	} else {
