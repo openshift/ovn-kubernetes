@@ -3034,7 +3034,7 @@ func createNamespaceWithPrimaryNetworkOfType(
 	if networkType != defaultNetwork {
 		nsLabels[RequiredUDNNamespaceLabel] = ""
 	}
-	namespace, err := framework.CreateTestingNS(context.Background(), networkName, f.ClientSet, nsLabels)
+	namespace, err := f.CreateNamespace(context.Background(), networkName, nsLabels)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create namespace: %w", err)
 	}
