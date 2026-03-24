@@ -2,7 +2,7 @@ package annotate
 
 import (
 	// ensure all the ginkgo tests are loaded
-	_ "github.com/ovn-org/ovn-kubernetes/test/e2e"
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 )
 
 var (
