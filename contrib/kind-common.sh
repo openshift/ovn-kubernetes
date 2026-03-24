@@ -1546,14 +1546,11 @@ create_kind_cluster() {
   ovn_ha=${OVN_HA} \
   net_cidr="${KIND_CIDR}" \
   svc_cidr=${SVC_CIDR} \
-  use_local_registry=${KIND_LOCAL_REGISTRY} \
   dns_domain=${KIND_DNS_DOMAIN} \
   ovn_num_master=${KIND_NUM_MASTER} \
   ovn_num_worker=${KIND_NUM_WORKER} \
   kind_num_infra=${KIND_NUM_INFRA} \
   cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
-  kind_local_registry_port=${KIND_LOCAL_REGISTRY_PORT} \
-  kind_local_registry_name=${KIND_LOCAL_REGISTRY_NAME} \
   jinjanate "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
 
   # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug
