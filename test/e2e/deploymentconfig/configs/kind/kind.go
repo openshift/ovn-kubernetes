@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 )
 
 func IsKind() bool {
@@ -43,4 +44,8 @@ func (k kind) ExternalBridgeName() string {
 
 func (k kind) PrimaryInterfaceName() string {
 	return "eth0"
+}
+
+func (k kind) GetAgnHostContainerImage() string {
+	return images.AgnHost()
 }

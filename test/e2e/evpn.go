@@ -15,7 +15,6 @@ import (
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	vtepclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
@@ -514,7 +513,7 @@ func createEVPNAgnhost(ictx infraapi.Context, networkName, containerName string,
 	// Step 2: Create agnhost container on that network
 	agnhostContainer := infraapi.ExternalContainer{
 		Name:        containerName,
-		Image:       images.AgnHost(),
+		Image:       deploymentconfig.Get().GetAgnHostContainerImage(),
 		Network:     network,
 		IPv4:        ipv4,
 		IPv6:        ipv6,
