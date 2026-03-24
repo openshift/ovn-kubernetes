@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
