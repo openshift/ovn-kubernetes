@@ -527,32 +527,53 @@ func (g *gateway) SetDefaultBridgeGARPDropFlows(isDropped bool) {
 	g.openflowManager.setDefaultBridgeGARPDrop(isDropped)
 }
 
-// Reconcile handles triggering updates to different components of a gateway, like OFM, Services
+// Reconcile updates gateway flows, SNAT rules, and service flows.
 func (g *gateway) Reconcile() error {
-	klog.Info("Reconciling gateway with updates")
+	return g.reconcileInternal(true)
+}
+
+// ReconcileWithoutServices reconciles gateway flows and SNAT rules without processing services.
+// This is used during UDN network addition to avoid expensive service query/processing.
+// Services will be reconciled during the next periodic sync.
+func (g *gateway) ReconcileWithoutServices() error {
+	return g.reconcileInternal(false)
+}
+
+// reconcileInternal is the internal implementation of gateway reconciliation.
+func (g *gateway) reconcileInternal(processServices bool) error {
+	if processServices {
+		klog.Info("Reconciling gateway with updates")
+	} else {
+		klog.V(4).Info("Reconciling gateway flows without service processing")
+	}
+
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if g.openflowManager != nil {
 			if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
 				return err
 			}
-			// let's sync these flows immediately
 			g.openflowManager.requestFlowSync()
 		}
 	}
-	// TBD updateSNATRules() gets node host-cidr by accessing gateway.nodeIPManager, which does not
-	// exist in dpu-host mode.
+
+	// Update SNAT rules (full mode only)
 	if config.OvnKubeNode.Mode == types.NodeModeFull {
 		err := g.updateSNATRules()
 		if err != nil {
 			return err
 		}
 	}
-	// Services create OpenFlow flows as well, need to update them all
-	if g.servicesRetryFramework != nil {
-		if errs := g.addAllServices(); errs != nil {
-			err := utilerrors.Join(errs...)
-			return err
+
+	// Update service flows (deferred during network addition for performance)
+	if processServices {
+		if g.servicesRetryFramework != nil {
+			if errs := g.addAllServices(); errs != nil {
+				err := utilerrors.Join(errs...)
+				return err
+			}
 		}
+	} else {
+		klog.V(4).Info("Skipped service processing (deferred to periodic sync)")
 	}
 	return nil
 }
