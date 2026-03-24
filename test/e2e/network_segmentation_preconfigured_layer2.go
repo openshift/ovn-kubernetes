@@ -10,11 +10,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
-	udnclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
+	udnclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -167,7 +167,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				reservedCIDRs: "172.16.0.10/30",
 			},
 			expectedError: ContainSubstring(
-				"Invalid value: \"object\": reservedSubnets must be a masked network address (no host bits set)",
+				"Invalid value: reservedSubnets must be a masked network address (no host bits set)",
 			),
 		}),
 		Entry("Layer2 with unmasked IPv6 reserved subnets", invalidAPITestConfig{
@@ -179,7 +179,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				reservedCIDRs: "2014:100:200::88/122",
 			},
 			expectedError: ContainSubstring(
-				"Invalid value: \"object\": reservedSubnets must be a masked network address (no host bits set)",
+				"Invalid value: reservedSubnets must be a masked network address (no host bits set)",
 			),
 		}),
 		Entry("Layer2 with unmasked IPv4 infrastructure subnets", invalidAPITestConfig{
@@ -191,7 +191,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				infrastructureCIDRs: "172.16.0.10/30",
 			},
 			expectedError: ContainSubstring(
-				"Invalid value: \"object\": infrastructureSubnets must be a masked network address (no host bits set)",
+				"Invalid value: infrastructureSubnets must be a masked network address (no host bits set)",
 			),
 		}),
 		Entry("Layer2 with unmasked IPv6 infrastructure subnets", invalidAPITestConfig{
@@ -203,7 +203,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				infrastructureCIDRs: "2014:100:200::88/122",
 			},
 			expectedError: ContainSubstring(
-				"Invalid value: \"object\": infrastructureSubnets must be a masked network address (no host bits set)",
+				"Invalid value: infrastructureSubnets must be a masked network address (no host bits set)",
 			),
 		}),
 	)

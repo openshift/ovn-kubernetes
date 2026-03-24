@@ -27,7 +27,7 @@ import (
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // getSupportedPlatformTypes returns a list of all supported platform types
@@ -102,7 +102,7 @@ var (
 		RawClusterSubnets:            "10.128.0.0/14/23",
 		Zone:                         types.OvnDefaultZone,
 		RawUDNAllowedDefaultServices: "default/kubernetes,kube-system/kube-dns",
-		Transport:                    types.NetworkTransportGeneve,
+		Transport:                    "",
 	}
 
 	// Logging holds logging-related parsed config file parameters and command-line overrides
@@ -274,11 +274,6 @@ const (
 
 	// ManagedBGPTopologyFullMesh represents a full-mesh BGP topology
 	ManagedBGPTopologyFullMesh string = "full-mesh"
-
-	// NoOverlaySNATEnabled enables SNAT for outbound traffic
-	NoOverlaySNATEnabled string = "enabled"
-	// NoOverlaySNATDisabled disables SNAT for outbound traffic
-	NoOverlaySNATDisabled string = "disabled"
 )
 
 // DefaultConfig holds parsed config file parameters and command-line overrides
@@ -366,8 +361,8 @@ type DefaultConfig struct {
 	UDNAllowedDefaultServices []string
 
 	// Transport specifies the transport technology used for the default network.
-	// Accepts: "geneve" or "no-overlay".
-	// Defaults to "geneve".
+	// Accepts: "" (empty, uses OVN default overlay) or "no-overlay".
+	// Defaults to "" (empty).
 	Transport string `gcfg:"transport"`
 }
 
@@ -681,6 +676,11 @@ type ManagedBGPConfig struct {
 	// Supported values: "full-mesh".
 	// Required when transport=no-overlay and routing=managed.
 	Topology string `gcfg:"topology"`
+	// FRRNamespace specifies the namespace where FRR-K8s FRRConfiguration resources are created
+	// when routing is managed.
+	// In unmanaged mode, the namespace is determined automatically by detecting user-created
+	// FRR-K8s FRRConfiguration resources. Therefore this flag is not needed.
+	FRRNamespace string `gcfg:"frr-namespace"`
 }
 
 // OvnDBScheme describes the OVN database connection transport method
@@ -1040,7 +1040,7 @@ var CommonFlags = []cli.Flag{
 	&cli.StringFlag{
 		Name:        "transport",
 		Value:       Default.Transport,
-		Usage:       "Transport technology used for the default network, default to geneve if unspecified. (geneve, no-overlay)",
+		Usage:       "Transport technology for the default network. When unset, the OVN default overlay transport is used. (no-overlay)",
 		Destination: &cliConfig.Default.Transport,
 	},
 	&cli.BoolFlag{
@@ -2459,9 +2459,9 @@ func buildNoOverlayConfig(file *config) error {
 
 // validateNoOverlayConfig validates the no-overlay configuration
 func validateNoOverlayConfig() error {
-	// Validate transport option
-	if Default.Transport != types.NetworkTransportGeneve && Default.Transport != types.NetworkTransportNoOverlay {
-		return fmt.Errorf("invalid transport %q: must be %q or %q", Default.Transport, types.NetworkTransportGeneve, types.NetworkTransportNoOverlay)
+	// Validate transport option; empty string means default OVN overlay transport
+	if Default.Transport != "" && Default.Transport != types.NetworkTransportNoOverlay {
+		return fmt.Errorf("invalid transport %q: must be empty (default OVN overlay) or %q", Default.Transport, types.NetworkTransportNoOverlay)
 	}
 
 	// If transport is no-overlay, validate required no-overlay options
@@ -2472,8 +2472,8 @@ func validateNoOverlayConfig() error {
 		if NoOverlay.OutboundSNAT == "" {
 			return fmt.Errorf("outbound-snat is required when transport=no-overlay")
 		}
-		if NoOverlay.OutboundSNAT != NoOverlaySNATEnabled && NoOverlay.OutboundSNAT != NoOverlaySNATDisabled {
-			return fmt.Errorf("invalid outbound-snat %q: must be %q or %q", NoOverlay.OutboundSNAT, NoOverlaySNATEnabled, NoOverlaySNATDisabled)
+		if NoOverlay.OutboundSNAT != types.NoOverlaySNATEnabled && NoOverlay.OutboundSNAT != types.NoOverlaySNATDisabled {
+			return fmt.Errorf("invalid outbound-snat %q: must be %q or %q", NoOverlay.OutboundSNAT, types.NoOverlaySNATEnabled, types.NoOverlaySNATDisabled)
 		}
 
 		if NoOverlay.Routing == "" {
@@ -2490,6 +2490,9 @@ func validateNoOverlayConfig() error {
 			}
 			if ManagedBGP.Topology != ManagedBGPTopologyFullMesh {
 				return fmt.Errorf("invalid topology %q: must be %q", ManagedBGP.Topology, ManagedBGPTopologyFullMesh)
+			}
+			if errs := validation.ValidateNamespaceName(ManagedBGP.FRRNamespace, false); len(errs) != 0 {
+				return fmt.Errorf("invalid frr-namespace %q: %s", ManagedBGP.FRRNamespace, strings.Join(errs, ", "))
 			}
 		}
 	} else {

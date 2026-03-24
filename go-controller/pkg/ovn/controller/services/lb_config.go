@@ -12,10 +12,10 @@ import (
 	"k8s.io/kubernetes/pkg/apis/core"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/unidling"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // magic string used in vips to indicate that the node's physical
@@ -160,7 +160,7 @@ var protos = []corev1.Protocol{
 //   - services with NodePort set but *without* ExternalTrafficPolicy=Local or
 //     affinity timeout set.
 func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.EndpointSlice, nodeInfos []nodeInfo,
-	useLBGroup, useTemplates bool) (perNodeConfigs, templateConfigs, clusterConfigs []lbConfig) {
+	useLBGroup, useTemplates bool, netInfo util.NetInfo) (perNodeConfigs, templateConfigs, clusterConfigs []lbConfig) {
 
 	needsAffinityTimeout := hasSessionAffinityTimeOut(service)
 
@@ -255,10 +255,14 @@ func buildServiceLBConfigs(service *corev1.Service, endpointSlices []*discovery.
 		// - OCP only HACK: It's an openshift-dns:default-dns service
 		//
 		// In that case, we need to create per-node LBs.
+<<<<<<< HEAD
 		if hasHostEndpoints(clusterEndpoints.V4IPs) || hasHostEndpoints(clusterEndpoints.V6IPs) || internalTrafficLocal ||
 			// OCP only hack begin
 			(service.Namespace == "openshift-dns" && service.Name == "dns-default") {
 			// OCP only hack end
+=======
+		if hasHostEndpoints(clusterEndpoints.V4IPs, netInfo) || hasHostEndpoints(clusterEndpoints.V6IPs, netInfo) || internalTrafficLocal {
+>>>>>>> upstream/master
 			perNodeConfigs = append(perNodeConfigs, clusterIPConfig)
 		} else {
 			clusterConfigs = append(clusterConfigs, clusterIPConfig)
@@ -621,7 +625,7 @@ func buildTemplateLBs(service *corev1.Service, configs []lbConfig, nodes []nodeI
 // - services with external IPs / LoadBalancer Status IPs
 //
 // HOWEVER, we need to replace, on each nodes gateway router only, any host-network endpoints with a special loopback address
-// see https://github.com/ovn-org/ovn-kubernetes/blob/master/docs/design/host_to_services_OpenFlow.md
+// see https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/design/host_to_services_OpenFlow.md
 // This is for host -> serviceip -> host hairpin
 //
 // For ExternalTrafficPolicy=local, all "External" IPs (NodePort, ExternalIPs, Loadbalancer Status) have:

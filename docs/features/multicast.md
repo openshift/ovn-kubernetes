@@ -16,6 +16,8 @@ and [2236](https://datatracker.ietf.org/doc/html/rfc2236).
 The feature is gated by config flag. In order to create a KIND cluster with
 multicast feature enabled, use the `--multicast-enabled` option with KIND.
 
+Always check the dependencies on the [Requirements page](requirements.md)
+
 ### Enabling multicast per namespace
 The multicast traffic between pods in the cluster is blocked by default; it can
 be enabled **per namespace** - but it **cannot** be enabled cluster wide.
@@ -42,7 +44,7 @@ The implementation of IPv4 multicast for ovn-kubernetes relies on:
 - 2 ACLs (ingress/egress) dropping all multicast traffic - on all switches (via clusterPortGroup)
 - 2 ACLs (ingress/egress) allowing all multicast traffic - on clusterRouterPortGroup 
 (that allows multicast between pods that reside on different nodes, see 
-https://github.com/ovn-org/ovn-kubernetes/commit/3864f2b6463392ae2d80c18d06bd46ec44e639f9 for more details)
+https://github.com/ovn-kubernetes/ovn-kubernetes/commit/3864f2b6463392ae2d80c18d06bd46ec44e639f9 for more details)
 
 
 These ACLs Matches look like:
@@ -333,7 +335,7 @@ qos_rules           : []
 ```
 
 ## Sources
-- [PR introducing multicast into OVN-K](https://github.com/ovn-org/ovn-kubernetes/pull/885)
-- [PR introducing IPv6 multicast support into OVN-K](https://github.com/ovn-org/ovn-kubernetes/pull/1705)
+- [PR introducing multicast into OVN-K](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/885)
+- [PR introducing IPv6 multicast support into OVN-K](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/1705)
 - [Dumitru Ceara's presentation about IGMP snooping / relay](https://www.youtube.com/watch?v=1BdLzyGHgTY)
 
