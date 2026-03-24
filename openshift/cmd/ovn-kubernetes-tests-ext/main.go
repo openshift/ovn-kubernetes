@@ -4,10 +4,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ovn-org/ovn-kubernetes/openshift/test"
-	"github.com/ovn-org/ovn-kubernetes/openshift/test/generated"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
 	// import ovn-kubernetes tests
-	_ "github.com/ovn-org/ovn-kubernetes/test/e2e"
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"

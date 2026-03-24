@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	ocphacke2e "github.com/ovn-org/ovn-kubernetes/openshift/test"
-	ocpdeploymentconfig "github.com/ovn-org/ovn-kubernetes/openshift/test/deploymentconfig"
-	ocpinfraprovider "github.com/ovn-org/ovn-kubernetes/openshift/test/infraprovider"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
+	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/reporters"
