@@ -492,7 +492,7 @@ jobs:
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
-          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled", "num-workers": "3", "network-segmentation": "enable-network-segmentation"}
+          - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-disabled", "num-workers": "3", "network-segmentation": "enable-network-segmentation", "local-kind-registry": "true"}
           - {"target": "kv-live-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": "enable-network-segmentation", "routeadvertisements": "true"}
           - {"target": "control-plane", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "forwarding": "disable-forwarding"}
@@ -524,6 +524,7 @@ jobs:
       ENABLE_NETWORK_SEGMENTATION: "${{ startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation' }}"
       PLATFORM_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       PLATFORM_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
+      KIND_LOCAL_REGISTRY: "${{ matrix.local-kind-registry == 'true' }}"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
       OVN_COMPACT_MODE: "${{ matrix.target == 'compact-mode' }}"
       OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'compact-mode' }}"
