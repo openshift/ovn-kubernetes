@@ -458,7 +458,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					nad := testClusterUdnNAD(cudn.Name, nsName)
 					networkName := ovntypes.CUDNPrefix + cudn.Name
 					nadName := nsName + "/" + cudn.Name
-					nad.Spec.Config = `{"cniVersion":"1.0.0","name":"` + networkName + `","netAttachDefName":"` + nadName + `","role":"","subnets":"10.10.10.0/24","topology":"layer2","type":"ovn-k8s-cni-overlay"}`
+					nad.Spec.Config = `{"cniVersion":"1.1.0","name":"` + networkName + `","netAttachDefName":"` + nadName + `","role":"","subnets":"10.10.10.0/24","topology":"layer2","type":"ovn-k8s-cni-overlay"}`
 					expectedNsNADs[nsName] = nad
 				}
 
@@ -1319,7 +1319,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				for _, nsName := range testNamespaces {
 					nad := testClusterUdnNAD(cudn.Name, nsName)
 					nadName := nsName + "/" + cudn.Name
-					nad.Spec.Config = `{"cniVersion":"1.0.0","name":"` + networkName + `","netAttachDefName":"` + nadName + `","role":"","subnets":"10.10.10.0/24","topology":"layer2","type":"ovn-k8s-cni-overlay"}`
+					nad.Spec.Config = `{"cniVersion":"1.1.0","name":"` + networkName + `","netAttachDefName":"` + nadName + `","role":"","subnets":"10.10.10.0/24","topology":"layer2","type":"ovn-k8s-cni-overlay"}`
 					nad.Annotations = map[string]string{
 						"foo":                             "bar",
 						ovntypes.OvnNetworkNameAnnotation: networkName,
@@ -2058,6 +2058,32 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(err).To(MatchError(expectedErr))
 		})
 
+		It("when namespace without pods is being deleted, should delete NAD in that namespace", func() {
+			const cudnName = "test-network"
+			testNs := testNamespace("blue")
+			cudn := testClusterUDN(cudnName, testNs.Name)
+			expectedNAD := testClusterUdnNAD(cudnName, testNs.Name)
+			c := newTestController(renderNadStub(expectedNAD), cudn, testNs)
+			Expect(c.Run()).To(Succeed())
+
+			By("verify NAD is created in namespace")
+			Eventually(func() error {
+				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(testNs.Name).Get(context.Background(), cudnName, metav1.GetOptions{})
+				return err
+			}).Should(Succeed())
+
+			By("mark namespace as terminating")
+			testNs.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+			_, err := cs.KubeClient.CoreV1().Namespaces().Update(context.Background(), testNs, metav1.UpdateOptions{})
+			Expect(err).ToNot(HaveOccurred())
+
+			By("verify NAD is deleted")
+			Eventually(func() bool {
+				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(testNs.Name).Get(context.Background(), cudnName, metav1.GetOptions{})
+				return apierrors.IsNotFound(err)
+			}).Should(BeTrue(), "NAD should be deleted when namespace is terminating")
+		})
+
 		It("when CR is deleted, CR has no finalizer, should succeed", func() {
 			deletedCUDN := testClusterUDN("test", "blue")
 			deletedCUDN.Finalizers = []string{}
@@ -2505,10 +2531,10 @@ func testEVPNClusterUdnNADWithVIDs(name, namespace, vtepName string, macVID, ipV
 	nad := testClusterUdnNAD(name, namespace)
 	if ipVID > 0 {
 		// Symmetric IRB (both MAC-VRF and IP-VRF)
-		nad.Spec.Config = fmt.Sprintf(`{"cniVersion":"1.0.0","name":"cluster_udn_%s","type":"ovn-k8s-cni-overlay","netAttachDefName":"%s/%s","topology":"layer2","role":"primary","subnets":"10.10.0.0/16","transport":"evpn","evpn":{"vtep":"%s","macVRF":{"vni":100,"vid":%d},"ipVRF":{"vni":200,"vid":%d}}}`, name, namespace, name, vtepName, macVID, ipVID)
+		nad.Spec.Config = fmt.Sprintf(`{"cniVersion":"1.1.0","name":"cluster_udn_%s","type":"ovn-k8s-cni-overlay","netAttachDefName":"%s/%s","topology":"layer2","role":"primary","subnets":"10.10.0.0/16","transport":"evpn","evpn":{"vtep":"%s","macVRF":{"vni":100,"vid":%d},"ipVRF":{"vni":200,"vid":%d}}}`, name, namespace, name, vtepName, macVID, ipVID)
 	} else {
 		// MAC-VRF only
-		nad.Spec.Config = fmt.Sprintf(`{"cniVersion":"1.0.0","name":"cluster_udn_%s","type":"ovn-k8s-cni-overlay","netAttachDefName":"%s/%s","topology":"layer2","role":"primary","subnets":"10.10.0.0/16","transport":"evpn","evpn":{"vtep":"%s","macVRF":{"vni":100,"vid":%d}}}`, name, namespace, name, vtepName, macVID)
+		nad.Spec.Config = fmt.Sprintf(`{"cniVersion":"1.1.0","name":"cluster_udn_%s","type":"ovn-k8s-cni-overlay","netAttachDefName":"%s/%s","topology":"layer2","role":"primary","subnets":"10.10.0.0/16","transport":"evpn","evpn":{"vtep":"%s","macVRF":{"vni":100,"vid":%d}}}`, name, namespace, name, vtepName, macVID)
 	}
 	return nad
 }
