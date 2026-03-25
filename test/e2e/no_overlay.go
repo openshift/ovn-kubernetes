@@ -25,87 +25,87 @@ import (
 var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay", feature.NoOverlay, func() {
 	f := wrappedTestFramework("no-overlay-default-network")
 
+	const (
+		tcpdumpPodName = "tcpdump-pod-no-overlay"
+		serverPodName  = "server-pod-no-overlay"
+		clientPodName  = "client-pod-no-overlay"
+	)
+	var clientPod, serverPod, tcpdumpPod *corev1.Pod
+	var serverService *corev1.Service
+	var nodes *corev1.NodeList
+
+	ginkgo.BeforeEach(func() {
+		var err error
+		ginkgo.By("Selecting nodes")
+		nodes, err = e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		if len(nodes.Items) < 2 {
+			ginkgo.Skip("requires at least 2 Nodes")
+		}
+
+		ginkgo.By("Creating server pod on first node")
+		serverPod = e2epod.NewAgnhostPod(f.Namespace.Name, serverPodName, nil, nil, []corev1.ContainerPort{{ContainerPort: netexecPort}}, "netexec")
+		serverPod.Labels = map[string]string{"app": "no-overlay-server"}
+		serverPod.Spec.NodeName = nodes.Items[0].Name
+		e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)
+
+		ginkgo.By("Creating client pod on second node")
+		clientPod = e2epod.NewAgnhostPod(f.Namespace.Name, clientPodName, nil, nil, []corev1.ContainerPort{{ContainerPort: netexecPort}}, "netexec")
+		clientPod.Spec.NodeName = nodes.Items[1].Name
+		e2epod.NewPodClient(f).CreateSync(context.TODO(), clientPod)
+
+		// Wait for pods to be ready and refresh their status
+		ginkgo.By("Waiting for server pod to be ready")
+		err = e2epod.WaitTimeoutForPodReadyInNamespace(context.TODO(), f.ClientSet, serverPod.Name, f.Namespace.Name, 60*time.Second)
+		framework.ExpectNoError(err, "Server pod failed to become ready")
+
+		ginkgo.By("Waiting for client pod to be ready")
+		err = e2epod.WaitTimeoutForPodReadyInNamespace(context.TODO(), f.ClientSet, clientPod.Name, f.Namespace.Name, 60*time.Second)
+		framework.ExpectNoError(err, "Client pod failed to become ready")
+
+		// Refresh pod status to get IP addresses
+		serverPod, err = e2epod.NewPodClient(f).Get(context.TODO(), serverPod.Name, metav1.GetOptions{})
+		framework.ExpectNoError(err, "Failed to get server pod status")
+
+		clientPod, err = e2epod.NewPodClient(f).Get(context.TODO(), clientPod.Name, metav1.GetOptions{})
+		framework.ExpectNoError(err, "Failed to get client pod status")
+
+		framework.Logf("Server pod IPs: %v", serverPod.Status.PodIPs)
+		framework.Logf("Client pod IPs: %v", clientPod.Status.PodIPs)
+
+		// Verify pods have IP addresses
+		gomega.Expect(serverPod.Status.PodIPs).NotTo(gomega.BeEmpty(), "Server pod should have at least one IP address")
+		gomega.Expect(clientPod.Status.PodIPs).NotTo(gomega.BeEmpty(), "Client pod should have at least one IP address")
+
+		ginkgo.By("Creating service to select server pod")
+		familyPolicy := corev1.IPFamilyPolicyPreferDualStack
+		serverService = e2eservice.CreateServiceSpec("no-overlay-server-service", "", false, map[string]string{"app": "no-overlay-server"})
+		serverService.Spec.Ports = []corev1.ServicePort{{Protocol: corev1.ProtocolTCP, Port: netexecPort}}
+		serverService.Spec.IPFamilyPolicy = &familyPolicy
+		serverService, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.TODO(), serverService, metav1.CreateOptions{})
+		framework.ExpectNoError(err, "Failed to create server service")
+		framework.Logf("Created service %s with ClusterIPs %v", serverService.Name, serverService.Spec.ClusterIPs)
+
+		// Create tcpdump pod as host networked pod to capture traffic on the physical interface
+		// In no-overlay mode pod IPs are routed directly and appear unencapsulated on the physical NIC.
+		ginkgo.By("Creating tcpdump pod")
+		tcpdumpPod, err = createPod(f, tcpdumpPodName, nodes.Items[1].Name, f.Namespace.Name,
+			[]string{"sh", "-c", "sleep 20000"},
+			map[string]string{},
+			func(p *corev1.Pod) {
+				p.Spec.HostNetwork = true
+				p.Spec.Containers[0].Image = images.Netshoot()
+				p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{
+					Capabilities: &corev1.Capabilities{
+						Add: []corev1.Capability{"NET_RAW", "NET_ADMIN"},
+					},
+				}
+			})
+		framework.ExpectNoError(err, "Failed to create tcpdump pod")
+		framework.Logf("tcpdumpPod pod IPs: %v", tcpdumpPod.Status.PodIPs)
+	})
+
 	ginkgo.When("connectivity tests", func() {
-		var clientPod, serverPod, tcpdumpPod *corev1.Pod
-		var serverService *corev1.Service
-		var nodes *corev1.NodeList
-
-		const (
-			tcpdumpPodName = "tcpdump-pod-no-overlay"
-			serverPodName  = "server-pod-no-overlay"
-			clientPodName  = "client-pod-no-overlay"
-		)
-
-		ginkgo.BeforeEach(func() {
-			var err error
-			ginkgo.By("Selecting nodes")
-			nodes, err = e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			if len(nodes.Items) < 2 {
-				ginkgo.Skip("requires at least 2 Nodes")
-			}
-
-			ginkgo.By("Creating server pod on first node")
-			serverPod = e2epod.NewAgnhostPod(f.Namespace.Name, serverPodName, nil, nil, []corev1.ContainerPort{{ContainerPort: netexecPort}}, "netexec")
-			serverPod.Labels = map[string]string{"app": "no-overlay-server"}
-			serverPod.Spec.NodeName = nodes.Items[0].Name
-			e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)
-
-			ginkgo.By("Creating client pod on second node")
-			clientPod = e2epod.NewAgnhostPod(f.Namespace.Name, clientPodName, nil, nil, []corev1.ContainerPort{{ContainerPort: netexecPort}}, "netexec")
-			clientPod.Spec.NodeName = nodes.Items[1].Name
-			e2epod.NewPodClient(f).CreateSync(context.TODO(), clientPod)
-
-			// Wait for pods to be ready and refresh their status
-			ginkgo.By("Waiting for server pod to be ready")
-			err = e2epod.WaitTimeoutForPodReadyInNamespace(context.TODO(), f.ClientSet, serverPod.Name, f.Namespace.Name, 60*time.Second)
-			framework.ExpectNoError(err, "Server pod failed to become ready")
-
-			ginkgo.By("Waiting for client pod to be ready")
-			err = e2epod.WaitTimeoutForPodReadyInNamespace(context.TODO(), f.ClientSet, clientPod.Name, f.Namespace.Name, 60*time.Second)
-			framework.ExpectNoError(err, "Client pod failed to become ready")
-
-			// Refresh pod status to get IP addresses
-			serverPod, err = e2epod.NewPodClient(f).Get(context.TODO(), serverPod.Name, metav1.GetOptions{})
-			framework.ExpectNoError(err, "Failed to get server pod status")
-
-			clientPod, err = e2epod.NewPodClient(f).Get(context.TODO(), clientPod.Name, metav1.GetOptions{})
-			framework.ExpectNoError(err, "Failed to get client pod status")
-
-			framework.Logf("Server pod IPs: %v", serverPod.Status.PodIPs)
-			framework.Logf("Client pod IPs: %v", clientPod.Status.PodIPs)
-
-			// Verify pods have IP addresses
-			gomega.Expect(serverPod.Status.PodIPs).NotTo(gomega.BeEmpty(), "Server pod should have at least one IP address")
-			gomega.Expect(clientPod.Status.PodIPs).NotTo(gomega.BeEmpty(), "Client pod should have at least one IP address")
-
-			ginkgo.By("Creating service to select server pod")
-			familyPolicy := corev1.IPFamilyPolicyPreferDualStack
-			serverService = e2eservice.CreateServiceSpec("no-overlay-server-service", "", false, map[string]string{"app": "no-overlay-server"})
-			serverService.Spec.Ports = []corev1.ServicePort{{Protocol: corev1.ProtocolTCP, Port: netexecPort}}
-			serverService.Spec.IPFamilyPolicy = &familyPolicy
-			serverService, err = f.ClientSet.CoreV1().Services(f.Namespace.Name).Create(context.TODO(), serverService, metav1.CreateOptions{})
-			framework.ExpectNoError(err, "Failed to create server service")
-			framework.Logf("Created service %s with ClusterIPs %v", serverService.Name, serverService.Spec.ClusterIPs)
-
-			// Create tcpdump pod as host networked pod to capture traffic on the physical interface
-			// In no-overlay mode pod IPs are routed directly and appear unencapsulated on the physical NIC.
-			ginkgo.By("Creating tcpdump pod")
-			tcpdumpPod, err = createPod(f, tcpdumpPodName, nodes.Items[1].Name, f.Namespace.Name,
-				[]string{"sh", "-c", "sleep 20000"},
-				map[string]string{},
-				func(p *corev1.Pod) {
-					p.Spec.HostNetwork = true
-					p.Spec.Containers[0].Image = images.Netshoot()
-					p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{
-						Capabilities: &corev1.Capabilities{
-							Add: []corev1.Capability{"NET_RAW", "NET_ADMIN"},
-						},
-					}
-				})
-			framework.ExpectNoError(err, "Failed to create tcpdump pod")
-			framework.Logf("tcpdumpPod pod IPs: %v", tcpdumpPod.Status.PodIPs)
-		})
 
 		ginkgo.It("should maintain pod2pod/pod2service/host2pod/host2service connectivity without overlay before and after ovnkube-node pod restarted", func() {
 			// test traffic for pod2pod, host2pod, pod2service, host2service and verify no overlay traffic is captured by tcpdump
@@ -183,7 +183,6 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 
 			framework.Logf("Pod2pod and pod2service connectivity maintained after ovnkube-node pod restart - test passed!")
 		})
-
 	})
 
 })
