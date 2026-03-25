@@ -2080,4 +2080,3 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
 }
-

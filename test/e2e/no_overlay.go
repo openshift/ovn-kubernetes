@@ -3,18 +3,25 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	raclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
+	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
@@ -24,7 +31,6 @@ import (
 
 var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay", feature.NoOverlay, func() {
 	f := wrappedTestFramework("no-overlay-default-network")
-
 	const (
 		tcpdumpPodName = "tcpdump-pod-no-overlay"
 		serverPodName  = "server-pod-no-overlay"
@@ -185,6 +191,105 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 		})
 	})
 
+	ginkgo.When("managed mode routing is enabled", func() {
+		ginkgo.BeforeEach(func() {
+			if !isManagedRoutingEnabled() {
+				ginkgo.Skip("Test requires managed routing mode to be enabled")
+			}
+		})
+
+		ginkgo.It("should reconcile RA CR if manually deleted in managed mode", func() {
+			raClient, err := raclientset.NewForConfig(f.ClientConfig())
+			framework.ExpectNoError(err, "Failed to create RouteAdvertisements client")
+
+			ginkgo.By("Verifying auto-created RA exists before deletion")
+			raName := managedRouteAdvertisementName(types.DefaultNetworkName)
+			ra, err := raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), raName, metav1.GetOptions{})
+			framework.ExpectNoError(err, "Failed to get RouteAdvertisement")
+			gomega.Expect(ra).NotTo(gomega.BeNil(), "RouteAdvertisement should exist")
+			originalUID := ra.UID
+			framework.Logf("RouteAdvertisement %s exists before deletion (UID=%s)", raName, originalUID)
+
+			ginkgo.By("Deleting RouteAdvertisement manually")
+			err = raClient.K8sV1().RouteAdvertisements().Delete(context.TODO(), raName, metav1.DeleteOptions{})
+			framework.ExpectNoError(err, "Failed to delete RouteAdvertisement")
+
+			ginkgo.By("Verifying RA is auto-recreated by the managed BGP controller")
+			gomega.Eventually(func() bool {
+				current, err := raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), raName, metav1.GetOptions{})
+				return err == nil &&
+					current.DeletionTimestamp == nil &&
+					current.UID != originalUID
+			}, 30*time.Second, 1*time.Second).Should(gomega.BeTrue(), "Auto-created RA should be recreated within 30 seconds")
+
+			ginkgo.By("Verifying RA is Accepted")
+			gomega.Eventually(func() bool {
+				ra, err = raClient.K8sV1().RouteAdvertisements().Get(context.TODO(), raName, metav1.GetOptions{})
+				if err != nil {
+					framework.Logf("Failed to get RouteAdvertisement: %v", err)
+					return false
+				}
+				acceptedCond := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
+				return acceptedCond != nil && acceptedCond.Status == metav1.ConditionTrue
+			}, 30*time.Second, 1*time.Second).Should(gomega.BeTrue(), "RouteAdvertisement should be Accepted within 30 seconds")
+
+			ginkgo.By("Verifying RA has the expected label")
+			expectedLabel := "k8s.ovn.org/managed-network"
+			gomega.Expect(ra.Labels[expectedLabel]).To(gomega.Equal(types.DefaultNetworkName))
+
+			ginkgo.By("Verifying RA selects managed FRRConfigurations")
+			expectedFRRLabel := "k8s.ovn.org/managed-internal-fabric"
+			gomega.Expect(ra.Spec.FRRConfigurationSelector.MatchLabels[expectedFRRLabel]).To(gomega.Equal("bgp"))
+			ginkgo.By("Verifying it selects the default network")
+			gomega.Expect(ra.Spec.NetworkSelectors).To(gomega.ContainElement(apitypes.NetworkSelector{NetworkSelectionType: apitypes.DefaultNetwork}))
+
+			ginkgo.By("Verifying pod2pod connectivity works after RA recreation")
+			checkConnectivityWithoutOverlay(serverPod.Status.PodIPs, nil, clientPod, tcpdumpPod)
+		})
+
+		ginkgo.It("should reconcile FRRConfiguration if manually deleted in managed mode", func() {
+			frrNamespace := deploymentconfig.Get().FRRK8sNamespace()
+
+			ginkgo.By("Getting FRRConfigurations managed by the system")
+			labelSelector := "k8s.ovn.org/managed-internal-fabric=bgp"
+			getFRRCmd := []string{"get", "frrconfigurations", "-n", frrNamespace, "-l", labelSelector, "-o", "jsonpath={.items[0].metadata.name}"}
+			frrName := e2ekubectl.RunKubectlOrDie(frrNamespace, getFRRCmd...)
+			gomega.Expect(frrName).NotTo(gomega.BeEmpty(), "Should find at least one managed FRRConfiguration")
+			framework.Logf("Found FRRConfiguration %s in namespace %s", frrName, frrNamespace)
+
+			originalUID := strings.TrimSpace(e2ekubectl.RunKubectlOrDie(frrNamespace,
+				"get", "frrconfigurations", frrName, "-n", frrNamespace, "-o", "jsonpath={.metadata.uid}"))
+			gomega.Expect(originalUID).NotTo(gomega.BeEmpty(), "FRRConfiguration should have a UID")
+
+			ginkgo.By("Deleting FRRConfiguration manually")
+			deleteCmd := []string{"delete", "frrconfigurations", frrName, "-n", frrNamespace}
+			e2ekubectl.RunKubectlOrDie(frrNamespace, deleteCmd...)
+			framework.Logf("Deleted FRRConfiguration %s (UID was %s)", frrName, originalUID)
+
+			ginkgo.By("Verifying the new FRRConfiguration is recreated (new UID, not terminating)")
+			gomega.Eventually(func() bool {
+				currentUID, err := e2ekubectl.RunKubectl(frrNamespace,
+					"get", "frrconfigurations", frrName, "-n", frrNamespace, "-o", "jsonpath={.metadata.uid}")
+				if err != nil {
+					return false
+				}
+				currentUID = strings.TrimSpace(currentUID)
+				if currentUID == "" || currentUID == originalUID {
+					return false
+				}
+				dt, err := e2ekubectl.RunKubectl(frrNamespace,
+					"get", "frrconfigurations", frrName, "-n", frrNamespace, "-o", "jsonpath={.metadata.deletionTimestamp}")
+				if err != nil {
+					return false
+				}
+				return strings.TrimSpace(dt) == ""
+			}, 30*time.Second, 1*time.Second).Should(gomega.BeTrue(),
+				"FRRConfiguration %s should be recreated with a new UID and no deletion timestamp", frrName)
+
+			ginkgo.By("Verifying pod2pod connectivity works after FRRConfiguration recreation")
+			checkConnectivityWithoutOverlay(serverPod.Status.PodIPs, nil, clientPod, tcpdumpPod)
+		})
+	})
 })
 
 // getTcpdumpOnPhysicalIface starts tcpdump on the physical NIC (from deploymentconfig) filtered
@@ -264,4 +369,25 @@ func checkConnectivityWithoutOverlay(serverPodIPs []corev1.PodIP, serviceCluster
 		gomega.Expect(tcpdumpOut).To(gomega.MatchRegexp(`(?m)^[1-9][0-9]* packets captured`),
 			"Should capture unencapsulated pod traffic on the physical interface")
 	}
+}
+
+func isManagedRoutingEnabled() bool {
+	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+	args := []string{"get", "configmap", "ovnkube-config", "-o=jsonpath={.data.ovnkube\\.conf}"}
+	conf := e2ekubectl.RunKubectlOrDie(ovnKubeNamespace, args...)
+	// Simplistic check for routing = managed
+	if strings.Contains(conf, "routing = managed") || strings.Contains(conf, "routing=managed") {
+		framework.Logf("Managed routing is enabled in ovnkube-config")
+		return true
+	}
+	return false
+}
+
+// managedRouteAdvertisementName matches clustermanager/managedbgp.ManagedRouteAdvertisementName
+// ("ovnk-managed-" + hex(fnv64a(networkName)))
+func managedRouteAdvertisementName(networkName string) string {
+	const prefix = "ovnk-managed-"
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(networkName))
+	return fmt.Sprintf("%s%x", prefix, h.Sum64())
 }
