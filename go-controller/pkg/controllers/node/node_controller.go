@@ -44,7 +44,7 @@ type NodeHandler interface {
 // This will change in the future.
 type NetworkFilteringPolicy interface {
 	NodeHasNetwork(nodeName, netName string) bool
-	ShouldFilterByRemoteNetworkActivity(node *corev1.Node) bool
+	ShouldFilterByRemoteNetworkActivity(node *corev1.Node, netName string) bool
 }
 
 // NodeController reconciles node topology for all registered networks.
@@ -118,7 +118,7 @@ func NewController(wf *factory.WatchFactory, name string, policy NetworkFilterin
 
 // NewNodeController builds a controller that handles node events for all UDNs.
 func NewNodeController(wf *factory.WatchFactory, networkManager networkmanager.Interface) *NodeController {
-	return NewController(wf, "udn-node-topology", &udnPolicy{networkManager: networkManager})
+	return NewController(wf, "node-topology", &udnPolicy{networkManager: networkManager})
 }
 
 // Start starts the node worker.
@@ -246,7 +246,7 @@ func (c *NodeController) reconcileNode(key string) error {
 		nodeHadNetwork := c.nodeHasNetwork(netName, nodeName)
 		nodeHasNetwork := c.policy.NodeHasNetwork(nodeName, netName)
 
-		if c.shouldFilterByRemoteNetworkActivity(newNode) || c.shouldFilterByRemoteNetworkActivity(oldNode) {
+		if c.shouldFilterByRemoteNetworkActivity(newNode, netName) || c.shouldFilterByRemoteNetworkActivity(oldNode, netName) {
 			// If the node is going inactive we need to delete it and not update
 			if nodeHadNetwork && !nodeHasNetwork {
 				needsAddUpdate = false
@@ -302,6 +302,9 @@ func (c *NodeController) reconcileNode(key string) error {
 // Reconciliation is level-driven.
 func (c *NodeController) reconcileUpdate(handler NodeHandler, oldNode, newNode *corev1.Node, netName string, oldState, newState *NodeAnnotationState) error {
 	if err := handler.ReconcileNode(oldNode, newNode, oldState, newState); err != nil {
+		// Keep the latest informer state cached even when reconciliation fails so a later
+		// delete can clean up any partial state created before the error was returned.
+		c.setCachedNode(netName, newNode)
 		return err
 	}
 
@@ -522,8 +525,8 @@ func (c *NodeController) deleteNodeActive(netName, nodeName string) {
 // shouldFilterByRemoteNetworkActivity returns true when dynamic UDN activity
 // filtering should be applied for the node. This is limited to remote-zone
 // nodes; local-zone nodes always run unfiltered reconciliation.
-func (c *NodeController) shouldFilterByRemoteNetworkActivity(node *corev1.Node) bool {
-	return c.policy.ShouldFilterByRemoteNetworkActivity(node)
+func (c *NodeController) shouldFilterByRemoteNetworkActivity(node *corev1.Node, netName string) bool {
+	return c.policy.ShouldFilterByRemoteNetworkActivity(node, netName)
 }
 
 type udnPolicy struct {
@@ -534,8 +537,8 @@ func (p *udnPolicy) NodeHasNetwork(nodeName, netName string) bool {
 	return p.networkManager.NodeHasNetwork(nodeName, netName)
 }
 
-func (p *udnPolicy) ShouldFilterByRemoteNetworkActivity(node *corev1.Node) bool {
-	if node == nil || !config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
+func (p *udnPolicy) ShouldFilterByRemoteNetworkActivity(node *corev1.Node, netName string) bool {
+	if node == nil || netName == types.DefaultNetworkName || !config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
 		return false
 	}
 	localZone := config.Default.Zone

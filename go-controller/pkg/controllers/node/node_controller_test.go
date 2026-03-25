@@ -221,6 +221,31 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 	}
 }
 
+func TestUDNPolicyDoesNotFilterDefaultNetwork(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+	config.Default.Zone = "local-zone"
+
+	policy := &udnPolicy{networkManager: networkmanager.Default().Interface()}
+	remoteNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Annotations: map[string]string{
+				util.OvnNodeZoneName: "remote-zone",
+			},
+		},
+	}
+
+	if policy.ShouldFilterByRemoteNetworkActivity(remoteNode, "default") {
+		t.Fatal("expected default network to skip dynamic UDN remote activity filtering")
+	}
+	if !policy.ShouldFilterByRemoteNetworkActivity(remoteNode, "net-a") {
+		t.Fatal("expected non-default network to apply dynamic UDN remote activity filtering")
+	}
+}
+
 func TestReconcileNodeRemoteNodeBecomesActiveTreatsAsAdd(t *testing.T) {
 	if err := config.PrepareTestConfig(); err != nil {
 		t.Fatalf("failed to prepare test config: %v", err)
