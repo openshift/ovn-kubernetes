@@ -416,6 +416,185 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	return nil
 }
 
+func (oc *DefaultNetworkController) SyncNodes(nodes []*corev1.Node) error {
+	return oc.syncNodes(nodesToInterfaces(nodes))
+}
+
+func defaultNodeSubnetChangedWithState(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) bool {
+	if !util.NodeSubnetAnnotationChanged(oldNode, newNode) {
+		return false
+	}
+	if oldState == nil || newState == nil {
+		return util.NodeSubnetAnnotationChangedForNetwork(oldNode, newNode, types.DefaultNetworkName)
+	}
+	return nodecontroller.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, types.DefaultNetworkName)
+}
+
+func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState) error {
+	if newNode == nil {
+		if oldNode == nil {
+			return fmt.Errorf("nil node received for network %s", oc.GetNetworkName())
+		}
+		err := oc.deleteNodeEvent(oldNode)
+		if err != nil {
+			oc.recordNodeErrorEvent(oldNode, err)
+		}
+		return err
+	}
+
+	var switchToOvnNode bool
+	if config.HybridOverlay.Enabled {
+		if util.NoHostSubnet(newNode) && (oldNode == nil || !util.NoHostSubnet(oldNode)) {
+			// The node switched to hybrid-overlay management, so reconcile the HO-specific topology instead.
+			err := oc.addUpdateHoNodeEvent(newNode)
+			if err != nil {
+				oc.recordNodeErrorEvent(newNode, err)
+			}
+			return err
+		} else if oldNode != nil && !util.NoHostSubnet(newNode) && util.NoHostSubnet(oldNode) {
+			// The node switched from hybrid-overlay management back to OVN-managed networking.
+			if err := oc.deleteHoNodeEvent(oldNode); err != nil {
+				oc.recordNodeErrorEvent(oldNode, err)
+				return err
+			}
+			switchToOvnNode = true
+		} else if oldNode == nil && !util.NoHostSubnet(newNode) {
+			if err := oc.deleteHoNodeEvent(newNode); err != nil {
+				oc.recordNodeErrorEvent(newNode, err)
+				return err
+			}
+		}
+	}
+
+	var aggregatedErrors []error
+	if oc.isLocalZoneNode(newNode) {
+		var nodeSyncsParam *nodeSyncs
+		hoNeedsCleanup := false
+		if !config.HybridOverlay.Enabled {
+			if _, exists := newNode.Annotations[hotypes.HybridOverlayDRIP]; exists {
+				hoNeedsCleanup = true
+			}
+			if _, exists := newNode.Annotations[hotypes.HybridOverlayDRMAC]; exists {
+				hoNeedsCleanup = true
+			}
+		}
+
+		if oldNode == nil {
+			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
+			_, clusterRtrSync := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+			_, mgmtSync := oc.mgmtPortFailed.Load(newNode.Name)
+			_, gwSync := oc.gatewaysFailed.Load(newNode.Name)
+			_, hoSync := oc.hybridOverlayFailed.Load(newNode.Name)
+			_, zoneICSync := oc.syncZoneICFailed.Load(newNode.Name)
+			_, hostNetAddrSetSync := oc.syncHostNetAddrSetFailed.Load(newNode.Name)
+			// When a bootstrap retry first failed while the node was remote, only syncZoneICFailed may be set.
+			// If the node later becomes local before any local switch state was populated in lsManager, we must
+			// do the full local node add instead of replaying only the previous remote-zone retry state.
+			localSwitchReady := oc.hasLocalNodeSwitchState(newNode)
+			if localSwitchReady && (nodeSync || clusterRtrSync || mgmtSync || gwSync || hoSync || zoneICSync || hostNetAddrSetSync) {
+				nodeSyncsParam = &nodeSyncs{
+					syncNode:              nodeSync,
+					syncClusterRouterPort: clusterRtrSync,
+					syncMgmtPort:          mgmtSync,
+					syncGw:                gwSync,
+					syncHo:                hoSync || hoNeedsCleanup,
+					syncZoneIC:            zoneICSync,
+				}
+			} else {
+				nodeSyncsParam = &nodeSyncs{
+					syncNode:              true,
+					syncClusterRouterPort: true,
+					syncMgmtPort:          true,
+					syncGw:                true,
+					syncHo:                config.HybridOverlay.Enabled || hoNeedsCleanup,
+					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+				}
+			}
+		} else if oc.isLocalZoneNode(oldNode) {
+			_, nodeSync := oc.addNodeFailed.Load(newNode.Name)
+			nodeSync = nodeSync || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState)
+			_, failed := oc.nodeClusterRouterPortFailed.Load(newNode.Name)
+			clusterRtrSync := failed || nodeChassisChanged(oldNode, newNode) || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState)
+			_, failed = oc.mgmtPortFailed.Load(newNode.Name)
+			mgmtSync := failed || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState)
+			_, failed = oc.gatewaysFailed.Load(newNode.Name)
+			gwSync := failed || gatewayChanged(oldNode, newNode) || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) ||
+				hostCIDRsChanged(oldNode, newNode) || nodeGatewayMTUSupportChanged(oldNode, newNode)
+			_, hoSync := oc.hybridOverlayFailed.Load(newNode.Name)
+			_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
+			syncZoneIC = syncZoneIC || oc.nodeZoneClusterChanged(oldNode, newNode) || primaryAddrChanged(oldNode, newNode)
+			nodeSyncsParam = &nodeSyncs{
+				syncNode:              nodeSync,
+				syncClusterRouterPort: clusterRtrSync,
+				syncMgmtPort:          mgmtSync,
+				syncGw:                gwSync,
+				syncHo:                switchToOvnNode || hoSync || hoNeedsCleanup,
+				syncZoneIC:            syncZoneIC,
+			}
+		} else {
+			klog.Infof("Node %s moved from the remote zone %s to local zone %s, in network: %q",
+				newNode.Name, util.GetNodeZone(oldNode), util.GetNodeZone(newNode), oc.GetNetworkName())
+			nodeSyncsParam = &nodeSyncs{
+				syncNode:              true,
+				syncClusterRouterPort: true,
+				syncMgmtPort:          true,
+				syncGw:                true,
+				syncHo:                true,
+				syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+			}
+		}
+		if err := oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam); err != nil {
+			aggregatedErrors = append(aggregatedErrors, err)
+		}
+	} else {
+		_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
+		if oldNode == nil {
+			syncZoneIC = config.OVNKubernetesFeature.EnableInterconnect
+		} else {
+			// Sync interconnect state when the node moved from local to remote, changed zone clusters,
+			// switched from hybrid-overlay to OVN management, or its remote reachability inputs changed.
+			syncZoneIC = syncZoneIC || oc.isLocalZoneNode(oldNode) ||
+				defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) ||
+				oc.nodeZoneClusterChanged(oldNode, newNode) ||
+				switchToOvnNode ||
+				util.NodeEncapIPsChanged(oldNode, newNode) ||
+				util.NodePrimaryDPUHostAddrAnnotationChanged(oldNode, newNode)
+		}
+		if syncZoneIC {
+			klog.Infof("Node %q in remote zone %q, network %q, needs interconnect zone sync up",
+				newNode.Name, util.GetNodeZone(newNode), oc.GetNetworkName())
+		}
+		// Reprovisioning the DPU, including OVS, changes the chassis system ID without changing the node.
+		// Delete the stale remote chassis mapping so the new chassis can be associated cleanly.
+		if oldNode != nil && config.OvnKubeNode.Mode == types.NodeModeDPU && nodeChassisChanged(oldNode, newNode) {
+			if err := oc.zoneChassisHandler.DeleteRemoteZoneNode(oldNode); err != nil {
+				aggregatedErrors = append(aggregatedErrors, err)
+			}
+			syncZoneIC = true
+		}
+		if err := oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC); err != nil {
+			aggregatedErrors = append(aggregatedErrors, err)
+		}
+	}
+
+	_, syncHostNetAddrSet := oc.syncHostNetAddrSetFailed.Load(newNode.Name)
+	if oldNode == nil || syncHostNetAddrSet {
+		if err := oc.addIPToHostNetworkNamespaceAddrSet(newNode); err != nil {
+			klog.Errorf("Failed to add node IPs to %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
+			oc.syncHostNetAddrSetFailed.Store(newNode.Name, true)
+			aggregatedErrors = append(aggregatedErrors, err)
+		} else {
+			oc.syncHostNetAddrSetFailed.Delete(newNode.Name)
+		}
+	}
+
+	err := utilerrors.Join(aggregatedErrors...)
+	if err != nil {
+		oc.recordNodeErrorEvent(newNode, err)
+	}
+	return err
+}
+
 // Cleanup stale chassis and chassis template variables with no
 // corresponding nodes.
 func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes []*corev1.Node) error {

@@ -292,6 +292,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 	var err error
 
 	cm.networkManager = networkmanager.Default()
+	cm.udnNodeController = nodecontroller.NewNodeController(cm.watchFactory, cm.networkManager.Interface())
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
 		cm.networkManager, err = networkmanager.NewForZone(config.Default.Zone, cm, wf)
 		if err != nil {
@@ -373,7 +374,7 @@ func (cm *ControllerManager) initDefaultNetworkController(observManager *observa
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache, cm.addressSetManager)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache, cm.addressSetManager, cm.udnNodeController)
 	if err != nil {
 		return err
 	}

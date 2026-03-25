@@ -1367,7 +1367,7 @@ func (e *EgressIPController) syncEgressIPs(_ []interface{}) error {
 	// since namespaces is the first object that egressIP feature starts watching
 
 	// update localZones cache of eIPCZoneController
-	// WatchNodes() is called before WatchEgressIPNamespaces() so the oc.localZones cache
+	// Node reconciliation runs before WatchEgressIPNamespaces() so the oc.localZones cache
 	// will be updated whereas WatchEgressNodes() is called after WatchEgressIPNamespaces()
 	// and so we must update the cache to ensure we are not stale.
 	// FIXME(martinkennelly): re-enable when EIP controller is fully extracted from DNC

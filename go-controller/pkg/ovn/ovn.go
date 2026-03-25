@@ -97,16 +97,6 @@ func (oc *DefaultNetworkController) recordPodEvent(reason string, addErr error, 
 	}
 }
 
-func (oc *DefaultNetworkController) recordNodeEvent(reason string, addErr error, node *corev1.Node) {
-	nodeRef, err := ref.GetReference(scheme.Scheme, node)
-	if err != nil {
-		klog.Errorf("Couldn't get a reference to node %s to post an event: '%v'", node.Name, err)
-	} else {
-		klog.V(5).Infof("Posting a %s event for node %s", corev1.EventTypeWarning, node.Name)
-		oc.recorder.Eventf(nodeRef, corev1.EventTypeWarning, reason, addErr.Error())
-	}
-}
-
 func exGatewayAnnotationsChanged(oldPod, newPod *corev1.Pod) bool {
 	return oldPod.Annotations[util.RoutingNamespaceAnnotation] != newPod.Annotations[util.RoutingNamespaceAnnotation] ||
 		oldPod.Annotations[util.RoutingNetworkAnnotation] != newPod.Annotations[util.RoutingNetworkAnnotation] ||
@@ -419,14 +409,6 @@ func gatewayChanged(oldNode, newNode *corev1.Node) bool {
 // hostCIDRsChanged compares old annotations to new and returns true if the something has changed.
 func hostCIDRsChanged(oldNode, newNode *corev1.Node) bool {
 	return util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
-}
-
-func nodeSubnetChanged(oldNode, node *corev1.Node, netName string) bool {
-	if !util.NodeSubnetAnnotationChanged(oldNode, node) {
-		return false
-	}
-
-	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, node, netName)
 }
 
 func primaryAddrChanged(oldNode, newNode *corev1.Node) bool {

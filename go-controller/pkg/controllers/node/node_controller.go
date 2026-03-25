@@ -118,7 +118,7 @@ func NewController(wf *factory.WatchFactory, name string, policy NetworkFilterin
 
 // NewNodeController builds a controller that handles node events for all UDNs.
 func NewNodeController(wf *factory.WatchFactory, networkManager networkmanager.Interface) *NodeController {
-	return NewController(wf, "udn-node-topology", &udnPolicy{networkManager: networkManager})
+	return NewController(wf, "node-topology", &udnPolicy{networkManager: networkManager})
 }
 
 // Start starts the node worker.
@@ -302,6 +302,9 @@ func (c *NodeController) reconcileNode(key string) error {
 // Reconciliation is level-driven.
 func (c *NodeController) reconcileUpdate(handler NodeHandler, oldNode, newNode *corev1.Node, netName string, oldState, newState *NodeAnnotationState) error {
 	if err := handler.ReconcileNode(oldNode, newNode, oldState, newState); err != nil {
+		// Keep the latest informer state cached even when reconciliation fails so a later
+		// delete can clean up any partial state created before the error was returned.
+		c.setCachedNode(netName, newNode)
 		return err
 	}
 

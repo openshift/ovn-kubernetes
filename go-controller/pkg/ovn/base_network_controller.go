@@ -13,7 +13,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	knet "k8s.io/api/networking/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -93,8 +92,6 @@ type BaseNetworkController struct {
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework
-	// retry framework for nodes
-	retryNodes *ovnretry.RetryFramework
 	// retry framework for namespaces
 	retryNamespaces *ovnretry.RetryFramework
 	// retry framework for network policies
@@ -104,17 +101,14 @@ type BaseNetworkController struct {
 	// retry framework for IPAMClaims
 	retryIPAMClaims *ovnretry.RetryFramework
 
-	// nodeReconciler is the shared UDN node controller. It is optional and will
-	// be nil for controllers that do not use the shared node path, such as the
-	// default network controller.
+	// nodeReconciler is the shared node controller used by controllers that
+	// reconcile node topology through pkg/controllers/node.
 	nodeReconciler *nodecontroller.NodeController
 	// node annotation cache for shared node controllers (optional)
 	nodeAnnotationCache *nodecontroller.NodeAnnotationCache
 
 	// pod events factory handler
 	podHandler *factory.Handler
-	// node events factory handler
-	nodeHandler *factory.Handler
 	// namespace events factory Handler
 	namespaceHandler *factory.Handler
 	// ipam claims events factory Handler
@@ -251,11 +245,6 @@ func (oc *BaseNetworkController) updateNADKeysChanged(nadKeys []string) bool {
 func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPods bool,
 	reconcileNodes []string, setNodeFailed func(string), reconcileNamespaces []string,
 ) error {
-	// UDNs have moved to node level-driven reconciliation
-	if !oc.IsDefault() && oc.nodeReconciler == nil {
-		return fmt.Errorf("shared node reconciler is required for UDN network %s", oc.GetNetworkName())
-	}
-
 	if reconcileRoutes {
 		err := oc.routeImportManager.ReconcileNetwork(oc.GetNetworkName())
 		if err != nil {
@@ -265,25 +254,7 @@ func (oc *BaseNetworkController) doReconcile(reconcileRoutes, reconcilePendingPo
 
 	for _, nodeName := range reconcileNodes {
 		setNodeFailed(nodeName)
-		if !oc.IsDefault() {
-			oc.nodeReconciler.ReconcileNetwork(nodeName, oc.GetNetworkName())
-			continue
-		}
-		node, err := oc.watchFactory.GetNode(nodeName)
-		if err != nil {
-			klog.Infof("Failed to get node %s for reconciling network %s: %v", nodeName, oc.GetNetworkName(), err)
-			continue
-		}
-		klog.V(5).Infof("Requesting to add node %s to network %s", nodeName, oc.GetNetworkName())
-		err = oc.retryNodes.AddRetryObjWithAddNoBackoff(node)
-		if err != nil {
-			klog.Errorf("Failed to retry node %s for network %s: %v", nodeName, oc.GetNetworkName(), err)
-		}
-	}
-
-	// only default network still uses retry framework for now
-	if len(reconcileNodes) > 0 && oc.IsDefault() {
-		oc.retryNodes.RequestRetryObjs()
+		oc.nodeReconciler.ReconcileNetwork(nodeName, oc.GetNetworkName())
 	}
 
 	if reconcilePendingPods {
@@ -964,25 +935,6 @@ func (bnc *BaseNetworkController) addLocalPodToNamespaceLocked(nsInfo *namespace
 	return ops, nil
 }
 
-// WatchNodes starts the watching of the nodes resource and calls back the appropriate handler logic
-func (bnc *BaseNetworkController) WatchNodes() error {
-	if bnc.nodeHandler != nil {
-		return nil
-	}
-	if !bnc.IsDefault() {
-		panic(fmt.Errorf("WatchNodes cannot be called on a non-default network %s", bnc.GetNetworkName()))
-	}
-	if bnc.retryNodes == nil {
-		return fmt.Errorf("node retry framework is not initialized for network %s", bnc.GetNetworkName())
-	}
-
-	handler, err := bnc.retryNodes.WatchResource()
-	if err == nil {
-		bnc.nodeHandler = handler
-	}
-	return err
-}
-
 func (bnc *BaseNetworkController) recordNodeErrorEvent(node *corev1.Node, nodeErr error) {
 	if bnc.IsUserDefinedNetwork() {
 		// TBD, noop for UDN for now
@@ -1100,40 +1052,8 @@ func (bnc *BaseNetworkController) isLayer2WithInterconnectTransport() bool {
 }
 
 // HandleNetworkRefChange enqueues node reconciliation when a NAD reference becomes active/inactive.
-func (bnc *BaseNetworkController) HandleNetworkRefChange(nodeName string, active bool) {
-	if !bnc.IsDefault() {
-		bnc.nodeReconciler.ReconcileNetwork(nodeName, bnc.GetNetworkName())
-		return
-	}
-	if bnc.retryNodes == nil || bnc.watchFactory == nil {
-		return
-	}
-	var node *corev1.Node
-	var err error
-	if active {
-		node, err = bnc.watchFactory.GetNode(nodeName)
-		if err != nil {
-			klog.V(4).Infof("%s: skipping network ref change for node %s: %v", bnc.controllerName, nodeName, err)
-			return
-		}
-	} else {
-		// Prefer the cached node for deletes; if it is gone, fall back to a stub with just the name.
-		node, err = bnc.watchFactory.GetNode(nodeName)
-		if err != nil {
-			node = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-		}
-	}
-	if active {
-		if err := bnc.retryNodes.AddRetryObjWithAddNoBackoff(node); err != nil {
-			klog.V(4).Infof("%s: failed to enqueue add for node %s: %v", bnc.controllerName, nodeName, err)
-		}
-	} else {
-		if err := bnc.retryNodes.AddRetryObjWithDeleteNoBackoff(node); err != nil {
-			klog.V(4).Infof("%s: failed to enqueue delete for node %s: %v", bnc.controllerName, nodeName, err)
-		}
-	}
-	// Nudge the queue so newly enqueued work is processed promptly.
-	bnc.retryNodes.RequestRetryObjs()
+func (bnc *BaseNetworkController) HandleNetworkRefChange(nodeName string, _ bool) {
+	bnc.nodeReconciler.ReconcileNetwork(nodeName, bnc.GetNetworkName())
 }
 
 func (bnc *BaseNetworkController) nodeZoneClusterChanged(oldNode, newNode *corev1.Node) bool {
