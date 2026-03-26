@@ -75,3 +75,23 @@ traffic-flow-tests:
 	TRAFFIC_FLOW_TESTS=$(TRAFFIC_FLOW_TESTS) \
 	./scripts/traffic-flow-tests.sh $(WHAT)
 	$(call check-coredumps)
+
+# OTE test extension binary configuration
+TESTS_EXT_BINARY := e2e/bin/ovn-kubernetes-tests-ext
+
+.PHONY: tests-ext-build
+tests-ext-build:
+	@echo "Building OTE test extension binary..."
+	@cd e2e && $(MAKE) -f bindata.mk update-bindata
+	@mkdir -p e2e/bin
+	cd e2e && GOTOOLCHAIN=auto GOSUMDB=sum.golang.org go build -mod=vendor -o bin/ovn-kubernetes-tests-ext ./cmd/extension
+	@echo "Extension binary built: $(TESTS_EXT_BINARY)"
+
+.PHONY: extension
+extension: tests-ext-build
+
+.PHONY: clean-extension
+clean-extension:
+	@echo "Cleaning extension binary..."
+	@rm -f $(TESTS_EXT_BINARY)
+	@cd e2e && $(MAKE) -f bindata.mk clean-bindata 2>/dev/null || true

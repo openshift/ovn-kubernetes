@@ -9,6 +9,10 @@ import (
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-org/ovn-kubernetes/test/e2e"
 
+	// import OTP (openshift-tests-private) migrated tests
+	_ "github.com/ovn-org/ovn-kubernetes/test/e2e/extension"
+	_ "github.com/ovn-org/ovn-kubernetes/test/e2e/extension/testdata"
+
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
