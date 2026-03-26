@@ -146,6 +146,10 @@ func (a *idAllocatorStub) ReleaseID(string) {
 	a.released = true
 }
 
+func (a *idAllocatorStub) GetID(string) int {
+	panic("not implemented") // TODO: Implement
+}
+
 func (a *idAllocatorStub) ForName(string) id.NamedAllocator {
 	panic("not implemented") // TODO: Implement
 }
