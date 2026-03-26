@@ -1205,7 +1205,7 @@ func (nc *DefaultNodeNetworkController) startEgressIPHealthCheckingServer(mgmtPo
 	}
 
 	mgmtAddress := mgmtAddresses[0]
-	if err := ip.SettleAddresses(ifName, 10); err != nil {
+	if err := ip.SettleAddresses(ifName, 10*time.Second); err != nil {
 		return fmt.Errorf("failed to start Egress IP health checking server due to unsettled IPv6: %w on interface %s", err, ifName)
 	}
 
