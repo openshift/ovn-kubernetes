@@ -244,6 +244,7 @@ require (
 	github.com/opencontainers/runc v1.2.9 // indirect
 	github.com/opencontainers/runtime-spec v1.2.0 // indirect
 	github.com/opencontainers/selinux v1.13.1 // indirect
+	github.com/openshift-eng/openshift-tests-extension v0.0.0-20260127124016-0fed2b824818 // indirect
 	github.com/openshift/api v0.0.0-20260212193555-c06ab675261f // indirect
 	github.com/openshift/client-go v0.0.0-20260108185524-48f4ccfc4e13 // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
@@ -263,6 +264,7 @@ require (
 	github.com/safchain/ethtool v0.3.1-0.20231027162144-83e5e0097c91 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/spf13/afero v1.14.0 // indirect
+	github.com/spf13/cobra v1.10.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.5.0 // indirect
 	github.com/std-uritemplate/std-uritemplate/go/v2 v2.0.3 // indirect
@@ -331,6 +333,7 @@ require (
 	k8s.io/cli-runtime v0.33.4 // indirect
 	k8s.io/cloud-provider v0.34.1 // indirect
 	k8s.io/cluster-bootstrap v0.0.0 // indirect
+	k8s.io/component-base v0.34.1 // indirect
 	k8s.io/component-helpers v0.34.1 // indirect
 	k8s.io/controller-manager v0.34.1 // indirect
 	k8s.io/cri-api v0.27.1 // indirect
@@ -365,19 +368,16 @@ require (
 	github.com/docker/docker v27.3.1+incompatible
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	github.com/onsi/ginkgo v1.16.5
-	github.com/openshift-eng/openshift-tests-extension v0.0.0-20260127124016-0fed2b824818
 	github.com/openshift-kni/k8sreporter v1.0.6
 	github.com/openshift/openshift-tests-private v0.0.0-20260325195702-fc61f537f0de
 	github.com/openshift/origin v1.5.0-alpha.3.0.20260325161443-0bf416dc3b70
 	github.com/ovn-org/ovn-kubernetes/go-controller v1.0.0
-	github.com/spf13/cobra v1.10.1
 	github.com/tidwall/gjson v1.18.0
 	github.com/vmware/govmomi v0.51.0
 	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
 	golang.org/x/crypto v0.45.0
 	google.golang.org/grpc v1.75.1
 	gopkg.in/yaml.v2 v2.4.0
-	k8s.io/component-base v0.34.1
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubectl v0.34.1
 	kubevirt.io/api v1.4.0
