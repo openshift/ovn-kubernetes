@@ -1054,7 +1054,7 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			_, err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackReplyAnyIP, tc.labels)
+			_, err := DeleteConntrack(map[string]netlink.ConntrackFilterType{tc.inputIPStr: netlink.ConntrackReplyAnyIP}, tc.inputPort, tc.inputProtocol, tc.labels)
 			if tc.errExp {
 				require.Error(t, err)
 			} else {
@@ -1067,7 +1067,7 @@ func TestDeleteConntrack(t *testing.T) {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 
-			_, err := DeleteConntrack(tc.inputIPStr, tc.inputPort, tc.inputProtocol, netlink.ConntrackOrigDstIP, tc.labels)
+			_, err := DeleteConntrack(map[string]netlink.ConntrackFilterType{tc.inputIPStr: netlink.ConntrackOrigDstIP}, tc.inputPort, tc.inputProtocol, tc.labels)
 			if tc.errExp {
 				require.Error(t, err)
 			} else {
