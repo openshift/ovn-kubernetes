@@ -218,7 +218,7 @@ func getTcpdumpOnPhysicalIface(tcpdumpPod *corev1.Pod, clientPod *corev1.Pod, cu
 
 	// Always stop tcpdump and collect output before returning, so the background
 	// process is not left running even when curl failed.
-	collectCmd := "sh -c 'kill -INT $(cat /tmp/tcpdump.pid) >/dev/null 2>&1 || true; sleep 1; cat /tmp/tcpdump.log'"
+	collectCmd := "sh -c 'sleep 0.5; kill -INT $(cat /tmp/tcpdump.pid) >/dev/null 2>&1 || true; sleep 1; cat /tmp/tcpdump.log'"
 	tcpdumpOut, err := e2epodoutput.RunHostCmdWithRetries(tcpdumpPod.Namespace, tcpdumpPod.Name, collectCmd, framework.Poll, 10*time.Second)
 	framework.ExpectNoError(err, "Failed to collect tcpdump output")
 	framework.Logf("tcpdump output:\n%s", tcpdumpOut)
