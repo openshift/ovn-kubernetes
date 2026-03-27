@@ -17,6 +17,9 @@ trap popd EXIT
 
 "${HERE}"/check-go-mod-consistency.sh
 
+echo "Generating bindata for test fixtures"
+make -C "${ROOT}/../test/e2e" -f bindata.mk update-bindata
+
 echo "Adding vendor files to tests extension"
 # FIXME: find a possibility to share go mod for openshift and test/e2e.
 # Load the vendor directory at test time for now to limit repo size at the cost
