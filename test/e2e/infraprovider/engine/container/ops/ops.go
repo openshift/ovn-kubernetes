@@ -1,4 +1,4 @@
-package container
+package ops
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container/network"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/kubernetes/test/e2e/framework"
 	utilnet "k8s.io/utils/net"
@@ -22,21 +23,16 @@ const (
 	nameFormat = "{{.Name}}"
 )
 
-// Runner abstracts command execution for various tools (docker, podman,
-// ssh, kcli, etc.)
-// Implementations execute commands with the provided arguments
-// and return combined stdout/stderr.
-type Runner interface {
-	// Run executes a command with the given arguments
-	// and returns its output, or an error on failure.
-	Run(args ...string) (string, error)
+// ContainerOps provides reusable helper methods for container lifecycle and network management.
+type ContainerOps struct {
+	// runtime string docker or podman
+	runtime string
+	// cmdRunner executes container runtime commands and returns their output.
+	cmdRunner api.Runner
 }
 
-// ContainerOps provides reusable helper methods for container lifecycle and network management.
-// It can be embedded by infrastructure providers to inherit common container operations.
-type ContainerOps struct {
-	// Runner executes container engine commands and returns their output.
-	CmdRunner Runner
+func NewContainerOps(runtime string, cmdRunner api.Runner) *ContainerOps {
+	return &ContainerOps{runtime: runtime, cmdRunner: cmdRunner}
 }
 
 // CreateNetwork creates a network using the provided command runner
@@ -67,7 +63,7 @@ func (o *ContainerOps) CreateNetwork(name string, subnets ...string) error {
 	if v6 {
 		cmdArgs = append(cmdArgs, "--ipv6")
 	}
-	stdOut, err := o.CmdRunner.Run(cmdArgs...)
+	stdOut, err := o.run(cmdArgs...)
 	if err != nil {
 		return fmt.Errorf("failed to create Network with command %q: %s (%s)", strings.Join(cmdArgs, " "), err, stdOut)
 	}
@@ -90,11 +86,11 @@ func (o *ContainerOps) networkExists(networkName string) (bool, error) {
 
 // getContainersAttachedToNetwork returns a list of containers attached to a network
 func (o *ContainerOps) getContainersAttachedToNetwork(networkName string) ([]string, error) {
-	out, err := o.CmdRunner.Run("network", "inspect", networkName)
+	out, err := o.run("network", "inspect", networkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect network %s: %w", networkName, err)
 	}
-	var result []NetworkInspect
+	var result []networkInspect
 	err = json.Unmarshal([]byte(out), &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal network %s inspect output: %w", networkName, err)
@@ -125,7 +121,7 @@ func (o *ContainerOps) AttachNetwork(network api.Network, container string) erro
 	if attached {
 		return fmt.Errorf("network %s is already attached to container %s", network.Name(), container)
 	}
-	out, err := o.CmdRunner.Run("network", "connect", network.Name(), container)
+	out, err := o.run("network", "connect", network.Name(), container)
 	if err != nil {
 		return fmt.Errorf("failed to attach network to container %s: %s (%s)", container, err, out)
 	}
@@ -147,7 +143,7 @@ func (o *ContainerOps) DetachNetwork(network api.Network, container string) erro
 		// for transient error (e.g. command timeout).
 		return err
 	}
-	out, err := o.CmdRunner.Run("network", "disconnect", network.Name(), container)
+	out, err := o.run("network", "disconnect", network.Name(), container)
 	if err != nil {
 		return fmt.Errorf("failed to disconnect network from container %s: %s (%s)", container, err, out)
 	}
@@ -183,11 +179,11 @@ func (o *ContainerOps) GetNetworkInterface(containerName, networkName string) (a
 	if !exists {
 		return api.NetworkInterface{}, fmt.Errorf("failed to find container %q: %w", containerName, api.NotFound)
 	}
-	out, err := o.CmdRunner.Run("inspect", containerName)
+	out, err := o.run("inspect", containerName)
 	if err != nil {
 		return api.NetworkInterface{}, fmt.Errorf("failed to inspect container %q: %w", containerName, err)
 	}
-	var inspectResult []ContainerInspect
+	var inspectResult []containerInspect
 	err = json.Unmarshal([]byte(out), &inspectResult)
 	if err != nil {
 		return api.NetworkInterface{}, fmt.Errorf("failed to inspect container %q: %w", containerName, err)
@@ -242,7 +238,7 @@ func (o *ContainerOps) GetNetworkInterface(containerName, networkName string) (a
 		if err != nil {
 			return "", fmt.Errorf("failed to get IP family flag for %s: %w", ip, err)
 		}
-		allInfAddrBytes, err := o.CmdRunner.Run("exec", "-i", containerName, "ip", "-br", ipFlag, "a", "sh")
+		allInfAddrBytes, err := o.run("exec", "-i", containerName, "ip", "-br", ipFlag, "a", "sh")
 		if err != nil {
 			return "", fmt.Errorf("failed to find interface with IP %s on container %s with command 'ip -br a sh': err %v, out: %s", ip, containerName,
 				err, allInfAddrBytes)
@@ -272,7 +268,7 @@ func (o *ContainerOps) GetNetworkInterface(containerName, networkName string) (a
 		}
 		infName := infNamesSplit[0]
 		// validate its an interface name on the Node with iproute2
-		out, err := o.CmdRunner.Run("exec", "-i", containerName, "ip", "link", "show", infName)
+		out, err := o.run("exec", "-i", containerName, "ip", "link", "show", infName)
 		if err != nil {
 			return "", fmt.Errorf("failed to validate that interface name %q with IP %s exists in container %s: err %v, out: %s",
 				infName, ip, containerName, err, out)
@@ -310,7 +306,7 @@ func (o *ContainerOps) doesContainerNameExist(name string) (bool, error) {
 }
 
 func (o *ContainerOps) ListNetworks() ([]string, error) {
-	output, err := o.CmdRunner.Run("network", "ls", "--format", nameFormat)
+	output, err := o.run("network", "ls", "--format", nameFormat)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list networks: %w", err)
 	}
@@ -326,7 +322,7 @@ func (o *ContainerOps) ListNetworks() ([]string, error) {
 // GetContainerState returns the state of a container by name
 // Returns empty string if container doesn't exist
 func (o *ContainerOps) GetContainerState(containerName string) (string, error) {
-	stdOut, err := o.CmdRunner.Run("ps", "-a", "-f", fmt.Sprintf("name=^%s$", containerName), "--format", "{{.State}}")
+	stdOut, err := o.run("ps", "-a", "-f", fmt.Sprintf("name=^%s$", containerName), "--format", "{{.State}}")
 	if err != nil {
 		return "", fmt.Errorf("failed to check container state for %s: %s (%s)", containerName, err, stdOut)
 	}
@@ -339,8 +335,8 @@ func (o *ContainerOps) GetContainerState(containerName string) (string, error) {
 // It inspects the network and returns its IPAM configuration, normalizing
 // differences between Docker and Podman formats. Returns api.NotFound if
 // the network does not exist.
-func (o *ContainerOps) GetNetwork(networkName string) (ContainerEngineNetwork, error) {
-	n := ContainerEngineNetwork{NetName: networkName}
+func (o *ContainerOps) GetNetwork(networkName string) (network.ContainerEngineNetwork, error) {
+	n := network.ContainerEngineNetwork{NetName: networkName}
 	exists, err := o.networkExists(networkName)
 	if err != nil {
 		return n, fmt.Errorf("failed to check if network %s exists: %w", networkName, err)
@@ -348,11 +344,11 @@ func (o *ContainerOps) GetNetwork(networkName string) (ContainerEngineNetwork, e
 	if !exists {
 		return n, api.NotFound
 	}
-	out, err := o.CmdRunner.Run("network", "inspect", networkName)
+	out, err := o.run("network", "inspect", networkName)
 	if err != nil {
 		return n, fmt.Errorf("failed to inspect network %s: %w", networkName, err)
 	}
-	var result []NetworkInspect
+	var result []networkInspect
 	err = json.Unmarshal([]byte(out), &result)
 	if err != nil {
 		return n, fmt.Errorf("failed to unmarshal network %s inspect output: %w", networkName, err)
@@ -401,7 +397,7 @@ func (o *ContainerOps) DeleteNetwork(network api.Network) error {
 				return false, nil
 			}
 		}
-		stdOut, err := o.CmdRunner.Run("network", "rm", network.Name())
+		stdOut, err := o.run("network", "rm", network.Name())
 		if err != nil {
 			framework.Logf("failed to delete network %s: %s (%s)", network.Name(), err, stdOut)
 			return false, nil
@@ -441,7 +437,7 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 		}
 	}
 	framework.Logf("creating external container with command: %q\n", strings.Join(cmd, " "))
-	stdOut, err := o.CmdRunner.Run(cmd...)
+	stdOut, err := o.run(cmd...)
 	if err != nil {
 		return container, fmt.Errorf("failed to create external container %s: %s (%s)", container, err, stdOut)
 	}
@@ -480,12 +476,12 @@ func (o *ContainerOps) DeleteExternalContainer(container api.ExternalContainer) 
 	if !exists {
 		return nil
 	}
-	stdOut, err := o.CmdRunner.Run("rm", "-f", container.Name)
+	stdOut, err := o.run("rm", "-f", container.Name)
 	if err != nil {
 		return fmt.Errorf("failed to delete external container (%s): %v (%s)", container, err, stdOut)
 	}
 	err = wait.ExponentialBackoff(wait.Backoff{Duration: 1 * time.Second, Factor: 5, Steps: 5}, wait.ConditionFunc(func() (done bool, err error) {
-		stdOut, err = o.CmdRunner.Run("ps", "-a", "-f", fmt.Sprintf("name=^%s$", container.Name), "-q")
+		stdOut, err = o.run("ps", "-a", "-f", fmt.Sprintf("name=^%s$", container.Name), "-q")
 		if err != nil {
 			return false, fmt.Errorf("failed to check if external container (%s) is deleted: %v (%s)", container, err, stdOut)
 		}
@@ -510,7 +506,7 @@ func (o *ContainerOps) ExecContainerCommand(name string, cmd []string) (string, 
 		return "", fmt.Errorf("cannot exec into container %q because it doesn't exist: %w", name, api.NotFound)
 	}
 	cmdArgs := append([]string{"exec", name}, cmd...)
-	out, err := o.CmdRunner.Run(cmdArgs...)
+	out, err := o.run(cmdArgs...)
 	if err != nil {
 		return "", fmt.Errorf("failed to exec container command (%s): err: %v, stdout: %q", strings.Join(cmdArgs, " "), err, out)
 	}
@@ -525,14 +521,14 @@ func (o *ContainerOps) GetExternalContainerLogs(container api.ExternalContainer)
 	if !exists {
 		return "", fmt.Errorf("external container %q doesn't exist, therefore no logs can be retrieved: %w", container.Name, api.NotFound)
 	}
-	stdOut, err := o.CmdRunner.Run("logs", container.Name)
+	stdOut, err := o.run("logs", container.Name)
 	if err != nil {
 		return "", fmt.Errorf("failed to get logs of external container (%s): %v (%s)", container, err, stdOut)
 	}
 	return stdOut, nil
 }
 
-func (o *ContainerOps) ShutdownContainer(name string) error {
+func (o *ContainerOps) StopContainer(name string) error {
 	state, err := o.GetContainerState(name)
 	if err != nil {
 		return err
@@ -549,7 +545,7 @@ func (o *ContainerOps) ShutdownContainer(name string) error {
 	}
 
 	framework.Logf("Shutting down container %s (current state: %s)", name, state)
-	stdOut, err := o.CmdRunner.Run("stop", name)
+	stdOut, err := o.run("stop", name)
 	if err != nil {
 		return fmt.Errorf("failed to shutdown container %s: %s (%s)", name, err, stdOut)
 	}
@@ -574,7 +570,7 @@ func (o *ContainerOps) StartContainer(name string) error {
 	}
 
 	framework.Logf("Starting container %s (current state: %s)", name, state)
-	stdOut, err := o.CmdRunner.Run("start", name)
+	stdOut, err := o.run("start", name)
 	if err != nil {
 		return fmt.Errorf("failed to start container %s: %s (%s)", name, err, stdOut)
 	}
@@ -582,30 +578,34 @@ func (o *ContainerOps) StartContainer(name string) error {
 	return nil
 }
 
+func (o *ContainerOps) run(args ...string) (string, error) {
+	return o.cmdRunner.Run(o.runtime, args...)
+}
+
 func isHostNetworked(networkName string) bool {
 	return networkName == "host"
 }
 
-// NetworkInspect represents the JSON output from 'docker/podman network inspect'
+// networkInspect represents the JSON output from 'docker/podman network inspect'
 // Docker uses IPAM.Config, while Podman uses subnets at the top level
-type NetworkInspect struct {
-	Name       string                          `json:"Name"`
-	IPAM       IPAMConfig                      `json:"IPAM"`              // Docker
-	Subnets    []ContainerEngineNetworkConfig  `json:"subnets,omitempty"` // Podman
-	Containers map[string]NetworkContainerInfo `json:"Containers"`
+type networkInspect struct {
+	Name       string                                 `json:"Name"`
+	IPAM       IPAMConfig                             `json:"IPAM"`              // Docker
+	Subnets    []network.ContainerEngineNetworkConfig `json:"subnets,omitempty"` // Podman
+	Containers map[string]NetworkContainerInfo        `json:"Containers"`
 }
 
 type IPAMConfig struct {
-	Config []ContainerEngineNetworkConfig `json:"Config"`
+	Config []network.ContainerEngineNetworkConfig `json:"Config"`
 }
 
 type NetworkContainerInfo struct {
 	Name string `json:"Name"`
 }
 
-// ContainerInspect represents the JSON output from 'docker/podman inspect'
+// containerInspect represents the JSON output from 'docker/podman inspect'
 // for a container.
-type ContainerInspect struct {
+type containerInspect struct {
 	NetworkSettings struct {
 		Networks map[string]EndpointSettings `json:"Networks"`
 	} `json:"NetworkSettings"`
