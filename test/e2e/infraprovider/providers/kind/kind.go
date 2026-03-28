@@ -6,14 +6,16 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/portalloc"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/runner"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,47 +23,21 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
-// IsProvider returns true if clusters provider is KinD
-func IsProvider() bool {
-	_, err := exec.LookPath("kubectl")
-	if err != nil {
-		framework.Logf("kubectl is not installed: %v", err)
-		return false
-	}
-	currentCtx, err := exec.Command("kubectl", "config", "current-context").CombinedOutput()
-	if err != nil {
-		framework.Logf("unable to get current cluster context: %v", err)
-		return false
-	}
-	if strings.Contains(string(currentCtx), "kind-ovn") {
-		return true
-	}
-	return false
-}
-
 type kind struct {
-	container.Provider
-	engine string
+	engine   *container.Engine
+	HostPort *portalloc.PortAllocator
 }
 
 func New() api.Provider {
-	containerEngine := container.Get()
-	kind := &kind{
-		Provider: container.Provider{
-			ExternalContainerPort: portalloc.New(12000, 65535),
-			HostPort:              portalloc.New(1024, 65535),
-		},
-		engine: containerEngine.String()}
-	kind.ContainerOps = &container.ContainerOps{CmdRunner: kind}
-	return kind
-}
-
-func (r *kind) Run(args ...string) (string, error) {
-	out, err := exec.Command(r.engine, args...).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("command failed: %w, output: %s", err, out)
+	if !infraprovider.IsKind() {
+		panic("Cluster provider must be KinD type")
 	}
-	return string(out), nil
+	ce := getContainerRuntime()
+	cmdRunner := runner.NewDirectRunner()
+	kind := &kind{
+		engine:   container.NewEngine(ce.String(), cmdRunner),
+		HostPort: portalloc.New(1024, 65535)}
+	return kind
 }
 
 func (k *kind) Name() string {
@@ -73,11 +49,47 @@ func (k *kind) PrimaryNetwork() (api.Network, error) {
 }
 
 func (k *kind) GetNetwork(name string) (api.Network, error) {
-	return k.ContainerOps.GetNetwork(name)
+	return k.engine.GetNetwork(name)
 }
 
 func (k *kind) GetDefaultTimeoutContext() *framework.TimeoutContext {
 	return framework.NewTimeoutContext()
+}
+
+func (k *kind) GetK8HostPort() uint16 {
+	return k.HostPort.Allocate()
+}
+
+func (k *kind) GetK8NodeNetworkInterface(container string, network api.Network) (api.NetworkInterface, error) {
+	return k.engine.GetNetworkInterface(container, network.Name())
+}
+
+func (k *kind) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
+	return k.engine.ExecContainerCommand(nodeName, cmd)
+}
+
+func (k *kind) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
+	return k.engine.ExecExternalContainerCommand(container, cmd)
+}
+
+func (k *kind) ExternalContainerPrimaryInterfaceName() string {
+	return k.engine.ExternalContainerPrimaryInterfaceName()
+}
+
+func (k *kind) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
+	return k.engine.GetExternalContainerLogs(container)
+}
+
+func (k *kind) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
+	return k.engine.GetExternalContainerNetworkInterface(container, network)
+}
+
+func (k *kind) GetExternalContainerPort() uint16 {
+	return k.engine.GetExternalContainerPort()
+}
+
+func (k *kind) ListNetworks() ([]string, error) {
+	return k.engine.ListNetworks()
 }
 
 func (k *kind) PreloadImages(imgs []string) {
@@ -86,14 +98,13 @@ func (k *kind) PreloadImages(imgs []string) {
 		framework.Logf("Warning: could not determine KIND cluster name, skipping image preload")
 		return
 	}
-	ce := container.Get()
 	pullBackoff := wait.Backoff{Duration: 5 * time.Second, Factor: 2, Steps: 5}
 	for _, img := range imgs {
 		framework.Logf("Preloading image %s into KIND cluster %s", img, clusterName)
 		var out []byte
 		err := wait.ExponentialBackoff(pullBackoff, func() (bool, error) {
 			var pullErr error
-			out, pullErr = exec.Command(ce.String(), "pull", img).CombinedOutput()
+			out, pullErr = exec.Command(engine.String(), "pull", img).CombinedOutput()
 			if pullErr != nil {
 				framework.Logf("Retrying pull for image %s: %v (%s)", img, pullErr, out)
 				return false, nil
@@ -104,9 +115,9 @@ func (k *kind) PreloadImages(imgs []string) {
 			framework.Logf("Warning: failed to pull image %s after retries: %v (%s)", img, err, out)
 			continue
 		}
-		if ce == container.Podman {
+		if engine == podman {
 			os.Remove("/tmp/image.tar")
-			out, err = exec.Command(ce.String(), "save", "-o", "/tmp/image.tar", img).CombinedOutput()
+			out, err = exec.Command(engine.String(), "save", "-o", "/tmp/image.tar", img).CombinedOutput()
 			if err != nil {
 				framework.Logf("Warning: failed to save image %s: %v (%s)", img, err, out)
 				continue
@@ -137,44 +148,50 @@ func kindClusterName() string {
 }
 
 func (k *kind) ShutdownNode(nodeName string) error {
-	return k.ShutdownContainer(nodeName)
+	return k.engine.StopContainer(nodeName)
 }
 
 func (k *kind) StartNode(nodeName string) error {
-	return k.StartContainer(nodeName)
+	return k.engine.StartContainer(nodeName)
 }
 
 func (k *kind) NewTestContext() api.Context {
+	context := &testcontext.TestContext{}
+	ginkgo.DeferCleanup(context.CleanUp)
 	ck := &contextKind{
-		TestContext: container.TestContext{
-			Mutex:        sync.Mutex{},
-			ContainerOps: k.ContainerOps,
-		},
+		TestContext: context,
+		engine:      k.engine.WithTestContext(context),
 	}
-	ginkgo.DeferCleanup(ck.CleanUp)
 	return ck
 }
 
 type contextKind struct {
-	container.TestContext
+	*testcontext.TestContext
+	engine *container.Engine
 }
 
-func (c *contextKind) GetAttachedNetworks() (api.Networks, error) {
-	c.Lock()
-	defer c.Unlock()
-	return c.getAttachedNetworks()
+func (c *contextKind) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
+	return c.engine.CreateExternalContainer(container)
 }
 
-func (c *contextKind) getAttachedNetworks() (api.Networks, error) {
-	primaryNetwork, err := c.GetNetwork("kind")
-	if err != nil {
-		return api.Networks{}, fmt.Errorf("failed to get primary network: %v", err)
-	}
-	attachedNetworks := api.Networks{List: []api.Network{primaryNetwork}}
-	for _, attachment := range c.CleanUpNetworkAttachments.List {
-		attachedNetworks.InsertNoDupe(attachment.Network)
-	}
-	return attachedNetworks, nil
+func (c *contextKind) DeleteExternalContainer(container api.ExternalContainer) error {
+	return c.engine.DeleteExternalContainer(container)
+}
+
+func (c *contextKind) CreateNetwork(name string, subnets ...string) (api.Network, error) {
+	return c.engine.CreateNetwork(name, subnets...)
+}
+
+func (c *contextKind) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
+	return c.engine.AttachNetwork(network, container)
+}
+
+func (c *contextKind) DetachNetwork(network api.Network, container string) error {
+	return c.engine.DetachNetwork(network, container)
+}
+
+func (c *contextKind) DeleteNetwork(network api.Network) error {
+	return c.engine.DeleteNetwork(network)
 }
 
 func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
@@ -219,7 +236,7 @@ func (c *contextKind) SetupUnderlay(f *framework.Framework, underlay api.Underla
 	}
 	for _, ovsPod := range ovsPods {
 		if underlay.BridgeName != deploymentconfig.Get().ExternalBridgeName() {
-			underlayInterface, err := c.GetNetworkInterface(ovsPod.Spec.NodeName, underlay.PhysicalNetworkName)
+			underlayInterface, err := c.engine.GetNetworkInterface(ovsPod.Spec.NodeName, underlay.PhysicalNetworkName)
 			if err != nil {
 				return fmt.Errorf("failed to get underlay interface for network %s on node %s: %w", underlay.PhysicalNetworkName, ovsPod.Spec.NodeName, err)
 			}

@@ -1,28 +1,14 @@
 package infraprovider
 
 import (
-	"fmt"
+	"os/exec"
+	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/internal/kind"
+	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 var infraProvider api.Provider
-
-// New creates a new infrastructure provider by name.
-func New(providerName string) api.Provider {
-	switch providerName {
-	case "kind":
-		return kind.New()
-	default:
-		panic(fmt.Sprintf("unknown infra provider %q", providerName))
-	}
-}
-
-// IsKindProvider returns true if clusters provider is KinD.
-func IsKindProvider() bool {
-	return kind.IsProvider()
-}
 
 // Set infrastructure provider.
 func Set(provider api.Provider) {
@@ -35,4 +21,22 @@ func Get() api.Provider {
 		panic("infra provider not set")
 	}
 	return infraProvider
+}
+
+// IsKind returns true if cluster provider is KinD
+func IsKind() bool {
+	_, err := exec.LookPath("kubectl")
+	if err != nil {
+		framework.Logf("kubectl is not installed: %v", err)
+		return false
+	}
+	currentCtx, err := exec.Command("kubectl", "config", "current-context").CombinedOutput()
+	if err != nil {
+		framework.Logf("unable to get current cluster context: %v", err)
+		return false
+	}
+	if strings.Contains(string(currentCtx), "kind-ovn") {
+		return true
+	}
+	return false
 }
