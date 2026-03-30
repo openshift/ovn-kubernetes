@@ -44,6 +44,8 @@ type VTEP struct {
 }
 
 // VTEPSpec defines the desired state of VTEP.
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Managed' || size(self.cidrs) >= size(oldSelf.cidrs)", message="CIDRs cannot be removed in managed mode; only appending new CIDRs or expanding the existing CIDRs is allowed"
+// +kubebuilder:validation:XValidation:rule="self.mode != 'Managed' || self.cidrs.all(i, v, i >= size(oldSelf.cidrs) || (cidr(v).containsIP(cidr(oldSelf.cidrs[i]).ip()) && cidr(v).prefixLength() <= cidr(oldSelf.cidrs[i]).prefixLength()))", message="In managed mode, existing CIDRs must remain at the same position and can only be expanded to a wider mask; shrinking the mask or reordering is not allowed"
 type VTEPSpec struct {
 	// CIDRs is the list of IP ranges from which VTEP IPs are discovered (unmanaged mode) or allocated (managed mode).
 	// Multiple CIDRs may be specified to expand capacity over time without recreating the VTEP.
@@ -51,8 +53,13 @@ type VTEPSpec struct {
 	// Each node receives at most one IP per address family from the CIDRs listed here.
 	// In managed mode, CIDRs are consumed sequentially: IPs are allocated from the first CIDR until it is
 	// exhausted, then from the next, and so on.
+	// In managed mode, CIDRs are append-only: existing entries cannot be removed, reordered, or shrunk to a
+	// smaller mask; they can only be expanded to a wider mask, and new entries may be appended.
 	// In unmanaged mode, if multiple IPs on a node match the configured CIDRs, or if the match is otherwise
 	// ambiguous, the VTEP will be placed into a failed status.
+	// In unmanaged mode, CIDRs may be freely added, removed, reordered, or resized.
+	// Caution: removing or modifying CIDRs in unmanaged mode that are actively in use may cause traffic disruption;
+	// no downtime guarantees are provided for such operations.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=20

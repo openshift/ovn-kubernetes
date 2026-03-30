@@ -32,8 +32,13 @@ type VTEPSpecApplyConfiguration struct {
 	// Each node receives at most one IP per address family from the CIDRs listed here.
 	// In managed mode, CIDRs are consumed sequentially: IPs are allocated from the first CIDR until it is
 	// exhausted, then from the next, and so on.
+	// In managed mode, CIDRs are append-only: existing entries cannot be removed, reordered, or shrunk to a
+	// smaller mask; they can only be expanded to a wider mask, and new entries may be appended.
 	// In unmanaged mode, if multiple IPs on a node match the configured CIDRs, or if the match is otherwise
 	// ambiguous, the VTEP will be placed into a failed status.
+	// In unmanaged mode, CIDRs may be freely added, removed, reordered, or resized.
+	// Caution: removing or modifying CIDRs in unmanaged mode that are actively in use may cause traffic disruption;
+	// no downtime guarantees are provided for such operations.
 	CIDRs []vtepv1.CIDR `json:"cidrs,omitempty"`
 	// Mode specifies how VTEP IPs are managed.
 	// "Managed" means OVN-Kubernetes allocates and assigns VTEP IPs per node automatically.
