@@ -812,7 +812,7 @@ func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidr
 	}
 
 	// Convert string CIDRs to vtepv1.CIDR type
-	vtepCIDRs := make(vtepv1.DualStackCIDRs, len(cidrs))
+	vtepCIDRs := make([]vtepv1.CIDR, len(cidrs))
 	for i, cidr := range cidrs {
 		vtepCIDRs[i] = vtepv1.CIDR(cidr)
 	}

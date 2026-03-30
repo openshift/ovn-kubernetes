@@ -45,12 +45,19 @@ type VTEP struct {
 
 // VTEPSpec defines the desired state of VTEP.
 type VTEPSpec struct {
-	// CIDRs is the list of IP ranges from which VTEP IPs are allocated.
-	// Dual-stack clusters may set 2 CIDRs (one for each IP family), otherwise only 1 CIDR is allowed.
-	// The format should match standard CIDR notation (for example, "100.64.0.0/24" or "fd00::/64").
+	// CIDRs is the list of IP ranges from which VTEP IPs are discovered (unmanaged mode) or allocated (managed mode).
+	// Multiple CIDRs may be specified to expand capacity over time without recreating the VTEP.
+	// Each entry must be a valid network address in CIDR notation (for example, "100.64.0.0/24" or "fd00:100::/64").
+	// Each node receives at most one IP per address family from the CIDRs listed here.
+	// In managed mode, CIDRs are consumed sequentially: IPs are allocated from the first CIDR until it is
+	// exhausted, then from the next, and so on.
+	// In unmanaged mode, if multiple IPs on a node match the configured CIDRs, or if the match is otherwise
+	// ambiguous, the VTEP will be placed into a failed status.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=20
 	// +required
-	CIDRs DualStackCIDRs `json:"cidrs"`
+	CIDRs []CIDR `json:"cidrs"`
 
 	// Mode specifies how VTEP IPs are managed.
 	// "Managed" means OVN-Kubernetes allocates and assigns VTEP IPs per node automatically.
@@ -66,12 +73,6 @@ type VTEPSpec struct {
 // +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self) == cidr(self).masked()", message="CIDR must be a valid network address"
 // +kubebuilder:validation:MaxLength=43
 type CIDR string
-
-// DualStackCIDRs is a list of CIDRs that supports dual-stack (IPv4 and IPv6).
-// +kubebuilder:validation:MinItems=1
-// +kubebuilder:validation:MaxItems=2
-// +kubebuilder:validation:XValidation:rule="size(self) != 2 || !isCIDR(self[0]) || !isCIDR(self[1]) || cidr(self[0]).ip().family() != cidr(self[1]).ip().family()", message="When 2 CIDRs are set, they must be from different IP families"
-type DualStackCIDRs []CIDR
 
 // VTEPMode defines the mode of VTEP IP allocation.
 // +kubebuilder:validation:Enum=Managed;Unmanaged

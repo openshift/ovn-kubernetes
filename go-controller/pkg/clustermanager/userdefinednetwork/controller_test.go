@@ -2861,7 +2861,7 @@ func testVTEP(name string) *vtepv1.VTEP {
 			UID:  types.UID("vtep-" + name),
 		},
 		Spec: vtepv1.VTEPSpec{
-			CIDRs: vtepv1.DualStackCIDRs{"100.64.0.0/24"},
+			CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
 			Mode:  vtepv1.VTEPModeManaged,
 		},
 	}

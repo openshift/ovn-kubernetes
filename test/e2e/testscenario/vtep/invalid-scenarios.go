@@ -29,7 +29,7 @@ spec:
 `,
 	},
 	{
-		Description: "CIDRs cannot have more than 2 items",
+		Description: "CIDRs cannot have more than 20 items",
 		ExpectedErr: `spec.cidrs: Too many`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
@@ -38,37 +38,27 @@ metadata:
   name: vtep-too-many-cidrs
 spec:
   cidrs:
-  - "10.20.100.0/24"
-  - "10.30.100.0/24"
-  - "10.40.100.0/24"
-`,
-	},
-	{
-		Description: "Dual-stack CIDRs must be from different IP families",
-		ExpectedErr: `When 2 CIDRs are set, they must be from different IP families`,
-		Manifest: `
-apiVersion: k8s.ovn.org/v1
-kind: VTEP
-metadata:
-  name: vtep-same-family-cidrs
-spec:
-  cidrs:
-  - "10.20.100.0/24"
-  - "10.30.100.0/24"
-`,
-	},
-	{
-		Description: "Dual-stack CIDRs must be from different IP families (IPv6)",
-		ExpectedErr: `When 2 CIDRs are set, they must be from different IP families`,
-		Manifest: `
-apiVersion: k8s.ovn.org/v1
-kind: VTEP
-metadata:
-  name: vtep-same-family-cidrs-ipv6
-spec:
-  cidrs:
-  - "fd00:10:20::/64"
-  - "fd00:10:30::/64"
+  - "10.0.0.0/24"
+  - "10.1.0.0/24"
+  - "10.2.0.0/24"
+  - "10.3.0.0/24"
+  - "10.4.0.0/24"
+  - "10.5.0.0/24"
+  - "10.6.0.0/24"
+  - "10.7.0.0/24"
+  - "10.8.0.0/24"
+  - "10.9.0.0/24"
+  - "10.10.0.0/24"
+  - "10.11.0.0/24"
+  - "10.12.0.0/24"
+  - "10.13.0.0/24"
+  - "10.14.0.0/24"
+  - "10.15.0.0/24"
+  - "10.16.0.0/24"
+  - "10.17.0.0/24"
+  - "fd00:1::/64"
+  - "fd00:2::/64"
+  - "fd00:3::/64"
 `,
 	},
 	{
