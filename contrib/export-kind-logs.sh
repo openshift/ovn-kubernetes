@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # Export kind cluster logs and collect coredump binaries
 # Usage: ./export-kind-logs.sh [logs_dir]
 # Default logs_dir: /tmp/kind/logs

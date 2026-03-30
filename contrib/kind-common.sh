@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 if [ "${BASH_SOURCE[0]}" -ef "$0" ]
 then
     >&2 echo 'This file contains bash helper functions that are common to'

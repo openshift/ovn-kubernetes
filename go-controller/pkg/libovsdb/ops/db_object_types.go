@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ops
 
 import "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"

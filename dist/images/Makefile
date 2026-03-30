@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # build image for ovn overlay network cni plugin
 
 # ovnkube-db.yaml, ovnkube-node.yaml, and onvkube-master.yaml use this image.
