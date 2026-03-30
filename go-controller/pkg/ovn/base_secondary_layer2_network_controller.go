@@ -376,7 +376,7 @@ func getDenyARPAndNSOnMACVRF(controllerName, macvrfportName string, nodeLRPMAC n
 				"outport==%q && eth.dst==%s && nd && icmp.type==135 && nd.target==%s",
 				macvrfportName,
 				nodeLRPMAC.String(),
-				gwIfAddrv4.IP.String(),
+				gwIfAddrv6.IP.String(),
 			),
 			nbdb.ACLActionDrop,
 			nil,

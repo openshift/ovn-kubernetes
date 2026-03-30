@@ -145,6 +145,24 @@ func (_m *Interface) PatchNode(old *corev1.Node, new *corev1.Node) error {
 	return r0
 }
 
+// PatchPodStatusAnnotations provides a mock function with given fields: oldPod, newPod
+func (_m *Interface) PatchPodStatusAnnotations(oldPod *corev1.Pod, newPod *corev1.Pod) error {
+	ret := _m.Called(oldPod, newPod)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PatchPodStatusAnnotations")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*corev1.Pod, *corev1.Pod) error); ok {
+		r0 = rf(oldPod, newPod)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // SetAnnotationsOnNamespace provides a mock function with given fields: namespaceName, annotations
 func (_m *Interface) SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error {
 	ret := _m.Called(namespaceName, annotations)
@@ -246,24 +264,6 @@ func (_m *Interface) UpdateNodeStatus(node *corev1.Node) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*corev1.Node) error); ok {
 		r0 = rf(node)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// UpdatePodStatus provides a mock function with given fields: pod
-func (_m *Interface) UpdatePodStatus(pod *corev1.Pod) error {
-	ret := _m.Called(pod)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdatePodStatus")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*corev1.Pod) error); ok {
-		r0 = rf(pod)
 	} else {
 		r0 = ret.Error(0)
 	}
