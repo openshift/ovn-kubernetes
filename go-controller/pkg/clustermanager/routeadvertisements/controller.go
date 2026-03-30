@@ -30,21 +30,21 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	controllerutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	eiptypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressiplisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
-	ratypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
-	raapply "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/applyconfiguration/routeadvertisements/v1"
-	raclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
-	ralisters "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/listers/routeadvertisements/v1"
-	apitypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
-	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
+	eiptypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressiplisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
+	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	raapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/applyconfiguration/routeadvertisements/v1"
+	raclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
+	ralisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/listers/routeadvertisements/v1"
+	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
+	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
@@ -533,8 +533,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 
 	// Validate EVPN configuration requirements
 	hasEVPNConfig := len(selectedNetworks.macVRFConfigs) > 0 || len(selectedNetworks.ipVRFConfigs) > 0
-	if hasEVPNConfig && !util.IsEVPNEnabled() {
+	if hasEVPNConfig && !config.OVNKubernetesFeature.EnableEVPN {
 		return nil, nil, fmt.Errorf("%w: EVPN networks selected but EVPN feature is not enabled", errConfig)
+	}
+	if hasEVPNConfig && config.Gateway.Mode != config.GatewayModeLocal {
+		return nil, nil, fmt.Errorf("%w: EVPN networks selected but EVPN feature is only supported in local gateway mode", errConfig)
 	}
 	// Require a router with default VRF for any EVPN configuration, since the
 	// global EVPN section with advertise-all-vni is required for EVPN to work properly.
@@ -733,15 +736,38 @@ func (c *Controller) generateFRRConfiguration(
 		// prefixes as appropriate
 		targetRouter := router
 		targetRouter.Prefixes = advertisePrefixes
+
+		// For managed FRRConfigurations, the base config lists all nodes as
+		// neighbors. When generating the per-node FRRConfiguration, we need
+		// to exclude the node itself from its own neighbor list to avoid
+		// self-peering. Look up the node's primary interface addresses so
+		// we can filter them out below.
+		node, err := c.nodeLister.Get(nodeName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node %s: %w", nodeName, err)
+		}
+		nodeIfAddr, err := util.GetNodeIfAddrAnnotation(node)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node %s primary interface address annotation: %w", nodeName, err)
+		}
+		// Strip CIDR mask to get bare IP strings for neighbor comparison.
+		nodeV4, _, _ := strings.Cut(nodeIfAddr.IPv4, "/")
+		nodeV6, _, _ := strings.Cut(nodeIfAddr.IPv6, "/")
+
 		targetRouter.Neighbors = make([]frrtypes.Neighbor, 0, len(source.Spec.BGP.Routers[i].Neighbors))
 		for _, neighbor := range source.Spec.BGP.Routers[i].Neighbors {
+			// Skip neighbors that are the node itself
+			if (nodeV4 != "" && neighbor.Address == nodeV4) || (nodeV6 != "" && neighbor.Address == nodeV6) {
+				continue
+			}
+
 			// If MultiProtocol is enabled (default) then a BGP session carries
 			// prefixes of both IPv4 and IPv6 families. Our problem is that with
 			// an IPv4 session, FRR can incorrectly pick the masquerade IPv6
 			// address (instead of the real address) as next hop for IPv6
 			// prefixes and that won't work. Note that with a dedicated IPv6
 			// session that can't happen since FRR will use the same address
-			// that was used to stablish the session. Let's enforce the use of
+			// that was used to establish the session. Let's enforce the use of
 			// DisableMP for now.
 			if !neighbor.DisableMP {
 				return nil, fmt.Errorf("%w: DisableMP==false not supported, seen on FRRConfiguration %s/%s neighbor %s",

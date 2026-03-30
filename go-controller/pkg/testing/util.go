@@ -10,9 +10,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ktesting "k8s.io/client-go/testing"
 
-	networkconnectv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
-	networkconnectfake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/clientset/versioned/fake"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	networkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
+	networkconnectfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 func GenerateNAD(networkName, name, namespace, topology, cidr, role string) *nadapi.NetworkAttachmentDefinition {
@@ -88,18 +88,36 @@ func AddNetworkConnectApplyReactor(fakeClient *networkconnectfake.Clientset) {
 		}
 
 		cnc := existingObj.(*networkconnectv1.ClusterNetworkConnect)
-		if cnc.Annotations == nil {
-			cnc.Annotations = map[string]string{}
-		}
+		if patchAction.GetSubresource() == "status" {
+			// handle status patch
+			type StatusPatch struct {
+				Status networkconnectv1.ClusterNetworkConnectStatus `json:"status"`
+			}
 
-		var patchData map[string]interface{}
-		if err := json.Unmarshal(patchAction.GetPatch(), &patchData); err != nil {
-			return true, nil, err
-		}
-		if metadata, ok := patchData["metadata"].(map[string]interface{}); ok {
-			if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
-				for k, v := range annotations {
-					cnc.Annotations[k] = v.(string)
+			var patchData StatusPatch
+			if err := json.Unmarshal(patchAction.GetPatch(), &patchData); err != nil {
+				return true, nil, err
+			}
+
+			// Update the status
+			// This is a simple overwrite for unit tests. The actual Server-Side Apply logic is not implemented
+			// and may differ from the real server results.
+			cnc.Status = patchData.Status
+		} else {
+			// update annotations
+			if cnc.Annotations == nil {
+				cnc.Annotations = map[string]string{}
+			}
+
+			var patchData map[string]interface{}
+			if err := json.Unmarshal(patchAction.GetPatch(), &patchData); err != nil {
+				return true, nil, err
+			}
+			if metadata, ok := patchData["metadata"].(map[string]interface{}); ok {
+				if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
+					for k, v := range annotations {
+						cnc.Annotations[k] = v.(string)
+					}
 				}
 			}
 		}

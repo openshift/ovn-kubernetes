@@ -6,17 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/containerengine"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/portalloc"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/containerengine"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/portalloc"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -142,6 +143,62 @@ func (k *kind) GetDefaultTimeoutContext() *framework.TimeoutContext {
 	return framework.NewTimeoutContext()
 }
 
+func (k *kind) PreloadImages(imgs []string) {
+	clusterName := kindClusterName()
+	if clusterName == "" {
+		framework.Logf("Warning: could not determine KIND cluster name, skipping image preload")
+		return
+	}
+	ce := containerengine.Get()
+	pullBackoff := wait.Backoff{Duration: 5 * time.Second, Factor: 2, Steps: 5}
+	for _, img := range imgs {
+		framework.Logf("Preloading image %s into KIND cluster %s", img, clusterName)
+		var out []byte
+		err := wait.ExponentialBackoff(pullBackoff, func() (bool, error) {
+			var pullErr error
+			out, pullErr = exec.Command(ce.String(), "pull", img).CombinedOutput()
+			if pullErr != nil {
+				framework.Logf("Retrying pull for image %s: %v (%s)", img, pullErr, out)
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			framework.Logf("Warning: failed to pull image %s after retries: %v (%s)", img, err, out)
+			continue
+		}
+		if ce == containerengine.Podman {
+			os.Remove("/tmp/image.tar")
+			out, err = exec.Command(ce.String(), "save", "-o", "/tmp/image.tar", img).CombinedOutput()
+			if err != nil {
+				framework.Logf("Warning: failed to save image %s: %v (%s)", img, err, out)
+				continue
+			}
+			out, err = exec.Command("kind", "load", "image-archive", "/tmp/image.tar", "--name", clusterName).CombinedOutput()
+		} else {
+			out, err = exec.Command("kind", "load", "docker-image", img, "--name", clusterName).CombinedOutput()
+		}
+		if err != nil {
+			framework.Logf("Warning: failed to load image %s into KIND cluster %s: %v (%s)", img, clusterName, err, out)
+			continue
+		}
+		framework.Logf("Preloaded image %s into KIND cluster %s", img, clusterName)
+	}
+}
+
+func kindClusterName() string {
+	currentCtx, err := exec.Command("kubectl", "config", "current-context").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	ctx := strings.TrimSpace(string(currentCtx))
+	// KIND contexts are named "kind-<cluster-name>"
+	if strings.HasPrefix(ctx, "kind-") {
+		return strings.TrimPrefix(ctx, "kind-")
+	}
+	return ""
+}
+
 // getContainerState returns the state of a container by name
 // Returns empty string if container doesn't exist
 func getContainerState(containerName string) (string, error) {
@@ -236,6 +293,12 @@ func (c *contextKind) createExternalContainer(container api.ExternalContainer) (
 		return container, fmt.Errorf("container %s already exists", container.Name)
 	}
 	cmd := []string{"run", "-itd", "--privileged", "--name", container.Name, "--network", container.Network.Name(), "--hostname", container.Name}
+	if container.IPv4 != "" {
+		cmd = append(cmd, "--ip", container.IPv4)
+	}
+	if container.IPv6 != "" {
+		cmd = append(cmd, "--ip6", container.IPv6)
+	}
 	if container.Entrypoint != "" {
 		cmd = append(cmd, "--entrypoint", container.Entrypoint)
 	}
@@ -305,6 +368,7 @@ func (c *contextKind) deleteExternalContainer(container api.ExternalContainer) e
 			return false, fmt.Errorf("failed to check if external container (%s) is deleted: %v (%s)", container, err, stdOut)
 		}
 		if string(stdOut) != "" {
+			framework.Logf("Waiting for external container %s to be deleted", container.Name)
 			return false, nil
 		}
 		return true, nil
@@ -579,12 +643,14 @@ func (c *contextKind) cleanUp() error {
 	c.cleanUpFns = nil
 	// detach network(s) from nodes
 	for _, na := range c.cleanUpNetworkAttachments.List {
+		framework.Logf("Detaching network %s from %s", na.Network.Name(), na.Instance)
 		if err := c.detachNetwork(na.Network, na.Instance); err != nil && !errors.Is(err, api.NotFound) {
 			errs = append(errs, err)
 		}
 	}
 	// remove containers
 	for _, container := range c.cleanUpContainers {
+		framework.Logf("Deleting external container %s", container.Name)
 		if err := c.deleteExternalContainer(container); err != nil && !errors.Is(err, api.NotFound) {
 			errs = append(errs, err)
 		}
@@ -592,6 +658,7 @@ func (c *contextKind) cleanUp() error {
 	c.cleanUpContainers = nil
 	// delete secondary networks
 	for _, network := range c.cleanUpNetworks.List {
+		framework.Logf("Deleting network %s", network.Name())
 		if err := c.deleteNetwork(network); err != nil && !errors.Is(err, api.NotFound) {
 			errs = append(errs, err)
 		}
@@ -612,7 +679,7 @@ const (
 	inspectNetworkContainersKeyStr = "{{ range $key, $value := .Containers }}{{ printf \"%s\\n\" $value.Name}}{{ end }}'"
 	emptyValue                     = "<no value>"
 	// Docker 29+ returns "invalid IP" for IP fields
-	emptyIPValue                   = "invalid IP"
+	emptyIPValue = "invalid IP"
 )
 
 func isNetworkAttachedToContainer(networkName, containerName string) bool {
@@ -801,7 +868,7 @@ func getNetworkInterface(containerName, networkName string) (api.NetworkInterfac
 	if ni.IPv4 != "" {
 		ni.InfName, err = getInterfaceNameUsingIP(ni.IPv4)
 		if err != nil {
-			framework.Logf("failed to get network interface name using IPv4 address %s: %v", ni.IPv4, err)
+			framework.Logf("failed to get network interface name using IPv4 address %s on container %q: %v", ni.IPv4, containerName, err)
 		}
 	}
 	ni.IPv6Gateway, err = getContainerNetwork(inspectNetworkIPv6GWKeyStr)
@@ -819,7 +886,7 @@ func getNetworkInterface(containerName, networkName string) (api.NetworkInterfac
 	if ni.IPv6 != "" {
 		ni.InfName, err = getInterfaceNameUsingIP(ni.IPv6)
 		if err != nil {
-			framework.Logf("failed to get network interface name using IPv6 address %s: %v", ni.IPv6, err)
+			framework.Logf("failed to get network interface name using IPv6 address %s on container %q: %v", ni.IPv6, containerName, err)
 		}
 	}
 	ni.IPv6Prefix, err = getContainerNetwork(inspectNetworkIPv6PrefixKeyStr)

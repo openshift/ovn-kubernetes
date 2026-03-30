@@ -29,22 +29,22 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	adminpolicybasedrouteclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
-	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
-	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	mgmtportmock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
-	linkMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	utilMock "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
-	multinetworkmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks/multinetwork"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
+	udnfakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
+	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	mgmtportmock "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
+	linkMock "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilMock "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
+	multinetworkmocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks/multinetwork"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -556,17 +556,28 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		Expect(err).NotTo(HaveOccurred())
 
 		// check that masquerade subnet annotation got updated
-		node, err := wf.GetNode(nodeName)
-		Expect(err).NotTo(HaveOccurred())
-		subnets, err := util.ParseNodeMasqueradeSubnet(node)
-		Expect(err).NotTo(HaveOccurred())
-		for _, subnet := range subnets {
-			if utilnet.IsIPv4CIDR(subnet) {
-				Expect(subnet.String()).To(Equal(config.Gateway.V4MasqueradeSubnet))
-			} else if utilnet.IsIPv6CIDR(subnet) {
-				Expect(subnet.String()).To(Equal(config.Gateway.V6MasqueradeSubnet))
+		Eventually(func() error {
+			node, err := kubeFakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+			if err != nil {
+				return err
 			}
-		}
+			subnets, err := util.ParseNodeMasqueradeSubnet(node)
+			if err != nil {
+				return err
+			}
+			for _, subnet := range subnets {
+				if utilnet.IsIPv4CIDR(subnet) {
+					if subnet.String() != config.Gateway.V4MasqueradeSubnet {
+						return fmt.Errorf("unexpected IPv4 masquerade subnet: got %s, want %s", subnet, config.Gateway.V4MasqueradeSubnet)
+					}
+				} else if utilnet.IsIPv6CIDR(subnet) {
+					if subnet.String() != config.Gateway.V6MasqueradeSubnet {
+						return fmt.Errorf("unexpected IPv6 masquerade subnet: got %s, want %s", subnet, config.Gateway.V6MasqueradeSubnet)
+					}
+				}
+			}
+			return nil
+		}, 5).ShouldNot(HaveOccurred())
 
 		return nil
 	}
@@ -1619,7 +1630,6 @@ var _ = Describe("Gateway Operations DPU", func() {
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
-		_, _ = util.SetFakeIPTablesHelpers()
 	})
 
 	AfterEach(func() {

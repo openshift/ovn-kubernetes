@@ -18,14 +18,18 @@ limitations under the License.
 package v1
 
 import (
-	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 )
 
 // Layer3SubnetApplyConfiguration represents a declarative configuration of the Layer3Subnet type for use
 // with apply.
 type Layer3SubnetApplyConfiguration struct {
-	CIDR       *userdefinednetworkv1.CIDR `json:"cidr,omitempty"`
-	HostSubnet *int32                     `json:"hostSubnet,omitempty"`
+	// CIDR specifies L3Subnet, which is split into smaller subnets for every node.
+	CIDR *userdefinednetworkv1.CIDR `json:"cidr,omitempty"`
+	// HostSubnet specifies the subnet size for every node.
+	//
+	// When not set, it will be assigned automatically.
+	HostSubnet *int32 `json:"hostSubnet,omitempty"`
 }
 
 // Layer3SubnetApplyConfiguration constructs a declarative configuration of the Layer3Subnet type for use with

@@ -8,8 +8,8 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	nodeipt "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iptables"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	nodeipt "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iptables"
 )
 
 // Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170

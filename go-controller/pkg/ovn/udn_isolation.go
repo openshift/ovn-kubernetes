@@ -13,14 +13,14 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
-	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/batching"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -264,14 +264,14 @@ const advertisedNetworkSubnetsKey = "advertised-network-subnets"
 
 // GetAdvertisedNetworkSubnetsAddressSetDBIDs returns the DB IDs for the advertised network subnets addressset
 func GetAdvertisedNetworkSubnetsAddressSetDBIDs() *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdvertisedNetwork, DefaultNetworkControllerName, map[libovsdbops.ExternalIDKey]string{
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetAdvertisedNetwork, types.DefaultNetworkControllerName, map[libovsdbops.ExternalIDKey]string{
 		libovsdbops.ObjectNameKey: advertisedNetworkSubnetsKey,
 	})
 }
 
 // GetAdvertisedNetworkSubnetsDropACLdbIDs returns the DB IDs for the advertised network subnets drop ACL
 func GetAdvertisedNetworkSubnetsDropACLdbIDs() *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, DefaultNetworkControllerName,
+	return libovsdbops.NewDbObjectIDs(libovsdbops.ACLAdvertisedNetwork, types.DefaultNetworkControllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: advertisedNetworkSubnetsKey,
 			libovsdbops.NetworkKey:    "",

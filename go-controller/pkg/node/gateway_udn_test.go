@@ -24,24 +24,24 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/knftables"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	rafakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
-	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
-	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
-	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
-	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
-	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	rafakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
+	udnfakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	factoryMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
+	kubemocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
+	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	coreinformermocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
+	v1mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -291,6 +291,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		// Restore global default values before each testcase
 		err := config.PrepareTestConfig()
 		Expect(err).NotTo(HaveOccurred())
+		// Ensure gateway tests never rely on host iptables binaries.
+		util.SetFakeIPTablesHelpers()
 
 		// Set dual-stack service CIDRs directly after PrepareTestConfig
 		config.Kubernetes.ServiceCIDRs = ovntest.MustParseIPNets("172.16.1.0/24", "fd02::/112")
@@ -611,7 +613,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -844,7 +845,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -1047,7 +1047,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		}()
 		err = wf.Start()
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		Expect(err).NotTo(HaveOccurred())
@@ -1284,7 +1283,6 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
 
-		_, _ = util.SetFakeIPTablesHelpers()
 		_ = nodenft.SetFakeNFTablesHelper()
 
 		// Make Management port
@@ -1731,9 +1729,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		defer func() {
 			wf.Shutdown()
 		}()
-		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 		nodenft.SetFakeNFTablesHelper()
-		fNPW := initFakeNodePortWatcher(iptV4, iptV6)
+		fNPW := initFakeNodePortWatcher()
 		fNPW.watchFactory = wf
 		// in-order to simulate a namespace with an Invalid UDN (when GetActiveNamespace is called), we add an entry
 		// to the fake network manager but no specified network. GetActiveNetwork will return the appropriate error of Invalid Network for namespace.

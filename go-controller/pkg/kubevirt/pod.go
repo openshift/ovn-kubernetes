@@ -16,16 +16,16 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/ndp"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/ndp"
 )
 
 // DefaultGatewayReconciler is responsible for reconciling the default gateway
@@ -276,19 +276,19 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 	return nil
 }
 
-func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool) error {
+func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool, controllerName string) error {
 	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale vm static routes: %v", err)
 	}
 	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale vm policies: %v", err)
 	}
 	if err := libovsdbops.DeleteDHCPOptionsWithPredicate(nbClient, func(item *nbdb.DHCPOptions) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale dhcp options: %v", err)
 	}
@@ -477,6 +477,14 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 
 	// no migration
 	if len(vmPods) < 2 {
+		// If the only remaining pod has the migration target ready
+		// annotation, the migration completed and the source pod is gone.
+		if len(vmPods) == 1 && isTargetPodReady(vmPods[0]) {
+			return &LiveMigrationStatus{
+				TargetPod: vmPods[0],
+				State:     LiveMigrationTargetDomainReady,
+			}, nil
+		}
 		return nil, nil
 	}
 
@@ -503,8 +511,15 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 		}, nil
 	}
 
-	// no active migration
+	// Source pod completed but target is still living. If the target has the
+	// migration ready annotation, the migration completed successfully.
 	if len(livingPods) < 2 {
+		if isTargetPodReady(targetPod) {
+			return &LiveMigrationStatus{
+				TargetPod: targetPod,
+				State:     LiveMigrationTargetDomainReady,
+			}, nil
+		}
 		return nil, nil
 	}
 
