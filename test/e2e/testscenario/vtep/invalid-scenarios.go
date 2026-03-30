@@ -88,4 +88,32 @@ spec:
   mode: "InvalidMode"
 `,
 	},
+	{
+		Description: "CIDRs must not overlap (superset contains subset)",
+		ExpectedErr: `CIDRs must not overlap with each other`,
+		Manifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-overlap-superset
+spec:
+  cidrs:
+  - "10.30.0.0/16"
+  - "10.30.1.0/24"
+`,
+	},
+	{
+		Description: "CIDRs must not overlap (identical CIDRs)",
+		ExpectedErr: `CIDRs must not overlap with each other`,
+		Manifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-overlap-identical
+spec:
+  cidrs:
+  - "10.31.0.0/24"
+  - "10.31.0.0/24"
+`,
+	},
 }

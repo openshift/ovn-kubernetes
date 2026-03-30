@@ -278,4 +278,89 @@ spec:
 			ExpectedErr: "CIDRs cannot be removed in managed mode",
 		},
 	},
+	{
+		ValidateCRScenario: testscenario.ValidateCRScenario{
+			Description: "Managed: append a CIDR that overlaps with an existing one",
+			Name:        "vtep-update-append-overlap",
+			Manifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-update-append-overlap
+spec:
+  cidrs:
+  - "100.93.0.0/16"
+  - "100.93.1.0/24"
+  mode: Managed
+`,
+			ExpectedErr: "CIDRs must not overlap with each other",
+		},
+		InitialManifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-update-append-overlap
+spec:
+  cidrs:
+  - "100.93.0.0/16"
+  mode: Managed
+`,
+	},
+	{
+		ValidateCRScenario: testscenario.ValidateCRScenario{
+			Description: "Managed: expand mask causing overlap with another CIDR",
+			Name:        "vtep-update-expand-overlap",
+			Manifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-update-expand-overlap
+spec:
+  cidrs:
+  - "100.94.0.0/16"
+  - "100.94.1.0/24"
+  mode: Managed
+`,
+			ExpectedErr: "CIDRs must not overlap with each other",
+		},
+		InitialManifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-update-expand-overlap
+spec:
+  cidrs:
+  - "100.94.0.0/24"
+  - "100.94.1.0/24"
+  mode: Managed
+`,
+	},
+	{
+		ValidateCRScenario: testscenario.ValidateCRScenario{
+			Description: "Unmanaged: overlapping CIDRs are also rejected",
+			Name:        "vtep-update-unmanaged-overlap",
+			Manifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-update-unmanaged-overlap
+spec:
+  cidrs:
+  - "100.95.0.0/16"
+  - "100.95.1.0/24"
+  mode: Unmanaged
+`,
+			ExpectedErr: "CIDRs must not overlap with each other",
+		},
+		InitialManifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-update-unmanaged-overlap
+spec:
+  cidrs:
+  - "100.95.0.0/24"
+  mode: Unmanaged
+`,
+	},
 }

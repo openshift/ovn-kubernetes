@@ -63,6 +63,7 @@ type VTEPSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:XValidation:rule="self.all(i, a, self.all(j, b, i == j || !(cidr(a).containsIP(cidr(b).ip()) || cidr(b).containsIP(cidr(a).ip()))))", message="CIDRs must not overlap with each other"
 	// +required
 	CIDRs []CIDR `json:"cidrs"`
 
