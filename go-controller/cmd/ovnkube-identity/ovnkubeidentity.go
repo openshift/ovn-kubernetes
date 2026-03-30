@@ -371,6 +371,11 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 		webhookMux.Handle("/pod", podHandler)
 	}
 
+	webhookMux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
 	cfg := &tls.Config{
 		NextProtos: []string{"h2"},
 		MinVersion: tls.VersionTLS10,

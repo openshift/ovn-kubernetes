@@ -875,8 +875,15 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
-	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
+		if err := nodeAnnotator.Run(); err != nil {
+			klog.Infof("Waiting for node %s annotation update to succeed: %v", nc.name, err)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timed out trying to set node %s annotations: %w", nc.name, err)
 	}
 
 	// Connect ovn-controller to SBDB
@@ -895,13 +902,13 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 			return fmt.Errorf("IPv6 mode is not supported on a DPU enabled node")
 		}
 		// Initialize gateway for OVS internal port or representor management port
-		gw, err := nc.initGatewayPreStart(subnets, nodeAnnotator, nc.mgmtPortController)
+		gw, err := nc.initGatewayPreStart(ctx, subnets, nodeAnnotator, nc.mgmtPortController)
 		if err != nil {
 			return err
 		}
 		nc.Gateway = gw
 	} else {
-		err = nc.initGatewayDPUHostPreStart(nc.nodeAddress, nodeAnnotator)
+		err = nc.initGatewayDPUHostPreStart(ctx, nc.nodeAddress, nodeAnnotator)
 		if err != nil {
 			return err
 		}
