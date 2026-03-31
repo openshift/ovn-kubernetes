@@ -1043,6 +1043,16 @@ deploy_frr_external_container() {
     # Neighbors are already configured by demo.sh; extract them from the running config.
     # This is cluster-level infrastructure shared across all EVPN tests; configured once
     # at install time so individual tests don't need to manage it.
+    # Wait for FRR daemons to be ready ("Not all daemons are up, cannot write config").
+    local attempts=0 daemon_status
+    while ! daemon_status=$($OCI_BIN exec frr vtysh -c "show daemons" 2>&1); do
+      if (( ++attempts > 30 )); then
+        echo "error: FRR daemons did not become ready after 30 attempts"
+        echo "last daemon status: $daemon_status"
+        exit 1
+      fi
+      sleep 1
+    done
     local bgp_neighbors vtysh_cmds
     bgp_neighbors=$($OCI_BIN exec frr vtysh -c "show running-config" | grep "^ neighbor.*remote-as" | awk '{print $2}')
     vtysh_cmds=(-c "configure terminal" -c "router bgp 64512" -c "address-family l2vpn evpn")
