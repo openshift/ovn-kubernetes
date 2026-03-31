@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -133,6 +134,20 @@ func toNBTemplateList(tlbs []*templateLoadBalancer) []TemplateMap {
 // It is assumed that names are meaningful and somewhat stable, to minimize churn. This
 // function doesn't work with Load_Balancers without a name.
 func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existingCacheLBs []LB, LBs []LB, netInfo util.NetInfo) error {
+	// Timing instrumentation for LB creation/update analysis
+	var buildOpsTime, buildAttachTime, nbdbTxTime time.Duration
+	startTime := time.Now()
+
+	defer func() {
+		totalTime := time.Since(startTime)
+		otherTime := totalTime - buildOpsTime - buildAttachTime - nbdbTxTime
+
+		klog.V(4).Infof("[Service LB %s/%s network=%s] EnsureLBs took %v "+
+			"(buildOps=%v, buildAttach=%v, nbdbTx=%v, other=%v)",
+			service.Namespace, service.Name, netInfo.GetNetworkName(), totalTime,
+			buildOpsTime, buildAttachTime, nbdbTxTime, otherTime)
+	}()
+
 	externalIDs := getExternalIDsForLoadBalancer(service, netInfo)
 	existingByName := make(map[string]*LB, len(existingCacheLBs))
 	toDelete := make(map[string]*LB, len(existingCacheLBs))
@@ -177,16 +192,21 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existing
 		mapLBDifferenceByKey(removeLBsFromGroups, existingGroups, wantGroups, blb)
 	}
 
+	t1 := time.Now()
 	ops, err := libovsdbops.CreateOrUpdateLoadBalancersOps(nbClient, nil, toNBLoadBalancerList(tlbs)...)
 	if err != nil {
 		return err
 	}
 
 	ops, err = svcCreateOrUpdateTemplateVarOps(nbClient, ops, toNBTemplateList(tlbs))
+	buildOpsTime = time.Since(t1)
 	if err != nil {
 		return fmt.Errorf("failed to create ops for ensuring creation of service %s/%s load balancers: %w",
 			service.Namespace, service.Name, err)
 	}
+
+	// Timing instrumentation for LB attachment operations
+	t2 := time.Now()
 
 	// cache switches for this round of ops
 	lswitches := map[string]*nbdb.LogicalSwitch{}
@@ -266,6 +286,8 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existing
 		}
 	}
 
+	buildAttachTime = time.Since(t2)
+
 	deleteLBs := make([]*nbdb.LoadBalancer, 0, len(toDelete))
 	deleteTemplates := make([]TemplateMap, 0, len(toDelete))
 	for _, clb := range toDelete {
@@ -290,7 +312,10 @@ func EnsureLBs(nbClient libovsdbclient.Client, service *corev1.Service, existing
 	}
 	ops = append(ops, recordOps...)
 
+	// Timing instrumentation for NBDB transaction
+	t3 := time.Now()
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(nbClient, toNBLoadBalancerList(tlbs), ops)
+	nbdbTxTime = time.Since(t3)
 	if err != nil {
 		return fmt.Errorf("failed to ensure load balancers for service %s/%s: %w", service.Namespace, service.Name, err)
 	}

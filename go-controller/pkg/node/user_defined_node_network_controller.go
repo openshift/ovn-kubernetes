@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
@@ -73,6 +74,8 @@ func NewUserDefinedNodeNetworkController(
 func (nc *UserDefinedNodeNetworkController) Start(_ context.Context) error {
 	klog.Infof("Starting UDN node network controller for network %s", nc.GetNetworkName())
 
+	// Phase 1: Setup DPU pod watcher (if enabled)
+	phaseStart := time.Now()
 	// enable adding ovs ports for dpu pods in both primary and secondary user-defined networks
 	if (config.OVNKubernetesFeature.EnableMultiNetwork || util.IsNetworkSegmentationSupportEnabled()) && config.OvnKubeNode.Mode == types.NodeModeDPU {
 		handler, err := nc.watchPodsDPU()
@@ -81,12 +84,18 @@ func (nc *UserDefinedNodeNetworkController) Start(_ context.Context) error {
 		}
 		nc.podHandler = handler
 	}
+	klog.V(4).Infof("[Start %s] phase 1 (DPU pod watcher setup) took %v", nc.GetNetworkName(), time.Since(phaseStart))
+
+	// Phase 2: Add network to gateway (PRIMARY BOTTLENECK)
+	phaseStart = time.Now()
 	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
 		if err := nc.gateway.AddNetwork(); err != nil {
 			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)
 		}
 	}
+	klog.V(4).Infof("[Start %s] phase 2 (add network to gateway) took %v", nc.GetNetworkName(), time.Since(phaseStart))
+
 	return nil
 }
 

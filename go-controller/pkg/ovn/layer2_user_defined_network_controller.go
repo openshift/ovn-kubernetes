@@ -365,16 +365,28 @@ func (oc *Layer2UserDefinedNetworkController) Start(_ context.Context) error {
 		klog.Infof("Starting controller for UDN %s took %v", oc.GetNetworkName(), time.Since(start))
 	}()
 
+	// Phase 1: Initialize controller
+	phaseStart := time.Now()
 	if err := oc.init(); err != nil {
 		return err
 	}
+	klog.V(4).Infof("[Start %s] phase 1 (init) took %v", oc.GetNetworkName(), time.Since(phaseStart))
+
+	// Phase 2: Register node handler
+	phaseStart = time.Now()
 	if err := oc.RegisterNodeHandler(); err != nil {
 		return err
 	}
+	klog.V(4).Infof("[Start %s] phase 2 (RegisterNodeHandler) took %v", oc.GetNetworkName(), time.Since(phaseStart))
+
+	// Phase 3: Run controller (start watchers and sync)
+	phaseStart = time.Now()
 	if err := oc.run(); err != nil {
 		oc.DeregisterNodeHandler()
 		return err
 	}
+	klog.V(4).Infof("[Start %s] phase 3 (run) took %v", oc.GetNetworkName(), time.Since(phaseStart))
+
 	return nil
 }
 
@@ -473,19 +485,26 @@ func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 }
 
 func (oc *Layer2UserDefinedNetworkController) init() error {
+	networkName := oc.GetNetworkName()
+
 	// Create default Control Plane Protection (COPP) entry for routers
+	phaseStart := time.Now()
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
 		return fmt.Errorf("unable to create router control plane protection: %w", err)
 	}
 	oc.defaultCOPPUUID = defaultCOPPUUID
+	klog.V(4).Infof("[init %s] EnsureDefaultCOPP took %v", networkName, time.Since(phaseStart))
 
 	if config.Layer2UsesTransitRouter && oc.IsPrimaryNetwork() {
+		phaseStart = time.Now()
 		if _, err = oc.newClusterRouter(); err != nil {
 			return fmt.Errorf("failed to create OVN cluster router for network %q: %v", oc.GetNetworkName(), err)
 		}
+		klog.V(4).Infof("[init %s] newClusterRouter took %v", networkName, time.Since(phaseStart))
 	}
 
+	phaseStart = time.Now()
 	clusterLBGroupUUID, switchLBGroupUUID, routerLBGroupUUID, err := initLoadBalancerGroups(oc.nbClient, oc.GetNetInfo())
 	if err != nil {
 		return err
@@ -493,9 +512,12 @@ func (oc *Layer2UserDefinedNetworkController) init() error {
 	oc.clusterLoadBalancerGroupUUID = clusterLBGroupUUID
 	oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
 	oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
+	klog.V(4).Infof("[init %s] initLoadBalancerGroups took %v", networkName, time.Since(phaseStart))
+
 	excludeSubnets := oc.ExcludeSubnets()
 	excludeSubnets = append(excludeSubnets, oc.InfrastructureSubnets()...)
 
+	phaseStart = time.Now()
 	_, err = oc.initializeLogicalSwitch(
 		oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
 		oc.Subnets(),
@@ -507,16 +529,21 @@ func (oc *Layer2UserDefinedNetworkController) init() error {
 	if err != nil {
 		return err
 	}
+	klog.V(4).Infof("[init %s] initializeLogicalSwitch took %v", networkName, time.Since(phaseStart))
 
 	// Configure cluster port groups and multicast default policies for user defined primary networks.
 	if oc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() {
+		phaseStart = time.Now()
 		if err := oc.setupClusterPortGroups(); err != nil {
 			return fmt.Errorf("failed to create cluster port groups for network %q: %w", oc.GetNetworkName(), err)
 		}
+		klog.V(4).Infof("[init %s] setupClusterPortGroups took %v", networkName, time.Since(phaseStart))
 
+		phaseStart = time.Now()
 		if err := oc.syncDefaultMulticastPolicies(); err != nil {
 			return fmt.Errorf("failed to sync default multicast policies for network %q: %w", oc.GetNetworkName(), err)
 		}
+		klog.V(4).Infof("[init %s] syncDefaultMulticastPolicies took %v", networkName, time.Since(phaseStart))
 	}
 
 	return err

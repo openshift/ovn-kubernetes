@@ -3,6 +3,7 @@ package ovn
 import (
 	"fmt"
 	"net"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -106,11 +107,15 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 }
 
 func (oc *BaseLayer2UserDefinedNetworkController) run() error {
+	networkName := oc.GetNetworkName()
+
 	// WatchNamespaces() should be started first because it has no other
 	// dependencies.
+	phaseStart := time.Now()
 	if err := oc.WatchNamespaces(); err != nil {
 		return err
 	}
+	klog.V(4).Infof("[run %s] WatchNamespaces took %v", networkName, time.Since(phaseStart))
 
 	// when on IC, it will be the NetworkController that returns the IPAMClaims
 	// IPs back to the pool
@@ -118,14 +123,18 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 		// WatchIPAMClaims should be started before WatchPods to prevent OVN-K
 		// master assigning IPs to pods without taking into account the persistent
 		// IPs set aside for the IPAMClaims
+		phaseStart = time.Now()
 		if err := oc.WatchIPAMClaims(); err != nil {
 			return err
 		}
+		klog.V(4).Infof("[run %s] WatchIPAMClaims took %v", networkName, time.Since(phaseStart))
 	}
 
+	phaseStart = time.Now()
 	if err := oc.WatchPods(); err != nil {
 		return err
 	}
+	klog.V(4).Infof("[run %s] WatchPods took %v", networkName, time.Since(phaseStart))
 
 	if util.IsMultiNetworkPoliciesSupportEnabled() && !oc.IsPrimaryNetwork() {
 		// WatchMultiNetworkPolicy depends on WatchPods and WatchNamespaces

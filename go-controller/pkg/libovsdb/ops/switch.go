@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
+	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -40,6 +42,13 @@ func FindLogicalSwitchesWithPredicate(nbClient libovsdbclient.Client, p switchPr
 
 // GetLogicalSwitch looks up a logical switch from the cache
 func GetLogicalSwitch(nbClient libovsdbclient.Client, sw *nbdb.LogicalSwitch) (*nbdb.LogicalSwitch, error) {
+	// Timing instrumentation for P99 NBDB query analysis
+	start := time.Now()
+	defer func() {
+		elapsed := time.Since(start)
+		klog.V(4).Infof("[NBDB GetLogicalSwitch] %s took %v", sw.Name, elapsed)
+	}()
+
 	found := []*nbdb.LogicalSwitch{}
 	opModel := operationModel{
 		Model:          sw,
@@ -318,6 +327,13 @@ func UpdateLogicalSwitchSetOtherConfig(nbClient libovsdbclient.Client, sw *nbdb.
 
 // GetLogicalSwitchPort looks up a logical switch port from the cache
 func GetLogicalSwitchPort(nbClient libovsdbclient.Client, lsp *nbdb.LogicalSwitchPort) (*nbdb.LogicalSwitchPort, error) {
+	// Timing instrumentation for P99 NBDB query analysis
+	start := time.Now()
+	defer func() {
+		elapsed := time.Since(start)
+		klog.V(4).Infof("[NBDB GetLogicalSwitchPort] %s took %v", lsp.Name, elapsed)
+	}()
+
 	found := []*nbdb.LogicalSwitchPort{}
 	opModel := operationModel{
 		Model:          lsp,

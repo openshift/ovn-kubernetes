@@ -373,7 +373,10 @@ func (c *Controller) initTopLevelCache() error {
 //
 // All Load_Balancer objects are tagged with their owner, so it's easy to find stale objects.
 func (c *Controller) syncService(key string) error {
+	// Timing instrumentation for service readiness analysis
+	var getLockTime, getServiceTime, getEndpointsTime, buildConfigTime, buildLBTime, ensureLBTime time.Duration
 	startTime := time.Now()
+
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
@@ -382,17 +385,31 @@ func (c *Controller) syncService(key string) error {
 	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
-		klog.V(5).Infof("Finished syncing service %s on namespace %s for network=%s : %v", name, namespace, c.netInfo.GetNetworkName(), time.Since(startTime))
-		metrics.MetricSyncServiceLatency.Observe(time.Since(startTime).Seconds())
+		totalTime := time.Since(startTime)
+		otherTime := totalTime - getLockTime - getServiceTime - getEndpointsTime - buildConfigTime - buildLBTime - ensureLBTime
+
+		// Detailed timing at v=4 (same level as pod timing)
+		klog.V(4).Infof("[Service %s/%s network=%s] sync took %v "+
+			"(getLock=%v, getSvc=%v, getEP=%v, buildCfg=%v, buildLB=%v, ensureLB=%v, other=%v)",
+			namespace, name, c.netInfo.GetNetworkName(), totalTime,
+			getLockTime, getServiceTime, getEndpointsTime, buildConfigTime, buildLBTime, ensureLBTime, otherTime)
+
+		// Keep existing v=5 log for backward compatibility
+		klog.V(5).Infof("Finished syncing service %s on namespace %s for network=%s : %v", name, namespace, c.netInfo.GetNetworkName(), totalTime)
+		metrics.MetricSyncServiceLatency.Observe(totalTime.Seconds())
 	}()
 
 	// Shared node information (c.nodeInfos, c.nodeIPv4Template, c.nodeIPv6Template)
 	// needs to be accessed with the nodeInfoRWLock taken for read.
+	t1 := time.Now()
 	c.nodeInfoRWLock.RLock()
+	getLockTime = time.Since(t1)
 	defer c.nodeInfoRWLock.RUnlock()
 
 	// Get current Service from the cache
+	t2 := time.Now()
 	service, err := c.serviceLister.Services(namespace).Get(name)
+	getServiceTime = time.Since(t2)
 	// It´s unlikely that we have an error different that "Not Found Object"
 	// because we are getting the object from the informer´s cache
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -458,21 +475,27 @@ func (c *Controller) syncService(key string) error {
 	// The Service exists in the cache: update it in OVN
 	klog.V(5).Infof("Service %s/%s retrieved from lister for network=%s: %v", service.Namespace, service.Name, c.netInfo.GetNetworkName(), service)
 
+	t3 := time.Now()
 	endpointSlices, err := util.GetServiceEndpointSlices(namespace, service.Name, c.netInfo.GetNetworkName(), c.endpointSliceLister)
+	getEndpointsTime = time.Since(t3)
 	if err != nil {
 		return fmt.Errorf("service %s/%s for network=%s, %w", service.Namespace, service.Name, c.netInfo.GetNetworkName(), err)
 	}
 
 	// Build the abstract LB configs for this service
+	t4 := time.Now()
 	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, c.nodeInfos, c.useLBGroups, c.useTemplates, c.netInfo)
+	buildConfigTime = time.Since(t4)
 	klog.V(5).Infof("Built service %s LB cluster-wide configs for network=%s: %#v", key, c.netInfo.GetNetworkName(), clusterConfigs)
 	klog.V(5).Infof("Built service %s LB per-node configs for network=%s:  %#v", key, c.netInfo.GetNetworkName(), perNodeConfigs)
 	klog.V(5).Infof("Built service %s LB template configs for network=%s: %#v", key, c.netInfo.GetNetworkName(), templateConfigs)
 
 	// Convert the LB configs in to load-balancer objects
+	t5 := time.Now()
 	clusterLBs := buildClusterLBs(service, clusterConfigs, c.nodeInfos, c.useLBGroups, c.netInfo)
 	templateLBs := buildTemplateLBs(service, templateConfigs, c.nodeInfos, c.nodeIPv4Templates, c.nodeIPv6Templates, c.netInfo)
 	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, c.nodeInfos, c.netInfo)
+	buildLBTime = time.Since(t5)
 	klog.V(5).Infof("Built service %s cluster-wide LB for network=%s: %#v", key, c.netInfo.GetNetworkName(), clusterLBs)
 	klog.V(5).Infof("Built service %s per-node LB for network=%s: %#v", key, c.netInfo.GetNetworkName(), perNodeLBs)
 	klog.V(5).Infof("Built service %s template LB for network=%s:  %#v", key, c.netInfo.GetNetworkName(), templateLBs)
@@ -494,15 +517,19 @@ func (c *Controller) syncService(key string) error {
 
 	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
 		klog.V(5).Infof("Skipping no-op change for service %s for network=%s", key, c.netInfo.GetNetworkName())
+		// No EnsureLBs call, so ensureLBTime remains 0
 	} else {
 		klog.V(5).Infof("Services do not match for network=%s, existing lbs: %#v, built lbs: %#v", c.netInfo.GetNetworkName(), existingLBs, lbs)
 		// Actually apply load-balancers to OVN.
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
+		t6 := time.Now()
 		if err := EnsureLBs(c.nbClient, service, existingLBs, lbs, c.netInfo); err != nil {
+			ensureLBTime = time.Since(t6)
 			return fmt.Errorf("failed to ensure service %s load balancers for network=%s: %w", key, c.netInfo.GetNetworkName(), err)
 		}
+		ensureLBTime = time.Since(t6)
 
 		c.alreadyAppliedRWLock.Lock()
 		c.alreadyApplied[key] = lbs

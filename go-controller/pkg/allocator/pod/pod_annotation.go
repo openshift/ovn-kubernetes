@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -116,6 +117,12 @@ func allocatePodAnnotation(
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
+	startTime := time.Now()
+	defer func() {
+		klog.V(4).Infof("Finished allocatePodAnnotation for pod %s/%s on network %s, took %v",
+			pod.Namespace, pod.Name, netInfo.GetNetworkName(), time.Since(startTime))
+	}()
+
 	// no id allocation
 	var idAllocator id.NamedAllocator
 
@@ -208,8 +215,16 @@ func allocatePodAnnotationWithTunnelID(
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
+	start := time.Now()
+	var rollbackTime, updateTime time.Duration
+	defer func() {
+		klog.Infof("ANNOTATION_ALLOC: [%s/%s] allocatePodAnnotationWithTunnelID for NAD key %s took %v (rollback=%v, updatePod=%v)",
+			pod.Namespace, pod.Name, nadKey, time.Since(start), rollbackTime, updateTime)
+	}()
+
 	allocateToPodWithRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
+		rollbackStart := time.Now()
 		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
 			idAllocator,
@@ -223,15 +238,18 @@ func allocatePodAnnotationWithTunnelID(
 			reallocateIP,
 			networkRole,
 		)
+		rollbackTime = time.Since(rollbackStart)
 		return pod, rollback, err
 	}
 
+	updateStart := time.Now()
 	err = util.UpdatePodWithRetryOrRollback(
 		podLister,
 		kube,
 		pod,
 		allocateToPodWithRollback,
 	)
+	updateTime = time.Since(updateStart)
 
 	if err != nil {
 		return nil, nil, err
@@ -348,12 +366,25 @@ func allocatePodAnnotationWithRollback(
 	rollback func(),
 	err error) {
 
+	start := time.Now()
+	var idAllocTime, ipAllocTime, macAllocTime, marshalTime time.Duration
+
 	if !netInfo.IsUserDefinedNetwork() {
 		nadKey = types.DefaultNetworkName
 	}
 	podDesc := fmt.Sprintf("%s/%s/%s", nadKey, pod.Namespace, pod.Name)
 	macOwnerID := macOwner(pod)
 	networkName := netInfo.GetNetworkName()
+
+	defer func() {
+		if err == nil {
+			klog.Infof("ANNOTATION_ROLLBACK: [%s/%s] allocatePodAnnotationWithRollback for NAD key %s took %v (idAlloc=%v, ipAlloc=%v, macAlloc=%v, marshal=%v)",
+				pod.Namespace, pod.Name, nadKey, time.Since(start), idAllocTime, ipAllocTime, macAllocTime, marshalTime)
+		} else {
+			klog.Infof("ANNOTATION_ROLLBACK: [%s/%s] allocatePodAnnotationWithRollback FAILED for NAD key %s after %v (idAlloc=%v, ipAlloc=%v, macAlloc=%v): %v",
+				pod.Namespace, pod.Name, nadKey, time.Since(start), idAllocTime, ipAllocTime, macAllocTime, err)
+		}
+	}()
 
 	// the IPs we allocate in this function need to be released back to the IPAM
 	// pool if there is some error in any step past the point the IPs were
@@ -414,11 +445,13 @@ func allocatePodAnnotationWithRollback(
 	needsID := tentative.TunnelID == 0 && hasIDAllocation
 
 	if hasIDAllocation {
+		idStart := time.Now()
 		if needsID {
 			tentative.TunnelID, err = idAllocator.AllocateID()
 		} else {
 			err = idAllocator.ReserveID(tentative.TunnelID)
 		}
+		idAllocTime = time.Since(idStart)
 
 		if err != nil {
 			err = fmt.Errorf("failed to assign pod id for %s: %w", podDesc, err)
@@ -490,6 +523,7 @@ func allocatePodAnnotationWithRollback(
 	}
 
 	if hasIPAM {
+		ipStart := time.Now()
 		if len(tentative.IPs) > 0 {
 			if err = ipAllocator.AllocateIPs(tentative.IPs); err != nil && !shouldSkipAllocateIPsError(err, isNetworkAllocated, ipamClaim) {
 				err = fmt.Errorf("failed to ensure requested or annotated IPs %v for %s: %w",
@@ -521,9 +555,11 @@ func allocatePodAnnotationWithRollback(
 			// copy the IPs that would need to be released
 			releaseIPs = util.CopyIPNets(tentative.IPs)
 		}
+		ipAllocTime = time.Since(ipStart)
 	}
 
 	if needsIPOrMAC {
+		macStart := time.Now()
 		// handle mac address
 		if network != nil && network.MacRequest != "" {
 			tentative.MAC, err = net.ParseMAC(network.MacRequest)
@@ -556,13 +592,16 @@ func allocatePodAnnotationWithRollback(
 		if err != nil {
 			return
 		}
+		macAllocTime = time.Since(macStart)
 	}
 
 	needsAnnotationUpdate := needsIPOrMAC || needsID
 
 	if needsAnnotationUpdate {
+		marshalStart := time.Now()
 		updatedPod = pod
 		updatedPod.Annotations, err = util.MarshalPodAnnotation(updatedPod.Annotations, tentative, nadKey)
+		marshalTime = time.Since(marshalStart)
 		podAnnotation = tentative
 	}
 

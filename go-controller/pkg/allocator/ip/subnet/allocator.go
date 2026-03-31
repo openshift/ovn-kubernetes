@@ -6,6 +6,7 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"time"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 
@@ -219,8 +220,28 @@ func (allocator *allocator) AllocateIPPerSubnet(name string, ips []*net.IPNet) e
 	if len(ips) == 0 {
 		return fmt.Errorf("failed to allocate IPs for %s: no IPs provided", name)
 	}
+
+	// Timing instrumentation for P99 lock contention analysis
+	lockStart := time.Now()
+
 	allocator.RLock()
-	defer allocator.RUnlock()
+	lockWaitTime := time.Since(lockStart)
+
+	allocStart := time.Now()
+	defer func() {
+		allocator.RUnlock()
+
+		allocTime := time.Since(allocStart)
+		totalTime := lockWaitTime + allocTime
+
+		// Log detailed timing at v=4 (same level as pod timing)
+		klog.V(4).Infof("[IPAM %s] AllocateIPPerSubnet(%d IPs) took %v "+
+			"(lockWait=%v [%.1f%%], alloc=%v [%.1f%%])",
+			name, len(ips), totalTime,
+			lockWaitTime, float64(lockWaitTime)/float64(totalTime)*100,
+			allocTime, float64(allocTime)/float64(totalTime)*100)
+	}()
+
 	subnetInfo, ok := allocator.cache[name]
 	if !ok {
 		return fmt.Errorf("failed to allocate IPs %v for %s: %w", util.StringSlice(ips), name, ErrSubnetNotFound)
@@ -310,8 +331,27 @@ func reserveSubnets(subnet *net.IPNet, ipam ipallocator.ContinuousAllocator) err
 
 // AllocateNextIPs allocates IP addresses from the given subnet set
 func (allocator *allocator) AllocateNextIPs(name string) ([]*net.IPNet, error) {
+	// Timing instrumentation for P99 lock contention analysis
+	lockStart := time.Now()
+
 	allocator.RLock()
-	defer allocator.RUnlock()
+	lockWaitTime := time.Since(lockStart)
+
+	allocStart := time.Now()
+	defer func() {
+		allocator.RUnlock()
+
+		allocTime := time.Since(allocStart)
+		totalTime := lockWaitTime + allocTime
+
+		// Log detailed timing at v=4 (same level as pod timing)
+		klog.V(4).Infof("[IPAM %s] AllocateNextIPs took %v "+
+			"(lockWait=%v [%.1f%%], alloc=%v [%.1f%%])",
+			name, totalTime,
+			lockWaitTime, float64(lockWaitTime)/float64(totalTime)*100,
+			allocTime, float64(allocTime)/float64(totalTime)*100)
+	}()
+
 	var ipnets []*net.IPNet
 	var ip net.IP
 	var err error

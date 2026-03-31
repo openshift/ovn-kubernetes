@@ -25,16 +25,27 @@ type AllocateToPodWithRollbackFunc func(pod *corev1.Pod) (*corev1.Pod, func(), e
 func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interface, pod *corev1.Pod, allocate AllocateToPodWithRollbackFunc) error {
 	start := time.Now()
 	var updated bool
+	var retryCount int
+	var totalGetTime, totalAllocTime, totalUpdateTime time.Duration
 
 	err := retry.RetryOnConflict(OvnConflictBackoff, func() error {
+		retryCount++
+
+		// Measure pod get time
+		t1 := time.Now()
 		pod, err := podLister.Pods(pod.Namespace).Get(pod.Name)
+		totalGetTime += time.Since(t1)
 		if err != nil {
 			return err
 		}
 
 		// Informer cache should not be mutated, so copy the object
 		pod = pod.DeepCopy()
+
+		// Measure allocation function time
+		t2 := time.Now()
 		pod, rollback, err := allocate(pod)
+		totalAllocTime += time.Since(t2)
 		if err != nil {
 			return err
 		}
@@ -44,9 +55,14 @@ func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interfa
 		}
 
 		updated = true
+
+		// Measure API update time
+		t3 := time.Now()
 		// It is possible to update the pod annotations using status subresource
 		// because changes to metadata via status subresource are not restricted pods.
 		err = kube.UpdatePodStatus(pod)
+		totalUpdateTime += time.Since(t3)
+
 		if err != nil && rollback != nil {
 			rollback()
 		}
@@ -59,7 +75,16 @@ func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interfa
 	}
 
 	if updated {
-		klog.Infof("[%s/%s] pod update took %v", pod.Namespace, pod.Name, time.Since(start))
+		totalTime := time.Since(start)
+		retryWaitTime := totalTime - totalGetTime - totalAllocTime - totalUpdateTime
+
+		// Log detailed timing at v=4 (same level as pod timing)
+		klog.V(4).Infof("[K8s API %s/%s] pod update took %v (attempts=%d, get=%v, alloc=%v, apiUpdate=%v, retryWait=%v)",
+			pod.Namespace, pod.Name, totalTime, retryCount,
+			totalGetTime, totalAllocTime, totalUpdateTime, retryWaitTime)
+
+		// Also keep the simple v=4 log for backward compatibility
+		klog.V(4).Infof("[%s/%s] pod update took %v", pod.Namespace, pod.Name, totalTime)
 	}
 
 	return nil

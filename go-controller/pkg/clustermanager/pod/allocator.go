@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -176,6 +177,7 @@ func (a *PodAllocator) Sync(objs []interface{}) error {
 }
 
 func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool) error {
+	start := time.Now()
 	var pod *corev1.Pod
 	if old != nil {
 		pod = old
@@ -183,6 +185,16 @@ func (a *PodAllocator) reconcile(old, new *corev1.Pod, releaseFromAllocator bool
 	if new != nil {
 		pod = new
 	}
+
+	defer func() {
+		if new != nil {
+			klog.V(4).Infof("CLUSTER_MANAGER: [%s/%s] reconcile (create/update) took %v",
+				pod.Namespace, pod.Name, time.Since(start))
+		} else {
+			klog.V(4).Infof("CLUSTER_MANAGER: [%s/%s] reconcile (delete) took %v",
+				pod.Namespace, pod.Name, time.Since(start))
+		}
+	}()
 
 	podScheduled := util.PodScheduled(pod)
 	podWantsHostNetwork := util.PodWantsHostNetwork(pod)
@@ -357,6 +369,12 @@ func (a *PodAllocator) releasePodOnNAD(pod *corev1.Pod, nadKey string, network *
 }
 
 func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network *nettypes.NetworkSelectionElement) error {
+	start := time.Now()
+	defer func() {
+		klog.Infof("CLUSTER_MANAGER: [%s/%s] allocatePodOnNAD for NAD key %s took %v",
+			pod.Namespace, pod.Name, nadKey, time.Since(start))
+	}()
+
 	var ipAllocator subnet.NamedAllocator
 	if util.DoesNetworkRequireIPAM(a.netInfo) {
 		ipAllocator = a.ipAllocator.ForSubnet(a.netInfo.GetNetworkName())
@@ -380,11 +398,14 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network 
 		return nil
 	}
 
+	nodeStart := time.Now()
 	node, err := a.nodeLister.Get(pod.Spec.NodeName)
+	nodeLookup := time.Since(nodeStart)
 	if err != nil {
 		return fmt.Errorf("failed to get node %q: %w", pod.Spec.NodeName, err)
 	}
 
+	allocStart := time.Now()
 	updatedPod, podAnnotation, err := a.podAnnotationAllocator.AllocatePodAnnotationWithTunnelID(
 		ipAllocator,
 		idAllocator,
@@ -395,8 +416,11 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network 
 		reallocate,
 		networkRole,
 	)
+	allocTime := time.Since(allocStart)
 
 	if err != nil {
+		klog.Infof("CLUSTER_MANAGER: [%s/%s] allocatePodOnNAD FAILED for NAD key %s after %v (nodeLookup=%v, allocTime=%v): %v",
+			pod.Namespace, pod.Name, nadKey, time.Since(start), nodeLookup, allocTime, err)
 		if errors.Is(err, ipallocator.ErrFull) ||
 			errors.Is(err, ipallocator.ErrAllocated) ||
 			errors.Is(err, mac.ErrReserveMACConflict) ||
@@ -407,13 +431,13 @@ func (a *PodAllocator) allocatePodOnNAD(pod *corev1.Pod, nadKey string, network 
 	}
 
 	if updatedPod != nil {
-		klog.V(5).Infof("Allocated IP addresses %v, mac address %s, gateways %v, routes %s and tunnel id %d for pod %s/%s on NAD key %s",
+		klog.Infof("CLUSTER_MANAGER: [%s/%s] Successfully allocated IP addresses %v, mac address %s, tunnel id %d for NAD key %s (nodeLookup=%v, allocTime=%v, total=%v)",
+			pod.Namespace, pod.Name,
 			util.StringSlice(podAnnotation.IPs),
 			podAnnotation.MAC,
-			util.StringSlice(podAnnotation.Gateways),
-			util.StringSlice(podAnnotation.Routes),
 			podAnnotation.TunnelID,
-			pod.Namespace, pod.Name, nadKey,
+			nadKey,
+			nodeLookup, allocTime, time.Since(start),
 		)
 	}
 
