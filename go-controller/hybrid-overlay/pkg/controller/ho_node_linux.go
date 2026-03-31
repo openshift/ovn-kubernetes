@@ -91,7 +91,7 @@ func (n *HONodeController) AddPod(pod *corev1.Pod) error {
 		klog.Infof("Remove the ovnkube pod annotation from pod %s", pod.Name)
 		podToUpdate := pod.DeepCopy()
 		delete(podToUpdate.Annotations, util.OvnPodAnnotationName)
-		if err := n.kube.UpdatePodStatus(podToUpdate); err != nil {
+		if err := n.kube.PatchPodStatusAnnotations(pod, podToUpdate); err != nil {
 			return fmt.Errorf("failed to remove ovnkube pod annotation from pod %s: %v", pod.Name, err)
 		}
 		return nil

@@ -1242,8 +1242,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 
 func newPrivelegedTestFramework(basename string) *framework.Framework {
 	f := framework.NewDefaultFramework(basename)
-	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
-	f.NamespacePodSecurityWarnLevel = admissionapi.LevelPrivileged
+	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 	f.DumpAllNamespaceInfo = func(ctx context.Context, f *framework.Framework, namespace string) {
 		debug.DumpAllNamespaceInfo(context.TODO(), f.ClientSet, namespace)
 	}
@@ -2080,3 +2079,4 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
 }
+

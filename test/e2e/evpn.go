@@ -15,7 +15,6 @@ import (
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	vtepclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
@@ -514,7 +513,7 @@ func createEVPNAgnhost(ictx infraapi.Context, networkName, containerName string,
 	// Step 2: Create agnhost container on that network
 	agnhostContainer := infraapi.ExternalContainer{
 		Name:        containerName,
-		Image:       images.AgnHost(),
+		Image:       deploymentconfig.Get().GetAgnHostContainerImage(),
 		Network:     network,
 		IPv4:        ipv4,
 		IPv6:        ipv6,
@@ -878,8 +877,10 @@ func randomVNI() int32 {
 
 // randomCUDNSubnets generates random non-overlapping CUDN subnets for parallel test isolation.
 // Uses /20 (4096 addresses) instead of /16 to allow randomizing both second and third octets,
-// giving ~4032 possible subnets within 10.0.0.0/8 while avoiding collisions with:
+// giving ~4016 possible subnets within 10.0.0.0/8 while avoiding collisions with:
+//   - 10.88.0.0/16  (podman default network)
 //   - 10.96.0.0/16  (Kubernetes services)
+//   - 10.128.0.0/14 (default cluster network pod CIDRs)
 //   - 10.132.0.0/16 (UDN perf tests)
 //   - 10.243.0.0/16, 10.244.0.0/16 (pod CIDRs)
 //
@@ -889,14 +890,14 @@ func randomVNI() int32 {
 // Returns IPv4 (/20) and IPv6 (/52) subnets.
 func randomCUDNSubnets() (ipv4, ipv6 string) {
 	// 4096 possible /20 subnets in 10.0.0.0/8 (256 second octets * 16 /20-aligned third octets)
-	// Exclude blocks overlapping known /16 reservations (16 /20 blocks each):
-	//   10.96, 10.132, 10.243, 10.244 = 64 excluded → ~4032 usable
+	// Exclude blocks overlapping known reservations (16 /20 blocks per second octet):
+	//   10.88, 10.96, 10.128-131 (10.128.0.0/14), 10.132, 10.243, 10.244 = 112 excluded → ~3952 usable
 	for {
 		second := randomN(256)
 		// 16 /20-aligned slots per second octet (256/16)
 		third := randomN(16) * 16 // 0, 16, 32, ..., 240
 		switch second {
-		case 96, 132, 243, 244:
+		case 88, 96, 128, 129, 130, 131, 132, 243, 244:
 			continue
 		}
 		n := second*16 + third/16
