@@ -333,7 +333,7 @@ func (g *BridgeEIPAddrManager) SyncEgressIP(objs []interface{}) error {
 			return fmt.Errorf("failed to sync EgressIP gateway config because failed to add address to link: %v", err)
 		}
 	}
-	
+
 	// Cleanup stale IPs from annotation
 	// Build list of IPs to delete from annotation first, then clean up both bridge and annotation
 	// We should be resilient to bridge deletion failures since stale IPs might not be on the bridge
