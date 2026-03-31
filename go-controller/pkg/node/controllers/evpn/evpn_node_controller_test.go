@@ -2,6 +2,7 @@ package evpn
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sync"
 
@@ -388,6 +389,364 @@ var _ = Describe("EVPN node controller", func() {
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 		})
 
+		It("reconfigures VXLAN source IP when host-cidrs change mid-life", func() {
+			vtep := &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}
+
+			ndm := &ndmmocks.Interface{}
+			lister := &vteplistmocks.VTEPLister{}
+			informer := &vtepinfmocks.VTEPInformer{}
+			informer.On("Lister").Return(lister)
+			wf := &factorymocks.NodeWatchFactory{}
+			wf.On("VTEPInformer").Return(informer)
+			lister.On("Get", vtepName).Return(vtep, nil)
+
+			ctrl := &Controller{
+				nodeName:     nodeName,
+				watchFactory: wf,
+				ndm:          ndm,
+				networkMgr:   &networkmanager.FakeNetworkManager{},
+				ovsClient:    ovsClient,
+				nadVTEPInfo:  make(map[string]string),
+				svisByBridge: make(map[string]sets.Set[string]),
+				stopChan:     make(chan struct{}),
+			}
+
+			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
+
+			By("first reconcile with host-cidrs containing 100.64.0.1")
+			wf.On("GetNode", nodeName).Return(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
+				},
+			}, nil).Once()
+
+			var firstSrcAddr, secondSrcAddr net.IP
+			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				cfg := args.Get(0).(netlinkdevicemanager.DeviceConfig)
+				if vxlan, ok := cfg.Link.(*netlink.Vxlan); ok && cfg.Link.Attrs().Name == vxlan4Name {
+					if firstSrcAddr == nil {
+						firstSrcAddr = vxlan.SrcAddr
+					} else {
+						secondSrcAddr = vxlan.SrcAddr
+					}
+				}
+			})
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+
+			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(firstSrcAddr.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
+
+			By("second reconcile with host-cidrs changed to 100.64.0.5")
+			wf.On("GetNode", nodeName).Return(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.5/24"]`},
+				},
+			}, nil).Once()
+
+			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			Expect(secondSrcAddr.Equal(net.ParseIP("100.64.0.5"))).To(BeTrue())
+		})
+
+		It("deletes IPv6 VXLAN when VTEP loses IPv6 host-cidrs", func() {
+			vtep := &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24", "fd00::/64"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}
+
+			ndm := &ndmmocks.Interface{}
+			lister := &vteplistmocks.VTEPLister{}
+			informer := &vtepinfmocks.VTEPInformer{}
+			informer.On("Lister").Return(lister)
+			wf := &factorymocks.NodeWatchFactory{}
+			wf.On("VTEPInformer").Return(informer)
+			lister.On("Get", vtepName).Return(vtep, nil)
+
+			ctrl := &Controller{
+				nodeName:     nodeName,
+				watchFactory: wf,
+				ndm:          ndm,
+				networkMgr:   &networkmanager.FakeNetworkManager{},
+				ovsClient:    ovsClient,
+				nadVTEPInfo:  make(map[string]string),
+				svisByBridge: make(map[string]sets.Set[string]),
+				stopChan:     make(chan struct{}),
+			}
+
+			vxlan6Name := GetEVPNVXLANName(vtepName, utilnet.IPv6)
+
+			By("first reconcile with dual-stack host-cidrs")
+			wf.On("GetNode", nodeName).Return(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24","fd00::1/64"]`},
+				},
+			}, nil).Once()
+			ndm.On("EnsureLink", mock.Anything).Return(nil)
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+
+			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			ndm.AssertCalled(GinkgoT(), "EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
+				return cfg.Link.Attrs().Name == vxlan6Name
+			}))
+
+			By("second reconcile with only IPv4 host-cidrs — IPv6 VXLAN should be deleted")
+			wf.On("GetNode", nodeName).Return(&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
+				},
+			}, nil).Once()
+
+			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+			ndm.AssertCalled(GinkgoT(), "DeleteLink", vxlan6Name)
+		})
+
+		It("isolates devices between multiple VTEPs", func() {
+			const vtepNameA = "vtep-a"
+			const vtepNameB = "vtep-b"
+
+			vtepA := &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepNameA},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}
+			vtepB := &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepNameB},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.65.0.0/24"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24","100.65.0.1/24"]`},
+				},
+			}
+
+			ndm := &ndmmocks.Interface{}
+			lister := &vteplistmocks.VTEPLister{}
+			informer := &vtepinfmocks.VTEPInformer{}
+			informer.On("Lister").Return(lister)
+			wf := &factorymocks.NodeWatchFactory{}
+			wf.On("GetNode", nodeName).Return(node, nil)
+			wf.On("VTEPInformer").Return(informer)
+			lister.On("Get", vtepNameA).Return(vtepA, nil)
+			lister.On("Get", vtepNameB).Return(vtepB, nil)
+
+			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
+			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
+			})
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+
+			ctrl := &Controller{
+				nodeName:     nodeName,
+				watchFactory: wf,
+				ndm:          ndm,
+				networkMgr:   &networkmanager.FakeNetworkManager{},
+				ovsClient:    ovsClient,
+				nadVTEPInfo:  make(map[string]string),
+				svisByBridge: make(map[string]sets.Set[string]),
+				stopChan:     make(chan struct{}),
+			}
+
+			Expect(ctrl.reconcile(vtepNameA)).To(Succeed())
+			Expect(ctrl.reconcile(vtepNameB)).To(Succeed())
+
+			bridgeA := GetEVPNBridgeName(vtepNameA)
+			bridgeB := GetEVPNBridgeName(vtepNameB)
+			vxlan4A := GetEVPNVXLANName(vtepNameA, utilnet.IPv4)
+			vxlan4B := GetEVPNVXLANName(vtepNameB, utilnet.IPv4)
+
+			By("verifying each VTEP got its own bridge and VXLAN with correct source IPs")
+			Expect(bridgeA).NotTo(Equal(bridgeB))
+			for _, cfg := range ensuredCfgs {
+				vxlan, ok := cfg.Link.(*netlink.Vxlan)
+				if !ok {
+					continue
+				}
+				switch cfg.Link.Attrs().Name {
+				case vxlan4A:
+					Expect(vxlan.SrcAddr.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
+					Expect(cfg.Master).To(Equal(bridgeA))
+				case vxlan4B:
+					Expect(vxlan.SrcAddr.Equal(net.ParseIP("100.65.0.1"))).To(BeTrue())
+					Expect(cfg.Master).To(Equal(bridgeB))
+				}
+			}
+
+			By("deleting vtep-a and verifying vtep-b devices are untouched")
+			lister.On("Get", vtepNameA).Unset()
+			lister.On("Get", vtepNameA).Return(nil, apierrors.NewNotFound(
+				schema.GroupResource{Group: "k8s.ovn.org", Resource: "vteps"}, vtepNameA))
+
+			Expect(ctrl.reconcile(vtepNameA)).To(Succeed())
+
+			ndm.AssertCalled(GinkgoT(), "DeleteLink", bridgeA)
+			ndm.AssertCalled(GinkgoT(), "DeleteLink", GetEVPNVXLANName(vtepNameA, utilnet.IPv4))
+			ndm.AssertNotCalled(GinkgoT(), "DeleteLink", bridgeB)
+			ndm.AssertNotCalled(GinkgoT(), "DeleteLink", vxlan4B)
+		})
+
+		It("returns error when VXLAN creation fails", func() {
+			vtep := &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
+				},
+			}
+
+			ndm := &ndmmocks.Interface{}
+			lister := &vteplistmocks.VTEPLister{}
+			informer := &vtepinfmocks.VTEPInformer{}
+			informer.On("Lister").Return(lister)
+			wf := &factorymocks.NodeWatchFactory{}
+			wf.On("GetNode", nodeName).Return(node, nil)
+			wf.On("VTEPInformer").Return(informer)
+			lister.On("Get", vtepName).Return(vtep, nil)
+
+			bridgeName := GetEVPNBridgeName(vtepName)
+			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
+
+			ndm.On("EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
+				return cfg.Link.Attrs().Name == bridgeName
+			})).Return(nil)
+			ndm.On("EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
+				return cfg.Link.Attrs().Name == vxlan4Name
+			})).Return(fmt.Errorf("device busy"))
+
+			ctrl := &Controller{
+				nodeName:     nodeName,
+				watchFactory: wf,
+				ndm:          ndm,
+				networkMgr:   &networkmanager.FakeNetworkManager{},
+				ovsClient:    ovsClient,
+				nadVTEPInfo:  make(map[string]string),
+				svisByBridge: make(map[string]sets.Set[string]),
+				stopChan:     make(chan struct{}),
+			}
+
+			err := ctrl.reconcile(vtepName)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("device busy"))
+
+			By("verifying bridge was still created despite VXLAN failure")
+			ndm.AssertCalled(GinkgoT(), "EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
+				return cfg.Link.Attrs().Name == bridgeName
+			}))
+		})
+
+		It("creates only MAC-VRF SVI for Layer2-only EVPN network", func() {
+			netInfo := &multinetworkmocks.NetInfo{}
+			netInfo.On("EVPNVTEPName").Return(vtepName)
+			netInfo.On("EVPNMACVRFVID").Return(100)
+			netInfo.On("EVPNMACVRFVNI").Return(int32(10100))
+			netInfo.On("EVPNIPVRFVID").Return(0)
+			netInfo.On("EVPNIPVRFVNI").Return(int32(0))
+			netInfo.On("GetNetworkName").Return("l2only")
+			netInfo.On("GetNetworkID").Return(7)
+			netInfo.On("GetNetworkScopedSwitchName", mock.Anything).Return("l2only_ovn_layer2_switch")
+
+			fakeNM := &networkmanager.FakeNetworkManager{
+				PrimaryNetworks: map[string]util.NetInfo{"test-ns": netInfo},
+			}
+
+			bridgeName := GetEVPNBridgeName(vtepName)
+			l2SVIName := GetEVPNL2SVIName(netInfo)
+			l3SVIName := GetEVPNL3SVIName(netInfo)
+
+			ndm := &ndmmocks.Interface{}
+			ndm.On("EnsureLink", mock.Anything).Return(nil)
+
+			ctrl := &Controller{ndm: ndm, networkMgr: fakeNM, svisByBridge: make(map[string]sets.Set[string])}
+			networks, err := ctrl.collectEVPNNetworks(vtepName)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(ctrl.reconcileSVIs(bridgeName, networks)).To(Succeed())
+
+			ndm.AssertCalled(GinkgoT(), "EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
+				vlan, ok := cfg.Link.(*netlink.Vlan)
+				return ok && cfg.Link.Attrs().Name == l2SVIName && vlan.VlanId == 100
+			}))
+			ndm.AssertNotCalled(GinkgoT(), "EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
+				return cfg.Link.Attrs().Name == l3SVIName
+			}))
+		})
+
+		It("creates single VXLAN for IPv4-only VTEP", func() {
+			vtep := &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        nodeName,
+					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
+				},
+			}
+
+			ndm := &ndmmocks.Interface{}
+			lister := &vteplistmocks.VTEPLister{}
+			informer := &vtepinfmocks.VTEPInformer{}
+			informer.On("Lister").Return(lister)
+			wf := &factorymocks.NodeWatchFactory{}
+			wf.On("GetNode", nodeName).Return(node, nil)
+			wf.On("VTEPInformer").Return(informer)
+			lister.On("Get", vtepName).Return(vtep, nil)
+
+			ndm.On("EnsureLink", mock.Anything).Return(nil)
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+
+			ctrl := &Controller{
+				nodeName:     nodeName,
+				watchFactory: wf,
+				ndm:          ndm,
+				networkMgr:   &networkmanager.FakeNetworkManager{},
+				ovsClient:    ovsClient,
+				nadVTEPInfo:  make(map[string]string),
+				svisByBridge: make(map[string]sets.Set[string]),
+				stopChan:     make(chan struct{}),
+			}
+
+			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
+			vxlan6Name := GetEVPNVXLANName(vtepName, utilnet.IPv6)
+
+			Expect(ctrl.reconcile(vtepName)).To(Succeed())
+
+			ndm.AssertCalled(GinkgoT(), "EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
+				vxlan, ok := cfg.Link.(*netlink.Vxlan)
+				return ok && cfg.Link.Attrs().Name == vxlan4Name && vxlan.SrcAddr.Equal(net.ParseIP("100.64.0.1"))
+			}))
+			ndm.AssertCalled(GinkgoT(), "DeleteLink", vxlan6Name)
+			ndm.AssertNotCalled(GinkgoT(), "EnsureLink", mock.MatchedBy(func(cfg netlinkdevicemanager.DeviceConfig) bool {
+				return cfg.Link.Attrs().Name == vxlan6Name
+			}))
+		})
+
 		It("cleans up stale OVS ports for a VTEP", func() {
 			// Create a stale OVS port using the production helper
 			stalePortName := "evovs-stale"
@@ -523,6 +882,55 @@ var _ = Describe("EVPN node controller", func() {
 
 			By("verifying IPv6 VXLAN was deleted (no IPv6 in host-cidrs)")
 			Expect(ndm.AssertCalled(GinkgoT(), "DeleteLink", vxlan6Name)).To(BeTrue())
+		})
+
+		It("reconciles when VTEP exists before node annotation", func() {
+			var ensuredMu sync.Mutex
+			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
+
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
+			})
+
+			By("creating an unmanaged VTEP before the node has host-cidrs")
+			_, err := vtepClient.K8sV1().VTEPs().Create(context.Background(), &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := wf.VTEPInformer().Lister().Get(vtepName)
+				return err
+			}).Should(Succeed())
+
+			By("adding host-cidrs annotation to trigger reconciliation")
+			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			node.Annotations = map[string]string{
+				util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`,
+			}
+			_, err = kubeClient.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			bridgeName := GetEVPNBridgeName(vtepName)
+			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
+
+			By("verifying bridge and VXLAN are created after annotation arrives")
+			Eventually(func() []string {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				var names []string
+				for _, cfg := range ensuredCfgs {
+					names = append(names, cfg.Link.Attrs().Name)
+				}
+				return names
+			}).Should(ContainElements(bridgeName, vxlan4Name))
 		})
 
 		It("reconciles VTEP with VID/VNI mappings when a network is added or removed", func() {
