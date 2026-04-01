@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"reflect"
+	"slices"
 	"sync"
 
 	"github.com/vishvananda/netlink"
@@ -712,9 +714,8 @@ func (c *Controller) ensureVXLAN(vxlanName string, bridgeName string, srcIP net.
 // For unmanaged VTEPs, an external provider has already assigned IPs to the node;
 // this discovers them from the host-cidrs annotation. When multiple IPs match
 // a single address family, it falls back to netlink to filter out secondary and
-// VIP addresses that can float between nodes. If ambiguity remains after
-// filtering, an error is returned — unmanaged VTEPs require exactly one IP
-// per address family.
+// VIP addresses that can float between nodes. If ambiguity remains, the
+// lexicographically lowest IP is chosen for deterministic selection.
 func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP, node *corev1.Node) (net.IP, net.IP, error) {
 	var cidrs []*net.IPNet
 	for _, cidr := range vtep.Spec.CIDRs {
@@ -762,7 +763,7 @@ func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP, node *corev1.No
 // pickVTEPIP selects a single VTEP IP from the candidates for the given address family.
 // If there's exactly one match, it's used directly. Multiple matches trigger a netlink
 // lookup to filter out keepalived VIPs and secondary addresses (which can float between
-// nodes). If ambiguity remains after filtering, an error is returned.
+// nodes). If ambiguity remains, the lexicographically lowest IP is chosen for determinism.
 func (c *Controller) pickVTEPIP(matches []net.IP, family int) (net.IP, error) {
 	if len(matches) <= 1 {
 		if len(matches) == 1 {
@@ -788,14 +789,14 @@ func (c *Controller) pickVTEPIP(matches []net.IP, family int) (net.IP, error) {
 			filtered = append(filtered, ip)
 		}
 	}
-
-	switch len(filtered) {
-	case 0:
-		return nil, nil
-	case 1:
+	slices.SortFunc(filtered, func(a, b net.IP) int {
+		addrA, _ := netip.AddrFromSlice(a)
+		addrB, _ := netip.AddrFromSlice(b)
+		return addrA.Compare(addrB)
+	})
+	if len(filtered) > 0 {
 		return filtered[0], nil
-	default:
-		return nil, fmt.Errorf("multiple non-VIP IPs %v found for address family %d; "+
-			"unmanaged VTEPs require exactly one IP per family in the VTEP CIDRs", filtered, family)
 	}
+	return nil, nil
+
 }

@@ -1192,7 +1192,7 @@ var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 		Expect(v6).To(BeNil())
 	})
 
-	It("errors when multiple non-VIP IPs match", func() {
+	It("picks the lowest IP when multiple non-VIP IPs match", func() {
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
@@ -1209,8 +1209,8 @@ var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 			{IPNet: &net.IPNet{IP: net.ParseIP("100.64.0.2"), Mask: net.CIDRMask(24, 32)}},
 		}, nil)
 
-		_, _, err := ctrl.discoverUnmanagedVTEPIPs(vtep, node)
-		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("multiple non-VIP IPs"))
+		v4, _, err := ctrl.discoverUnmanagedVTEPIPs(vtep, node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(v4.Equal(net.ParseIP("100.64.0.2"))).To(BeTrue())
 	})
 })
