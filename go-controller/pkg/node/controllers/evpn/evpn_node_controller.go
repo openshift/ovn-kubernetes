@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corelisters "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -39,24 +38,29 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
+// nodeAddressManager provides access to the node's IP addresses
+// and allows registering callbacks for address changes.
+type nodeAddressManager interface {
+	ListAddresses() ([]net.IP, []*net.IPNet)
+	AddOnAddressesChangedHandler(handler func())
+}
+
 const (
 	ovsBridgeInt = "br-int"
 )
 
 type Controller struct {
-	nodeName     string
-	watchFactory factory.NodeWatchFactory
-	kube         kube.Interface
-	networkMgr   networkmanager.Interface
-	ndm          netlinkdevicemanager.Interface
-	ovsClient    libovsdbclient.Client
+	nodeName       string
+	watchFactory   factory.NodeWatchFactory
+	kube           kube.Interface
+	networkMgr     networkmanager.Interface
+	ndm            netlinkdevicemanager.Interface
+	ovsClient      libovsdbclient.Client
+	addressManager nodeAddressManager
 
 	// vtepController reconciles VTEP CRs: ensures bridge, VXLAN, SVI, and OVS port
 	// lifecycle for each VTEP assigned to this node.
 	vtepController controller.Controller
-	// nodeEventHandler watches for node annotation changes that should
-	// trigger VTEP reconciliation if needed.
-	nodeEventHandler cache.ResourceEventHandlerRegistration
 	// nadReconciler triggers VTEP reconciliation when NADs referencing a VTEP
 	// are added or removed, so VID/VNI mappings and SVIs stay in sync.
 	nadReconciler   controller.Reconciler
@@ -81,17 +85,18 @@ type Controller struct {
 	stopChan chan struct{}
 }
 
-func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Interface, ndm netlinkdevicemanager.Interface, networkMgr networkmanager.Interface, ovsClient libovsdbclient.Client) (*Controller, error) {
+func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Interface, ndm netlinkdevicemanager.Interface, networkMgr networkmanager.Interface, ovsClient libovsdbclient.Client, addressManager nodeAddressManager) (*Controller, error) {
 	c := &Controller{
-		nodeName:     nodeName,
-		watchFactory: wf,
-		kube:         kube,
-		networkMgr:   networkMgr,
-		ndm:          ndm,
-		ovsClient:    ovsClient,
-		nadVTEPInfo:  make(map[string]string),
-		svisByBridge: make(map[string]sets.Set[string]),
-		stopChan:     make(chan struct{}),
+		nodeName:       nodeName,
+		watchFactory:   wf,
+		kube:           kube,
+		networkMgr:     networkMgr,
+		ndm:            ndm,
+		ovsClient:      ovsClient,
+		addressManager: addressManager,
+		nadVTEPInfo:    make(map[string]string),
+		svisByBridge:   make(map[string]sets.Set[string]),
+		stopChan:       make(chan struct{}),
 	}
 
 	vtepInformer := wf.VTEPInformer()
@@ -123,13 +128,8 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 			Lister:         c.podLister.List,
 		})
 
-	var err error
-	c.nodeEventHandler, err = wf.NodeCoreInformer().Informer().AddEventHandler(
-		cache.ResourceEventHandlerFuncs{
-			UpdateFunc: c.onNodeUpdate,
-		})
-	if err != nil {
-		return nil, fmt.Errorf("failed to add node event handler: %w", err)
+	if addressManager != nil {
+		addressManager.AddOnAddressesChangedHandler(c.reconcileAllUnmanagedVTEPs)
 	}
 
 	return c, nil
@@ -147,20 +147,9 @@ func (c *Controller) Start() error {
 }
 
 func (c *Controller) initialSync() error {
-	// VTEP informer cache sync is handled by StartWithInitialSync, but we also
-	// need the node informer cache synced to discover VTEP IPs from annotations.
-	if !util.WaitForInformerCacheSyncWithTimeout("evpn-node", c.stopChan, c.watchFactory.NodeCoreInformer().Informer().HasSynced) {
-		return fmt.Errorf("timed out waiting for node informer cache to sync")
-	}
-
 	vteps, err := c.watchFactory.VTEPInformer().Lister().List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("failed to list VTEPs: %w", err)
-	}
-
-	node, err := c.watchFactory.GetNode(c.nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get node %s: %w", c.nodeName, err)
 	}
 
 	// Pre-populate NDM desired state so it doesn't remove existing devices on startup.
@@ -172,7 +161,7 @@ func (c *Controller) initialSync() error {
 		if vtep.Spec.Mode == vtepv1.VTEPModeManaged {
 			continue
 		}
-		vtepIPv4, vtepIPv6, err := c.discoverUnmanagedVTEPIPs(vtep, node)
+		vtepIPv4, vtepIPv6, err := c.discoverUnmanagedVTEPIPs(vtep)
 		if err != nil {
 			klog.Errorf("Failed to get VTEP IPs for %s: %v", vtep.Name, err)
 			continue
@@ -202,12 +191,6 @@ func (c *Controller) initialSync() error {
 func (c *Controller) Stop() {
 	klog.Info("Stopping EVPN node controller")
 
-	if c.nodeEventHandler != nil {
-		if err := c.watchFactory.NodeCoreInformer().Informer().RemoveEventHandler(c.nodeEventHandler); err != nil {
-			klog.Errorf("Failed to remove node event handler: %v", err)
-		}
-	}
-
 	if c.nadReconcilerID != 0 {
 		if err := c.networkMgr.DeRegisterNADReconciler(c.nadReconcilerID); err != nil {
 			klog.Warningf("Failed to deregister EVPN NAD reconciler: %v", err)
@@ -226,70 +209,20 @@ func (c *Controller) vtepNeedsUpdate(oldObj, newObj *vtepv1.VTEP) bool {
 	return !reflect.DeepEqual(oldObj.Spec, newObj.Spec)
 }
 
-func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
-	oldNode, ok := oldObj.(*corev1.Node)
-	if !ok {
-		return
-	}
-	newNode, ok := newObj.(*corev1.Node)
-	if !ok {
-		return
-	}
-	if newNode.Name != c.nodeName {
-		return
-	}
-
-	if util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
-		c.reconcileUnmanagedVTEPs(oldNode, newNode)
-	}
-}
-
-// reconcileUnmanagedVTEPs reconciles unmanaged VTEPs whose CIDRs overlap with
-// the host-cidrs that changed between oldNode and newNode.
-func (c *Controller) reconcileUnmanagedVTEPs(oldNode, newNode *corev1.Node) {
-	oldCIDRs, err := util.ParseNodeHostCIDRs(oldNode)
-	if err != nil {
-		klog.Errorf("Failed to parse old host-cidrs for node %s: %v", c.nodeName, err)
-		return
-	}
-	newCIDRs, err := util.ParseNodeHostCIDRs(newNode)
-	if err != nil {
-		klog.Errorf("Failed to parse new host-cidrs for node %s: %v", c.nodeName, err)
-		return
-	}
-	changed := oldCIDRs.SymmetricDifference(newCIDRs)
-	if changed.Len() == 0 {
-		return
-	}
-
-	changedNets, err := util.ParseIPNets(changed.UnsortedList())
-	if err != nil {
-		klog.Errorf("Failed to parse changed host CIDRs: %v", err)
-		return
-	}
-
+// reconcileAllUnmanagedVTEPs triggers reconciliation for all unmanaged VTEPs.
+// Called when the node's addresses change via the address manager callback.
+func (c *Controller) reconcileAllUnmanagedVTEPs() {
 	vteps, err := c.watchFactory.VTEPInformer().Lister().List(labels.Everything())
 	if err != nil {
-		klog.Errorf("Failed to list VTEPs for host-cidrs reconciliation: %v", err)
+		klog.Errorf("Failed to list VTEPs for address change reconciliation: %v", err)
 		return
 	}
 	for _, vtep := range vteps {
 		if vtep.Spec.Mode != vtepv1.VTEPModeUnmanaged {
 			continue
 		}
-		var vtepCIDRStrs []string
-		for _, cidr := range vtep.Spec.CIDRs {
-			vtepCIDRStrs = append(vtepCIDRStrs, string(cidr))
-		}
-		vtepNets, err := util.ParseIPNets(vtepCIDRStrs)
-		if err != nil {
-			klog.Errorf("Failed to parse VTEP %s CIDRs: %v", vtep.Name, err)
-			continue
-		}
-		if util.NetworksOverlap(vtepNets, changedNets) {
-			klog.V(4).Infof("Host CIDRs changed on node %s, reconciling unmanaged VTEP %s", c.nodeName, vtep.Name)
-			c.vtepController.Reconcile(vtep.Name)
-		}
+		klog.V(4).Infof("Node addresses changed on %s, reconciling unmanaged VTEP %s", c.nodeName, vtep.Name)
+		c.vtepController.Reconcile(vtep.Name)
 	}
 }
 
@@ -317,12 +250,7 @@ func (c *Controller) reconcile(key string) error {
 			"configure a different hybrid-overlay-vxlan-port to avoid the conflict", config.DefaultVXLANPort)
 	}
 
-	node, err := c.watchFactory.GetNode(c.nodeName)
-	if err != nil {
-		return fmt.Errorf("failed to get node %s: %w", c.nodeName, err)
-	}
-
-	vtepIPv4, vtepIPv6, err := c.discoverUnmanagedVTEPIPs(vtep, node)
+	vtepIPv4, vtepIPv6, err := c.discoverUnmanagedVTEPIPs(vtep)
 	if err != nil {
 		return fmt.Errorf("failed to discover VTEP %s IPs: %w", vtep.Name, err)
 	}
@@ -712,11 +640,11 @@ func (c *Controller) ensureVXLAN(vxlanName string, bridgeName string, srcIP net.
 
 // discoverUnmanagedVTEPIPs finds IPs on the node that fall within the VTEP's CIDRs.
 // For unmanaged VTEPs, an external provider has already assigned IPs to the node;
-// this discovers them from the host-cidrs annotation. When multiple IPs match
+// this discovers them from the node address manager. When multiple IPs match
 // a single address family, it falls back to netlink to filter out secondary and
 // VIP addresses that can float between nodes. If ambiguity remains, the
 // lexicographically lowest IP is chosen for deterministic selection.
-func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP, node *corev1.Node) (net.IP, net.IP, error) {
+func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP, error) {
 	var cidrs []*net.IPNet
 	for _, cidr := range vtep.Spec.CIDRs {
 		_, ipNet, err := net.ParseCIDR(string(cidr))
@@ -726,17 +654,10 @@ func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP, node *corev1.No
 		cidrs = append(cidrs, ipNet)
 	}
 
-	hostCIDRs, err := util.ParseNodeHostCIDRs(node)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse host-cidrs annotation: %w", err)
-	}
+	nodeIPs, _ := c.addressManager.ListAddresses()
 
 	var v4Matches, v6Matches []net.IP
-	for hostCIDR := range hostCIDRs {
-		ip, _, err := net.ParseCIDR(hostCIDR)
-		if err != nil {
-			return nil, nil, err
-		}
+	for _, ip := range nodeIPs {
 		if util.IsIPContainedInAnyCIDR(ip, cidrs...) {
 			if ip.To4() != nil {
 				v4Matches = append(v4Matches, ip)

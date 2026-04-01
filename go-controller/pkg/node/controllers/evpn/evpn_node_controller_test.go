@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -91,31 +90,25 @@ var _ = Describe("EVPN node controller", func() {
 					Mode:  vtepv1.VTEPModeUnmanaged,
 				},
 			}
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24","fd00::1/64"]`},
-				},
-			}
 
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
-			wf.On("GetNode", nodeName).Return(node, nil)
 			wf.On("VTEPInformer").Return(informer)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			ctrl := &Controller{
-				nodeName:     nodeName,
-				watchFactory: wf,
-				ndm:          ndm,
-				networkMgr:   &networkmanager.FakeNetworkManager{},
-				ovsClient:    ovsClient,
-				nadVTEPInfo:  make(map[string]string),
-				svisByBridge: make(map[string]sets.Set[string]),
-				stopChan:     make(chan struct{}),
+				nodeName:       nodeName,
+				watchFactory:   wf,
+				ndm:            ndm,
+				networkMgr:     &networkmanager.FakeNetworkManager{},
+				ovsClient:      ovsClient,
+				nadVTEPInfo:    make(map[string]string),
+				svisByBridge:   make(map[string]sets.Set[string]),
+				addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("fd00::1")}},
+				stopChan:       make(chan struct{}),
 			}
 
 			bridgeName := GetEVPNBridgeName(vtepName)
@@ -263,19 +256,12 @@ var _ = Describe("EVPN node controller", func() {
 					Mode:  vtepv1.VTEPModeUnmanaged,
 				},
 			}
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
-				},
-			}
 
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
-			wf.On("GetNode", nodeName).Return(node, nil)
 			wf.On("VTEPInformer").Return(informer)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
@@ -292,7 +278,8 @@ var _ = Describe("EVPN node controller", func() {
 				svisByBridge: map[string]sets.Set[string]{
 					bridgeName: sets.New(staleSVI),
 				},
-				stopChan: make(chan struct{}),
+				addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}},
+				stopChan:       make(chan struct{}),
 			}
 
 			ndm.On("EnsureLink", mock.Anything).Return(nil)
@@ -354,12 +341,13 @@ var _ = Describe("EVPN node controller", func() {
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			ctrl := &Controller{
-				nodeName:     nodeName,
-				watchFactory: wf,
-				ovsClient:    ovsClient,
-				nadVTEPInfo:  make(map[string]string),
-				svisByBridge: make(map[string]sets.Set[string]),
-				stopChan:     make(chan struct{}),
+				nodeName:       nodeName,
+				watchFactory:   wf,
+				ovsClient:      ovsClient,
+				nadVTEPInfo:    make(map[string]string),
+				svisByBridge:   make(map[string]sets.Set[string]),
+				addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}},
+				stopChan:       make(chan struct{}),
 			}
 
 			By("enabling hybrid overlay with the default VXLAN port")
@@ -371,14 +359,6 @@ var _ = Describe("EVPN node controller", func() {
 
 			By("using a different VXLAN port for hybrid overlay, reconciliation proceeds")
 			config.HybridOverlay.VXLANPort = 4790
-
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
-				},
-			}
-			wf.On("GetNode", nodeName).Return(node, nil)
 
 			ndm := &ndmmocks.Interface{}
 			ndm.On("EnsureLink", mock.Anything).Return(nil)
@@ -406,27 +386,22 @@ var _ = Describe("EVPN node controller", func() {
 			wf.On("VTEPInformer").Return(informer)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
+			am := &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}}
 			ctrl := &Controller{
-				nodeName:     nodeName,
-				watchFactory: wf,
-				ndm:          ndm,
-				networkMgr:   &networkmanager.FakeNetworkManager{},
-				ovsClient:    ovsClient,
-				nadVTEPInfo:  make(map[string]string),
-				svisByBridge: make(map[string]sets.Set[string]),
-				stopChan:     make(chan struct{}),
+				nodeName:       nodeName,
+				watchFactory:   wf,
+				ndm:            ndm,
+				networkMgr:     &networkmanager.FakeNetworkManager{},
+				ovsClient:      ovsClient,
+				nadVTEPInfo:    make(map[string]string),
+				svisByBridge:   make(map[string]sets.Set[string]),
+				addressManager: am,
+				stopChan:       make(chan struct{}),
 			}
 
 			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
 
-			By("first reconcile with host-cidrs containing 100.64.0.1")
-			wf.On("GetNode", nodeName).Return(&corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
-				},
-			}, nil).Once()
-
+			By("first reconcile with address manager containing 100.64.0.1")
 			var firstSrcAddr, secondSrcAddr net.IP
 			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 				cfg := args.Get(0).(netlinkdevicemanager.DeviceConfig)
@@ -443,13 +418,8 @@ var _ = Describe("EVPN node controller", func() {
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 			Expect(firstSrcAddr.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 
-			By("second reconcile with host-cidrs changed to 100.64.0.5")
-			wf.On("GetNode", nodeName).Return(&corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.5/24"]`},
-				},
-			}, nil).Once()
+			By("second reconcile with address manager changed to 100.64.0.5")
+			am.ips = []net.IP{net.ParseIP("100.64.0.5")}
 
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 			Expect(secondSrcAddr.Equal(net.ParseIP("100.64.0.5"))).To(BeTrue())
@@ -472,26 +442,22 @@ var _ = Describe("EVPN node controller", func() {
 			wf.On("VTEPInformer").Return(informer)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
+			am := &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("fd00::1")}}
 			ctrl := &Controller{
-				nodeName:     nodeName,
-				watchFactory: wf,
-				ndm:          ndm,
-				networkMgr:   &networkmanager.FakeNetworkManager{},
-				ovsClient:    ovsClient,
-				nadVTEPInfo:  make(map[string]string),
-				svisByBridge: make(map[string]sets.Set[string]),
-				stopChan:     make(chan struct{}),
+				nodeName:       nodeName,
+				watchFactory:   wf,
+				ndm:            ndm,
+				networkMgr:     &networkmanager.FakeNetworkManager{},
+				ovsClient:      ovsClient,
+				nadVTEPInfo:    make(map[string]string),
+				svisByBridge:   make(map[string]sets.Set[string]),
+				addressManager: am,
+				stopChan:       make(chan struct{}),
 			}
 
 			vxlan6Name := GetEVPNVXLANName(vtepName, utilnet.IPv6)
 
-			By("first reconcile with dual-stack host-cidrs")
-			wf.On("GetNode", nodeName).Return(&corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24","fd00::1/64"]`},
-				},
-			}, nil).Once()
+			By("first reconcile with dual-stack addresses")
 			ndm.On("EnsureLink", mock.Anything).Return(nil)
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
 
@@ -500,13 +466,8 @@ var _ = Describe("EVPN node controller", func() {
 				return cfg.Link.Attrs().Name == vxlan6Name
 			}))
 
-			By("second reconcile with only IPv4 host-cidrs — IPv6 VXLAN should be deleted")
-			wf.On("GetNode", nodeName).Return(&corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
-				},
-			}, nil).Once()
+			By("second reconcile with only IPv4 addresses — IPv6 VXLAN should be deleted")
+			am.ips = []net.IP{net.ParseIP("100.64.0.1")}
 
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 			ndm.AssertCalled(GinkgoT(), "DeleteLink", vxlan6Name)
@@ -530,19 +491,12 @@ var _ = Describe("EVPN node controller", func() {
 					Mode:  vtepv1.VTEPModeUnmanaged,
 				},
 			}
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24","100.65.0.1/24"]`},
-				},
-			}
 
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
-			wf.On("GetNode", nodeName).Return(node, nil)
 			wf.On("VTEPInformer").Return(informer)
 			lister.On("Get", vtepNameA).Return(vtepA, nil)
 			lister.On("Get", vtepNameB).Return(vtepB, nil)
@@ -554,14 +508,15 @@ var _ = Describe("EVPN node controller", func() {
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
 
 			ctrl := &Controller{
-				nodeName:     nodeName,
-				watchFactory: wf,
-				ndm:          ndm,
-				networkMgr:   &networkmanager.FakeNetworkManager{},
-				ovsClient:    ovsClient,
-				nadVTEPInfo:  make(map[string]string),
-				svisByBridge: make(map[string]sets.Set[string]),
-				stopChan:     make(chan struct{}),
+				nodeName:       nodeName,
+				watchFactory:   wf,
+				ndm:            ndm,
+				networkMgr:     &networkmanager.FakeNetworkManager{},
+				ovsClient:      ovsClient,
+				nadVTEPInfo:    make(map[string]string),
+				svisByBridge:   make(map[string]sets.Set[string]),
+				addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("100.65.0.1")}},
+				stopChan:       make(chan struct{}),
 			}
 
 			Expect(ctrl.reconcile(vtepNameA)).To(Succeed())
@@ -610,19 +565,12 @@ var _ = Describe("EVPN node controller", func() {
 					Mode:  vtepv1.VTEPModeUnmanaged,
 				},
 			}
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
-				},
-			}
 
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
-			wf.On("GetNode", nodeName).Return(node, nil)
 			wf.On("VTEPInformer").Return(informer)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
@@ -637,14 +585,15 @@ var _ = Describe("EVPN node controller", func() {
 			})).Return(fmt.Errorf("device busy"))
 
 			ctrl := &Controller{
-				nodeName:     nodeName,
-				watchFactory: wf,
-				ndm:          ndm,
-				networkMgr:   &networkmanager.FakeNetworkManager{},
-				ovsClient:    ovsClient,
-				nadVTEPInfo:  make(map[string]string),
-				svisByBridge: make(map[string]sets.Set[string]),
-				stopChan:     make(chan struct{}),
+				nodeName:       nodeName,
+				watchFactory:   wf,
+				ndm:            ndm,
+				networkMgr:     &networkmanager.FakeNetworkManager{},
+				ovsClient:      ovsClient,
+				nadVTEPInfo:    make(map[string]string),
+				svisByBridge:   make(map[string]sets.Set[string]),
+				addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}},
+				stopChan:       make(chan struct{}),
 			}
 
 			err := ctrl.reconcile(vtepName)
@@ -702,19 +651,12 @@ var _ = Describe("EVPN node controller", func() {
 					Mode:  vtepv1.VTEPModeUnmanaged,
 				},
 			}
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        nodeName,
-					Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`},
-				},
-			}
 
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
-			wf.On("GetNode", nodeName).Return(node, nil)
 			wf.On("VTEPInformer").Return(informer)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
@@ -722,14 +664,15 @@ var _ = Describe("EVPN node controller", func() {
 			ndm.On("DeleteLink", mock.Anything).Return(nil)
 
 			ctrl := &Controller{
-				nodeName:     nodeName,
-				watchFactory: wf,
-				ndm:          ndm,
-				networkMgr:   &networkmanager.FakeNetworkManager{},
-				ovsClient:    ovsClient,
-				nadVTEPInfo:  make(map[string]string),
-				svisByBridge: make(map[string]sets.Set[string]),
-				stopChan:     make(chan struct{}),
+				nodeName:       nodeName,
+				watchFactory:   wf,
+				ndm:            ndm,
+				networkMgr:     &networkmanager.FakeNetworkManager{},
+				ovsClient:      ovsClient,
+				nadVTEPInfo:    make(map[string]string),
+				svisByBridge:   make(map[string]sets.Set[string]),
+				addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}},
+				stopChan:       make(chan struct{}),
 			}
 
 			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
@@ -769,7 +712,7 @@ var _ = Describe("EVPN node controller", func() {
 		})
 	})
 
-	Describe("onNodeUpdate", func() {
+	Describe("address change reconciliation", func() {
 		var (
 			kubeClient *fake.Clientset
 			vtepClient *vtepfake.Clientset
@@ -778,6 +721,7 @@ var _ = Describe("EVPN node controller", func() {
 			fakeNM     *networkmanager.FakeNetworkManager
 			ovsCleanup *libovsdbtest.Context
 			ctrl       *Controller
+			am         *fakeAddressManager
 		)
 
 		BeforeEach(func() {
@@ -788,10 +732,10 @@ var _ = Describe("EVPN node controller", func() {
 			config.OVNKubernetesFeature.EnableEVPN = true
 			config.Gateway.Mode = config.GatewayModeLocal
 
-			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
-			kubeClient = fake.NewClientset(node)
+			kubeClient = fake.NewClientset()
 			vtepClient = vtepfake.NewSimpleClientset()
 			ndm = &ndmmocks.Interface{}
+			am = &fakeAddressManager{}
 
 			var err error
 			wf, err = factory.NewNodeWatchFactory(&util.OVNNodeClientset{
@@ -810,7 +754,7 @@ var _ = Describe("EVPN node controller", func() {
 			fakeNM = &networkmanager.FakeNetworkManager{}
 			var ovsClient libovsdbclient.Client
 			ovsClient, ovsCleanup = newTestOVSClient()
-			ctrl, err = NewController(nodeName, wf, &kube.Kube{KClient: kubeClient}, ndm, fakeNM, ovsClient)
+			ctrl, err = NewController(nodeName, wf, &kube.Kube{KClient: kubeClient}, ndm, fakeNM, ovsClient, am)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ctrl.Start()).To(Succeed())
 		})
@@ -827,7 +771,7 @@ var _ = Describe("EVPN node controller", func() {
 			}
 		})
 
-		It("reconciles VTEPs when node host-cidrs annotation changes", func() {
+		It("reconciles VTEPs when node addresses change", func() {
 			bridgeName := GetEVPNBridgeName(vtepName)
 			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
 			vxlan6Name := GetEVPNVXLANName(vtepName, utilnet.IPv6)
@@ -860,16 +804,11 @@ var _ = Describe("EVPN node controller", func() {
 				return err
 			}).Should(Succeed())
 
-			By("annotating the node with host-cidrs to trigger onNodeUpdate → reconcile")
-			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			node.Annotations = map[string]string{
-				util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`,
-			}
-			_, err = kubeClient.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{})
-			Expect(err).NotTo(HaveOccurred())
+			By("updating address manager IPs and triggering reconciliation")
+			am.ips = []net.IP{net.ParseIP("100.64.0.1")}
+			ctrl.reconcileAllUnmanagedVTEPs()
 
-			By("verifying the full chain: onNodeUpdate → reconcile → NDM creates bridge and VXLAN")
+			By("verifying the full chain: reconcileAllUnmanagedVTEPs → reconcile → NDM creates bridge and VXLAN")
 			Eventually(func() []string {
 				ensuredMu.Lock()
 				defer ensuredMu.Unlock()
@@ -880,11 +819,11 @@ var _ = Describe("EVPN node controller", func() {
 				return names
 			}).Should(ContainElements(bridgeName, vxlan4Name))
 
-			By("verifying IPv6 VXLAN was deleted (no IPv6 in host-cidrs)")
+			By("verifying IPv6 VXLAN was deleted (no IPv6 address)")
 			Expect(ndm.AssertCalled(GinkgoT(), "DeleteLink", vxlan6Name)).To(BeTrue())
 		})
 
-		It("reconciles when VTEP exists before node annotation", func() {
+		It("reconciles when VTEP exists before addresses are available", func() {
 			var ensuredMu sync.Mutex
 			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
 
@@ -895,7 +834,7 @@ var _ = Describe("EVPN node controller", func() {
 				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
 			})
 
-			By("creating an unmanaged VTEP before the node has host-cidrs")
+			By("creating an unmanaged VTEP before addresses are available")
 			_, err := vtepClient.K8sV1().VTEPs().Create(context.Background(), &vtepv1.VTEP{
 				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
 				Spec: vtepv1.VTEPSpec{
@@ -909,19 +848,14 @@ var _ = Describe("EVPN node controller", func() {
 				return err
 			}).Should(Succeed())
 
-			By("adding host-cidrs annotation to trigger reconciliation")
-			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			node.Annotations = map[string]string{
-				util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`,
-			}
-			_, err = kubeClient.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{})
-			Expect(err).NotTo(HaveOccurred())
+			By("updating address manager and triggering reconciliation")
+			am.ips = []net.IP{net.ParseIP("100.64.0.1")}
+			ctrl.reconcileAllUnmanagedVTEPs()
 
 			bridgeName := GetEVPNBridgeName(vtepName)
 			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
 
-			By("verifying bridge and VXLAN are created after annotation arrives")
+			By("verifying bridge and VXLAN are created after addresses arrive")
 			Eventually(func() []string {
 				ensuredMu.Lock()
 				defer ensuredMu.Unlock()
@@ -947,7 +881,7 @@ var _ = Describe("EVPN node controller", func() {
 				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
 			})
 
-			By("creating an unmanaged VTEP and annotating the node with host-cidrs")
+			By("creating an unmanaged VTEP and setting up addresses")
 			_, err := vtepClient.K8sV1().VTEPs().Create(context.Background(), &vtepv1.VTEP{
 				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
 				Spec: vtepv1.VTEPSpec{
@@ -961,13 +895,7 @@ var _ = Describe("EVPN node controller", func() {
 				return err
 			}).Should(Succeed())
 
-			node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			node.Annotations = map[string]string{
-				util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`,
-			}
-			_, err = kubeClient.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{})
-			Expect(err).NotTo(HaveOccurred())
+			am.ips = []net.IP{net.ParseIP("100.64.0.1")}
 
 			By("simulating a network add with EVPN VID/VNI mappings")
 			netInfo := &multinetworkmocks.NetInfo{}
@@ -1119,63 +1047,65 @@ var _ = Describe("vtepNeedsUpdate", func() {
 	})
 })
 
+type fakeAddressManager struct {
+	ips []net.IP
+}
+
+func (f *fakeAddressManager) ListAddresses() ([]net.IP, []*net.IPNet) {
+	return f.ips, nil
+}
+
+func (f *fakeAddressManager) AddOnAddressesChangedHandler(func()) {}
+
 var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 	const nodeName = "node1"
 	var ctrl *Controller
 
-	BeforeEach(func() {
-		ctrl = &Controller{nodeName: nodeName}
-	})
-
 	It("discovers a single IPv4 match", func() {
+		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}}}
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
 		}
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName,
-			Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24"]`}}}
 
-		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep, node)
+		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 		Expect(v6).To(BeNil())
 	})
 
 	It("discovers a single IPv6 match", func() {
+		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("fd00::1")}}}
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"fd00::/64"}},
 		}
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName,
-			Annotations: map[string]string{util.OVNNodeHostCIDRs: `["fd00::1/64"]`}}}
 
-		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep, node)
+		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4).To(BeNil())
 		Expect(v6.Equal(net.ParseIP("fd00::1"))).To(BeTrue())
 	})
 
 	It("discovers dual-stack IPs", func() {
+		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("fd00::1")}}}
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24", "fd00::/64"}},
 		}
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName,
-			Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24","fd00::1/64"]`}}}
 
-		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep, node)
+		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 		Expect(v6.Equal(net.ParseIP("fd00::1"))).To(BeTrue())
 	})
 
 	It("filters keepalived VIPs when multiple IPs match", func() {
+		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("100.64.0.2")}}}
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
 		}
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName,
-			Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.1/24","100.64.0.2/24"]`}}}
 
 		nlMock := &mocks.NetLinkOps{}
 		util.SetNetLinkOpMockInst(nlMock)
@@ -1186,19 +1116,18 @@ var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 			{IPNet: &net.IPNet{IP: net.ParseIP("100.64.0.2"), Mask: net.CIDRMask(24, 32)}, Label: "eth0:vip"},
 		}, nil)
 
-		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep, node)
+		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 		Expect(v6).To(BeNil())
 	})
 
 	It("picks the lowest IP when multiple non-VIP IPs match", func() {
+		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.5"), net.ParseIP("100.64.0.2")}}}
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
 		}
-		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName,
-			Annotations: map[string]string{util.OVNNodeHostCIDRs: `["100.64.0.5/24","100.64.0.2/24"]`}}}
 
 		nlMock := &mocks.NetLinkOps{}
 		util.SetNetLinkOpMockInst(nlMock)
@@ -1209,7 +1138,7 @@ var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 			{IPNet: &net.IPNet{IP: net.ParseIP("100.64.0.2"), Mask: net.CIDRMask(24, 32)}},
 		}, nil)
 
-		v4, _, err := ctrl.discoverUnmanagedVTEPIPs(vtep, node)
+		v4, _, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4.Equal(net.ParseIP("100.64.0.2"))).To(BeTrue())
 	})
