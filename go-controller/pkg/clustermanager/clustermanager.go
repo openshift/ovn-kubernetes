@@ -248,7 +248,7 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		// Increase worker concurrency from 1 to 20 for better throughput at scale
 		// Reduces 25s mirror delay to <5s (80% reduction)
 		// With 200 UDNs × 5 services = 1000 EndpointSlices, single worker is overwhelmed
-		workerCount := 20
+		workerCount := 15
 		klog.Infof("Starting EndpointSlice mirror controller with %d workers", workerCount)
 		if err := cm.endpointSliceMirrorController.Start(ctx, workerCount); err != nil {
 			return err
