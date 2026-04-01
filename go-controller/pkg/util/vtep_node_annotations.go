@@ -34,6 +34,17 @@ func ParseNodeVTEPs(node *corev1.Node) (map[string]VTEPNodeAnnotation, error) {
 	return vteps, nil
 }
 
+// MarshalNodeVTEPs serializes the VTEPs annotation for use with SetAnnotationsOnNode.
+func MarshalNodeVTEPs(vteps map[string]VTEPNodeAnnotation) (map[string]interface{}, error) {
+	data, err := json.Marshal(vteps)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		OVNNodeVTEPs: string(data),
+	}, nil
+}
+
 // NodeVTEPsAnnotationChanged returns true if the k8s.ovn.org/vteps annotation
 // differs between the old and new node objects. Both oldNode and newNode must
 // be non-nil;

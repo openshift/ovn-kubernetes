@@ -75,6 +75,11 @@ type Controller struct {
 	svisByBridgeLock sync.Mutex
 	svisByBridge     map[string]sets.Set[string]
 
+	// vtepsAnnotation is a controller-local copy of the node's VTEP annotation,
+	// used instead of the informer cache to avoid stale reads when multiple
+	// VTEPs are reconciled in sequence before the cache catches up.
+	vtepsAnnotation map[string]util.VTEPNodeAnnotation
+
 	// podController manages static FDB and neighbor entries for local pods
 	// on EVPN networks, enabling ARP/ND suppression and known-unicast forwarding.
 	podController controller.Controller
@@ -147,6 +152,12 @@ func (c *Controller) Start() error {
 }
 
 func (c *Controller) initialSync() error {
+	// VTEP informer cache sync is handled by StartWithInitialSync, but we also
+	// need the node informer cache synced to read VTEP IPs annotation.
+	if !util.WaitForInformerCacheSyncWithTimeout("evpn-node", c.stopChan, c.watchFactory.NodeCoreInformer().Informer().HasSynced) {
+		return fmt.Errorf("timed out waiting for node informer cache to sync")
+	}
+
 	vteps, err := c.watchFactory.VTEPInformer().Lister().List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("failed to list VTEPs: %w", err)
@@ -638,47 +649,134 @@ func (c *Controller) ensureVXLAN(vxlanName string, bridgeName string, srcIP net.
 	return nil
 }
 
-// discoverUnmanagedVTEPIPs finds IPs on the node that fall within the VTEP's CIDRs.
-// For unmanaged VTEPs, an external provider has already assigned IPs to the node;
-// this discovers them from the node address manager. When multiple IPs match
-// a single address family, it falls back to netlink to filter out secondary and
-// VIP addresses that can float between nodes. If ambiguity remains, the
-// lexicographically lowest IP is chosen for deterministic selection.
+// discoverUnmanagedVTEPIPs resolves the IPs to use for an unmanaged VTEP.
+// For each IP family present in the VTEP's CIDRs, it checks the node's VTEP annotation
+// for a previously selected IP. If that IP is still present in the address manager and
+// within the VTEP's CIDRs, it is reused for stability. Otherwise, a new IP is discovered
+// from the address manager and the annotation is updated.
 func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP, error) {
-	var cidrs []*net.IPNet
-	for _, cidr := range vtep.Spec.CIDRs {
-		_, ipNet, err := net.ParseCIDR(string(cidr))
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to parse VTEP CIDR %q: %w", cidr, err)
-		}
-		cidrs = append(cidrs, ipNet)
+	// fetch the annotated VTEP IPs
+	vtepsAnnotation, err := c.getVTEPsAnnotation()
+	if err != nil {
+		return nil, nil, err
 	}
+	v4AnnotatedIP := net.ParseIP(matchFirstIPStringFamily(false, vtepsAnnotation[vtep.Name].IPs))
+	v6AnnotatedIP := net.ParseIP(matchFirstIPStringFamily(true, vtepsAnnotation[vtep.Name].IPs))
 
+	// get valid node IP addresses
 	nodeIPs, _ := c.addressManager.ListAddresses()
+	v4NodeIPs, v6NodeIPs := util.SplitIPsByIPFamily(nodeIPs)
 
-	var v4Matches, v6Matches []net.IP
-	for _, ip := range nodeIPs {
-		if util.IsIPContainedInAnyCIDR(ip, cidrs...) {
-			if ip.To4() != nil {
-				v4Matches = append(v4Matches, ip)
-			} else {
-				v6Matches = append(v6Matches, ip)
-			}
+	// get the VTEP CIDRs
+	vtepIPNets, err := util.ParseIPNets(vtep.Spec.CIDRs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse VTEP %q CIDRs %v: %w", vtep.Name, vtep.Spec.CIDRs, err)
+	}
+	v4VTEPCIDRS, v6VTEPCIDRS := util.SplitIPNetsByIPFamily(vtepIPNets)
+
+	// reuse the annotated IP if still valid otherwise select a new one,
+	// resolving each IP family independently
+	v4SelectedIP, err := c.resolveVTEPIP(netlink.FAMILY_V4, v4VTEPCIDRS, v4NodeIPs, v4AnnotatedIP)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	v6SelectedIP, err := c.resolveVTEPIP(netlink.FAMILY_V6, v6VTEPCIDRS, v6NodeIPs, v6AnnotatedIP)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	changed := !v4AnnotatedIP.Equal(v4SelectedIP) || !v6AnnotatedIP.Equal(v6SelectedIP)
+	if changed {
+		if err := c.annotateVTEPIPs(vtep.Name, v4SelectedIP, v6SelectedIP); err != nil {
+			return nil, nil, fmt.Errorf("failed to annotate VTEP %s IPs: %w", vtep.Name, err)
 		}
 	}
+	return v4SelectedIP, v6SelectedIP, nil
+}
 
-	// When a single match exists per family, use it directly. Multiple matches
-	// require netlink to filter out secondary/VIP addresses that float between nodes.
-	// If ambiguity remains, returns an error.
-	ipv4, err := c.pickVTEPIP(v4Matches, netlink.FAMILY_V4)
-	if err != nil {
-		return nil, nil, err
+// resolveVTEPIP returns the IP to use for a given family. If the VTEP IP
+// is still present among the node IPs and within the VTEP's CIDRs, it is
+// returned. Otherwise, a new IP is selected from matching node IPs.
+func (c *Controller) resolveVTEPIP(family int, vtepCIDRs []*net.IPNet, nodeIPs []net.IP, vtepIP net.IP) (net.IP, error) {
+	if len(vtepCIDRs) == 0 {
+		return nil, nil
 	}
-	ipv6, err := c.pickVTEPIP(v6Matches, netlink.FAMILY_V6)
-	if err != nil {
-		return nil, nil, err
+
+	equalsVTEPIP := func(ip net.IP) bool { return ip.Equal(vtepIP) }
+	if vtepIP != nil && slices.ContainsFunc(nodeIPs, equalsVTEPIP) && util.IsIPContainedInAnyCIDR(vtepIP, vtepCIDRs...) {
+		return vtepIP, nil
 	}
-	return ipv4, ipv6, nil
+
+	// Select a new IP from node addresses matching the CIDRs.
+	var matches []net.IP
+	for _, nodeIP := range nodeIPs {
+		if util.IsIPContainedInAnyCIDR(nodeIP, vtepCIDRs...) {
+			matches = append(matches, nodeIP)
+		}
+	}
+	return c.pickVTEPIP(matches, family)
+}
+
+// getVTEPsAnnotation returns the controller-local copy of the VTEP annotation.
+// On first call it bootstraps from the informer cache; subsequent calls return
+// the local copy which is kept in sync by annotateVTEPIPs. This avoids stale
+// reads when multiple VTEPs are reconciled before the informer cache updates.
+func (c *Controller) getVTEPsAnnotation() (map[string]util.VTEPNodeAnnotation, error) {
+	if c.vtepsAnnotation != nil {
+		return c.vtepsAnnotation, nil
+	}
+	node, err := c.watchFactory.GetNode(c.nodeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s: %w", c.nodeName, err)
+	}
+	vtepsAnnotation, err := util.ParseNodeVTEPs(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			c.vtepsAnnotation = map[string]util.VTEPNodeAnnotation{}
+			return c.vtepsAnnotation, nil
+		}
+		return nil, fmt.Errorf("failed to parse VTEP annotation: %w", err)
+	}
+	c.vtepsAnnotation = vtepsAnnotation
+	return c.vtepsAnnotation, nil
+}
+
+// annotateVTEPIPs updates the node's VTEP annotation with the selected IPs.
+func (c *Controller) annotateVTEPIPs(vtepName string, ipv4, ipv6 net.IP) (err error) {
+	entry := util.VTEPNodeAnnotation{}
+	if ipv4 != nil {
+		entry.IPs = append(entry.IPs, ipv4.String())
+	}
+	if ipv6 != nil {
+		entry.IPs = append(entry.IPs, ipv6.String())
+	}
+
+	vtepsAnnotation, err := c.getVTEPsAnnotation()
+	if err != nil {
+		return err
+	}
+
+	// restore previous value on error to ensure retry will reattempt to set the
+	// annotation
+	previous := vtepsAnnotation[vtepName]
+	defer func() {
+		if err == nil {
+			return
+		}
+		vtepsAnnotation[vtepName] = previous
+		if len(previous.IPs) == 0 {
+			delete(vtepsAnnotation, vtepName)
+		}
+	}()
+
+	vtepsAnnotation[vtepName] = entry
+	annotations, err := util.MarshalNodeVTEPs(vtepsAnnotation)
+	if err != nil {
+		return err
+	}
+
+	return c.kube.SetAnnotationsOnNode(c.nodeName, annotations)
 }
 
 // pickVTEPIP selects a single VTEP IP from the candidates for the given address family.
@@ -720,4 +818,12 @@ func (c *Controller) pickVTEPIP(matches []net.IP, family int) (net.IP, error) {
 	}
 	return nil, nil
 
+}
+
+func matchFirstIPStringFamily(isIPv6 bool, ips []string) string {
+	ip, err := util.MatchIPStringFamily(isIPv6, ips)
+	if err != nil {
+		return ""
+	}
+	return ip
 }

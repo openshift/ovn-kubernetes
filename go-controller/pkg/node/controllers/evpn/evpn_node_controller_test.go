@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -32,6 +33,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	factorymocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	kubemocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/netlinkdevicemanager"
@@ -91,17 +93,22 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			ctrl := &Controller{
 				nodeName:       nodeName,
 				watchFactory:   wf,
+				kube:           kubeMock,
 				ndm:            ndm,
 				networkMgr:     &networkmanager.FakeNetworkManager{},
 				ovsClient:      ovsClient,
@@ -257,12 +264,16 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			bridgeName := GetEVPNBridgeName(vtepName)
@@ -271,6 +282,7 @@ var _ = Describe("EVPN node controller", func() {
 			ctrl := &Controller{
 				nodeName:     nodeName,
 				watchFactory: wf,
+				kube:         kubeMock,
 				ndm:          ndm,
 				networkMgr:   &networkmanager.FakeNetworkManager{},
 				ovsClient:    ovsClient,
@@ -333,16 +345,21 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil)
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			ctrl := &Controller{
 				nodeName:       nodeName,
 				watchFactory:   wf,
+				kube:           kubeMock,
 				ovsClient:      ovsClient,
 				nadVTEPInfo:    make(map[string]string),
 				svisByBridge:   make(map[string]sets.Set[string]),
@@ -378,18 +395,30 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				for k, v := range args.Get(1).(map[string]interface{}) {
+					if node.Annotations == nil {
+						node.Annotations = make(map[string]string)
+					}
+					node.Annotations[k] = v.(string)
+				}
+			})
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			am := &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}}
 			ctrl := &Controller{
 				nodeName:       nodeName,
 				watchFactory:   wf,
+				kube:           kubeMock,
 				ndm:            ndm,
 				networkMgr:     &networkmanager.FakeNetworkManager{},
 				ovsClient:      ovsClient,
@@ -434,18 +463,23 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			am := &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("fd00::1")}}
 			ctrl := &Controller{
 				nodeName:       nodeName,
 				watchFactory:   wf,
+				kube:           kubeMock,
 				ndm:            ndm,
 				networkMgr:     &networkmanager.FakeNetworkManager{},
 				ovsClient:      ovsClient,
@@ -492,12 +526,16 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepNameA).Return(vtepA, nil)
 			lister.On("Get", vtepNameB).Return(vtepB, nil)
 
@@ -510,6 +548,7 @@ var _ = Describe("EVPN node controller", func() {
 			ctrl := &Controller{
 				nodeName:       nodeName,
 				watchFactory:   wf,
+				kube:           kubeMock,
 				ndm:            ndm,
 				networkMgr:     &networkmanager.FakeNetworkManager{},
 				ovsClient:      ovsClient,
@@ -566,12 +605,16 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			bridgeName := GetEVPNBridgeName(vtepName)
@@ -587,6 +630,7 @@ var _ = Describe("EVPN node controller", func() {
 			ctrl := &Controller{
 				nodeName:       nodeName,
 				watchFactory:   wf,
+				kube:           kubeMock,
 				ndm:            ndm,
 				networkMgr:     &networkmanager.FakeNetworkManager{},
 				ovsClient:      ovsClient,
@@ -652,12 +696,16 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			ndm.On("EnsureLink", mock.Anything).Return(nil)
@@ -666,6 +714,7 @@ var _ = Describe("EVPN node controller", func() {
 			ctrl := &Controller{
 				nodeName:       nodeName,
 				watchFactory:   wf,
+				kube:           kubeMock,
 				ndm:            ndm,
 				networkMgr:     &networkmanager.FakeNetworkManager{},
 				ovsClient:      ovsClient,
@@ -732,7 +781,8 @@ var _ = Describe("EVPN node controller", func() {
 			config.OVNKubernetesFeature.EnableEVPN = true
 			config.Gateway.Mode = config.GatewayModeLocal
 
-			kubeClient = fake.NewClientset()
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeClient = fake.NewClientset(node)
 			vtepClient = vtepfake.NewSimpleClientset()
 			ndm = &ndmmocks.Interface{}
 			am = &fakeAddressManager{}
@@ -1059,49 +1109,97 @@ func (f *fakeAddressManager) AddOnAddressesChangedHandler(func()) {}
 
 var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 	const nodeName = "node1"
-	var ctrl *Controller
 
-	It("discovers a single IPv4 match", func() {
-		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}}}
+	type testController struct {
+		*Controller
+		node     *corev1.Node
+		kubeMock *kubemocks.Interface
+	}
+
+	newTestController := func(ips []net.IP, annotations map[string]string) *testController {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: annotations}}
+		kubeMock := &kubemocks.Interface{}
+		kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+			for k, v := range args.Get(1).(map[string]interface{}) {
+				if node.Annotations == nil {
+					node.Annotations = make(map[string]string)
+				}
+				node.Annotations[k] = v.(string)
+			}
+		})
+		wf := &factorymocks.NodeWatchFactory{}
+		wf.On("GetNode", nodeName).Return(node, nil)
+		return &testController{
+			Controller: &Controller{
+				nodeName:       nodeName,
+				watchFactory:   wf,
+				kube:           kubeMock,
+				addressManager: &fakeAddressManager{ips: ips},
+			},
+			node:     node,
+			kubeMock: kubeMock,
+		}
+	}
+
+	It("discovers a single IPv4 match and annotates it", func() {
+		tc := newTestController([]net.IP{net.ParseIP("100.64.0.1")}, nil)
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
 		}
 
-		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
+		v4, v6, err := tc.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 		Expect(v6).To(BeNil())
+
+		tc.kubeMock.AssertCalled(GinkgoT(), "SetAnnotationsOnNode", nodeName, mock.Anything)
+		vteps, err := util.ParseNodeVTEPs(tc.node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(vteps).To(HaveLen(1))
+		Expect(vteps["vtep1"].IPs).To(ConsistOf("100.64.0.1"))
 	})
 
-	It("discovers a single IPv6 match", func() {
-		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("fd00::1")}}}
+	It("discovers a single IPv6 match and annotates it", func() {
+		tc := newTestController([]net.IP{net.ParseIP("fd00::1")}, nil)
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"fd00::/64"}},
 		}
 
-		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
+		v4, v6, err := tc.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4).To(BeNil())
 		Expect(v6.Equal(net.ParseIP("fd00::1"))).To(BeTrue())
+
+		tc.kubeMock.AssertCalled(GinkgoT(), "SetAnnotationsOnNode", nodeName, mock.Anything)
+		vteps, err := util.ParseNodeVTEPs(tc.node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(vteps).To(HaveLen(1))
+		Expect(vteps["vtep1"].IPs).To(ConsistOf("fd00::1"))
 	})
 
-	It("discovers dual-stack IPs", func() {
-		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("fd00::1")}}}
+	It("discovers dual-stack IPs and annotates both", func() {
+		tc := newTestController([]net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("fd00::1")}, nil)
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24", "fd00::/64"}},
 		}
 
-		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
+		v4, v6, err := tc.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 		Expect(v6.Equal(net.ParseIP("fd00::1"))).To(BeTrue())
+
+		tc.kubeMock.AssertCalled(GinkgoT(), "SetAnnotationsOnNode", nodeName, mock.Anything)
+		vteps, err := util.ParseNodeVTEPs(tc.node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(vteps).To(HaveLen(1))
+		Expect(vteps["vtep1"].IPs).To(ConsistOf("100.64.0.1", "fd00::1"))
 	})
 
-	It("filters keepalived VIPs when multiple IPs match", func() {
-		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("100.64.0.2")}}}
+	It("filters keepalived VIPs when multiple IPs match and annotates the selected one", func() {
+		tc := newTestController([]net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("100.64.0.2")}, nil)
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
@@ -1116,14 +1214,20 @@ var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 			{IPNet: &net.IPNet{IP: net.ParseIP("100.64.0.2"), Mask: net.CIDRMask(24, 32)}, Label: "eth0:vip"},
 		}, nil)
 
-		v4, v6, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
+		v4, v6, err := tc.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 		Expect(v6).To(BeNil())
+
+		tc.kubeMock.AssertCalled(GinkgoT(), "SetAnnotationsOnNode", nodeName, mock.Anything)
+		vteps, err := util.ParseNodeVTEPs(tc.node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(vteps).To(HaveLen(1))
+		Expect(vteps["vtep1"].IPs).To(ConsistOf("100.64.0.1"))
 	})
 
-	It("picks the lowest IP when multiple non-VIP IPs match", func() {
-		ctrl = &Controller{nodeName: nodeName, addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.5"), net.ParseIP("100.64.0.2")}}}
+	It("picks the lowest IP when multiple non-VIP IPs match and annotates it", func() {
+		tc := newTestController([]net.IP{net.ParseIP("100.64.0.5"), net.ParseIP("100.64.0.2")}, nil)
 		vtep := &vtepv1.VTEP{
 			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
 			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
@@ -1138,8 +1242,118 @@ var _ = Describe("discoverUnmanagedVTEPIPs", func() {
 			{IPNet: &net.IPNet{IP: net.ParseIP("100.64.0.2"), Mask: net.CIDRMask(24, 32)}},
 		}, nil)
 
-		v4, _, err := ctrl.discoverUnmanagedVTEPIPs(vtep)
+		v4, _, err := tc.discoverUnmanagedVTEPIPs(vtep)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(v4.Equal(net.ParseIP("100.64.0.2"))).To(BeTrue())
+
+		tc.kubeMock.AssertCalled(GinkgoT(), "SetAnnotationsOnNode", nodeName, mock.Anything)
+		vteps, err := util.ParseNodeVTEPs(tc.node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(vteps).To(HaveLen(1))
+		Expect(vteps["vtep1"].IPs).To(ConsistOf("100.64.0.2"))
+	})
+
+	It("reuses annotated IP when still valid and does not write annotation", func() {
+		tc := newTestController(
+			[]net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("100.64.0.5")},
+			map[string]string{util.OVNNodeVTEPs: `{"vtep1":{"ips":["100.64.0.5"]}}`},
+		)
+		vtep := &vtepv1.VTEP{
+			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
+			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
+		}
+
+		v4, v6, err := tc.discoverUnmanagedVTEPIPs(vtep)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(v4.Equal(net.ParseIP("100.64.0.5"))).To(BeTrue(), "should reuse the annotated IP, not pick a new one")
+		Expect(v6).To(BeNil())
+
+		tc.kubeMock.AssertNotCalled(GinkgoT(), "SetAnnotationsOnNode", mock.Anything, mock.Anything)
+	})
+
+	It("selects a new IP and updates annotation when annotated IP is no longer on the node", func() {
+		tc := newTestController(
+			[]net.IP{net.ParseIP("100.64.0.5")},
+			map[string]string{util.OVNNodeVTEPs: `{"vtep1":{"ips":["100.64.0.1"]}}`},
+		)
+		vtep := &vtepv1.VTEP{
+			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
+			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
+		}
+
+		v4, _, err := tc.discoverUnmanagedVTEPIPs(vtep)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(v4.Equal(net.ParseIP("100.64.0.5"))).To(BeTrue())
+
+		tc.kubeMock.AssertCalled(GinkgoT(), "SetAnnotationsOnNode", nodeName, mock.Anything)
+		vteps, err := util.ParseNodeVTEPs(tc.node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(vteps).To(HaveLen(1))
+		Expect(vteps["vtep1"].IPs).To(ConsistOf("100.64.0.5"))
+	})
+
+	It("selects a new IP when annotated IP is outside VTEP CIDRs", func() {
+		tc := newTestController(
+			[]net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("10.0.0.1")},
+			map[string]string{util.OVNNodeVTEPs: `{"vtep1":{"ips":["10.0.0.1"]}}`},
+		)
+		vtep := &vtepv1.VTEP{
+			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
+			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
+		}
+
+		v4, _, err := tc.discoverUnmanagedVTEPIPs(vtep)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(v4.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
+
+		tc.kubeMock.AssertCalled(GinkgoT(), "SetAnnotationsOnNode", nodeName, mock.Anything)
+	})
+
+	It("restores cached annotation when SetAnnotationsOnNode fails", func() {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+		kubeMock := &kubemocks.Interface{}
+		kubeMock.On("SetAnnotationsOnNode", nodeName, mock.Anything).Return(fmt.Errorf("API unavailable"))
+		wf := &factorymocks.NodeWatchFactory{}
+		wf.On("GetNode", nodeName).Return(node, nil)
+
+		tc := &Controller{
+			nodeName:       nodeName,
+			watchFactory:   wf,
+			kube:           kubeMock,
+			addressManager: &fakeAddressManager{ips: []net.IP{net.ParseIP("100.64.0.1")}},
+		}
+
+		vtep := &vtepv1.VTEP{
+			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
+			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24"}},
+		}
+
+		_, _, err := tc.discoverUnmanagedVTEPIPs(vtep)
+		Expect(err).To(HaveOccurred())
+
+		By("verifying the in-memory annotation cache was restored to its previous (empty) state")
+		Expect(tc.vtepsAnnotation).NotTo(HaveKey("vtep1"))
+	})
+
+	It("reuses valid IPv4 and selects new IPv6 when only IPv6 changes", func() {
+		tc := newTestController(
+			[]net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("fd00::5")},
+			map[string]string{util.OVNNodeVTEPs: `{"vtep1":{"ips":["100.64.0.1","fd00::1"]}}`},
+		)
+		vtep := &vtepv1.VTEP{
+			ObjectMeta: metav1.ObjectMeta{Name: "vtep1"},
+			Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/24", "fd00::/64"}},
+		}
+
+		v4, v6, err := tc.discoverUnmanagedVTEPIPs(vtep)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(v4.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue(), "IPv4 should be reused")
+		Expect(v6.Equal(net.ParseIP("fd00::5"))).To(BeTrue(), "IPv6 should be newly selected")
+
+		tc.kubeMock.AssertCalled(GinkgoT(), "SetAnnotationsOnNode", nodeName, mock.Anything)
+		vteps, err := util.ParseNodeVTEPs(tc.node)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(vteps).To(HaveLen(1))
+		Expect(vteps["vtep1"].IPs).To(ConsistOf("100.64.0.1", "fd00::5"))
 	})
 })
