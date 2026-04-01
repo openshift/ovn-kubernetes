@@ -36,6 +36,7 @@ const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+	featureLabelNoOverlay           = "Feature:NoOverlay"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -52,11 +53,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Future feature-based filters can be added here
-	// Example:
-	// if !someFeatureEnabled && spec.Labels.Has(featureLabelSomeFeature) {
-	//     return false
-	// }
+	// No-Overlay tests: only include if no-overlay is enabled in the cluster
+	noOverlayEnabled := os.Getenv(ocpinfraprovider.EnvVarNoOverlayEnabled) == "true"
+	if !noOverlayEnabled && spec.Labels.Has(featureLabelNoOverlay) {
+		return false
+	}
 
 	return true
 }

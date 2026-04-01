@@ -39,6 +39,7 @@ const (
 	// These are set during infra provider initialization and consumed by test selection logic
 	EnvVarOVNGatewayMode     = "OVN_GATEWAY_MODE"
 	EnvVarEVPNFeatureEnabled = "EVPN_FEATURE_ENABLED"
+	EnvVarNoOverlayEnabled   = "NO_OVERLAY_ENABLED"
 )
 
 // Provider extends the base api.Provider interface with OpenShift-specific
@@ -129,6 +130,7 @@ func (o *openshift) LoadTestConfigs() error {
 	if err != nil {
 		return fmt.Errorf("failed to check EVPN capability with the cluster: %w", err)
 	}
+	o.detectNoOverlayCapability(network)
 	// Future feature detection can be added here, reusing network and clusterFeatureGate
 
 	return nil
@@ -207,6 +209,16 @@ func isLocalGatewayMode(network *operv1.Network) bool {
 
 	return network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
 		network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost
+}
+
+// detectNoOverlayCapability checks if no-overlay mode is enabled and sets the env var
+func (o *openshift) detectNoOverlayCapability(network *operv1.Network) {
+	if network.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+		return
+	}
+	if network.Spec.DefaultNetwork.OVNKubernetesConfig.Transport == operv1.TransportOptionNoOverlay {
+		os.Setenv(EnvVarNoOverlayEnabled, "true")
+	}
 }
 
 // hasFRRExternalContainer checks if the FRR external container is available.
