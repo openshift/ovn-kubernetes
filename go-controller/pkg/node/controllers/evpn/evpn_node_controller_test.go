@@ -448,7 +448,7 @@ var _ = Describe("EVPN node controller", func() {
 			Expect(firstSrcAddr.Equal(net.ParseIP("100.64.0.1"))).To(BeTrue())
 
 			By("second reconcile with address manager changed to 100.64.0.5")
-			am.ips = []net.IP{net.ParseIP("100.64.0.5")}
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.5")})
 
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 			Expect(secondSrcAddr.Equal(net.ParseIP("100.64.0.5"))).To(BeTrue())
@@ -501,7 +501,7 @@ var _ = Describe("EVPN node controller", func() {
 			}))
 
 			By("second reconcile with only IPv4 addresses — IPv6 VXLAN should be deleted")
-			am.ips = []net.IP{net.ParseIP("100.64.0.1")}
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
 
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 			ndm.AssertCalled(GinkgoT(), "DeleteLink", vxlan6Name)
@@ -855,10 +855,10 @@ var _ = Describe("EVPN node controller", func() {
 			}).Should(Succeed())
 
 			By("updating address manager IPs and triggering reconciliation")
-			am.ips = []net.IP{net.ParseIP("100.64.0.1")}
-			ctrl.reconcileAllUnmanagedVTEPs()
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
+			ctrl.vtepController.Reconcile(reconcileNodeAddressChange)
 
-			By("verifying the full chain: reconcileAllUnmanagedVTEPs → reconcile → NDM creates bridge and VXLAN")
+			By("verifying the full chain: reconcileNodeAddressChange → reconcile → NDM creates bridge and VXLAN")
 			Eventually(func() []string {
 				ensuredMu.Lock()
 				defer ensuredMu.Unlock()
@@ -899,8 +899,8 @@ var _ = Describe("EVPN node controller", func() {
 			}).Should(Succeed())
 
 			By("updating address manager and triggering reconciliation")
-			am.ips = []net.IP{net.ParseIP("100.64.0.1")}
-			ctrl.reconcileAllUnmanagedVTEPs()
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
+			ctrl.vtepController.Reconcile(reconcileNodeAddressChange)
 
 			bridgeName := GetEVPNBridgeName(vtepName)
 			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
@@ -915,6 +915,181 @@ var _ = Describe("EVPN node controller", func() {
 				}
 				return names
 			}).Should(ContainElements(bridgeName, vxlan4Name))
+		})
+
+		It("skips reconciliation when annotated IPs are still valid", func() {
+			var ensuredMu sync.Mutex
+			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
+
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
+			})
+
+			By("creating an unmanaged VTEP and performing initial reconciliation")
+			_, err := vtepClient.K8sV1().VTEPs().Create(context.Background(), &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := wf.VTEPInformer().Lister().Get(vtepName)
+				return err
+			}).Should(Succeed())
+
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
+			ctrl.vtepController.Reconcile(reconcileNodeAddressChange)
+
+			bridgeName := GetEVPNBridgeName(vtepName)
+			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
+			Eventually(func() []string {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				var names []string
+				for _, cfg := range ensuredCfgs {
+					names = append(names, cfg.Link.Attrs().Name)
+				}
+				return names
+			}).Should(ContainElements(bridgeName, vxlan4Name))
+
+			By("recording call count after initial reconciliation completes")
+			ensuredMu.Lock()
+			initialCount := len(ensuredCfgs)
+			ensuredMu.Unlock()
+
+			By("triggering address change with same IPs — no new NDM calls expected")
+			ctrl.vtepController.Reconcile(reconcileNodeAddressChange)
+			Consistently(func() int {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				return len(ensuredCfgs)
+			}).Should(Equal(initialCount))
+		})
+
+		It("reconciles when annotated IP is no longer on the node", func() {
+			var ensuredMu sync.Mutex
+			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
+
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
+			})
+
+			By("creating an unmanaged VTEP and performing initial reconciliation")
+			_, err := vtepClient.K8sV1().VTEPs().Create(context.Background(), &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := wf.VTEPInformer().Lister().Get(vtepName)
+				return err
+			}).Should(Succeed())
+
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
+			ctrl.vtepController.Reconcile(reconcileNodeAddressChange)
+
+			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
+			Eventually(func() bool {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				for _, cfg := range ensuredCfgs {
+					if cfg.Link.Attrs().Name == vxlan4Name {
+						return true
+					}
+				}
+				return false
+			}).Should(BeTrue())
+
+			By("changing node IP — should reconcile with new source IP")
+			ensuredMu.Lock()
+			ensuredCfgs = nil
+			ensuredMu.Unlock()
+
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.5")})
+			ctrl.vtepController.Reconcile(reconcileNodeAddressChange)
+
+			Eventually(func() net.IP {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				for _, cfg := range ensuredCfgs {
+					if vxlan, ok := cfg.Link.(*netlink.Vxlan); ok && cfg.Link.Attrs().Name == vxlan4Name {
+						return vxlan.SrcAddr
+					}
+				}
+				return nil
+			}).Should(Equal(net.ParseIP("100.64.0.5")))
+		})
+
+		It("reconciles when a required IP family becomes available", func() {
+			var ensuredMu sync.Mutex
+			var ensuredCfgs []netlinkdevicemanager.DeviceConfig
+
+			ndm.On("DeleteLink", mock.Anything).Return(nil)
+			ndm.On("EnsureLink", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				ensuredCfgs = append(ensuredCfgs, args.Get(0).(netlinkdevicemanager.DeviceConfig))
+			})
+
+			By("creating a dual-stack VTEP and reconciling with only IPv4")
+			_, err := vtepClient.K8sV1().VTEPs().Create(context.Background(), &vtepv1.VTEP{
+				ObjectMeta: metav1.ObjectMeta{Name: vtepName},
+				Spec: vtepv1.VTEPSpec{
+					CIDRs: []vtepv1.CIDR{"100.64.0.0/24", "fd00::/64"},
+					Mode:  vtepv1.VTEPModeUnmanaged,
+				},
+			}, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := wf.VTEPInformer().Lister().Get(vtepName)
+				return err
+			}).Should(Succeed())
+
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
+			ctrl.vtepController.Reconcile(reconcileNodeAddressChange)
+
+			vxlan4Name := GetEVPNVXLANName(vtepName, utilnet.IPv4)
+			Eventually(func() bool {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				for _, cfg := range ensuredCfgs {
+					if cfg.Link.Attrs().Name == vxlan4Name {
+						return true
+					}
+				}
+				return false
+			}).Should(BeTrue())
+
+			By("adding IPv6 address — should reconcile and create IPv6 VXLAN")
+			ensuredMu.Lock()
+			ensuredCfgs = nil
+			ensuredMu.Unlock()
+
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1"), net.ParseIP("fd00::1")})
+			ctrl.vtepController.Reconcile(reconcileNodeAddressChange)
+
+			vxlan6Name := GetEVPNVXLANName(vtepName, utilnet.IPv6)
+			Eventually(func() net.IP {
+				ensuredMu.Lock()
+				defer ensuredMu.Unlock()
+				for _, cfg := range ensuredCfgs {
+					if vxlan, ok := cfg.Link.(*netlink.Vxlan); ok && cfg.Link.Attrs().Name == vxlan6Name {
+						return vxlan.SrcAddr
+					}
+				}
+				return nil
+			}).Should(Equal(net.ParseIP("fd00::1")))
 		})
 
 		It("reconciles VTEP with VID/VNI mappings when a network is added or removed", func() {
@@ -945,7 +1120,7 @@ var _ = Describe("EVPN node controller", func() {
 				return err
 			}).Should(Succeed())
 
-			am.ips = []net.IP{net.ParseIP("100.64.0.1")}
+			am.SetIPs([]net.IP{net.ParseIP("100.64.0.1")})
 
 			By("simulating a network add with EVPN VID/VNI mappings")
 			netInfo := &multinetworkmocks.NetInfo{}
@@ -1098,11 +1273,22 @@ var _ = Describe("vtepNeedsUpdate", func() {
 })
 
 type fakeAddressManager struct {
+	mu  sync.Mutex
 	ips []net.IP
 }
 
+func (f *fakeAddressManager) SetIPs(ips []net.IP) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ips = ips
+}
+
 func (f *fakeAddressManager) ListAddresses() ([]net.IP, []*net.IPNet) {
-	return f.ips, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]net.IP, len(f.ips))
+	copy(out, f.ips)
+	return out, nil
 }
 
 func (f *fakeAddressManager) AddOnAddressesChangedHandler(func()) {}

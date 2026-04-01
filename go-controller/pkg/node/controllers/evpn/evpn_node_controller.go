@@ -47,6 +47,11 @@ type nodeAddressManager interface {
 
 const (
 	ovsBridgeInt = "br-int"
+
+	// reconcileNodeAddressChange is a synthetic key enqueued into the VTEP
+	// controller workqueue when node addresses change. It triggers
+	// reconciliation of unmanaged VTEPs whose annotated IPs are stale.
+	reconcileNodeAddressChange = ""
 )
 
 type Controller struct {
@@ -133,9 +138,12 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 			Lister:         c.podLister.List,
 		})
 
-	if addressManager != nil {
-		addressManager.AddOnAddressesChangedHandler(c.reconcileAllUnmanagedVTEPs)
+	if addressManager == nil {
+		return nil, fmt.Errorf("EVPN node VTEP controller requires a non-nil node address manager")
 	}
+	addressManager.AddOnAddressesChangedHandler(func() {
+		c.vtepController.Reconcile(reconcileNodeAddressChange)
+	})
 
 	return c, nil
 }
@@ -220,21 +228,39 @@ func (c *Controller) vtepNeedsUpdate(oldObj, newObj *vtepv1.VTEP) bool {
 	return !reflect.DeepEqual(oldObj.Spec, newObj.Spec)
 }
 
-// reconcileAllUnmanagedVTEPs triggers reconciliation for all unmanaged VTEPs.
-// Called when the node's addresses change via the address manager callback.
-func (c *Controller) reconcileAllUnmanagedVTEPs() {
+// reconcileNodeAddressChange triggers reconciliation for unmanaged VTEPs whose
+// annotated IPs are no longer valid or missing. Called when the node's
+// addresses change via the address manager callback.
+func (c *Controller) reconcileNodeAddressChange() error {
+	vtepsAnnotation, err := c.getVTEPsAnnotation()
+	if err != nil {
+		return fmt.Errorf("failed to get VTEP annotation for address change reconciliation: %w", err)
+	}
+
+	nodeIPs, _ := c.addressManager.ListAddresses()
+	nodeIPSet := sets.New(util.StringSlice(nodeIPs)...)
+
 	vteps, err := c.watchFactory.VTEPInformer().Lister().List(labels.Everything())
 	if err != nil {
-		klog.Errorf("Failed to list VTEPs for address change reconciliation: %v", err)
-		return
+		return fmt.Errorf("failed to list VTEPs for address change reconciliation: %w", err)
 	}
 	for _, vtep := range vteps {
 		if vtep.Spec.Mode != vtepv1.VTEPModeUnmanaged {
 			continue
 		}
-		klog.V(4).Infof("Node addresses changed on %s, reconciling unmanaged VTEP %s", c.nodeName, vtep.Name)
-		c.vtepController.Reconcile(vtep.Name)
+		needsIPv4 := util.MatchFirstCIDRStringFamily(false, vtep.Spec.CIDRs) != ""
+		needsIPv6 := util.MatchFirstCIDRStringFamily(true, vtep.Spec.CIDRs) != ""
+		v4AnnotatedIP := matchFirstIPStringFamily(false, vtepsAnnotation[vtep.Name].IPs)
+		v6AnnotatedIP := matchFirstIPStringFamily(true, vtepsAnnotation[vtep.Name].IPs)
+		missesIPv4 := needsIPv4 && !nodeIPSet.Has(v4AnnotatedIP)
+		missesIPv6 := needsIPv6 && !nodeIPSet.Has(v6AnnotatedIP)
+		if missesIPv4 || missesIPv6 {
+			klog.V(5).Infof("Node addresses changed on %s, reconciling unmanaged VTEP %s", c.nodeName, vtep.Name)
+			c.vtepController.Reconcile(vtep.Name)
+		}
 	}
+
+	return nil
 }
 
 // reconcile ensures all node-local devices for a VTEP are in the desired state:
@@ -242,7 +268,13 @@ func (c *Controller) reconcileAllUnmanagedVTEPs() {
 // 2. Ensure bridge, VXLAN tunnels, and VID/VNI mappings via NDM
 // 3. Reconcile SVIs and OVS ports for each EVPN-enabled network
 // If the VTEP is deleted or unsupported, all its devices are cleaned up.
+// The special reconcileNodeAddressChange key triggers reconciliation of
+// unmanaged VTEPs whose annotated IPs are stale or missing.
 func (c *Controller) reconcile(key string) error {
+	if key == reconcileNodeAddressChange {
+		return c.reconcileNodeAddressChange()
+	}
+
 	vtep, err := c.watchFactory.VTEPInformer().Lister().Get(key)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
