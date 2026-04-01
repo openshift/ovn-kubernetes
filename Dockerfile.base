@@ -12,6 +12,7 @@ RUN dnf install -y --nodocs \
 	selinux-policy procps-ng && \
 	dnf clean all
 
+# Just adding a comment to check CI.
 ARG ovsver=3.3
 ARG ovnver=24.03.5-40.el9fdp
 
