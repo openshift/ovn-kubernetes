@@ -571,10 +571,8 @@ func (c *NodeController) getCachedNode(netName, nodeName string) *corev1.Node {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
 	node := c.nodeCache[netName][nodeName]
-	if node == nil {
-		return nil
-	}
-	return node.DeepCopy()
+
+	return node
 }
 
 // Set stores a deep copy of a node.
@@ -589,7 +587,7 @@ func (c *NodeController) setCachedNode(netName string, node *corev1.Node) {
 		c.nodeCache[netName] = make(map[string]*corev1.Node)
 	}
 
-	c.nodeCache[netName][node.Name] = node.DeepCopy()
+	c.nodeCache[netName][node.Name] = node
 }
 
 // Delete removes a node from the cache.
