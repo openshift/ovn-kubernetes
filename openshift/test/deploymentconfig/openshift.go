@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -50,4 +51,8 @@ func (m openshift) PrimaryInterfaceName() string {
 	// support only for baremetald which expects the following interface name
 	// TODO; dynamically look up primary interface name instead of hardcoding it to baremetald env
 	return "enp0s3"
+}
+
+func (m openshift) GetAgnHostContainerImage() string {
+	return images.AgnHost()
 }
