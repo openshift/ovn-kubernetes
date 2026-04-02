@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	vtepclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
@@ -514,7 +512,7 @@ func createEVPNAgnhost(ictx infraapi.Context, networkName, containerName string,
 	// Step 2: Create agnhost container on that network
 	agnhostContainer := infraapi.ExternalContainer{
 		Name:        containerName,
-		Image:       images.AgnHost(),
+		Image:       deploymentconfig.Get().GetAgnHostContainerImage(),
 		Network:     network,
 		IPv4:        ipv4,
 		IPv6:        ipv6,
@@ -813,7 +811,7 @@ func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidr
 	}
 
 	// Convert string CIDRs to vtepv1.CIDR type
-	vtepCIDRs := make(vtepv1.DualStackCIDRs, len(cidrs))
+	vtepCIDRs := make([]vtepv1.CIDR, len(cidrs))
 	for i, cidr := range cidrs {
 		vtepCIDRs[i] = vtepv1.CIDR(cidr)
 	}
@@ -878,8 +876,10 @@ func randomVNI() int32 {
 
 // randomCUDNSubnets generates random non-overlapping CUDN subnets for parallel test isolation.
 // Uses /20 (4096 addresses) instead of /16 to allow randomizing both second and third octets,
-// giving ~4032 possible subnets within 10.0.0.0/8 while avoiding collisions with:
+// giving ~4016 possible subnets within 10.0.0.0/8 while avoiding collisions with:
+//   - 10.88.0.0/16  (podman default network)
 //   - 10.96.0.0/16  (Kubernetes services)
+//   - 10.128.0.0/14 (default cluster network pod CIDRs)
 //   - 10.132.0.0/16 (UDN perf tests)
 //   - 10.243.0.0/16, 10.244.0.0/16 (pod CIDRs)
 //
@@ -889,14 +889,14 @@ func randomVNI() int32 {
 // Returns IPv4 (/20) and IPv6 (/52) subnets.
 func randomCUDNSubnets() (ipv4, ipv6 string) {
 	// 4096 possible /20 subnets in 10.0.0.0/8 (256 second octets * 16 /20-aligned third octets)
-	// Exclude blocks overlapping known /16 reservations (16 /20 blocks each):
-	//   10.96, 10.132, 10.243, 10.244 = 64 excluded → ~4032 usable
+	// Exclude blocks overlapping known reservations (16 /20 blocks per second octet):
+	//   10.88, 10.96, 10.128-131 (10.128.0.0/14), 10.132, 10.243, 10.244 = 112 excluded → ~3952 usable
 	for {
 		second := randomN(256)
 		// 16 /20-aligned slots per second octet (256/16)
 		third := randomN(16) * 16 // 0, 16, 32, ..., 240
 		switch second {
-		case 96, 132, 243, 244:
+		case 88, 96, 128, 129, 130, 131, 132, 243, 244:
 			continue
 		}
 		n := second*16 + third/16
@@ -1056,121 +1056,6 @@ metadata:
 }
 
 // =============================================================================
-// REVERT ME: Temporary Cluster-Side EVPN Setup
-// =============================================================================
-// This section provides a temporary workaround to enable EVPN E2E tests before
-// OVN-Kubernetes natively implements EVPN. It downloads and executes a setup
-// script from a remote GitHub repository.
-//
-// The script performs:
-//   - Step 7: Setup EVPN Bridge on cluster nodes (br0/vxlan0)
-//   - Step 8: Configure MAC-VRF + IP-VRF (OVS port, OVN LSP, VLAN/VNI, SVI)
-//   - Step 9: Configure frr-k8s for EVPN BGP (vtysh commands)
-//
-// Remove this entire section once OVN-K EVPN implementation is complete.
-// =============================================================================
-
-const (
-	// clusterEVPNSetupScriptURL is the URL to the cluster-side EVPN setup script.
-	// REVERT ME: Remove this once OVN-K implements EVPN natively.
-	clusterEVPNSetupScriptURL = "https://raw.githubusercontent.com/tssurya/evpn-scripts-on-ovnk-kind-with-existing-bgp-setup/0b1ab74/evpn-cluster-setup.sh"
-)
-
-// runClusterEVPNSetupScript executes the cluster-side EVPN setup script from remote URL.
-// The script discovers and configures all cluster nodes automatically using kubectl.
-// This is a temporary workaround until OVN-K implements EVPN natively.
-//
-// REVERT ME: Remove this function once OVN-K EVPN implementation is complete.
-func runClusterEVPNSetupScript(
-	ictx infraapi.Context,
-	ipFamilySet sets.Set[utilnet.IPFamily],
-	networkName string,
-	bgpASN int,
-	macVRFVNI,
-	macVRFVID int,
-	ipVRFVNI,
-	ipVRFVID int,
-	cudnSubnets []string,
-) error {
-
-	externalFRRIP, err := getExternalFRRIP(ipFamilySet)
-	if err != nil {
-		return err
-	}
-
-	// Build environment variables - script handles node discovery via kubectl
-	// All vars prefixed with EVPN_ to avoid conflicts with other env vars
-	env := map[string]string{
-		"EVPN_NETWORK_NAME":    networkName,
-		"EVPN_EXTERNAL_FRR_IP": externalFRRIP,
-		"EVPN_BGP_ASN":         fmt.Sprintf("%d", bgpASN),
-		"EVPN_CUDN_SUBNETS":    strings.Join(cudnSubnets, ","),
-		"EVPN_OVN_NAMESPACE":   deploymentconfig.Get().OVNKubernetesNamespace(),
-		"EVPN_FRR_NAMESPACE":   deploymentconfig.Get().FRRK8sNamespace(),
-	}
-	if macVRFVNI != 0 {
-		env["EVPN_MACVRF_VNI"] = fmt.Sprintf("%d", macVRFVNI)
-		env["EVPN_MACVRF_VID"] = fmt.Sprintf("%d", macVRFVID)
-	}
-	if ipVRFVNI != 0 {
-		env["EVPN_IPVRF_VNI"] = fmt.Sprintf("%d", ipVRFVNI)
-		env["EVPN_IPVRF_VID"] = fmt.Sprintf("%d", ipVRFVID)
-	}
-
-	// Register cleanup FIRST - ensures cleanup runs even if setup fails
-	ictx.AddCleanUpFn(func() error {
-		cleanupEnv := copyEnvMap(env)
-		cleanupEnv["EVPN_CLEANUP"] = "true"
-
-		framework.Logf("Running cluster EVPN cleanup script")
-		if err := runRemoteScript(clusterEVPNSetupScriptURL, cleanupEnv); err != nil {
-			// Log but don't fail - cleanup should be best-effort
-			framework.Logf("WARNING: cleanup script had errors (may be expected): %v", err)
-		}
-		return nil
-	})
-
-	// Run setup script - it handles all nodes internally
-	framework.Logf("Running cluster EVPN setup script")
-	if err := runRemoteScript(clusterEVPNSetupScriptURL, env); err != nil {
-		return fmt.Errorf("setup script failed: %w", err)
-	}
-
-	framework.Logf("Cluster-side EVPN setup complete")
-	return nil
-}
-
-// runRemoteScript executes a bash script from a URL with the given environment variables.
-// Uses: curl -sL $url | bash
-func runRemoteScript(url string, env map[string]string) error {
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("curl -sL %s | bash", url))
-
-	// Set environment variables
-	cmd.Env = os.Environ()
-	for k, v := range env {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	output, err := cmd.CombinedOutput()
-	if len(output) > 0 {
-		framework.Logf("Script output:\n%s", string(output))
-	}
-	if err != nil {
-		return fmt.Errorf("script failed: %w\nOutput: %s", err, string(output))
-	}
-	return nil
-}
-
-// copyEnvMap creates a copy of an environment variable map.
-func copyEnvMap(m map[string]string) map[string]string {
-	cp := make(map[string]string, len(m))
-	for k, v := range m {
-		cp[k] = v
-	}
-	return cp
-}
-
-// =============================================================================
 // EVPN Test Helpers
 // =============================================================================
 
@@ -1277,7 +1162,7 @@ func runEVPNNetworkAndServers(
 
 	testVTEPName := testName + "-vtep"
 	framework.Logf("Creating VTEP CR")
-	err = createVTEP(f, ictx, testVTEPName, vtepSubnets, vtepv1.VTEPModeManaged)
+	err = createVTEP(f, ictx, testVTEPName, vtepSubnets, vtepv1.VTEPModeUnmanaged)
 	if err != nil {
 		return err
 	}

@@ -125,7 +125,7 @@ var _ = Describe("VTEPNotifier", func() {
 		// Update VTEP spec (change CIDRs)
 		vtep, err := vtepClient.K8sV1().VTEPs().Get(context.Background(), "test-vtep-1", metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		vtep.Spec.CIDRs = vtepv1.DualStackCIDRs{"192.168.0.0/24"}
+		vtep.Spec.CIDRs = []vtepv1.CIDR{"192.168.0.0/24"}
 		_, err = vtepClient.K8sV1().VTEPs().Update(context.Background(), vtep, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -170,7 +170,7 @@ func testVTEP(name string) *vtepv1.VTEP {
 			Name: name,
 		},
 		Spec: vtepv1.VTEPSpec{
-			CIDRs: vtepv1.DualStackCIDRs{"10.10.10.0/24"},
+			CIDRs: []vtepv1.CIDR{"10.10.10.0/24"},
 			Mode:  vtepv1.VTEPModeManaged,
 		},
 	}
