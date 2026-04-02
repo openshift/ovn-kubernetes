@@ -24,22 +24,6 @@ _Validation:_
 - MaxLength: 43
 
 _Appears in:_
-- [DualStackCIDRs](#dualstackcidrs)
-
-
-
-#### DualStackCIDRs
-
-_Underlying type:_ _[CIDR](#cidr)_
-
-DualStackCIDRs is a list of CIDRs that supports dual-stack (IPv4 and IPv6).
-
-_Validation:_
-- MaxItems: 2
-- MaxLength: 43
-- MinItems: 1
-
-_Appears in:_
 - [VTEPSpec](#vtepspec)
 
 
@@ -113,7 +97,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `cidrs` _[DualStackCIDRs](#dualstackcidrs)_ | CIDRs is the list of IP ranges from which VTEP IPs are allocated.<br />Dual-stack clusters may set 2 CIDRs (one for each IP family), otherwise only 1 CIDR is allowed.<br />The format should match standard CIDR notation (for example, "100.64.0.0/24" or "fd00::/64"). |  | MaxItems: 2 <br />MaxLength: 43 <br />MinItems: 1 <br />Required: \{\} <br /> |
+| `cidrs` _[CIDR](#cidr) array_ | CIDRs is the list of IP ranges from which VTEP IPs are discovered (unmanaged mode) or allocated (managed mode).<br />Multiple CIDRs may be specified to expand capacity over time without recreating the VTEP.<br />Each entry must be a valid network address in CIDR notation (for example, "100.64.0.0/24" or "fd00:100::/64").<br />Each node receives at most one IP per address family from the CIDRs listed here.<br />In managed mode, CIDRs are consumed sequentially: IPs are allocated from the first CIDR until it is<br />exhausted, then from the next, and so on.<br />In managed mode, CIDRs are append-only: existing entries cannot be removed, reordered, or shrunk to a<br />smaller mask; they can only be expanded to a wider mask, and new entries may be appended.<br />In unmanaged mode, if multiple IPs on a node match the configured CIDRs, or if the match is otherwise<br />ambiguous, the VTEP will be placed into a failed status.<br />In unmanaged mode, CIDRs may be freely added, removed, reordered, or resized.<br />Caution: removing or modifying CIDRs in unmanaged mode that are actively in use may cause traffic disruption;<br />no downtime guarantees are provided for such operations. |  | MaxItems: 20 <br />MaxLength: 43 <br />MinItems: 1 <br />Required: \{\} <br /> |
 | `mode` _[VTEPMode](#vtepmode)_ | Mode specifies how VTEP IPs are managed.<br />"Managed" means OVN-Kubernetes allocates and assigns VTEP IPs per node automatically.<br />"Unmanaged" means an external provider handles IP assignment; OVN-Kubernetes discovers existing IPs on nodes.<br />Defaults to "Managed". | Managed | Enum: [Managed Unmanaged] <br /> |
 
 

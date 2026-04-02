@@ -977,10 +977,11 @@ clone_frr() {
     # https://github.com/FRRouting/frr/pull/15714).
     #
     # Bump to 10.4.1 for upstream demo was posted here: https://github.com/metallb/frr-k8s/pull/404
-    # We bump further to 10.4.2 to include additional fixes for EVPN:
+    # We bump further to 10.4.3 to include additional fixes for EVPN:
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3907335193
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3898408592
-    sed -i 's|quay.io/frrouting/frr:9.1.0|quay.io/frrouting/frr:10.4.2|g' hack/demo/demo.sh
+    # https://github.com/FRRouting/frr/pull/20496
+    sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' hack/demo/demo.sh
 
     popd
 
@@ -1042,6 +1043,16 @@ deploy_frr_external_container() {
     # Neighbors are already configured by demo.sh; extract them from the running config.
     # This is cluster-level infrastructure shared across all EVPN tests; configured once
     # at install time so individual tests don't need to manage it.
+    # Wait for FRR daemons to be ready ("Not all daemons are up, cannot write config").
+    local attempts=0 daemon_status
+    while ! daemon_status=$($OCI_BIN exec frr vtysh -c "show daemons" 2>&1); do
+      if (( ++attempts > 30 )); then
+        echo "error: FRR daemons did not become ready after 30 attempts"
+        echo "last daemon status: $daemon_status"
+        exit 1
+      fi
+      sleep 1
+    done
     local bgp_neighbors vtysh_cmds
     bgp_neighbors=$($OCI_BIN exec frr vtysh -c "show running-config" | grep "^ neighbor.*remote-as" | awk '{print $2}')
     vtysh_cmds=(-c "configure terminal" -c "router bgp 64512" -c "address-family l2vpn evpn")
@@ -1162,6 +1173,10 @@ install_frr_k8s() {
   # Use the same image from the Kubernetes community registry instead.
   # REVERT ME: when https://github.com/metallb/metallb/issues/2619 is fixed
   sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
+    "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+  # Bump frr in frr-k8s to 10.4.3 to consume the following fix
+  # https://github.com/FRRouting/frr/pull/20496
+  sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
   if [ "${bgp_port}" -ne 0 ]; then
     local frr_yaml="${FRR_TMP_DIR}/frr-k8s/config/all-in-one/frr-k8s.yaml"
