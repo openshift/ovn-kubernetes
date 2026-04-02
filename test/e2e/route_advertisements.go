@@ -1940,9 +1940,16 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			ipVRFAgnhostIPv4, ipVRFAgnhostIPv6 := randomIPVRFAgnhostSubnets()
 			ipVRFAgnhostSubnets := []string{ipVRFAgnhostIPv4, ipVRFAgnhostIPv6}
 			framework.Logf("Networks allocated for EVPN Agnhost servers: %v", ipVRFAgnhostSubnets)
-			vtepIPv4, vtepIPv6 := randomVTEPSubnets()
-			vtepSubnets := []string{vtepIPv4, vtepIPv6}
-			framework.Logf("Networks allocated for EVPN VTEPs: %v", vtepSubnets)
+			// TODO: Only unmanaged mode is supported currently
+			// TODO: Enable ipv6 once FRR supports it
+			// Derive VTEP subnet from the kind network CIDRs(unmanaged mode)
+			// NOTE: FRR does not support anything else than IPv4 vteps today
+			kindNetwork, err := infraprovider.Get().GetNetwork("kind")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			kindV4Subnet, _, err := kindNetwork.IPv4IPv6Subnets()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			vtepSubnets := []string{kindV4Subnet}
+			framework.Logf("Networks used for EVPN VTEPs: %v", vtepSubnets)
 			macVRFAgnhostName := networkName + "-macvrf-agnhost"
 			macVRFNetworkName := macVRFAgnhostName
 			ipVRFAgnhostName := networkName + "-ipvrf-agnhost"
@@ -1994,34 +2001,6 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				_, err = infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"ip", "link", "set", "dev", iface.InfName, "master", networkName})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			}
-		case cudnAdvertisedEVPN:
-			// REVERT ME: Temporary cluster-side EVPN setup until OVN-K implements it natively
-			ginkgo.By("Running cluster-side EVPN setup script (REVERT ME)")
-			cudnSubnets := getNetworkSubnetsFromSpec(networkSpec)
-			var macVRFVNI, ipVRFVNI, macVRFVID, ipVRFVID int
-			if networkSpec.EVPN.MACVRF != nil {
-				macVRFVNI = int(networkSpec.EVPN.MACVRF.VNI)
-				macVRFVID = randomVID()
-			}
-			if networkSpec.EVPN.IPVRF != nil {
-				ipVRFVNI = int(networkSpec.EVPN.IPVRF.VNI)
-				ipVRFVID = randomVID()
-				for macVRFVID == ipVRFVID {
-					ipVRFVID = randomVID()
-				}
-			}
-			err = runClusterEVPNSetupScript(
-				ictx,
-				ipFamilySet,
-				networkName,
-				bgpASN,
-				macVRFVNI,
-				macVRFVID,
-				ipVRFVNI,
-				ipVRFVID,
-				cudnSubnets,
-			)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
 
 		return testNamespace, servers
@@ -2765,7 +2744,7 @@ type templateInputFRR struct {
 var ratestdata embed.FS
 var tmplDir = filepath.Join("testdata", "routeadvertisements")
 
-const frrImage = "quay.io/frrouting/frr:10.4.2"
+const frrImage = "quay.io/frrouting/frr:10.4.3"
 
 // generateFRRConfiguration to establish a BGP session towards the provided
 // neighbors in the network's VRF configured to advertised the provided
