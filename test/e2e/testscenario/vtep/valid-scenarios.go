@@ -72,17 +72,33 @@ spec:
 `,
 	},
 	{
-		Description: "Valid VTEP with dual-stack CIDRs (IPv6 first)",
-		Name:        "vtep-dualstack-ipv6-first",
+		Description: "Valid VTEP with multiple IPv4 CIDRs for capacity expansion",
+		Name:        "vtep-multi-ipv4",
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: VTEP
 metadata:
-  name: vtep-dualstack-ipv6-first
+  name: vtep-multi-ipv4
 spec:
   cidrs:
-  - "fd00:100:68::/64"
   - "100.68.0.0/24"
+  - "100.68.1.0/24"
+  - "100.68.2.0/24"
+`,
+	},
+	{
+		Description: "Valid VTEP with multiple CIDRs including mixed families",
+		Name:        "vtep-multi-mixed",
+		Manifest: `
+apiVersion: k8s.ovn.org/v1
+kind: VTEP
+metadata:
+  name: vtep-multi-mixed
+spec:
+  cidrs:
+  - "100.69.0.0/24"
+  - "fd00:100:69::/64"
+  - "100.69.1.0/24"
 `,
 	},
 }
