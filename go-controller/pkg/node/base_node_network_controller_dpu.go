@@ -282,28 +282,11 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	}
 	klog.Infof("Port %s added to bridge br-int", vfRepName)
 
-	link, err := util.GetNetLinkOps().LinkByName(vfRepName)
-	if err != nil {
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
-		return fmt.Errorf("failed to get link device for interface %s", vfRepName)
-	}
-
-	if err = util.GetNetLinkOps().LinkSetMTU(link, ifInfo.MTU); err != nil {
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
-		return fmt.Errorf("failed to setup representor port. failed to set MTU for interface %s", vfRepName)
-	}
-
-	if err = util.GetNetLinkOps().LinkSetUp(link); err != nil {
-		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
-		return fmt.Errorf("failed to setup representor port. failed to set link up for interface %s", vfRepName)
-	}
-
 	// Update connection-status annotation
 	// TODO(adrianc): we should update Status in case of error as well
 	connStatus := util.DPUConnectionStatus{Status: util.DPUConnectionStatusReady, Reason: ""}
 	err = bnnc.updatePodDPUConnStatusWithRetry(pod, &connStatus, nadKey)
 	if err != nil {
-		_ = util.GetNetLinkOps().LinkSetDown(link)
 		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
 		return fmt.Errorf("failed to setup representor port. failed to set pod annotations. %v", err)
 	}

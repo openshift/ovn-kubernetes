@@ -18,6 +18,7 @@ package v1
 
 // EVPNConfig contains configuration options for networks operating in EVPN mode.
 // +kubebuilder:validation:XValidation:rule="has(self.macVRF) || has(self.ipVRF)", message="at least one of macVRF or ipVRF must be specified"
+// +kubebuilder:validation:XValidation:rule="!has(self.macVRF) || !has(self.ipVRF) || self.macVRF.vni != self.ipVRF.vni", message="macVRF and ipVRF must use different VNIs"
 type EVPNConfig struct {
 	// VTEP is the name of the VTEP CR that defines VTEP IPs for EVPN.
 	// +kubebuilder:validation:Required
@@ -58,12 +59,12 @@ type EVPNConfig struct {
 //
 // +kubebuilder:validation:MaxLength=21
 // +kubebuilder:validation:XValidation:rule="self.split(':').size() == 2",message="RT must contain exactly one colon"
-// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || (self.startsWith('*:') || isIP(self.split(':')[0]) || self.split(':')[0].matches('[0-9]+'))",message="RT global administrator must be either '*', an IPv4 address, or a number"
-// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || self.split(':')[1].matches('[0-9]+')",message="RT local administrator must be a number"
-// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || !self.startsWith('*:') || (self.split(':')[1].matches('[0-9]+') && uint(self.split(':')[1]) <= 4294967295u)",message="RT with wildcard global administrator must have format *:OPQR where OPQR <= 4294967295"
-// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || !self.split(':')[0].contains('.') || (self.split(':')[1].matches('[0-9]+') && uint(self.split(':')[1]) <= 65535u)",message="RT with IPv4 global administrator must have format A.B.C.D:MN where MN <= 65535"
-// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || self.startsWith('*:') || self.split(':')[0].contains('.') || !self.split(':')[0].matches('[0-9]+') || !self.split(':')[1].matches('[0-9]+') || uint(self.split(':')[0]) <= 65535u || uint(self.split(':')[1]) <= 65535u",message="RT with 4-byte ASN global administrator must have format GHJK:MN where GHJK <= 4294967295 and MN <= 65535"
-// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || self.startsWith('*:') || self.split(':')[0].contains('.') || !self.split(':')[0].matches('[0-9]+') || !self.split(':')[1].matches('[0-9]+') || uint(self.split(':')[0]) > 65535u || uint(self.split(':')[1]) <= 4294967295u",message="RT with 2-byte ASN global administrator must have format EF:OPQR where EF <= 65535 and OPQR <= 4294967295"
+// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || (self.startsWith('*:') || isIP(self.split(':')[0]) || self.split(':')[0].matches('^[0-9]+$'))",message="RT global administrator must be either '*', an IPv4 address, or a number"
+// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || self.split(':')[1].matches('^[0-9]+$')",message="RT local administrator must be a number"
+// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || !self.startsWith('*:') || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1]) <= 4294967295u)",message="RT with wildcard global administrator must have format *:OPQR where OPQR <= 4294967295"
+// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || !self.split(':')[0].contains('.') || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1]) <= 65535u)",message="RT with IPv4 global administrator must have format A.B.C.D:MN where MN <= 65535"
+// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || self.startsWith('*:') || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$') || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0]) <= 65535u || uint(self.split(':')[1]) <= 65535u",message="RT with 4-byte ASN global administrator must have format GHJK:MN where GHJK <= 4294967295 and MN <= 65535"
+// +kubebuilder:validation:XValidation:rule="self.split(':').size() != 2 || self.startsWith('*:') || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$') || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0]) > 65535u || uint(self.split(':')[1]) <= 4294967295u",message="RT with 2-byte ASN global administrator must have format EF:OPQR where EF <= 65535 and OPQR <= 4294967295"
 type RouteTargetString string
 
 // VRFConfig contains configuration for a VRF in EVPN.

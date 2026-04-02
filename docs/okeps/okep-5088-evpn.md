@@ -475,11 +475,12 @@ failover handling can occur. If a link goes down to one leaf, BFD will fire, and
 routes, moving all traffic to a second leaf.
 
 If the VTEP is in unmanaged mode, ovnkube-node discovers IPs on each node that fall within the VTEP CIDRs and writes
-the `k8s.ovn.org/vteps` annotation. ovnkube-cluster-manager then reads this annotation to validate that every node
-has a valid VTEP IP. If a node does not have a matching IP, or has ambiguous matches (multiple IPs of the same address
-family within the VTEP CIDRs), the VTEP is set to `Accepted=False` with reason `AllocationFailed`. The
-RouteAdvertisements controller reads the same `k8s.ovn.org/vteps` annotation when generating FRR configurations to
-advertise the VTEP.
+the `k8s.ovn.org/vteps` annotation. Keepalived VIPs (identified by the `vip` label suffix that keepalived
+adds to addresses) and secondary addresses (`IFA_F_SECONDARY` flag) are filtered out since they can float
+between nodes. ovnkube-cluster-manager reads this annotation to validate that every node has a valid VTEP IP.
+If a node does not have a matching IP, or has multiple non-VIP IPs for the same address family, the VTEP is
+set to `Accepted=False` with reason `AllocationFailed`. The RouteAdvertisements controller reads the same
+`k8s.ovn.org/vteps` annotation when generating FRR configurations to advertise the VTEP.
 
 A finalizer (`k8s.ovn.org/vtep-protection`) is added to the VTEP to prevent deletion while it is referenced
 by any CUDN. The VTEP controller re-evaluates the finalizer on CUDN delete events.
