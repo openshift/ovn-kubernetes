@@ -270,6 +270,16 @@ func MatchAllIPNetsStringFamily(isIPv6 bool, ipnets []string) []string {
 	return out
 }
 
+// IsIPContainedInAnyCIDR returns true if ip is contained in any of the given ipnets
+func IsIPContainedInAnyCIDR(ip net.IP, ipnets ...*net.IPNet) bool {
+	for _, ipnet := range ipnets {
+		if ipnet.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsContainedInAnyCIDR returns true if ipnet is contained in any of ipnets
 func IsContainedInAnyCIDR(ipnet *net.IPNet, ipnets ...*net.IPNet) bool {
 	for _, container := range ipnets {
