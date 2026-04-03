@@ -125,7 +125,7 @@ func UpdateAddressSetsAddresses(nbClient libovsdbclient.Client, addrSets ...*nbd
 		opModel := operationModel{
 			Model:          as,
 			OnModelUpdates: []interface{}{&as.Addresses},
-			ErrNotFound:    true,
+			ErrNotFound:    false, // Allow creation if not found in cache (fixes scale issues)
 			BulkOp:         false,
 		}
 		opModels = append(opModels, opModel)
