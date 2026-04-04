@@ -18,7 +18,6 @@ import (
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/portalloc"
@@ -370,20 +369,6 @@ func (o *openshift) GetDefaultTimeoutContext() *framework.TimeoutContext {
 }
 
 func (o *openshift) PreloadImages(images []string) {
-}
-
-func New(config *rest.Config) (api.Provider, error) {
-	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
-	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
-	kubeClient, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("unable to create kubernetes client: %w", err)
-	}
-	return &openshift{
-		externalContainerPortAlloc: portalloc.New(30000, 32767),
-		hostPortAlloc:              portalloc.New(30000, 32767),
-		kubeClient:                 kubeClient,
-	}, nil
 }
 
 func (o *openshift) Name() string {
