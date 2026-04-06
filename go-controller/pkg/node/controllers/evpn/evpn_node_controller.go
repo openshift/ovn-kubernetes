@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
@@ -51,7 +52,17 @@ const (
 	// reconcileNodeAddressChange is a synthetic key enqueued into the VTEP
 	// controller workqueue when node addresses change. It triggers
 	// reconciliation of unmanaged VTEPs whose annotated IPs are stale.
-	reconcileNodeAddressChange = ""
+	reconcileNodeAddressChange = "//node-address-change"
+
+	// reconcileVTEPAnnotationChange is a synthetic key enqueued when the
+	// node's VTEP annotation is externally modified or removed. It
+	// invalidates the annotation cache and triggers reconciliation to
+	// restore the expected state.
+	reconcileVTEPAnnotationChange = "//vtep-annotation-change"
+
+	// vtepAnnotationFieldManager identifies this controller as the owner of
+	// the VTEP annotation on the node, used to detect external modifications.
+	vtepAnnotationFieldManager = "node-vtep-controller"
 )
 
 type Controller struct {
@@ -66,6 +77,9 @@ type Controller struct {
 	// vtepController reconciles VTEP CRs: ensures bridge, VXLAN, SVI, and OVS port
 	// lifecycle for each VTEP assigned to this node.
 	vtepController controller.Controller
+	// nodeEventHandler watches for node annotation changes that should
+	// trigger VTEP reconciliation if needed.
+	nodeEventHandler cache.ResourceEventHandlerRegistration
 	// nadReconciler triggers VTEP reconciliation when NADs referencing a VTEP
 	// are added or removed, so VID/VNI mappings and SVIs stay in sync.
 	nadReconciler   controller.Reconciler
@@ -96,6 +110,10 @@ type Controller struct {
 }
 
 func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Interface, ndm netlinkdevicemanager.Interface, networkMgr networkmanager.Interface, ovsClient libovsdbclient.Client, addressManager nodeAddressManager) (*Controller, error) {
+	if addressManager == nil {
+		return nil, fmt.Errorf("EVPN node VTEP controller requires a non-nil node address manager")
+	}
+
 	c := &Controller{
 		nodeName:       nodeName,
 		watchFactory:   wf,
@@ -138,9 +156,15 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 			Lister:         c.podLister.List,
 		})
 
-	if addressManager == nil {
-		return nil, fmt.Errorf("EVPN node VTEP controller requires a non-nil node address manager")
+	var err error
+	c.nodeEventHandler, err = wf.NodeCoreInformer().Informer().AddEventHandler(
+		cache.ResourceEventHandlerFuncs{
+			UpdateFunc: c.onNodeUpdate,
+		})
+	if err != nil {
+		return nil, fmt.Errorf("failed to add node event handler: %w", err)
 	}
+
 	addressManager.AddOnAddressesChangedHandler(func() {
 		c.vtepController.Reconcile(reconcileNodeAddressChange)
 	})
@@ -210,6 +234,12 @@ func (c *Controller) initialSync() error {
 func (c *Controller) Stop() {
 	klog.Info("Stopping EVPN node controller")
 
+	if c.nodeEventHandler != nil {
+		if err := c.watchFactory.NodeCoreInformer().Informer().RemoveEventHandler(c.nodeEventHandler); err != nil {
+			klog.Errorf("Failed to remove node event handler: %v", err)
+		}
+	}
+
 	if c.nadReconcilerID != 0 {
 		if err := c.networkMgr.DeRegisterNADReconciler(c.nadReconcilerID); err != nil {
 			klog.Warningf("Failed to deregister EVPN NAD reconciler: %v", err)
@@ -226,6 +256,29 @@ func (c *Controller) vtepNeedsUpdate(oldObj, newObj *vtepv1.VTEP) bool {
 		return true
 	}
 	return !reflect.DeepEqual(oldObj.Spec, newObj.Spec)
+}
+
+func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
+	oldNode, ok := oldObj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	newNode, ok := newObj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	if newNode.Name != c.nodeName {
+		return
+	}
+	if !util.NodeVTEPsAnnotationChanged(oldNode, newNode) {
+		return
+	}
+	// don't reconcile on our own updates
+	if util.IsLastUpdatedByManager(vtepAnnotationFieldManager, newNode.ManagedFields) {
+		return
+	}
+
+	c.vtepController.Reconcile(reconcileVTEPAnnotationChange)
 }
 
 // reconcileNodeAddressChange triggers reconciliation for unmanaged VTEPs whose
@@ -268,10 +321,16 @@ func (c *Controller) reconcileNodeAddressChange() error {
 // 2. Ensure bridge, VXLAN tunnels, and VID/VNI mappings via NDM
 // 3. Reconcile SVIs and OVS ports for each EVPN-enabled network
 // If the VTEP is deleted or unsupported, all its devices are cleaned up.
-// The special reconcileNodeAddressChange key triggers reconciliation of
-// unmanaged VTEPs whose annotated IPs are stale or missing.
+// The synthetic keys reconcileVTEPAnnotationChange and
+// reconcileNodeAddressChange trigger reconciliation of unmanaged VTEPs
+// whose annotated IPs are stale or missing.
 func (c *Controller) reconcile(key string) error {
-	if key == reconcileNodeAddressChange {
+	switch key {
+	case reconcileVTEPAnnotationChange:
+		// node annotation changed, reset the cached annotation to re-read
+		c.vtepsAnnotation = nil
+		fallthrough
+	case reconcileNodeAddressChange:
 		return c.reconcileNodeAddressChange()
 	}
 
@@ -808,7 +867,7 @@ func (c *Controller) annotateVTEPIPs(vtepName string, ipv4, ipv6 net.IP) (err er
 		return err
 	}
 
-	return c.kube.SetAnnotationsOnNode(c.nodeName, annotations)
+	return c.kube.SetAnnotationsOnNodeWithFieldManager(c.nodeName, annotations, vtepAnnotationFieldManager)
 }
 
 // pickVTEPIP selects a single VTEP IP from the candidates for the given address family.
