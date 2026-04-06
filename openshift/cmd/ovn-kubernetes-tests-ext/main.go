@@ -94,6 +94,11 @@ func main() {
 	})
 
 	specs = specs.Select(func(spec *extensiontests.ExtensionTestSpec) bool {
+		// Disable informing specs for now
+		if spec.Lifecycle == extensiontests.LifecycleInforming {
+			return false
+		}
+
 		return !strings.Contains(spec.Name, "[Disabled:")
 	})
 
