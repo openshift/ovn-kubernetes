@@ -35,7 +35,12 @@ func ParseNodeVTEPs(node *corev1.Node) (map[string]VTEPNodeAnnotation, error) {
 }
 
 // MarshalNodeVTEPs serializes the VTEPs annotation for use with SetAnnotationsOnNode.
+// If the map is empty, the annotation value is set to nil so that a strategic
+// merge patch removes the key from the node.
 func MarshalNodeVTEPs(vteps map[string]VTEPNodeAnnotation) (map[string]interface{}, error) {
+	if len(vteps) == 0 {
+		return map[string]interface{}{OVNNodeVTEPs: nil}, nil
+	}
 	data, err := json.Marshal(vteps)
 	if err != nil {
 		return nil, err

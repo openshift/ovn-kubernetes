@@ -337,14 +337,20 @@ func (c *Controller) reconcile(key string) error {
 	vtep, err := c.watchFactory.VTEPInformer().Lister().Get(key)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			klog.V(4).Infof("VTEP %s not found, cleaning up devices", key)
-			return c.deleteVTEPDevices(key)
+			klog.V(4).Infof("VTEP %s not found, cleaning up", key)
+			if err := c.deleteVTEPDevices(key); err != nil {
+				return err
+			}
+			return c.setVTEPAnnotation(key, nil, nil)
 		}
 		return err
 	}
 	if vtep.Spec.Mode == vtepv1.VTEPModeManaged {
-		klog.Warningf("VTEP %s uses unsupported %s mode, cleaning up devices", vtep.Name, vtepv1.VTEPModeManaged)
-		return c.deleteVTEPDevices(key)
+		klog.Warningf("VTEP %s uses unsupported %s mode, cleaning up", vtep.Name, vtepv1.VTEPModeManaged)
+		if err := c.deleteVTEPDevices(key); err != nil {
+			return err
+		}
+		return c.setVTEPAnnotation(key, nil, nil)
 	}
 
 	if config.HybridOverlay.Enabled && config.HybridOverlay.VXLANPort == config.DefaultVXLANPort {
@@ -779,7 +785,7 @@ func (c *Controller) discoverUnmanagedVTEPIPs(vtep *vtepv1.VTEP) (net.IP, net.IP
 
 	changed := !v4AnnotatedIP.Equal(v4SelectedIP) || !v6AnnotatedIP.Equal(v6SelectedIP)
 	if changed {
-		if err := c.annotateVTEPIPs(vtep.Name, v4SelectedIP, v6SelectedIP); err != nil {
+		if err := c.setVTEPAnnotation(vtep.Name, v4SelectedIP, v6SelectedIP); err != nil {
 			return nil, nil, fmt.Errorf("failed to annotate VTEP %s IPs: %w", vtep.Name, err)
 		}
 	}
@@ -811,7 +817,7 @@ func (c *Controller) resolveVTEPIP(family int, vtepCIDRs []*net.IPNet, nodeIPs [
 
 // getVTEPsAnnotation returns the controller-local copy of the VTEP annotation.
 // On first call it bootstraps from the informer cache; subsequent calls return
-// the local copy which is kept in sync by annotateVTEPIPs. This avoids stale
+// the local copy which is kept in sync by setVTEPAnnotation. This avoids stale
 // reads when multiple VTEPs are reconciled before the informer cache updates.
 func (c *Controller) getVTEPsAnnotation() (map[string]util.VTEPNodeAnnotation, error) {
 	if c.vtepsAnnotation != nil {
@@ -833,23 +839,16 @@ func (c *Controller) getVTEPsAnnotation() (map[string]util.VTEPNodeAnnotation, e
 	return c.vtepsAnnotation, nil
 }
 
-// annotateVTEPIPs updates the node's VTEP annotation with the selected IPs.
-func (c *Controller) annotateVTEPIPs(vtepName string, ipv4, ipv6 net.IP) (err error) {
-	entry := util.VTEPNodeAnnotation{}
-	if ipv4 != nil {
-		entry.IPs = append(entry.IPs, ipv4.String())
-	}
-	if ipv6 != nil {
-		entry.IPs = append(entry.IPs, ipv6.String())
-	}
-
+// setVTEPAnnotation updates or removes a VTEP entry in the node's VTEP
+// annotation. If both IPs are nil, the entry is removed; otherwise it is
+// set to the provided IPs.
+func (c *Controller) setVTEPAnnotation(vtepName string, ipv4, ipv6 net.IP) (err error) {
 	vtepsAnnotation, err := c.getVTEPsAnnotation()
 	if err != nil {
 		return err
 	}
 
-	// restore previous value on error to ensure retry will reattempt to set the
-	// annotation
+	// restore previous value on error to ensure retry will reattempt
 	previous := vtepsAnnotation[vtepName]
 	defer func() {
 		if err == nil {
@@ -861,7 +860,25 @@ func (c *Controller) annotateVTEPIPs(vtepName string, ipv4, ipv6 net.IP) (err er
 		}
 	}()
 
-	vtepsAnnotation[vtepName] = entry
+	switch {
+	case ipv4 == nil && ipv6 == nil:
+		delete(vtepsAnnotation, vtepName)
+	default:
+		entry := util.VTEPNodeAnnotation{}
+		if ipv4 != nil {
+			entry.IPs = append(entry.IPs, ipv4.String())
+		}
+		if ipv6 != nil {
+			entry.IPs = append(entry.IPs, ipv6.String())
+		}
+		vtepsAnnotation[vtepName] = entry
+	}
+
+	// inhibit API request if noop
+	if slices.Equal(slices.Sorted(slices.Values(previous.IPs)), slices.Sorted(slices.Values(vtepsAnnotation[vtepName].IPs))) {
+		return nil
+	}
+
 	annotations, err := util.MarshalNodeVTEPs(vtepsAnnotation)
 	if err != nil {
 		return err

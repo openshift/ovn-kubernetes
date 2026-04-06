@@ -157,17 +157,22 @@ var _ = Describe("EVPN node controller", func() {
 				},
 			}
 
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNodeWithFieldManager", nodeName, mock.Anything, vtepAnnotationFieldManager).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(vtep, nil)
 
 			ctrl := &Controller{
 				nodeName:     nodeName,
 				watchFactory: wf,
+				kube:         kubeMock,
 				ndm:          ndm,
 				networkMgr:   &networkmanager.FakeNetworkManager{},
 				ovsClient:    ovsClient,
@@ -184,21 +189,27 @@ var _ = Describe("EVPN node controller", func() {
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 			ndm.AssertExpectations(GinkgoT())
 			ndm.AssertNotCalled(GinkgoT(), "EnsureLink", mock.Anything)
+			kubeMock.AssertNotCalled(GinkgoT(), "SetAnnotationsOnNodeWithFieldManager", mock.Anything, mock.Anything, mock.Anything)
 		})
 
 		It("deletes all devices when VTEP is not found", func() {
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNodeWithFieldManager", nodeName, mock.Anything, vtepAnnotationFieldManager).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(nil, apierrors.NewNotFound(
 				schema.GroupResource{Group: "k8s.ovn.org", Resource: "vteps"}, vtepName))
 
 			ctrl := &Controller{
 				nodeName:     nodeName,
 				watchFactory: wf,
+				kube:         kubeMock,
 				ndm:          ndm,
 				ovsClient:    ovsClient,
 				nadVTEPInfo:  make(map[string]string),
@@ -212,6 +223,7 @@ var _ = Describe("EVPN node controller", func() {
 
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 			ndm.AssertExpectations(GinkgoT())
+			kubeMock.AssertNotCalled(GinkgoT(), "SetAnnotationsOnNodeWithFieldManager", mock.Anything, mock.Anything, mock.Anything)
 		})
 
 		It("creates L3 and L2 SVIs with correct VLAN IDs and VRF master", func() {
@@ -302,12 +314,16 @@ var _ = Describe("EVPN node controller", func() {
 		})
 
 		It("deletes SVIs parented to the bridge when VTEP is not found", func() {
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}
+			kubeMock := &kubemocks.Interface{}
+			kubeMock.On("SetAnnotationsOnNodeWithFieldManager", nodeName, mock.Anything, vtepAnnotationFieldManager).Return(nil)
 			ndm := &ndmmocks.Interface{}
 			lister := &vteplistmocks.VTEPLister{}
 			informer := &vtepinfmocks.VTEPInformer{}
 			informer.On("Lister").Return(lister)
 			wf := &factorymocks.NodeWatchFactory{}
 			wf.On("VTEPInformer").Return(informer)
+			wf.On("GetNode", nodeName).Return(node, nil)
 			lister.On("Get", vtepName).Return(nil, apierrors.NewNotFound(
 				schema.GroupResource{Group: "k8s.ovn.org", Resource: "vteps"}, vtepName))
 
@@ -317,6 +333,7 @@ var _ = Describe("EVPN node controller", func() {
 			ctrl := &Controller{
 				nodeName:     nodeName,
 				watchFactory: wf,
+				kube:         kubeMock,
 				ndm:          ndm,
 				ovsClient:    ovsClient,
 				nadVTEPInfo:  make(map[string]string),
@@ -334,6 +351,7 @@ var _ = Describe("EVPN node controller", func() {
 			Expect(ctrl.reconcile(vtepName)).To(Succeed())
 			ndm.AssertCalled(GinkgoT(), "DeleteLink", sviName)
 			ndm.AssertExpectations(GinkgoT())
+			kubeMock.AssertNotCalled(GinkgoT(), "SetAnnotationsOnNodeWithFieldManager", mock.Anything, mock.Anything, mock.Anything)
 		})
 
 		It("fails reconciliation when hybrid overlay is enabled with conflicting VXLAN port", func() {
