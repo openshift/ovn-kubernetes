@@ -21,22 +21,29 @@ import (
 type fakeNodeHandler struct {
 	netName        string
 	syncErr        error
+	reconcileErr   error
 	syncCalls      int
 	reconcileCalls int
 	deleteCalls    int
+	lastOldNode    *corev1.Node
 }
 
 func (f *fakeNodeHandler) GetNetworkName() string {
 	return f.netName
 }
 
-func (f *fakeNodeHandler) ReconcileNode(_ *corev1.Node, newNode *corev1.Node, _, _ *NodeAnnotationState) error {
+func (f *fakeNodeHandler) ReconcileNode(oldNode *corev1.Node, newNode *corev1.Node, _, _ *NodeAnnotationState) error {
+	if oldNode != nil {
+		f.lastOldNode = oldNode.DeepCopy()
+	} else {
+		f.lastOldNode = nil
+	}
 	if newNode == nil {
 		f.deleteCalls++
 		return nil
 	}
 	f.reconcileCalls++
-	return nil
+	return f.reconcileErr
 }
 
 func (f *fakeNodeHandler) SyncNodes(_ []*corev1.Node) error {
@@ -218,6 +225,75 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 	}
 	if handlerB.reconcileCalls != 0 {
 		t.Fatalf("expected net-b handler to not be called, got %d", handlerB.reconcileCalls)
+	}
+}
+
+func TestReconcileUpdateFailureKeepsConfiguredCacheAndStoresLatestInformerNode(t *testing.T) {
+	handler := &fakeNodeHandler{
+		netName:      "net-a",
+		reconcileErr: errors.New("reconcile failed"),
+	}
+	oldNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Annotations: map[string]string{"v": "old"}}}
+	newNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Annotations: map[string]string{"v": "new"}}}
+
+	c := &NodeController{
+		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
+		handlers:           syncmap.NewSyncMap[NodeHandler](),
+		nodeReconciliation: map[string]map[string]bool{},
+		nodeActive:         map[string]map[string]struct{}{},
+		nodeCache: map[string]map[string]*corev1.Node{
+			handler.netName: {oldNode.Name: oldNode.DeepCopy()},
+		},
+		annotationCache: NewNodeAnnotationCache(),
+	}
+
+	newState := c.annotationCache.UpdateNodeAnnotationState(newNode, true)
+	err := c.reconcileUpdate(handler, oldNode, newNode, handler.netName, nil, newState)
+	if err == nil {
+		t.Fatal("expected reconcileUpdate to fail")
+	}
+
+	cachedNode := c.getCachedNode(handler.netName, oldNode.Name)
+	if cachedNode == nil || cachedNode.Annotations["v"] != "old" {
+		t.Fatalf("expected configured cache to retain old node, got %#v", cachedNode)
+	}
+
+	latestInformerNode := c.getLatestInformerNode(handler.netName, oldNode.Name)
+	if latestInformerNode == nil || latestInformerNode.Annotations["v"] != "new" {
+		t.Fatalf("expected latest informer cache to store new node, got %#v", latestInformerNode)
+	}
+}
+
+func TestReconcileDeleteFallsBackToLatestInformerNode(t *testing.T) {
+	handler := &fakeNodeHandler{netName: "net-a"}
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node-a",
+			Annotations: map[string]string{"cleanup": "needed"},
+		},
+	}
+
+	c := &NodeController{
+		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
+		handlers:           syncmap.NewSyncMap[NodeHandler](),
+		nodeReconciliation: map[string]map[string]bool{},
+		nodeActive:         map[string]map[string]struct{}{},
+		nodeCache:          map[string]map[string]*corev1.Node{},
+		annotationCache:    NewNodeAnnotationCache(),
+	}
+	c.setLatestInformerNode(handler.netName, newNode)
+
+	if err := c.reconcileDelete(handler, newNode.Name, handler.netName, c.getCachedNode(handler.netName, newNode.Name), nil); err != nil {
+		t.Fatalf("reconcileDelete returned error: %v", err)
+	}
+	if handler.deleteCalls != 1 {
+		t.Fatalf("expected delete to be called once, got %d", handler.deleteCalls)
+	}
+	if handler.lastOldNode == nil || handler.lastOldNode.Annotations["cleanup"] != "needed" {
+		t.Fatalf("expected delete to use latest informer node, got %#v", handler.lastOldNode)
+	}
+	if c.getLatestInformerNode(handler.netName, newNode.Name) != nil {
+		t.Fatal("expected latest informer cache to be cleared after delete")
 	}
 }
 
