@@ -198,7 +198,11 @@ func (na *NodeAllocator) NeedsNodeAllocation(node *corev1.Node) bool {
 
 	// ovn node check
 	if na.hasNodeSubnetAllocation() {
-		if !util.HasNodeHostSubnetAnnotation(node, na.netInfo.GetNetworkName()) {
+		hostSubnets, err := util.ParseNodeHostSubnetAnnotation(node, na.netInfo.GetNetworkName())
+		if err != nil {
+			return true
+		}
+		if !na.hasExpectedHostSubnets(hostSubnets) {
 			return true
 		}
 	}
@@ -226,7 +230,11 @@ func (na *NodeAllocator) NeedsNodeAllocationWithState(node *corev1.Node, state *
 	}
 
 	if na.hasNodeSubnetAllocation() {
-		if _, err := state.Subnets(na.netInfo.GetNetworkName()); err != nil {
+		hostSubnets, err := state.Subnets(na.netInfo.GetNetworkName())
+		if err != nil {
+			return true
+		}
+		if !na.hasExpectedHostSubnets(hostSubnets) {
 			return true
 		}
 	}
@@ -238,6 +246,35 @@ func (na *NodeAllocator) NeedsNodeAllocationWithState(node *corev1.Node, state *
 	}
 
 	return false
+}
+
+// hasExpectedHostSubnets returns true when the node-subnets annotation matches
+// the current IP-family mode for this network. During single-stack/dual-stack
+// conversion we may have a stale annotation that still exists, but no longer
+// satisfies the configured families, so allocation must run again.
+func (na *NodeAllocator) hasExpectedHostSubnets(hostSubnets []*net.IPNet) bool {
+	ipv4Mode, ipv6Mode := na.netInfo.IPMode()
+	foundIPv4 := false
+	foundIPv6 := false
+
+	for _, subnet := range hostSubnets {
+		switch {
+		case utilnet.IsIPv4CIDR(subnet):
+			if !ipv4Mode || foundIPv4 {
+				return false
+			}
+			foundIPv4 = true
+		case utilnet.IsIPv6CIDR(subnet):
+			if !ipv6Mode || foundIPv6 {
+				return false
+			}
+			foundIPv6 = true
+		default:
+			return false
+		}
+	}
+
+	return foundIPv4 == ipv4Mode && foundIPv6 == ipv6Mode
 }
 
 // HandleAddUpdateNodeEvent handles the add or update node event
