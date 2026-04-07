@@ -67,6 +67,12 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for network %s", netName)
+
+	if oc.addressSetManager != nil {
+		if err := oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
+			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
+		}
+	}
 	// delete layer 2 logical switches
 	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {
@@ -376,7 +382,7 @@ func getDenyARPAndNSOnMACVRF(controllerName, macvrfportName string, nodeLRPMAC n
 				"outport==%q && eth.dst==%s && nd && icmp.type==135 && nd.target==%s",
 				macvrfportName,
 				nodeLRPMAC.String(),
-				gwIfAddrv4.IP.String(),
+				gwIfAddrv6.IP.String(),
 			),
 			nbdb.ACLActionDrop,
 			nil,

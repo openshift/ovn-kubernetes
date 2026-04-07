@@ -8,6 +8,7 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 )
 
 func IsOpenShift(config *rest.Config) (bool, error) {
@@ -51,3 +52,8 @@ func (m openshift) PrimaryInterfaceName() string {
 	// TODO; dynamically look up primary interface name instead of hardcoding it to baremetald env
 	return "enp0s3"
 }
+
+func (m openshift) GetAgnHostContainerImage() string {
+	return images.AgnHost()
+}
+

@@ -271,6 +271,24 @@ func (_m *InterfaceOVN) GetPodsForDBChecker(namespace string, opts metav1.ListOp
 	return r0, r1
 }
 
+// PatchPodStatusAnnotations provides a mock function with given fields: oldPod, newPod
+func (_m *InterfaceOVN) PatchPodStatusAnnotations(oldPod *apicorev1.Pod, newPod *apicorev1.Pod) error {
+	ret := _m.Called(oldPod, newPod)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PatchPodStatusAnnotations")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*apicorev1.Pod, *apicorev1.Pod) error); ok {
+		r0 = rf(oldPod, newPod)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // PatchEgressIP provides a mock function with given fields: name, patchData
 func (_m *InterfaceOVN) PatchEgressIP(name string, patchData []byte) error {
 	ret := _m.Called(name, patchData)
@@ -510,24 +528,6 @@ func (_m *InterfaceOVN) UpdateNodeStatus(node *apicorev1.Node) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*apicorev1.Node) error); ok {
 		r0 = rf(node)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// UpdatePodStatus provides a mock function with given fields: pod
-func (_m *InterfaceOVN) UpdatePodStatus(pod *apicorev1.Pod) error {
-	ret := _m.Called(pod)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdatePodStatus")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*apicorev1.Pod) error); ok {
-		r0 = rf(pod)
 	} else {
 		r0 = ret.Error(0)
 	}

@@ -7,10 +7,35 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	kubemocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	v1mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 )
+
+func TestIsPodAnnotationUpdateRetryable(t *testing.T) {
+	if !IsPodAnnotationUpdateRetryable(apierrors.NewConflict(
+		schema.GroupResource{Group: "", Resource: "pods"},
+		"test-pod",
+		errors.New("conflict"),
+	)) {
+		t.Fatal("expected conflict error to be retryable")
+	}
+
+	if !IsPodAnnotationUpdateRetryable(apierrors.NewInvalid(
+		schema.GroupKind{Group: "", Kind: "Pod"},
+		"test-pod",
+		field.ErrorList{field.Invalid(field.NewPath("metadata", "annotations"), "value", "test failed")},
+	)) {
+		t.Fatal("expected invalid error to be retryable")
+	}
+
+	if IsPodAnnotationUpdateRetryable(errors.New("plain error")) {
+		t.Fatal("expected plain error to not be retryable")
+	}
+}
 
 func TestUpdatePodWithAllocationOrRollback(t *testing.T) {
 	tests := []struct {
@@ -93,9 +118,9 @@ func TestUpdatePodWithAllocationOrRollback(t *testing.T) {
 			}
 
 			if tt.updatePodErr {
-				kubeMock.On("UpdatePodStatus", pod).Return(errors.New("Update pod error"))
+				kubeMock.On("PatchPodStatusAnnotations", pod, mock.AnythingOfType("*v1.Pod")).Return(errors.New("Update pod error"))
 			} else if tt.expectUpdate {
-				kubeMock.On("UpdatePodStatus", pod).Return(nil)
+				kubeMock.On("PatchPodStatusAnnotations", pod, mock.AnythingOfType("*v1.Pod")).Return(nil)
 			}
 
 			err := UpdatePodWithRetryOrRollback(podListerMock, kubeMock, &corev1.Pod{}, allocate)

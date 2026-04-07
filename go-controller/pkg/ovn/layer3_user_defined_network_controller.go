@@ -404,6 +404,12 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for %s network controller of network %s", types.Layer3Topology, netName)
 
+	if oc.addressSetManager != nil {
+		if err = oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
+			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
+		}
+	}
+
 	// For primary L3 UDN only: when this is a cleanup-only controller (dummy for stale UDN
 	// cleanup; GetNetworkID() is InvalidID because netInfo was never reconciled from a NAD),
 	// discover and cleanup all gateway routers from the NB DB. DB-driven cleanup works even
