@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -135,6 +136,7 @@ type testNode struct {
 	PrimaryAddressAnnotation string
 	SubnetsAnnotation        string
 	VTEPIPs                  map[string][]string
+	RawVTEPAnnotation        *string
 }
 
 func (tn testNode) Node() *corev1.Node {
@@ -146,7 +148,9 @@ func (tn testNode) Node() *corev1.Node {
 		"k8s.ovn.org/node-subnets": tn.SubnetsAnnotation,
 		util.OvnNodeIfAddr:         primaryAddressAnnotation,
 	}
-	if len(tn.VTEPIPs) > 0 {
+	if tn.RawVTEPAnnotation != nil {
+		annotations[util.OVNNodeVTEPs] = *tn.RawVTEPAnnotation
+	} else if len(tn.VTEPIPs) > 0 {
 		vteps := make(map[string]util.VTEPNodeAnnotation, len(tn.VTEPIPs))
 		for vtepName, ips := range tn.VTEPIPs {
 			vteps[vtepName] = util.VTEPNodeAnnotation{IPs: ips}
@@ -441,6 +445,12 @@ func init() {
 	// cannot stop the NAD informer properly (the api we use was generated with
 	// an old codegen and the informer has no shutdown method)
 	config.IPv4Mode = true
+
+	// Disable WatchListClient feature gate for tests.
+	// Fake clientsets from third-party libraries don't yet support WatchList semantics
+	// introduced in K8s 1.35, causing informers to hang waiting for bookmark events.
+	// See: https://github.com/kubernetes/kubernetes/issues/135895
+	os.Setenv("KUBE_FEATURE_WatchListClient", "false")
 }
 
 func TestController_reconcile(t *testing.T) {
@@ -1570,7 +1580,7 @@ exit
 					Routers: []*testRouter{
 						{ASN: 65000, VRF: "blue", Prefixes: []string{"10.2.1.0/24"}},
 						{ASN: 65000, Prefixes: []string{"100.64.0.1/32"}, Neighbors: []*testNeighbor{
-							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}},
+							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}, Receive: []testPrefixSelector{{Prefix: "100.64.0.0/16", LE: 32}}},
 						}},
 					},
 				},
@@ -1635,7 +1645,7 @@ exit
 					Routers: []*testRouter{
 						{ASN: 65000, VRF: "blue6", Prefixes: []string{"fd02::/64"}},
 						{ASN: 65000, Prefixes: []string{"fd64::1/128"}, Neighbors: []*testNeighbor{
-							{ASN: 65000, Address: "fd00::1", Advertise: []string{"fd64::1/128"}},
+							{ASN: 65000, Address: "fd00::1", Advertise: []string{"fd64::1/128"}, Receive: []testPrefixSelector{{Prefix: "fd64::/64", LE: 128}}},
 						}},
 					},
 				},
@@ -1696,7 +1706,7 @@ exit
 							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"10.1.0.0/16"}},
 						}},
 						{ASN: 65000, Prefixes: []string{"100.64.0.1/32"}, Neighbors: []*testNeighbor{
-							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}},
+							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}, Receive: []testPrefixSelector{{Prefix: "100.64.0.0/16", LE: 32}}},
 						}},
 					},
 				},
@@ -1776,7 +1786,7 @@ exit
 						{ASN: 65000, VRF: "blue", Prefixes: []string{"10.2.1.0/24"}},
 						{ASN: 65000, VRF: "green", Prefixes: []string{"10.3.1.0/24"}},
 						{ASN: 65000, Prefixes: []string{"100.64.0.1/32"}, Neighbors: []*testNeighbor{
-							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}},
+							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}, Receive: []testPrefixSelector{{Prefix: "100.64.0.0/16", LE: 32}}},
 						}},
 					},
 				},
@@ -1846,7 +1856,7 @@ exit
 					Routers: []*testRouter{
 						{ASN: 65000, VRF: "blue", Prefixes: []string{"10.2.1.0/24"}},
 						{ASN: 65000, Prefixes: []string{"100.64.0.1/32"}, Neighbors: []*testNeighbor{
-							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}},
+							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}, Receive: []testPrefixSelector{{Prefix: "100.64.0.0/16", LE: 32}}},
 						}},
 					},
 				},
@@ -1878,7 +1888,7 @@ exit
 					Routers: []*testRouter{
 						{ASN: 65000, VRF: "blue", Prefixes: []string{"10.2.2.0/24"}},
 						{ASN: 65000, Prefixes: []string{"100.64.0.2/32"}, Neighbors: []*testNeighbor{
-							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.2/32"}},
+							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.2/32"}, Receive: []testPrefixSelector{{Prefix: "100.64.0.0/16", LE: 32}}},
 						}},
 					},
 				},
@@ -1962,7 +1972,7 @@ exit
 						{ASN: 65000, VRF: "blue", Prefixes: []string{"10.2.1.0/24"}},
 						{ASN: 65000, VRF: "green", Prefixes: []string{"10.3.1.0/24"}},
 						{ASN: 65000, Prefixes: []string{"100.64.0.1/32", "200.10.0.1/32"}, Neighbors: []*testNeighbor{
-							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32", "200.10.0.1/32"}},
+							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32", "200.10.0.1/32"}, Receive: []testPrefixSelector{{Prefix: "100.64.0.0/16", LE: 32}, {Prefix: "200.10.0.0/16", LE: 32}}},
 						}},
 					},
 				},

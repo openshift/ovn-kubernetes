@@ -333,6 +333,10 @@ type selectedNetworks struct {
 	// only has a rare migration use case OR we have 1 RA selecting more than one CUDN with each
 	// CUDN having a different VTEPs which is also rare.
 	vtepIPsByNode map[string][]string
+	// vtepCIDRs is the deduplicated, ordered list of VTEP CIDRs from the
+	// referenced VTEP resources.  Used as the ToReceive prefix filter so that
+	// each node accepts routes for all VTEP IPs within these ranges.
+	vtepCIDRs []string
 	// hostNetworkSubnets is a map of selected network names to their ordered network subnets specific for a node
 	hostNetworkSubnets map[string][]string
 	// prefixLength is a map of selected network to their prefix length
@@ -573,9 +577,14 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	// Read per-node VTEP IPs from the k8s.ovn.org/vteps annotation written by
 	// ovnkube-node. This runs after EVPN validation so c.vtepLister (only
 	// initialized when EVPN is enabled) is safe to dereference.
+	vtepCIDRSet := sets.New[string]()
 	for _, vtepName := range sets.List(vtepNames) {
-		if _, err := c.vtepLister.Get(vtepName); err != nil {
+		vtep, err := c.vtepLister.Get(vtepName)
+		if err != nil {
 			return nil, nil, fmt.Errorf("%w: VTEP %q referenced by EVPN network not found: %w", errConfig, vtepName, err)
+		}
+		for _, cidr := range vtep.Spec.CIDRs {
+			vtepCIDRSet.Insert(string(cidr))
 		}
 	}
 	vtepIPsByNode := map[string]sets.Set[string]{}
@@ -614,6 +623,7 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	for node, ips := range vtepIPsByNode {
 		selectedNetworks.vtepIPsByNode[node] = sets.List(ips)
 	}
+	selectedNetworks.vtepCIDRs = sets.List(vtepCIDRSet)
 
 	// helper to gather host subnets and cache during reconcile
 	// TODO perhaps cache across reconciles as well
@@ -1011,17 +1021,30 @@ func (c *Controller) generateFRRConfiguration(
 	// In that case we create a new default-VRF router from the source
 	// to carry the VTEP IPs.
 	if vtepIPs := selectedNetworks.vtepIPsByNode[nodeName]; len(vtepIPs) > 0 && globalRouterASN > 0 {
+		// Build ToReceive prefix selectors from the VTEP CIDRs so each
+		// node accepts routes for all VTEP IPs within these ranges.
+		vtepReceiveSelectors := vtepCIDRPrefixSelectors(selectedNetworks.vtepCIDRs)
+
 		defaultIdx := slices.IndexFunc(routers, func(r frrtypes.Router) bool { return r.VRF == "" })
 		if defaultIdx >= 0 {
 			// dedup, ordered
 			// router level - injects the prefix into BGP
 			routers[defaultIdx].Prefixes = sets.List(sets.New(routers[defaultIdx].Prefixes...).Insert(vtepIPs...))
-			// neighbor level - filters the prefixes to the IP family of the neighbor to advertise
+			// neighbor level - advertise this node's VTEP IPs and accept VTEP CIDRs
 			for i := range routers[defaultIdx].Neighbors {
 				allPrefixes := routers[defaultIdx].Prefixes
 				isIPV6 := utilnet.IsIPv6String(routers[defaultIdx].Neighbors[i].Address)
 				routers[defaultIdx].Neighbors[i].ToAdvertise.Allowed.Prefixes =
 					util.MatchAllIPNetsStringFamily(isIPV6, allPrefixes)
+				for _, ps := range vtepReceiveSelectors {
+					if utilnet.IsIPv6CIDRString(ps.Prefix) == isIPV6 {
+						routers[defaultIdx].Neighbors[i].ToReceive.Allowed.Prefixes = append(
+							routers[defaultIdx].Neighbors[i].ToReceive.Allowed.Prefixes, ps)
+					}
+				}
+				if len(routers[defaultIdx].Neighbors[i].ToReceive.Allowed.Prefixes) > 0 {
+					routers[defaultIdx].Neighbors[i].ToReceive.Allowed.Mode = frrtypes.AllowRestricted
+				}
 			}
 		} else {
 			// No default-VRF router in the generated set; clone the source's
@@ -1053,6 +1076,14 @@ func (c *Controller) generateFRRConfiguration(
 							Mode:     frrtypes.AllowRestricted,
 							Prefixes: filteredVTEPIPs,
 						},
+					}
+					for _, ps := range vtepReceiveSelectors {
+						if utilnet.IsIPv6CIDRString(ps.Prefix) == isIPV6 {
+							n.ToReceive.Allowed.Prefixes = append(n.ToReceive.Allowed.Prefixes, ps)
+						}
+					}
+					if len(n.ToReceive.Allowed.Prefixes) > 0 {
+						n.ToReceive.Allowed.Mode = frrtypes.AllowRestricted
 					}
 					vtepRouter.Neighbors = append(vtepRouter.Neighbors, n)
 				}
@@ -1109,6 +1140,22 @@ func (c *Controller) generateFRRConfiguration(
 	}
 
 	return new, nil
+}
+
+// vtepCIDRPrefixSelectors converts VTEP CIDRs into FRR PrefixSelectors that
+// accept host routes (/32 for IPv4, /128 for IPv6) within each CIDR range.
+func vtepCIDRPrefixSelectors(cidrs []string) []frrtypes.PrefixSelector {
+	selectors := make([]frrtypes.PrefixSelector, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		var le uint32
+		if utilnet.IsIPv6CIDRString(cidr) {
+			le = 128
+		} else {
+			le = 32
+		}
+		selectors = append(selectors, frrtypes.PrefixSelector{Prefix: cidr, LE: le})
+	}
+	return selectors
 }
 
 // updateFRRConfigurations updates the FRRConfigurations that apply for a
