@@ -3,13 +3,9 @@ package infraprovider
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -20,10 +16,7 @@ import (
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container/network"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/runner"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
@@ -31,156 +24,80 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
-const (
-	hypervisorNodeUser = "root"
-	hypervisorSshport  = "22"
-	// use network name created for attaching frr container with
-	// cluster primary network as per changes in the link:
-	// https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L123-L124
-	primaryNetworkName         = "ostestbm_net"
-	frrContainerPrimaryNetIPv4 = "192.168.111.3"
-	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
-	externalFRRContainerName   = "frr"
-
-	// Environment variable names for test configuration
-	// These are set during infra provider initialization and consumed by test selection logic
-	EnvVarOVNGatewayMode     = "OVN_GATEWAY_MODE"
-	EnvVarEVPNFeatureEnabled = "EVPN_FEATURE_ENABLED"
-)
-
 type OpenshiftInfraProvider struct {
-	config       *rest.Config
-	engine       *container.Engine
-	HostPort     *portalloc.PortAllocator
-	sshRunner    api.Runner
-	clusterInfra *BareMetalNetworking // For now, it is populated only in bare-metal (BM) clusters.
-}
-
-type BareMetalNetworking struct {
-	machineNetwork       api.Network           // contains subnet details about cluster machine network
-	machineNetworkGwInfo *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	clusterFeatureGate      *configv1.FeatureGate
+	operNetwork             *operv1.Network
+	hasFRRExternalContainer bool
+	hostPort                *portalloc.PortAllocator
+	clusterInfra            *baremetalInfra
 }
 
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
 	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
-	// Initialize command runner for executing commands on hypervisor
-	// (optional, may not be available)
-	sshRunner, err := hypervisorSshCmdRunner()
+	clusterInfra, err := initializeClusterInfra(config)
 	if err != nil {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
-		config:    config,
-		HostPort:  portalloc.New(30000, 32767),
-		sshRunner: sshRunner,
+		hostPort:     portalloc.New(30000, 32767),
+		clusterInfra: clusterInfra,
 	}
-	if sshRunner != nil {
-		// Initialize podman container engine
-		o.engine = container.NewEngine("podman", sshRunner)
-	}
-
-	// Load cluster configuration
-	configClient, err := configclient.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve config client: %w", err)
-	}
-	if err = o.initializeBareMetalNetworking(configClient); err != nil {
-		return nil, fmt.Errorf("failed to initialize bare-metal networking: %w", err)
+	if err = o.initClusterObjects(config); err != nil {
+		return nil, err
 	}
 	return o, nil
 }
 
-func (o *OpenshiftInfraProvider) initializeBareMetalNetworking(configClient *configclient.Clientset) error {
-	infra, err := configClient.ConfigV1().Infrastructures().Get(context.Background(), "cluster", metav1.GetOptions{})
+func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
+	configClient, err := configclient.NewForConfig(config)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve cluster infrastructure object: %w", err)
+		return fmt.Errorf("failed to retrieve config client: %w", err)
 	}
-	// Skip populating cluster infra object if cluster is not a BM.
-	// This is sufficient for now to support EVPN E2Es.
-	if infra.Spec.PlatformSpec.Type != configv1.BareMetalPlatformType {
-		return nil
-	}
-	o.clusterInfra = &BareMetalNetworking{}
-	// just mimic machine network with ContainerEngineNetwork to make it
-	// compatibile with api.Network API.
-	machineNetwork := &network.ContainerEngineNetwork{NetName: primaryNetworkName}
-	var cidrs []network.ContainerEngineNetworkConfig
-	for _, cidr := range infra.Spec.PlatformSpec.BareMetal.MachineNetworks {
-		cidrs = append(cidrs, network.ContainerEngineNetworkConfig{Subnet: string(cidr)})
-	}
-	machineNetwork.Configs = cidrs
-	o.clusterInfra.machineNetwork = machineNetwork
-
-	v4, v6, err := o.clusterInfra.machineNetwork.IPv4IPv6Subnets()
+	operatorClient, err := operatorv1client.NewForConfig(config)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve primary network subnets: %w", err)
+		return fmt.Errorf("failed to retrieve operator client: %w", err)
 	}
-	if o.sshRunner != nil {
-		// Retrieve primary network interface from hypervisor instance
-		o.clusterInfra.machineNetworkGwInfo, err = findHypervisorNodeInterface(o.sshRunner, v4, v6)
-		if err != nil {
-			return fmt.Errorf("failed to retrieve hypervisor node interface for machine network: %w", err)
-		}
+	o.operNetwork, err = operatorClient.OperatorV1().Networks().Get(context.Background(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to retrieve network operator cluster object: %w", err)
+	}
+	o.clusterFeatureGate, err = configClient.ConfigV1().FeatureGates().Get(context.Background(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to retrieve cluster feature gate: %w", err)
+	}
+	// check ovn gateway mode and export required env variable
+	o.configureOVNGatewayMode()
+	if o.clusterInfra != nil {
+		// check for frr external container availability
+		frrContainer := api.ExternalContainer{Name: externalFRRContainerName}
+		output, _ := o.clusterInfra.ExecExternalContainerCommand(frrContainer, []string{"hostname"})
+		o.hasFRRExternalContainer = output != ""
 	}
 	return nil
 }
 
-// DetectEVPNCapability returns true if cluster has EVPN capability,
-// otherwise returns false.
-func (o *OpenshiftInfraProvider) DetectEVPNCapability() (bool, error) {
-	configClient, err := configclient.NewForConfig(o.config)
-	if err != nil {
-		return false, fmt.Errorf("failed to retrieve config client: %w", err)
-	}
-	operatorClient, err := operatorv1client.NewForConfig(o.config)
-	if err != nil {
-		return false, fmt.Errorf("failed to retrieve operator client: %w", err)
-	}
-	network, err := operatorClient.OperatorV1().Networks().Get(context.Background(), "cluster", metav1.GetOptions{})
-	if err != nil {
-		return false, fmt.Errorf("failed to retrieve network operator cluster object: %w", err)
-	}
-	featureGate, err := configClient.ConfigV1().FeatureGates().Get(context.Background(), "cluster", metav1.GetOptions{})
-	if err != nil {
-		return false, fmt.Errorf("failed to retrieve cluster feature gate: %w", err)
-	}
-	o.configureOVNGatewayMode(network)
-	return o.checkForEVPN(network, featureGate)
-}
-
 // configureOVNGatewayMode detects and configures the OVN gateway mode for tests
-func (o *OpenshiftInfraProvider) configureOVNGatewayMode(network *operv1.Network) {
-	if network.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
+	if o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
 		return
 	}
 
-	if network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
-		network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost {
-		// Needed for EVPN E2Es
-		os.Setenv(EnvVarOVNGatewayMode, "local")
+	if o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
+		o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost {
+		// The E2E utility method isLocalGWModeEnabled depends on the
+		// OVN_GATEWAY_MODE environment variable. All EVPN tests must
+		// satisfy this condition; otherwise, they will be skipped.
+		os.Setenv("OVN_GATEWAY_MODE", "local")
 	}
 }
 
-// checkForEVPN checks all EVPN prerequisites
-func (o *OpenshiftInfraProvider) checkForEVPN(network *operv1.Network, featureGate *configv1.FeatureGate) (bool, error) {
-	if !hasEVPNFeatureGate(featureGate) {
-		return false, nil
-	}
-	if !hasFRRRouteProvider(network) {
-		return false, nil
-	}
-	if !isLocalGatewayMode(network) {
-		return false, nil
-	}
-	exists, err := o.hasFRRExternalContainer()
-	if err != nil {
-		return false, err
-	}
-	if !exists {
-		return false, nil
-	}
-	return true, nil
+// CheckForEVPN checks all EVPN prerequisites
+func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
+	return hasEVPNFeatureGate(o.clusterFeatureGate) &&
+		hasFRRRouteProvider(o.operNetwork) &&
+		isLocalGatewayMode(o.operNetwork) &&
+		o.hasFRRExternalContainer
 }
 
 // hasEVPNFeatureGate checks if the EVPN feature gate is enabled in the cluster
@@ -219,45 +136,11 @@ func isLocalGatewayMode(network *operv1.Network) bool {
 		network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost
 }
 
-// hasFRRExternalContainer checks if the FRR external container is available
-func (o *OpenshiftInfraProvider) hasFRRExternalContainer() (bool, error) {
-	if o.engine == nil || o.sshRunner == nil {
-		return false, nil
-	}
-	// Verify SSH connectivity works
-	if _, err := o.sshRunner.Run("echo", "connection test"); err != nil {
-		return false, fmt.Errorf("failed to check frr container status, connectivity check failed with hypervisor: %w", err)
-	}
-	state, err := o.engine.GetContainerState(externalFRRContainerName)
-	if err != nil {
-		return false, fmt.Errorf("failed to retrieve frr container state: %w", err)
-	}
-	return state != "", nil
-}
-
 func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
-	if container.Name == "frr" && network.Name() == primaryNetworkName {
-		// frr container uses static ip configuration for ostestbm_net,
-		// querying it with podman inspect returns empty values, so build
-		// it explicitly.
-		if o.clusterInfra == nil || o.clusterInfra.machineNetworkGwInfo == nil {
-			return api.NetworkInterface{}, fmt.Errorf("can not find primary network gateway node for frr container")
-		}
-		return api.NetworkInterface{
-				IPv4:        frrContainerPrimaryNetIPv4,
-				IPv6:        frrContainerPrimaryNetIPv6,
-				IPv4Gateway: o.clusterInfra.machineNetworkGwInfo.IPv4,
-				IPv6Gateway: o.clusterInfra.machineNetworkGwInfo.IPv6,
-				InfName:     "eth0",
-				IPv4Prefix:  o.clusterInfra.machineNetworkGwInfo.IPv4Prefix,
-				IPv6Prefix:  o.clusterInfra.machineNetworkGwInfo.IPv6Prefix},
-			nil
+	if o.clusterInfra == nil {
+		panic("not implemented")
 	}
-	if o.engine == nil {
-		return api.NetworkInterface{},
-			fmt.Errorf("container engine not found, can not find network %s interface for the container %s", network.Name(), container.Name)
-	}
-	return o.engine.GetNetworkInterface(container.Name, network.Name())
+	return o.clusterInfra.GetExternalContainerNetworkInterface(container, network)
 }
 
 func (o *OpenshiftInfraProvider) ShutdownNode(nodeName string) error {
@@ -283,36 +166,22 @@ func (o *OpenshiftInfraProvider) Name() string {
 }
 
 func (o *OpenshiftInfraProvider) PrimaryNetwork() (api.Network, error) {
-	return o.getNetwork(primaryNetworkName)
+	if o.clusterInfra == nil {
+		panic("not implemented")
+	}
+	return o.clusterInfra.GetNetwork(primaryNetworkName)
 }
 
 func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
-	// Override "kind" network queries with the actual primary network name
-	if name == "kind" {
-		framework.Logf("overriding kind network with actual primary network name %s for the query", primaryNetworkName)
-		name = primaryNetworkName
+	if o.clusterInfra == nil {
+		panic("not implemented")
 	}
-	return o.getNetwork(name)
+	return o.clusterInfra.GetNetwork(name)
 
-}
-
-func (o *OpenshiftInfraProvider) getNetwork(name string) (api.Network, error) {
-	// check primary network first.
-	if name == primaryNetworkName {
-		if o.clusterInfra == nil {
-			return nil, fmt.Errorf("primary network %s not found", primaryNetworkName)
-		}
-		return o.clusterInfra.machineNetwork, nil
-	}
-	if o.engine == nil {
-		return nil, fmt.Errorf("container engine not found, can not retrieve network %s", name)
-	}
-	// fall back into container networks.
-	return o.engine.GetNetwork(name)
 }
 
 func (o *OpenshiftInfraProvider) GetK8HostPort() uint16 {
-	return o.HostPort.Allocate()
+	return o.hostPort.Allocate()
 }
 
 func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
@@ -340,38 +209,38 @@ func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string
 }
 
 func (o *OpenshiftInfraProvider) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
-	if o.engine == nil {
-		return "", fmt.Errorf("container engine not found, can not execute command %v on the container %s", cmd, container.Name)
+	if o.clusterInfra == nil {
+		panic("not implemented")
 	}
-	return o.engine.ExecExternalContainerCommand(container, cmd)
+	return o.clusterInfra.ExecExternalContainerCommand(container, cmd)
 }
 
 func (o *OpenshiftInfraProvider) ExternalContainerPrimaryInterfaceName() string {
-	if o.engine == nil {
-		panic("container engine not found, can not retrieve external container primary interface")
+	if o.clusterInfra == nil {
+		panic("not implemented")
 	}
-	return o.engine.ExternalContainerPrimaryInterfaceName()
+	return o.clusterInfra.ExternalContainerPrimaryInterfaceName()
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
-	if o.engine == nil {
-		return "", fmt.Errorf("container engine not found, can not retrieve logs from external container %s", container.Name)
+	if o.clusterInfra == nil {
+		panic("not implemented")
 	}
-	return o.engine.GetExternalContainerLogs(container)
+	return o.clusterInfra.GetExternalContainerLogs(container)
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerPort() uint16 {
-	if o.engine == nil {
-		panic("container engine not found, can not allocate port for external container")
+	if o.clusterInfra == nil {
+		panic("not implemented")
 	}
-	return o.engine.GetExternalContainerPort()
+	return o.clusterInfra.GetExternalContainerPort()
 }
 
 func (o *OpenshiftInfraProvider) ListNetworks() ([]string, error) {
-	if o.engine == nil {
-		return nil, fmt.Errorf("container engine not found, can not list networks")
+	if o.clusterInfra == nil {
+		panic("not implemented")
 	}
-	return o.engine.ListNetworks()
+	return o.clusterInfra.ListNetworks()
 }
 
 func (o *OpenshiftInfraProvider) NewTestContext() api.Context {
@@ -379,241 +248,60 @@ func (o *OpenshiftInfraProvider) NewTestContext() api.Context {
 	ginkgo.DeferCleanup(context.CleanUp)
 	co := &contextOpenshift{
 		TestContext: context,
-		engine:      o.engine.WithTestContext(context),
+	}
+	if o.clusterInfra != nil {
+		co.externalContainerContextProvider = o.clusterInfra.GetExternalContainerContextProvider(context)
 	}
 	return co
 }
 
 type contextOpenshift struct {
 	*testcontext.TestContext
-	engine *container.Engine
+	externalContainerContextProvider api.ExternalContainerContextProvider
 }
 
 func (o *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	if o.engine == nil {
-		return api.ExternalContainer{},
-			fmt.Errorf("container engine not found, can not create external container %s", container.Name)
+	if o.externalContainerContextProvider == nil {
+		panic("not implemented")
 	}
-	return o.engine.CreateExternalContainer(container)
+	return o.externalContainerContextProvider.CreateExternalContainer(container)
 }
 
 func (o *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
-	if o.engine == nil {
-		return fmt.Errorf("container engine not found, can not delete external container %s", container.Name)
+	if o.externalContainerContextProvider == nil {
+		panic("not implemented")
 	}
-	return o.engine.DeleteExternalContainer(container)
+	return o.externalContainerContextProvider.DeleteExternalContainer(container)
 }
 
 func (o *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	if o.engine == nil {
-		return nil, fmt.Errorf("container engine not found, can not create network %s", name)
+	if o.externalContainerContextProvider == nil {
+		panic("not implemented")
 	}
-	return o.engine.CreateNetwork(name, subnets...)
+	return o.externalContainerContextProvider.CreateNetwork(name, subnets...)
 }
 
 func (o *contextOpenshift) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
-	if o.engine == nil {
-		return api.NetworkInterface{},
-			fmt.Errorf("container engine not found, can't attach network %s from container %s", network.Name(), container)
+	if o.externalContainerContextProvider == nil {
+		panic("not implemented")
 	}
-	return o.engine.AttachNetwork(network, container)
+	return o.externalContainerContextProvider.AttachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DetachNetwork(network api.Network, container string) error {
-	if o.engine == nil {
-		return fmt.Errorf("container engine not found, can't detach network %s from container %s", network.Name(), container)
+	if o.externalContainerContextProvider == nil {
+		panic("not implemented")
 	}
-	return o.engine.DetachNetwork(network, container)
+	return o.externalContainerContextProvider.DetachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
-	if o.engine == nil {
-		return fmt.Errorf("container engine not found, can not delete network %s", network.Name())
+	if o.externalContainerContextProvider == nil {
+		panic("not implemented")
 	}
-	return o.engine.DeleteNetwork(network)
+	return o.externalContainerContextProvider.DeleteNetwork(network)
 }
 
-func (c *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
-	return fmt.Errorf("SetupUnderlay is not supported")
-}
-
-func hypervisorSshCmdRunner() (api.Runner, error) {
-	// Read hypervisor IP from shared directory
-	ip, err := readHypervisorIP()
-	if err != nil {
-		return nil, err
-	}
-	if ip == "" {
-		return nil, nil // Not configured
-	}
-
-	// Find SSH key for hypervisor access
-	sshKeyPath, err := findSSHKeyPath()
-	if err != nil {
-		return nil, err
-	}
-	if sshKeyPath == "" {
-		return nil, nil // Not configured
-	}
-
-	sshRunner, err := runner.NewSSHRunner(ip, hypervisorNodeUser, hypervisorSshport, sshKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ssh runner for hypervisor: %w", err)
-	}
-
-	return sshRunner, nil
-}
-
-// readHypervisorIP reads the hypervisor IP from the SHARED_DIR/server-ip file.
-// Returns empty string if not configured, error if misconfigured.
-func readHypervisorIP() (string, error) {
-	sharedDir := os.Getenv("SHARED_DIR")
-	if sharedDir == "" {
-		return "", nil
-	}
-
-	ipFile := filepath.Join(sharedDir, "server-ip")
-	exists, err := fileExists(ipFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to check hypervisor ip file: %w", err)
-	}
-	if !exists {
-		return "", nil
-	}
-
-	data, err := os.ReadFile(ipFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to read hypervisor ip file: %w", err)
-	}
-
-	ip := strings.TrimSpace(string(data))
-	if ip == "" {
-		return "", fmt.Errorf("hypervisor ip file is empty")
-	}
-
-	return ip, nil
-}
-
-// findSSHKeyPath locates the SSH private key file for hypervisor access.
-// Tries equinix-ssh-key first, falls back to packet-ssh-key.
-// Returns empty string if not configured, error if misconfigured.
-func findSSHKeyPath() (string, error) {
-	clusterProfileDir := os.Getenv("CLUSTER_PROFILE_DIR")
-	if clusterProfileDir == "" {
-		return "", nil
-	}
-
-	// Try equinix-ssh-key first
-	equinixKey := filepath.Join(clusterProfileDir, "equinix-ssh-key")
-	exists, err := fileExists(equinixKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to check equinix-ssh-key: %w", err)
-	}
-	if exists {
-		return equinixKey, nil
-	}
-
-	// Fall back to packet-ssh-key
-	packetKey := filepath.Join(clusterProfileDir, "packet-ssh-key")
-	exists, err = fileExists(packetKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to check packet-ssh-key: %w", err)
-	}
-	if exists {
-		return packetKey, nil
-	}
-
-	return "", nil
-}
-
-// fileExists checks if a file exists and is accessible.
-// Returns (false, nil) if file doesn't exist, (false, error) for access errors.
-func fileExists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-type linkInfo struct {
-	IfName   string          `json:"ifname"`
-	Mac      string          `json:"address"`
-	AddrInfo []ipAddressInfo `json:"addr_info"`
-}
-
-type ipAddressInfo struct {
-	Family string `json:"family"`
-	Local  string `json:"local"`
-}
-
-// findHypervisorNodeInterface retrieves attached interface for the matching subnets from the hypervisor node.
-func findHypervisorNodeInterface(runner api.Runner, v4Subnet, v6Subnet string) (*api.NetworkInterface, error) {
-	ipAddrCmdArgs := []string{"-j", "addr"}
-	result, err := runner.Run("ip", ipAddrCmdArgs...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve network links: %w", err)
-	}
-
-	var links []linkInfo
-	if err := json.Unmarshal([]byte(result), &links); err != nil {
-		return nil, fmt.Errorf("failed to parse network links: %w", err)
-	}
-
-	for _, link := range links {
-		if netInfo := tryMatchLink(link, v4Subnet, v6Subnet); netInfo != nil {
-			return netInfo, nil
-		}
-	}
-	return nil, fmt.Errorf("no network interface found matching subnets v4=%s v6=%s", v4Subnet, v6Subnet)
-}
-
-func tryMatchLink(link linkInfo, v4Subnet, v6Subnet string) *api.NetworkInterface {
-	netInterface := &api.NetworkInterface{}
-
-	for _, addr := range link.AddrInfo {
-		// Check for IPv4 match
-		if v4Subnet != "" {
-			if ok, _ := ipInCIDR(addr.Local, v4Subnet); ok {
-				netInterface.IPv4 = addr.Local
-				netInterface.IPv4Prefix = v4Subnet
-			}
-		}
-
-		// Check for IPv6 match
-		if v6Subnet != "" {
-			if ok, _ := ipInCIDR(addr.Local, v6Subnet); ok {
-				netInterface.IPv6 = addr.Local
-				netInterface.IPv6Prefix = v6Subnet
-			}
-		}
-	}
-
-	// Only consider this link a match if we found all requested IPs
-	hasV4Match := v4Subnet == "" || netInterface.IPv4 != ""
-	hasV6Match := v6Subnet == "" || netInterface.IPv6 != ""
-
-	if hasV4Match && hasV6Match {
-		netInterface.InfName = link.IfName
-		netInterface.MAC = link.Mac
-		return netInterface
-	}
-
-	// Not a complete match, return nil
-	return nil
-}
-
-func ipInCIDR(ipStr, cidrStr string) (bool, error) {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false, fmt.Errorf("invalid IP address: %q", ipStr)
-	}
-	_, ipNet, err := net.ParseCIDR(cidrStr)
-	if err != nil {
-		return false, err
-	}
-	return ipNet.Contains(ip), nil
+func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
+	panic("not implemented")
 }
