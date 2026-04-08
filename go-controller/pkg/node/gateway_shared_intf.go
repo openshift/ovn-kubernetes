@@ -1780,7 +1780,7 @@ func newGateway(
 		}
 
 		// resync flows on IP change
-		gw.nodeIPManager.OnChanged = func() {
+		gw.nodeIPManager.AddOnAddressesChangedHandler(func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
 			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address
@@ -1798,7 +1798,7 @@ func newGateway(
 				}
 			}
 			gw.openflowManager.requestFlowSync()
-		}
+		})
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Gateway Node Port Watcher")
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, networkManager)
