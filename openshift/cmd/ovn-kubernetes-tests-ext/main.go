@@ -55,15 +55,16 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	}
 
 	// EVPN tests: only include if EVPN is enabled in the cluster
-	evpnEnabled, err := ocpInfra.DetectEVPNCapability()
-	if err != nil {
-		panic(err)
-	}
+	evpnEnabled := ocpInfra.CheckForEVPN()
 	if !evpnEnabled && spec.Labels.Has(featureLabelEVPN) {
 		return false
 	}
 
 	// Future feature-based filters can be added here
+
+	// FUP: not having to detect the environment, and just be able to
+	// run what we want through the definition of the appropriate test
+	// suites
 
 	return true
 }
