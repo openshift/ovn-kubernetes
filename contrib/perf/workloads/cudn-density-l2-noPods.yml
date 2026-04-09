@@ -17,11 +17,11 @@ global:
       - name: ovnkube-controller-heap
         namespace: "ovn-kubernetes"
         labelSelector: {app: ovnkube-node}
-        url: http://localhost:9410/debug/pprof/heap?seconds=30
+        url: http://localhost:9410/debug/pprof/heap
       - name: ovnkube-control-plane-heap
         namespace: "ovn-kubernetes"
         labelSelector: {name: ovnkube-control-plane}
-        url: http://localhost:9411/debug/pprof/heap?seconds=30
+        url: http://localhost:9411/debug/pprof/heap
 jobs:
   - name: cudn-density-l2-nopods
     jobIterations: 200
@@ -32,7 +32,7 @@ jobs:
     waitWhenFinished: true
     podWait: false 
     preLoadImages: false 
-    preLoadPeriod: 2m
+    preLoadPeriod: 5m
     # Disabling churn until https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5883 is resolved
     #churnConfig:
     #  percent: 10
