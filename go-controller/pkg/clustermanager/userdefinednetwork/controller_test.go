@@ -2348,6 +2348,21 @@ var _ = Describe("User Defined Network Controller", func() {
 		}, 2*time.Second, 100*time.Millisecond).Should(BeTrue())
 	}
 
+	expectNoTransportCondition := func(cudnName string) {
+		Consistently(func() bool {
+			cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
+			if err != nil {
+				return false
+			}
+			for _, cond := range cudn.Status.Conditions {
+				if cond.Type == "TransportAccepted" {
+					return false // Found TransportAccepted condition, fail the check
+				}
+			}
+			return true // No TransportAccepted condition found, as expected
+		}, 500*time.Millisecond, 100*time.Millisecond).Should(BeTrue())
+	}
+
 	Context("CUDN Transport Validation", func() {
 		var c *Controller
 
@@ -2357,18 +2372,11 @@ var _ = Describe("User Defined Network Controller", func() {
 			}
 		})
 
-		It("should update status to True with DefaultTransportAccepted for Geneve transport", func() {
+		It("should not update status for empty transport (defaults to Geneve)", func() {
 			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, "")
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "DefaultTransportAccepted", "Default transport has been configured.")
-		})
-
-		It("should update status to True for empty transport (defaults to Geneve)", func() {
-			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, "")
-			c = newTestController(template.RenderNetAttachDefManifest, cudn)
-			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "DefaultTransportAccepted", "Default transport has been configured.")
+			expectNoTransportCondition("test-cudn")
 		})
 
 		It("should update status to True with NoOverlayTransportAccepted when RA is accepted", func() {
@@ -2403,8 +2411,9 @@ var _ = Describe("User Defined Network Controller", func() {
 		})
 
 		It("should not update status when condition already matches", func() {
-			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, "")
+			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionNoOverlay)
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
+			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 			Expect(c.Run()).To(Succeed())
 
 			var initialResourceVersion string
