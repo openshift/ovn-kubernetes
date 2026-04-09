@@ -2891,10 +2891,8 @@ spec:
 		}
 		// Enslaving a link to a VRF device may cause the removal of the non link local IPv6 address from the interface
 		// Look up the IP address, add it after enslaving the link and perform test.
-		networks, err := providerCtx.GetAttachedNetworks()
-		_, exists := networks.Get(secondaryNetworkName)
-		gomega.Expect(exists).Should(gomega.BeTrue(), "network %s must exist", secondaryNetworkName)
-		secondaryNetwork, _ := networks.Get(secondaryNetworkName)
+		secondaryNetwork, err := infraprovider.Get().GetNetwork(secondaryNetworkName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "network %s must exist", secondaryNetworkName)
 		restoreLinkIPv6AddrFn := func() error { return nil }
 		if isV6Node {
 			ginkgo.By("attempting to find IPv6 global address for secondary network")
@@ -2990,10 +2988,8 @@ spec:
 			[]string{"ip", "neigh", "flush", egressIPSecondaryHost})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should flush neighbor cache")
 
-		networks, err := providerCtx.GetAttachedNetworks()
-		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should get attached networks")
-		secondaryNetwork, exists := networks.Get(secondaryNetworkName)
-		gomega.Expect(exists).Should(gomega.BeTrue(), "network %s must exist", secondaryNetworkName)
+		secondaryNetwork, err := infraprovider.Get().GetNetwork(secondaryNetworkName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "network %s must exist", secondaryNetworkName)
 
 		inf, err := infraprovider.Get().GetExternalContainerNetworkInterface(secondaryTargetExternalContainer, secondaryNetwork)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred(), "should have network interface for network %s on instance %s", secondaryNetwork.Name(), secondaryTargetExternalContainer.Name)
