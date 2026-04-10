@@ -59,7 +59,7 @@ func initializeTestFramework(provider string, cfg *rest.Config) error {
 	framework.TestContext.KubeConfig = os.Getenv("KUBECONFIG")
 	gomega.Expect(framework.TestContext.KubeConfig).NotTo(gomega.BeEmpty())
 	framework.TestContext.DeleteNamespace = os.Getenv("DELETE_NAMESPACE") != "false"
-	framework.TestContext.VerifyServiceAccount = false
+	framework.TestContext.VerifyServiceAccount = true
 	//TODO: do we really need the file systems?
 	framework.TestContext.KubectlPath = "oc"
 	if ad := os.Getenv("ARTIFACT_DIR"); len(strings.TrimSpace(ad)) == 0 {
