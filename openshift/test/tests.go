@@ -1,16 +1,17 @@
 package test
 
-// BlockingTests lists tests that are considered stable and should block CI jobs if they fail.
-// Tests NOT in this list or explicitly "Disabled" in annotations will be marked as "informing"
-//   - they run but failures don't fail the job.
-//
-// To graduate a test from informing to blocking:
-//  1. Add the full test name to this slice (with proper quotes and comma)
+// This list contains separate lists of informing and blocking tests. Tests not
+// on either of these lists do not run. To graduate a test from informing to
+// blocking:
+//  1. Remove the tests from InformingTests list and add it to the BlockingTests list
 //  2. Rebuild: ./hack/build-tests-ext.sh
 //  3. Verify: ./bin/ovn-kubernetes-tests-ext list tests | jq -r '.[] | select(.name == "test name here") | .lifecycle'
 //
 // Used by: openshift/cmd/ovn-kubernetes-tests-ext/main.go
-var BlockingTests = []string{
+
+// InformingTests lists tests that generally pass but are not considered stable
+// and should not block CI jobs if they fail.
+var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN with custom network [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L3 primary UDN [Suite:openshift/conformance/parallel]",
@@ -61,3 +62,7 @@ var BlockingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:openshift/conformance/parallel]",
 }
+
+// BlockingTests lists tests that are considered stable and should block CI jobs
+// if they fail.
+var BlockingTests = []string{}
