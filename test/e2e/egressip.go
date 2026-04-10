@@ -394,6 +394,69 @@ func removeSliceElement(s []string, i int) []string {
 	return s[:len(s)-1]
 }
 
+// checkForDuplicateMAC performs arping (IPv4) or ndisc6 (IPv6) checks to detect duplicate MAC address responses
+// after egress IP migration. Returns error immediately if old node MAC is detected responding.
+func checkForDuplicateMAC(externalContainer infraapi.ExternalContainer, interfaceName, egressIP, oldMAC, expectedMAC string, isIPv6 bool, maxChecks int, checkInterval time.Duration) error {
+	// For arping: MAC is in brackets [aa:bb:cc:dd:ee:ff]
+	// For ndisc6: MAC is on the line "Target link-layer address: aa:bb:cc:dd:ee:ff"
+	macRegexArping := regexp.MustCompile(`\[([0-9a-fA-F:]+)\]`)
+	macRegexNdisc6 := regexp.MustCompile(`Target link-layer address:\s+([0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2})`)
+
+	oldMAC = strings.ToLower(oldMAC)
+	expectedMAC = strings.ToLower(expectedMAC)
+
+	var toolName string
+	if isIPv6 {
+		toolName = "ndisc6"
+	} else {
+		toolName = "arping"
+	}
+
+	framework.Logf("Checking for duplicate MAC responses after migration using %s (old MAC: %s, expected MAC: %s)...", toolName, oldMAC, expectedMAC)
+
+	foundExpected := false
+	for i := 0; i < maxChecks; i++ {
+		var cmd string
+		var macRegex *regexp.Regexp
+
+		if isIPv6 {
+			cmd = fmt.Sprintf("ndisc6 -1 -w 1000 %s %s 2>&1", egressIP, interfaceName)
+			macRegex = macRegexNdisc6
+		} else {
+			cmd = fmt.Sprintf("arping -c 1 -I %s %s 2>&1", interfaceName, egressIP)
+			macRegex = macRegexArping
+		}
+
+		output, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"sh", "-c", cmd})
+		if err != nil {
+			framework.Logf("Check %d/%d: %s command returned error: %v; output: %s", i+1, maxChecks, toolName, err, output)
+		}
+		matches := macRegex.FindAllStringSubmatch(output, -1)
+		for _, match := range matches {
+			respondingMAC := strings.ToLower(strings.TrimSpace(match[1]))
+			if respondingMAC == oldMAC {
+				return fmt.Errorf("DUPLICATE MAC DETECTED on check %d: Old node MAC %s responded to %s for egress IP %s after migration. "+
+					"The nftables drop rules should have prevented this response", i+1, oldMAC, toolName, egressIP)
+			} else if respondingMAC == expectedMAC {
+				foundExpected = true
+				framework.Logf("Check %d/%d: New node MAC %s is responding (expected)", i+1, maxChecks, expectedMAC)
+			} else {
+				return fmt.Errorf("Unexpected MAC %s (not old or expected)", respondingMAC)
+			}
+		}
+
+		if i < maxChecks-1 {
+			time.Sleep(checkInterval)
+		}
+	}
+
+	if !foundExpected {
+		return fmt.Errorf("did not observe expected MAC %s responding to %s for egress IP %s after %d checks", expectedMAC, toolName, egressIP, maxChecks)
+	}
+	framework.Logf("✓ No duplicate MAC detected - nftables rules successfully blocked responses from old node")
+	return nil
+}
+
 type egressIPStatus struct {
 	Node     string `json:"node"`
 	EgressIP string `json:"egressIP"`
@@ -3863,6 +3926,360 @@ spec:
 			_, err = e2ekubectl.RunKubectl("", "annotate", "--overwrite", "egressip", egressIPName, fmt.Sprintf("%s-", util.EgressIPMarkAnnotation))
 			gomega.Expect(err).To(gomega.HaveOccurred(), "Should fail if k8s.ovn.org/egressip-mark is being removed")
 			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("The \"k8s.ovn.org/egressip-mark\" annotation cannot be modified or removed once set. This annotation is managed by the system.")))
+		})
+
+		ginkgo.It("Should skip orphaned nodes and assign EgressIPs to valid nodes", func() {
+			if isUserDefinedNetwork(netConfigParams) {
+				ginkgo.Skip("Unsupported for UDNs")
+			}
+
+			// Label two nodes for egress assignment
+			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+
+			podNamespace := f.Namespace
+			nodeToOrphan := egress1Node.name
+
+			ginkgo.By("Allocating EgressIP addresses before orphaning node")
+			var egressIP1, egressIP2 net.IP
+			var err error
+			if utilnet.IsIPv6String(egress1Node.nodeIP) {
+				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				framework.ExpectNoError(err, "Failed to allocate IPv6 for EgressIP1")
+				egressIP2, err = ipalloc.NewPrimaryIPv6()
+				framework.ExpectNoError(err, "Failed to allocate IPv6 for EgressIP2")
+			} else {
+				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				framework.ExpectNoError(err, "Failed to allocate IPv4 for EgressIP1")
+				egressIP2, err = ipalloc.NewPrimaryIPv4()
+				framework.ExpectNoError(err, "Failed to allocate IPv4 for EgressIP2")
+			}
+
+			ginkgo.By("Removing host-cidrs annotation from one node to simulate orphan")
+			node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodeToOrphan, metav1.GetOptions{})
+			framework.ExpectNoError(err, "Failed to get node %s", nodeToOrphan)
+			originalHostCIDRs := node.Annotations[util.OVNNodeHostCIDRs]
+
+			// The node object is updated by ovnkube-node while the test runs, so
+			// every write here has to be retried on conflict.
+			setHostCIDRs := func(value string) error {
+				return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodeToOrphan, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+					if value == "" {
+						delete(node.Annotations, util.OVNNodeHostCIDRs)
+					} else {
+						node.Annotations[util.OVNNodeHostCIDRs] = value
+					}
+					_, err = f.ClientSet.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+					return err
+				})
+			}
+
+			framework.ExpectNoError(setHostCIDRs(""), "Failed to remove host-cidrs annotation from node %s", nodeToOrphan)
+
+			// Register node annotation restore immediately
+			defer func() {
+				framework.ExpectNoError(setHostCIDRs(originalHostCIDRs),
+					"Failed to restore host-cidrs annotation on node %s", nodeToOrphan)
+			}()
+
+			egressIPConfig1 := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: eip-test-1
+spec:
+    egressIPs:
+    - %s
+    podSelector:
+        matchLabels:
+            egress-pod: "true"
+    namespaceSelector:
+        matchLabels:
+            kubernetes.io/metadata.name: %s
+`, egressIP1.String(), podNamespace.Name)
+
+			egressIPConfig2 := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: eip-test-2
+spec:
+    egressIPs:
+    - %s
+    podSelector:
+        matchLabels:
+            egress-pod: "true"
+    namespaceSelector:
+        matchLabels:
+            kubernetes.io/metadata.name: %s
+`, egressIP2.String(), podNamespace.Name)
+
+			tmpDir, err := os.MkdirTemp("", "egressip-test-")
+			if err != nil {
+				framework.Failf("Unable to create temp directory: %v", err)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			egressIPYaml1 := filepath.Join(tmpDir, "eip-test-1.yaml")
+			if err := os.WriteFile(egressIPYaml1, []byte(egressIPConfig1), 0644); err != nil {
+				framework.Failf("Unable to write EgressIP YAML to disk: %v", err)
+			}
+
+			egressIPYaml2 := filepath.Join(tmpDir, "eip-test-2.yaml")
+			if err := os.WriteFile(egressIPYaml2, []byte(egressIPConfig2), 0644); err != nil {
+				framework.Failf("Unable to write EgressIP YAML to disk: %v", err)
+			}
+
+			framework.Logf("Create the EgressIP configurations")
+			e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml1)
+			providerCtx.AddCleanUpFn(func() error {
+				_, err := e2ekubectl.RunKubectl("default", "delete", "egressip", "eip-test-1", "--ignore-not-found=true")
+				return err
+			})
+
+			e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml2)
+			providerCtx.AddCleanUpFn(func() error {
+				_, err := e2ekubectl.RunKubectl("default", "delete", "egressip", "eip-test-2", "--ignore-not-found=true")
+				return err
+			})
+
+			// Returns the node each of the two test EgressIPs is assigned to.
+			// An EgressIP that has no assignment yet is absent from the map.
+			assignedNodes := func() map[string]string {
+				egressIPStdout, err := e2ekubectl.RunKubectl("default", "get", "eip", "-o", "json")
+				if err != nil {
+					framework.Logf("Error getting EgressIPs: %v", err)
+					return nil
+				}
+				var egressIPList egressIPs
+				if err := json.Unmarshal([]byte(egressIPStdout), &egressIPList); err != nil {
+					framework.Logf("Error unmarshaling EgressIP list: %v", err)
+					return nil
+				}
+				assigned := map[string]string{}
+				for _, eip := range egressIPList.Items {
+					if eip.Metadata.Name != "eip-test-1" && eip.Metadata.Name != "eip-test-2" {
+						continue
+					}
+					if len(eip.Status.Items) > 0 {
+						assigned[eip.Metadata.Name] = eip.Status.Items[0].Node
+					}
+				}
+				return assigned
+			}
+
+			// The orphaned state cannot be held open for a fixed window:
+			// ovnkube-node's address manager restores host-cidrs on any netlink
+			// address event, not only on its sync ticker, and IPv6 links produce
+			// enough address activity that the annotation can come back within
+			// seconds. So assert as soon as both EgressIPs are assigned, and
+			// re-check the annotation on every poll: if it returns before the
+			// assignments land, the run has not exercised the orphaned state and
+			// must fail loudly rather than pass without testing anything.
+			ginkgo.By("Verifying both EgressIPs are assigned while one node is orphaned")
+			var assigned map[string]string
+			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
+				orphanNode, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodeToOrphan, metav1.GetOptions{})
+				if err != nil {
+					return false, err
+				}
+				if _, ok := orphanNode.Annotations[util.OVNNodeHostCIDRs]; ok {
+					return false, fmt.Errorf("node %s regained its host-cidrs annotation before both EgressIPs were assigned, so the orphaned state was not exercised", nodeToOrphan)
+				}
+				assigned = assignedNodes()
+				framework.Logf("Current EgressIP assignments: %v", assigned)
+				return len(assigned) == 2, nil
+			})
+			framework.ExpectNoError(err, "Both EgressIPs should have been assigned while node %s was orphaned", nodeToOrphan)
+
+			gomega.Expect(assigned).NotTo(gomega.ContainElement(nodeToOrphan),
+				"EgressIPs must not be assigned to node %s while its host-cidrs annotation is missing", nodeToOrphan)
+		})
+
+		ginkgo.It("should prevent duplicate MAC responses when egress node is rebooted", func() {
+			if !isNetworkSegmentationEnabled() {
+				ginkgo.Skip("network segmentation is disabled")
+			}
+
+			ginkgo.By("1. Label node 1 as egress-assignable")
+			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "")
+			defer e2enode.RemoveLabelOffNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable")
+
+			ginkgo.By("2. Creating EgressIP object")
+			podNamespace := f.Namespace
+			labels := map[string]string{
+				"name": f.Namespace.Name,
+			}
+			updateNamespaceLabels(f, podNamespace, labels)
+			var egressIP net.IP
+			var err error
+			if isIPv6TestRun {
+				egressIP, err = ipalloc.NewPrimaryIPv6()
+			} else {
+				egressIP, err = ipalloc.NewPrimaryIPv4()
+			}
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate egress IP")
+			egressIPConfig := createEIPManifest(egressIPName, podEgressLabel, labels, egressIP.String())
+			if err := os.WriteFile(egressIPYaml, []byte(egressIPConfig), 0644); err != nil {
+				framework.Failf("Unable to write EgressIP config: %v", err)
+			}
+			defer os.Remove(egressIPYaml)
+			e2ekubectl.RunKubectlOrDie("default", "create", "-f", egressIPYaml)
+
+			ginkgo.By("3. Verifying EgressIP assigned to node 1 and creating a pod on this node")
+			statuses := verifyEgressIPStatusLengthEquals(1, func(statuses []egressIPStatus) bool {
+				return statuses[0].Node == egress1Node.name
+			})
+			framework.Logf("Egress IP %s assigned to node: %s", egressIP.String(), statuses[0].Node)
+			_, err = createGenericPodWithLabel(f, pod1Name, egress1Node.name, f.Namespace.Name, getAgnHostHTTPPortBindFullCMD(clusterNetworkHTTPPort), podEgressLabel)
+			framework.ExpectNoError(err, "failed to create pod matching EgressIP selector")
+
+			ginkgo.By("4. Labeling node 2 as egress-assignable for failover")
+			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable", "")
+			defer e2enode.RemoveLabelOffNode(f.ClientSet, egress2Node.name, "k8s.ovn.org/egress-assignable")
+
+			ginkgo.By("5. Getting network interfaces of both EgressIP nodes and external container")
+			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
+			framework.ExpectNoError(err, "failed to get primary network")
+			egress1NodeInf, err := infraprovider.Get().GetK8NodeNetworkInterface(egress1Node.name, primaryProviderNetwork)
+			framework.ExpectNoError(err, "failed to get node 1 interface")
+			egress2NodeInf, err := infraprovider.Get().GetK8NodeNetworkInterface(egress2Node.name, primaryProviderNetwork)
+			framework.ExpectNoError(err, "failed to get node 2 interface")
+			extContainerInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(primaryTargetExternalContainer, primaryProviderNetwork)
+			framework.ExpectNoError(err, "failed to get external container interface")
+
+			ginkgo.By("6. Installing arping/ndisc6 in external container")
+			var installCmd string
+			if isIPv6TestRun {
+				installCmd = "which ndisc6 >/dev/null 2>&1 || (apk update && apk add ndisc6)"
+			} else {
+				installCmd = "which arping >/dev/null 2>&1 || (apk update && apk add iputils)"
+			}
+			_, err = infraprovider.Get().ExecExternalContainerCommand(primaryTargetExternalContainer, []string{
+				"sh", "-c", installCmd,
+			})
+			framework.ExpectNoError(err, "failed to install network discovery tool")
+
+			ginkgo.By("7. Verifying egress IP resolves to node 1 MAC before migration")
+			var discoveryCmd string
+			var macRegex *regexp.Regexp
+			if isIPv6TestRun {
+				discoveryCmd = fmt.Sprintf("ndisc6 -1 -w 1000 %s %s 2>&1", egressIP.String(), extContainerInf.InfName)
+				// ndisc6 output format: "Target link-layer address: aa:bb:cc:dd:ee:ff"
+				macRegex = regexp.MustCompile(`Target link-layer address:\s+([0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2}:[0-9a-fA-F]{1,2})`)
+			} else {
+				discoveryCmd = fmt.Sprintf("arping -c 1 -I %s %s 2>&1", extContainerInf.InfName, egressIP.String())
+				macRegex = regexp.MustCompile(`\[([0-9a-fA-F:]+)\]`)
+			}
+			output, err := infraprovider.Get().ExecExternalContainerCommand(primaryTargetExternalContainer, []string{"sh", "-c", discoveryCmd})
+			framework.ExpectNoError(err, "network discovery should succeed before migration")
+			matches := macRegex.FindStringSubmatch(output)
+			gomega.Expect(matches).To(gomega.HaveLen(2), "should extract MAC from discovery output")
+			macBeforeMigration := strings.ToLower(strings.TrimSpace(matches[1]))
+			expectedMAC1 := strings.ToLower(egress1NodeInf.MAC)
+			framework.Logf("MAC before migration: %s, expected: %s", macBeforeMigration, expectedMAC1)
+			gomega.Expect(macBeforeMigration).To(gomega.Equal(expectedMAC1), "Egress IP should resolve to node 1 MAC before migration")
+
+			ginkgo.By("8. Getting ovnkube-node pod name on egress node 1")
+			ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+				FieldSelector: fmt.Sprintf("spec.nodeName=%s", egress1Node.name),
+				LabelSelector: "app=ovnkube-node",
+			})
+			framework.ExpectNoError(err, "failed to list ovnkube-node pods")
+			gomega.Expect(ovnkubeNodePods.Items).To(gomega.HaveLen(1), "should have exactly one ovnkube-node pod on egress node 1")
+			ovnkubeNodePod := ovnkubeNodePods.Items[0].Name
+			framework.Logf("Found ovnkube-node pod: %s on node %s", ovnkubeNodePod, egress1Node.name)
+
+			ginkgo.By("9. Start a goroutine to check for nftables chain during pod deletion")
+			nftChainFound := make(chan bool, 1)
+			stopChecking := make(chan bool, 1)
+			goroutineReady := make(chan bool, 1)
+			nftChainCheckCmd := "nft -j list chains | jq '.nftables[] | select(.chain.table==\"ovn-kubernetes-egressip\" and .chain.family==\"netdev\" and .chain.name==\"egressip-drop\").chain'"
+			go func() {
+				defer close(nftChainFound)
+				ticker := time.NewTicker(100 * time.Millisecond)
+				defer ticker.Stop()
+				goroutineReady <- true
+				for {
+					select {
+					case <-stopChecking:
+						return
+					case <-ticker.C:
+						output, err := infraprovider.Get().ExecK8NodeCommand(egress1Node.name, []string{"sh", "-c", nftChainCheckCmd})
+						if err == nil && strings.Contains(output, "egressip-drop") {
+							nftChainFound <- true
+							return
+						}
+					}
+				}
+			}()
+			<-goroutineReady
+			framework.Logf("Nftables chain monitoring goroutine started")
+
+			ginkgo.By("10. Deleting ovnkube-node pod and intentionally dropping EgressIP health check packets to trigger egress IP migration")
+			framework.Logf("Deleting ovnkube-node pod %s to trigger egress IP migration", ovnkubeNodePod)
+			err = deletePodWithWaitByName(context.TODO(), f.ClientSet, ovnkubeNodePod, "ovn-kubernetes")
+			framework.ExpectNoError(err, "failed to delete ovnkube-node pod and wait for termination")
+			framework.Logf("✓ ovnkube-node pod %s deleted and fully terminated", ovnkubeNodePod)
+			framework.Logf("Dropping EgressIP health check packets on node %s to trigger EgressIP migration", egress1Node.name)
+			setNodeReachable(egress1Node.name, false)
+			defer setNodeReachable(egress1Node.name, true)
+
+			ginkgo.By("11. Verifying nftables chain exists on node 1 during shutdown")
+			close(stopChecking)
+			chainFound, ok := <-nftChainFound
+			if !ok || !chainFound {
+				framework.Failf("Nftables chain egressip-drop was not found on node %s during pod shutdown", egress1Node.name)
+			}
+			framework.Logf("✓ Nftables chain egressip-drop verified on node %s", egress1Node.name)
+
+			ginkgo.By("12. Waiting for egress IP to migrate to node 2")
+			verifyEgressIPStatusLengthEquals(1, func(statuses []egressIPStatus) bool {
+				return statuses[0].Node == egress2Node.name
+			})
+			framework.Logf("✓ Egress IP successfully migrated to node %s", egress2Node.name)
+
+			ginkgo.By("13. Checking for duplicate MAC responses after migration")
+			// The old node should NOT respond to ARP/NDP requests even though the SNAT rule is present on the gateway router and egress IP might
+			// still be on its br-ex interface temporarily. The nftables rules added during pod shutdown should prevent any ARP/NDP responses.
+			err = checkForDuplicateMAC(
+				primaryTargetExternalContainer,
+				extContainerInf.InfName,
+				egressIP.String(),
+				egress1NodeInf.MAC,
+				egress2NodeInf.MAC,
+				isIPv6TestRun,
+				20,                   // maxChecks
+				500*time.Millisecond, // checkInterval
+			)
+			framework.ExpectNoError(err, "duplicate MAC detection check failed")
+
+			ginkgo.By("14. Waiting for ovnkube-node pod to restart and OVN cluster to be healthy")
+			err = waitOVNKubernetesHealthy(f)
+			framework.ExpectNoError(err, "OVN-Kubernetes cluster should be healthy after ovnkube-node pod restart")
+
+			ginkgo.By("15. Verifying nftables cleanup on node 1 after pod restart")
+			ovnkubeNodePods, err = f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+				FieldSelector: fmt.Sprintf("spec.nodeName=%s", egress1Node.name),
+				LabelSelector: "app=ovnkube-node",
+			})
+			framework.ExpectNoError(err, "failed to list ovnkube-node pods")
+			if len(ovnkubeNodePods.Items) > 0 {
+				podName := ovnkubeNodePods.Items[0].Name
+				nftCmd := "nft list table netdev ovn-kubernetes-egressip 2>&1"
+				_, err := e2ekubectl.RunKubectl("ovn-kubernetes", "exec", podName, "-c", "ovnkube-controller", "--", "sh", "-c", nftCmd)
+				// Command should fail because table should be deleted
+				gomega.Expect(err).ToNot(gomega.BeNil(), "nft command should fail because table should be deleted")
+				gomega.Expect(err.Error()).To(gomega.Or(
+					gomega.ContainSubstring("No such file or directory"),
+					gomega.ContainSubstring("No such file"),
+				), "nftables egress IP table should be deleted after cleanup")
+				framework.Logf("✓ Nftables table cleaned up on node 1")
+			}
+
+			framework.Logf("✓ Test passed: Egress IP migrated cleanly without duplicate MAC responses")
 		})
 
 		ginkgo.DescribeTable("[OVN network] multiple namespaces with different primary networks", func(otherNetworkAttachParms networkAttachmentConfigParams) {
