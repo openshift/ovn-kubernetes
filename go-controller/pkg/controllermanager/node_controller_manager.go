@@ -3,11 +3,13 @@ package controllermanager
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
@@ -23,6 +25,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
+	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
@@ -254,6 +257,12 @@ waitForControllerSyncLoop:
 	}
 	// end workaround
 
+	// Cleanup stale nftables from previous shutdown. Critical for container restarts where
+	// nftables state persists and would block ARP responses for reassigned egress IPs.
+	if err := node.CleanupEgressIPARPBlockNFT(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup egress IP ARP/NDP block table: %v", err)
+	}
+
 	return nil
 }
 
@@ -264,6 +273,23 @@ func (ncm *NodeControllerManager) Stop(isOVNKubeControllerSyncd *atomic.Bool) {
 
 	if ncm.defaultNodeNetworkController != nil {
 		if isOVNKubeControllerSyncd != nil && ncm.defaultNodeNetworkController.Gateway != nil {
+			// Upon node reboot, egressIP reassignment happens after healthcheck fails. After reassignment of
+			// EIP, new egressIPNode sends GARP and old egressIPNode can respond with unicast ARP if either
+			// EIP is still attached to interface or ovs-vswitchd is still running(SNAT in GR creates lflow to
+			// respond to such ARP requests). addEgressIPARPBlockRules takes care of this scenario. On the other
+			// hand SetDefaultBridgeGARPDropFlows makes sure that GARP packets coming from br-int bridge is dropped
+			// except for node IPs and makes sure that OVN database has synced at least once so that SNATs gets removed.
+			assignedIPs, err := ncm.getAssignedEgressIPs()
+			if err != nil {
+				klog.Errorf("Failed to get assigned Egress IPs during shutdown: %v", err)
+			}
+
+			if len(assignedIPs) > 0 {
+				if err := ncm.addEgressIPARPBlockRules(assignedIPs); err != nil {
+					klog.Errorf("Failed to add egress IP ARP block rules during shutdown: %v", err)
+				}
+			}
+
 			ncm.defaultNodeNetworkController.Gateway.SetDefaultBridgeGARPDropFlows(true)
 			if err := ncm.defaultNodeNetworkController.Gateway.Reconcile(); err != nil {
 				klog.Errorf("Failed to reconcile gateway after attempting to add flows to the external bridge to drop GARPs: %v", err)
@@ -362,6 +388,53 @@ func (ncm *NodeControllerManager) checkForStaleOVSRepresentorInterfaces() {
 			}
 		}
 	}
+}
+
+// getAssignedEgressIPs returns IP addresses of all Egress IPs assigned to this node
+func (ncm *NodeControllerManager) getAssignedEgressIPs() ([]string, error) {
+	// Use informer lister for cached access (doesn't hit API server)
+	egressIPLister := ncm.watchFactory.EgressIPInformer().Lister()
+
+	// List all EgressIP resources from cache
+	egressIPs, err := egressIPLister.List(labels.Everything())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list EgressIPs from cache: %w", err)
+	}
+
+	// Filter for EgressIPs assigned to this node and extract IP addresses
+	var assignedIPs []string
+	for _, eip := range egressIPs {
+		for _, status := range eip.Status.Items {
+			if status.Node == ncm.name {
+				ip := net.ParseIP(status.EgressIP)
+				if ip != nil {
+					assignedIPs = append(assignedIPs, ip.String())
+					klog.V(5).Infof("Found Egress IP %s (IP: %s) assigned to this node", eip.Name, status.EgressIP)
+				} else {
+					klog.Warningf("Invalid Egress IP format in status: %s", status.EgressIP)
+				}
+				// one object can only have one IP assigned to a given node at a time, so its safe to break here
+				break
+			}
+		}
+	}
+
+	klog.V(5).Infof("Found %d Egress IPs assigned to node %s", len(assignedIPs), ncm.name)
+	return assignedIPs, nil
+}
+
+// addEgressIPARPBlockRules adds nftables rules to block ARP/NDP requests for egress IPs
+// during graceful shutdown. This prevents duplicate MAC responses during migration.
+func (ncm *NodeControllerManager) addEgressIPARPBlockRules(egressIPs []string) error {
+	klog.Infof("Adding nftables ARP/NDP block rules for %d egress IPs during shutdown", len(egressIPs))
+
+	uplinkName := ncm.defaultNodeNetworkController.Gateway.GetUplinkName()
+	if err := node.SetupEgressIPARPBlockNFT(egressIPs, uplinkName); err != nil {
+		return fmt.Errorf("failed to setup egress IP ARP block nftables %s: %w", nodenft.OVNKubernetesEgressIPNFTablesName, err)
+	}
+
+	klog.Infof("Successfully added nftables ARP/NDP block rules for %d egress IPs", len(egressIPs))
+	return nil
 }
 
 // checkForStaleOVSInternalPorts checks for OVS internal ports without any ofport assigned,
