@@ -67,6 +67,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for network %s", netName)
+
 	// delete layer 2 logical switches
 	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {
@@ -79,6 +80,13 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, oc.controllerName)
 	if err != nil {
 		return err
+	}
+
+	// cleanup address sets after ACLs are deleted to avoid ovn-controller errors
+	if oc.addressSetManager != nil {
+		if err := oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
+			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
+		}
 	}
 
 	ops, err = libovsdbops.DeleteQoSesWithPredicateOps(oc.nbClient, ops,

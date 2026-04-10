@@ -455,6 +455,13 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 		return err
 	}
 
+	// cleanup address sets after ACLs are deleted to avoid ovn-controller errors
+	if oc.addressSetManager != nil {
+		if err = oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
+			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
+		}
+	}
+
 	// Delete QoS rows for this network (e.g. from NetworkQoS controller). Applies to primary and
 	// secondary Layer3 UDNs when EnableNetworkQoS is set.
 	ops, err = libovsdbops.DeleteQoSesWithPredicateOps(oc.nbClient, ops,
