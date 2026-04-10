@@ -19,6 +19,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
@@ -400,10 +401,13 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
 	return oc.deleteAdvertisedNetworkIsolation(node.Name)
 }
 
-// gatewayChanged() compares old annotations to new and returns true if something has changed.
-func gatewayChanged(oldNode, newNode *corev1.Node) bool {
-	return oldNode.Annotations[util.OvnNodeL3GatewayConfig] != newNode.Annotations[util.OvnNodeL3GatewayConfig] ||
-		oldNode.Annotations[util.OvnNodeChassisID] != newNode.Annotations[util.OvnNodeChassisID]
+// gatewayChanged compares the per-network gateway annotation between node
+// revisions. Chassis changes are handled separately by callers that need them.
+func gatewayChanged(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState, netName string) bool {
+	if oldState != nil && newState != nil {
+		return nodecontroller.GatewayAnnotationChangedForNetworkWithState(oldState, newState, netName)
+	}
+	return oldNode.Annotations[util.OvnNodeL3GatewayConfig] != newNode.Annotations[util.OvnNodeL3GatewayConfig]
 }
 
 // hostCIDRsChanged compares old annotations to new and returns true if the something has changed.

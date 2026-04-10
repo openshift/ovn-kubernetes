@@ -515,7 +515,9 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 			_, failed = oc.mgmtPortFailed.Load(newNode.Name)
 			mgmtSync := failed || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState)
 			_, failed = oc.gatewaysFailed.Load(newNode.Name)
-			gwSync := failed || gatewayChanged(oldNode, newNode) || defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) ||
+			gwSync := failed || gatewayChanged(oldNode, newNode, oldState, newState, oc.GetNetworkName()) ||
+				nodeChassisChanged(oldNode, newNode) ||
+				defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) ||
 				hostCIDRsChanged(oldNode, newNode) || nodeGatewayMTUSupportChanged(oldNode, newNode)
 			_, hoSync := oc.hybridOverlayFailed.Load(newNode.Name)
 			_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
@@ -576,7 +578,8 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 
 	_, syncHostNetAddrSet := oc.syncHostNetAddrSetFailed.Load(newNode.Name)
 	hostNamespaceAddressesChanged := oldNode != nil &&
-		(defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) || gatewayChanged(oldNode, newNode))
+		(defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) ||
+			gatewayChanged(oldNode, newNode, oldState, newState, oc.GetNetworkName()))
 	if oldNode == nil || syncHostNetAddrSet || hostNamespaceAddressesChanged {
 		hostNamespaceAddrSetErr := false
 		if hostNamespaceAddressesChanged {

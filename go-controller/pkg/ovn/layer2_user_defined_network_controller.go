@@ -575,7 +575,8 @@ func (oc *Layer2UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 			shouldSyncMgmtPort := mgmtUpdateFailed || nodeSubnetChange
 			_, gwUpdateFailed := oc.gatewaysFailed.Load(newNode.Name)
 			shouldSyncGW := gwUpdateFailed ||
-				gatewayChanged(oldNode, newNode) ||
+				gatewayChanged(oldNode, newNode, oldState, newState, oc.GetNetworkName()) ||
+				nodeChassisChanged(oldNode, newNode) ||
 				hostCIDRsChanged(oldNode, newNode) ||
 				nodeGatewayMTUSupportChanged(oldNode, newNode)
 			_, syncRerouteFailed := oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
