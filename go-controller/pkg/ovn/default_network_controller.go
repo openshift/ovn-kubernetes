@@ -575,12 +575,23 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 	}
 
 	_, syncHostNetAddrSet := oc.syncHostNetAddrSetFailed.Load(newNode.Name)
-	if oldNode == nil || syncHostNetAddrSet {
+	hostNamespaceAddressesChanged := oldNode != nil &&
+		(defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) || gatewayChanged(oldNode, newNode))
+	if oldNode == nil || syncHostNetAddrSet || hostNamespaceAddressesChanged {
+		hostNamespaceAddrSetErr := false
+		if hostNamespaceAddressesChanged {
+			if err := oc.delIPFromHostNetworkNamespaceAddrSet(oldNode); err != nil {
+				klog.Errorf("Failed to delete old node IPs from %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
+				hostNamespaceAddrSetErr = true
+				oc.syncHostNetAddrSetFailed.Store(newNode.Name, true)
+				aggregatedErrors = append(aggregatedErrors, err)
+			}
+		}
 		if err := oc.addIPToHostNetworkNamespaceAddrSet(newNode); err != nil {
 			klog.Errorf("Failed to add node IPs to %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
 			oc.syncHostNetAddrSetFailed.Store(newNode.Name, true)
 			aggregatedErrors = append(aggregatedErrors, err)
-		} else {
+		} else if !hostNamespaceAddrSetErr {
 			oc.syncHostNetAddrSetFailed.Delete(newNode.Name)
 		}
 	}
