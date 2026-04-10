@@ -135,6 +135,12 @@ func main() {
 		if annotations, ok := generated.AppendedAnnotations[spec.Name]; ok {
 			spec.Name += " " + annotations
 		}
+
+		// prepend other labels by matching on existing spec labels
+		for _, label := range getPrependLabels(spec.Labels) {
+			spec.Labels.Insert(label)
+		}
+
 		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
 
 		switch {
