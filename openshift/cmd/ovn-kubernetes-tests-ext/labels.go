@@ -6,6 +6,14 @@ import (
 	"github.com/openshift-eng/openshift-tests-extension/pkg/util/sets"
 )
 
+// map contains prepend labels to be added on the spec for an existing spec label
+var labelToPrependLabelsMap = map[string][]string{
+	// Make EVPN tests to be added with gated label.
+	"Feature:EVPN": {
+		"FeatureGate:EVPN",
+	},
+}
+
 // getTestExtensionLabels returns labels that should be applied to all tests in this extension
 func getTestExtensionLabels() []string {
 	return []string{"sig-network", "ovn-kubernetes-ote"}
@@ -21,4 +29,15 @@ func generatePrependedLabelsStr(labels sets.Set[string]) string {
 		labelsStr += "[" + label + "]"
 	}
 	return labelsStr
+}
+
+// getPrependLabels returns additional prepend labels for given labels.
+func getPrependLabels(labels sets.Set[string]) []string {
+	var prependLabels []string
+	for _, label := range labels.UnsortedList() {
+		for _, prependLabel := range labelToPrependLabelsMap[label] {
+			prependLabels = append(prependLabels, prependLabel)
+		}
+	}
+	return prependLabels
 }
