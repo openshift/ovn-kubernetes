@@ -301,6 +301,17 @@ func SetupEgressIPARPBlockNFT(egressIPs []string, uplinkName string) error {
 	return nil
 }
 
+// SetupEgressIPARPBlockNFTables sets up nftables for blocking ARP/NDP responses for egress IPs during
+// graceful shutdown. Uses netdev family with ingress hook on the physical uplink interface to intercept
+// packets before they reach the OVS bridge, preventing OVN from responding to ARP/NDP requests.
+func SetupEgressIPARPBlockNFTables(egressIPs []string, uplinkName string) error {
+	if len(egressIPs) == 0 {
+		klog.V(5).Info("No egress IPs to setup ARP block rules for")
+		return nil
+	}
+	return SetupEgressIPARPBlockNFT(egressIPs, uplinkName)
+}
+
 // CleanupEgressIPARPBlockNFT deletes the dedicated nftable "ovn-kubernetes-egressip"  for egress IP ARP/NDP blocking.
 // Called during startup to remove stale rules from previous container shutdown.
 // On full node reboot, nftables state is cleared automatically, so this primarily handles container restarts.
@@ -314,9 +325,16 @@ func CleanupEgressIPARPBlockNFT(ctx context.Context) error {
 	tx.Delete(&knftables.Table{})
 
 	if err = nft.Run(ctx, tx); err != nil && !knftables.IsNotFound(err) {
-		return fmt.Errorf("could not delete egress IP nftables table %s: %v", nodenft.OVNKubernetesEgressIPNFTablesName, err)
+		return fmt.Errorf("could not delete egress IP nftables table: %v", err)
 	}
 
-	klog.Infof("Cleaned up egress IP nftables table from previous shutdown : %s", nodenft.OVNKubernetesEgressIPNFTablesName)
+	klog.Infof("Cleaned up egress IP nftables table from previous shutdown")
 	return nil
+}
+
+// CleanupEgressIPARPBlockNFTTable deletes the dedicated nftables table for egress IP ARP/NDP blocking.
+// Called during startup to remove stale rules from previous container shutdown.
+// On full node reboot, nftables state is cleared automatically, so this primarily handles container restarts.
+func CleanupEgressIPARPBlockNFTTable(ctx context.Context) error {
+	return CleanupEgressIPARPBlockNFT(ctx)
 }
