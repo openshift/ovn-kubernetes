@@ -289,6 +289,11 @@ func (allocator *allocator) AllocateIPPerSubnet(name string, ips []*net.IPNet) e
 				}
 			}
 		}
+
+		if !allocated {
+			err = fmt.Errorf("failed to allocate IP %s for %s: not contained in any known subnet", ipnet.IP, name)
+			return err
+		}
 	}
 	return nil
 }

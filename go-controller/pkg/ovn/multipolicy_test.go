@@ -464,7 +464,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 
 					namespace1 := *ovntest.NewNamespace(namespaceName1)
 					nPodTest := getTestPod(namespace1.Name, nodeName)
-					nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, "", "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
+					nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, "", "", "", "10.1.0.1", "0a:58:0a:01:00:01", "secondary", 1, nil)
 					networkPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)
 
 					watchNodes := false
@@ -653,7 +653,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 				namespace1 := *ovntest.NewNamespace(namespaceName1)
 				namespace2 := *ovntest.NewNamespace(namespaceName2)
 				nPodTest := getTestPod(namespace1.Name, nodeName)
-				nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, "", "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
+				nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, "", "", "", "10.1.0.1", "0a:58:0a:01:00:01", "secondary", 1, nil)
 				networkPolicy := getPortNetworkPolicy(netPolicyName1, namespace1.Name, labelName, labelVal, portNum)
 
 				watchNodes := false
