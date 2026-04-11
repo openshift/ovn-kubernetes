@@ -10,16 +10,8 @@ source "${DIR}/kind-common.sh"
 
 set_default_params() {
   set_common_default_params
-
-  # Hard code ipv4 support until IPv6 is implemented
-  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    echo "kind-helm.sh does not support IPv6 yet"
-    exit 1
-  fi
-  if [ "$PLATFORM_IPV4_SUPPORT" != true ]; then
-    echo "kind-helm.sh only supports IPv4, must set PLATFORM_IPV4_SUPPORT to true "
-    exit 1
-  fi
+  check_ipv6
+  set_cluster_cidr_ip_families
 }
 
 usage() {
@@ -46,6 +38,8 @@ usage() {
     echo "       [-rud | --routed-udn-isolation-disable]"
     echo "       [ -nqe | --network-qos-enable ]"
     echo "       [ -noe | --no-overlay-enable [snat-enabled|managed] ]"
+    echo "       [ -n4  | --no-ipv4 ]"
+    echo "       [ -i6  | --ipv6 ]"
     echo "       [ -wk  | --num-workers <num> ]"
     echo "       [ -ic  | --enable-interconnect]"
     echo "       [ -npz | --node-per-zone ]"
@@ -84,6 +78,8 @@ usage() {
     echo "-nqe | --network-qos-enable                   Enable network QoS. DEFAULT: Disabled"
     echo "-noe | --no-overlay-enable [snat-enabled|managed] Enable no overlay for the default network. Optional value: 'snat-enabled' to enable SNAT, 'managed' to enable SNAT and managed routing. DEFAULT: disabled."
     echo "-ha  | --ha-enabled                           Enable high availability. DEFAULT: HA Disabled"
+    echo "-n4  | --no-ipv4                              Disable IPv4. DEFAULT: IPv4 Enabled."
+    echo "-i6  | --ipv6                                 Enable IPv6. DEFAULT: IPv6 Disabled."
     echo "-wk  | --num-workers                          Number of worker nodes. DEFAULT: 2 workers"
     echo "-ov  | --ovn-image                            Use the specified docker image instead of building locally. DEFAULT: local build."
     echo "-ovr | --ovn-repo                             Specify the repository to build OVN from"
@@ -184,6 +180,10 @@ parse_args() {
                                                     ENABLE_NO_OVERLAY_MANAGED_ROUTING=false
                                                   fi
                                                   ;;
+            -n4 | --no-ipv4 )                     PLATFORM_IPV4_SUPPORT=false
+                                                  ;;
+            -i6 | --ipv6 )                        PLATFORM_IPV6_SUPPORT=true
+                                                  ;;
             -ha | --ha-enabled )                  OVN_HA=true
                                                   KIND_NUM_MASTER=3
                                                   ;;
@@ -279,6 +279,11 @@ print_params() {
      echo "ENABLE_NO_OVERLAY = $ENABLE_NO_OVERLAY"
      echo "ENABLE_NO_OVERLAY_OUTBOUND_SNAT = $ENABLE_NO_OVERLAY_OUTBOUND_SNAT"
      echo "ENABLE_NO_OVERLAY_MANAGED_ROUTING = $ENABLE_NO_OVERLAY_MANAGED_ROUTING"
+     echo "OVN_GATEWAY_MODE = $OVN_GATEWAY_MODE"
+     echo "OVN_SECOND_BRIDGE = $OVN_SECOND_BRIDGE"
+     echo "OVN_DISABLE_SNAT_MULTIPLE_GWS = $OVN_DISABLE_SNAT_MULTIPLE_GWS"
+     echo "OVN_DISABLE_FORWARDING = $OVN_DISABLE_FORWARDING"
+     echo "OVN_UNPRIVILEGED_MODE = $OVN_UNPRIVILEGED_MODE"
      echo "OVN_MTU = $OVN_MTU"
      echo "OVN_IMAGE = $OVN_IMAGE"
      echo "OVN_REPO = $OVN_REPO"
@@ -366,12 +371,13 @@ create_ovn_kubernetes() {
     # When Helm encounters a comma within a string value in a --set argument, it attempts to parse the comma as a separator
     # for multiple values (like a list or a map), not as part of a single string value.
     set -x
-    ESCAPED_NET_CIDR_IPV4="${NET_CIDR_IPV4//,/\\,}"
+    ESCAPED_NET_CIDR="${NET_CIDR//,/\\,}"
+    ESCAPED_SVC_CIDR="${SVC_CIDR//,/\\,}"
     cmd=$(cat <<EOF
 helm install ovn-kubernetes . -f "${value_file}" \
           --set k8sAPIServer=${API_URL} \
-          --set podNetwork="${ESCAPED_NET_CIDR_IPV4}" \
-          --set serviceNetwork=${SVC_CIDR_IPV4} \
+          --set podNetwork="${ESCAPED_NET_CIDR}" \
+          --set serviceNetwork="${ESCAPED_SVC_CIDR}" \
           --set mtu=${OVN_MTU} \
           --set ovnkube-master.replicas=${MASTER_REPLICAS} \
           --set global.image.repository=${OVN_IMAGE%%:*} \
@@ -398,6 +404,10 @@ helm install ovn-kubernetes . -f "${value_file}" \
           --set global.enableNoOverlayManagedRouting=$(if [ "${ENABLE_NO_OVERLAY_MANAGED_ROUTING}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.enableCoredumps=$(if [ "${ENABLE_COREDUMPS}" == "true" ]; then echo "true"; else echo "false"; fi) \
           --set global.allowICMPNetworkPolicy=$(if [ "${OVN_ALLOW_ICMP_NETPOL}" == "true" ]; then echo "true"; else echo "false"; fi) \
+          --set global.gatewayMode="${OVN_GATEWAY_MODE}" \
+          --set global.disableSnatMultipleGws=$(if [ "${OVN_DISABLE_SNAT_MULTIPLE_GWS}" == "true" ]; then echo "true"; else echo "false"; fi) \
+          --set global.disableForwarding=$(if [ "${OVN_DISABLE_FORWARDING}" == "true" ]; then echo "true"; else echo "false"; fi) \
+          --set global.unprivilegedMode=false \
           ${ovnkube_db_options}
 EOF
        )
@@ -423,6 +433,9 @@ if [ "$ENABLE_COREDUMPS" == true ]; then
 fi
 detect_apiserver_url
 install_ovn_image
+if [ "$OVN_SECOND_BRIDGE" == true ]; then
+  docker_create_second_interface
+fi
 docker_disable_ipv6
 coredns_patch
 if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then

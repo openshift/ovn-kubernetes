@@ -584,72 +584,6 @@ set_default_params() {
   fi
 }
 
-check_ipv6() {
-  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    # Collect additional IPv6 data on test environment
-    ERROR_FOUND=false
-    TMPVAR=$(sysctl net.ipv6.conf.all.forwarding | awk '{print $3}')
-    echo "net.ipv6.conf.all.forwarding is equal to $TMPVAR"
-    if [ "$TMPVAR" != 1 ]; then
-      if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
-	sudo sysctl -w net.ipv6.conf.all.forwarding=1
-      else
-	echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.forwarding=1' to use IPv6."
-	ERROR_FOUND=true
-      fi
-    fi
-    TMPVAR=$(sysctl net.ipv6.conf.all.disable_ipv6 | awk '{print $3}')
-    echo "net.ipv6.conf.all.disable_ipv6 is equal to $TMPVAR"
-    if [ "$TMPVAR" != 0 ]; then
-      if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
-	sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
-      else
-	echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0' to use IPv6."
-	ERROR_FOUND=true
-      fi
-    fi
-    if [ -f /proc/net/if_inet6 ]; then
-      echo "/proc/net/if_inet6 exists so IPv6 supported in kernel."
-    else
-      echo "/proc/net/if_inet6 does not exists so no IPv6 support found! Compile the kernel!!"
-      ERROR_FOUND=true
-    fi
-    if "$ERROR_FOUND"; then
-      exit 2
-    fi
-  fi
-}
-
-set_cluster_cidr_ip_families() {
-# kind only allows single subnet for pod network, while ovn-kubernetes supports multiple subnets.
-# So we pick the first subnet from the provided list for kind configuration and store it in KIND_CIDR.
-# remove host subnet mask info for kind configuration (when the subnet is set as 10.0.0.0/16/14)
-  KIND_CIDR_IPV4=$(echo "${NET_CIDR_IPV4}"| cut -d',' -f1 | cut -d'/' -f1,2 )
-  KIND_CIDR_IPV6=$(echo "${NET_CIDR_IPV6}"| cut -d',' -f1 | cut -d'/' -f1,2 )
-  if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
-    IP_FAMILY=""
-    KIND_CIDR=$KIND_CIDR_IPV4
-    NET_CIDR=$NET_CIDR_IPV4
-    SVC_CIDR=$SVC_CIDR_IPV4
-    echo "IPv4 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
-  elif [ "$PLATFORM_IPV4_SUPPORT" == false ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    IP_FAMILY="ipv6"
-    KIND_CIDR=$KIND_CIDR_IPV6
-    NET_CIDR=$NET_CIDR_IPV6
-    SVC_CIDR=$SVC_CIDR_IPV6
-    echo "IPv6 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
-  elif [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    IP_FAMILY="dual"
-    KIND_CIDR=$KIND_CIDR_IPV4,$KIND_CIDR_IPV6
-    NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
-    SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
-    echo "Dual Stack Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
-  else
-    echo "Invalid setup. PLATFORM_IPV4_SUPPORT and/or PLATFORM_IPV6_SUPPORT must be true."
-    exit 1
-  fi
-}
-
 create_local_registry() {
     # create registry container unless it already exists
     if [ "$($OCI_BIN inspect -f '{{.State.Running}}' "${KIND_LOCAL_REGISTRY_NAME}" 2>/dev/null || true)" != 'true' ]; then
@@ -968,17 +902,6 @@ install_ipsec() {
   fi
 }
 
-docker_create_second_interface() {
-  echo "adding second interfaces to nodes"
-
-  # Create the network as dual stack, regardless of the type of the deployment. Ignore if already exists.
-  "$OCI_BIN" network create --ipv6 --driver=bridge xgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
-
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    "$OCI_BIN" network connect xgw "$n"
-  done
-}
 
 # run_script_in_container should be used when kind.sh is run nested in a container
 # and makes sure the control-plane node is reachable by substituting 127.0.0.1
