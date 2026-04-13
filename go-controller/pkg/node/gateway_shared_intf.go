@@ -1259,13 +1259,18 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			errors = append(errors, err)
 		}
 
-		for _, set := range getGatewayNFTSets() {
+		nftableManagementPortSets := []string{
+			types.NFTMgmtPortNoSNATNodePorts,
+			types.NFTMgmtPortNoSNATServicesV4,
+			types.NFTMgmtPortNoSNATServicesV6,
+		}
+		for _, set := range nftableManagementPortSets {
 			if err = recreateNFTSet(set, keepNFTSetElems); err != nil {
 				errors = append(errors, err)
 			}
 		}
 		if util.IsNetworkSegmentationSupportEnabled() {
-			for _, nftMap := range getUDNNFTMaps() {
+			for _, nftMap := range []string{nftablesUDNMarkNodePortsMap, nftablesUDNMarkExternalIPsV4Map, nftablesUDNMarkExternalIPsV6Map} {
 				if err = recreateNFTMap(nftMap, keepNFTMapElems); err != nil {
 					errors = append(errors, err)
 				}
@@ -1655,7 +1660,12 @@ func (npwipt *nodePortWatcherIptables) SyncServices(services []interface{}) erro
 		}
 	}
 
-	for _, set := range getGatewayNFTSets() {
+	nftableManagementPortSets := []string{
+		types.NFTMgmtPortNoSNATNodePorts,
+		types.NFTMgmtPortNoSNATServicesV4,
+		types.NFTMgmtPortNoSNATServicesV6,
+	}
+	for _, set := range nftableManagementPortSets {
 		if err = recreateNFTSet(set, keepNFTElems); err != nil {
 			errors = append(errors, err)
 		}
@@ -1770,7 +1780,7 @@ func newGateway(
 		}
 
 		// resync flows on IP change
-		gw.nodeIPManager.AddOnAddressesChangedHandler(func() {
+		gw.nodeIPManager.OnChanged = func() {
 			klog.V(5).Info("Node addresses changed, re-syncing bridge flows")
 			if err := gw.openflowManager.updateBridgeFlowCache(gw.nodeIPManager.ListAddresses()); err != nil {
 				// very unlikely - somehow node has lost its IP address
@@ -1788,7 +1798,7 @@ func newGateway(
 				}
 			}
 			gw.openflowManager.requestFlowSync()
-		})
+		}
 		if config.Gateway.NodeportEnable {
 			klog.Info("Creating Gateway Node Port Watcher")
 			gw.nodePortWatcher, err = newNodePortWatcher(gwBridge, gw.openflowManager, gw.nodeIPManager, watchFactory, networkManager)

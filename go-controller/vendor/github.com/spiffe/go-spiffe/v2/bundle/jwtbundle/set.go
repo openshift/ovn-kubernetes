@@ -1,7 +1,6 @@
 package jwtbundle
 
 import (
-	"fmt"
 	"sort"
 	"sync"
 
@@ -99,7 +98,7 @@ func (s *Set) GetJWTBundleForTrustDomain(trustDomain spiffeid.TrustDomain) (*Bun
 
 	bundle, ok := s.bundles[trustDomain]
 	if !ok {
-		return nil, wrapJwtbundleErr(fmt.Errorf("no JWT bundle for trust domain %q", trustDomain))
+		return nil, jwtbundleErr.New("no JWT bundle for trust domain %q", trustDomain)
 	}
 
 	return bundle, nil

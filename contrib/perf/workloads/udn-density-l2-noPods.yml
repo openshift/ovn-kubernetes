@@ -17,11 +17,11 @@ global:
       - name: ovnkube-controller-heap
         namespace: "ovn-kubernetes"
         labelSelector: {app: ovnkube-node}
-        url: http://localhost:9410/debug/pprof/heap
+        url: http://localhost:9410/debug/pprof/heap?seconds=30
       - name: ovnkube-control-plane-heap
         namespace: "ovn-kubernetes"
         labelSelector: {name: ovnkube-control-plane}
-        url: http://localhost:9411/debug/pprof/heap
+        url: http://localhost:9411/debug/pprof/heap?seconds=30
 jobs:
   - name: udn-density-l2-nopods
     jobIterations: 200
@@ -32,7 +32,7 @@ jobs:
     waitWhenFinished: true
     podWait: false 
     preLoadImages: false 
-    preLoadPeriod: 5m
+    preLoadPeriod: 2m
     churnConfig:
       percent: 10
       cycles: 5 

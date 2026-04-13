@@ -1246,7 +1246,7 @@ func (h *Handle) RouteListFiltered(family int, filter *Route, filterMask uint64)
 		return true
 	})
 	if err != nil {
-		return res, err
+		return nil, err
 	}
 	return res, nil
 }

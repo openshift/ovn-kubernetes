@@ -17,12 +17,11 @@ package types
 
 import (
 	"net"
-	"sort"
 
-	"github.com/containernetworking/cni/libcni"
+	"gopkg.in/k8snetworkplumbingwg/multus-cni.v4/pkg/logging"
+
 	"github.com/containernetworking/cni/pkg/types"
 	cni100 "github.com/containernetworking/cni/pkg/types/100"
-	"gopkg.in/k8snetworkplumbingwg/multus-cni.v4/pkg/logging"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -58,7 +57,6 @@ type NetConf struct {
 	NamespaceIsolation       bool     `json:"namespaceIsolation"`
 	RawNonIsolatedNamespaces string   `json:"globalNamespaces"`
 	NonIsolatedNamespaces    []string `json:"-"`
-	AuxiliaryCNIChainName    string   `json:"auxiliaryCNIChainName,omitempty"`
 
 	// Option to set system namespaces (to avoid to add defaultNetworks)
 	SystemNamespaces []string `json:"systemNamespaces"`
@@ -101,7 +99,6 @@ type BandwidthEntry struct {
 type DelegateNetConf struct {
 	Conf                  types.NetConf
 	ConfList              types.NetConfList
-	CNINetworkConfigList  libcni.NetworkConfigList
 	Name                  string
 	IfnameRequest         string          `json:"ifnameRequest,omitempty"`
 	MacRequest            string          `json:"macRequest,omitempty"`
@@ -177,16 +174,6 @@ type K8sArgs struct {
 type ResourceInfo struct {
 	Index     int
 	DeviceIDs []string
-}
-
-// SortDeviceIDs sorts DeviceIDs in each ResourceInfo in place so that device
-// order is deterministic across GetPodResourceMap callers (e.g. Multus and OVN-Kubernetes).
-func SortDeviceIDs(resourceMap map[string]*ResourceInfo) {
-	for _, rInfo := range resourceMap {
-		if rInfo.DeviceIDs != nil {
-			sort.Strings(rInfo.DeviceIDs)
-		}
-	}
 }
 
 // ResourceClient provides a kubelet Pod resource handle

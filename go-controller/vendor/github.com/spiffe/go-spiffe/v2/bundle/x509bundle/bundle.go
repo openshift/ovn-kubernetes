@@ -2,7 +2,6 @@ package x509bundle
 
 import (
 	"crypto/x509"
-	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -10,7 +9,10 @@ import (
 	"github.com/spiffe/go-spiffe/v2/internal/pemutil"
 	"github.com/spiffe/go-spiffe/v2/internal/x509util"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/zeebo/errs"
 )
+
+var x509bundleErr = errs.Class("x509bundle")
 
 // Bundle is a collection of trusted X.509 authorities for a trust domain.
 type Bundle struct {
@@ -40,7 +42,7 @@ func FromX509Authorities(trustDomain spiffeid.TrustDomain, authorities []*x509.C
 func Load(trustDomain spiffeid.TrustDomain, path string) (*Bundle, error) {
 	fileBytes, err := os.ReadFile(path)
 	if err != nil {
-		return nil, wrapX509bundleErr(fmt.Errorf("unable to load X.509 bundle file: %w", err))
+		return nil, x509bundleErr.New("unable to load X.509 bundle file: %w", err)
 	}
 
 	return Parse(trustDomain, fileBytes)
@@ -51,7 +53,7 @@ func Load(trustDomain spiffeid.TrustDomain, path string) (*Bundle, error) {
 func Read(trustDomain spiffeid.TrustDomain, r io.Reader) (*Bundle, error) {
 	b, err := io.ReadAll(r)
 	if err != nil {
-		return nil, wrapX509bundleErr(fmt.Errorf("unable to read X.509 bundle: %v", err))
+		return nil, x509bundleErr.New("unable to read X.509 bundle: %v", err)
 	}
 
 	return Parse(trustDomain, b)
@@ -67,7 +69,7 @@ func Parse(trustDomain spiffeid.TrustDomain, b []byte) (*Bundle, error) {
 
 	certs, err := pemutil.ParseCertificates(b)
 	if err != nil {
-		return nil, wrapX509bundleErr(fmt.Errorf("cannot parse certificate: %v", err))
+		return nil, x509bundleErr.New("cannot parse certificate: %v", err)
 	}
 	for _, cert := range certs {
 		bundle.AddX509Authority(cert)
@@ -85,7 +87,7 @@ func ParseRaw(trustDomain spiffeid.TrustDomain, b []byte) (*Bundle, error) {
 
 	certs, err := x509.ParseCertificates(b)
 	if err != nil {
-		return nil, wrapX509bundleErr(fmt.Errorf("cannot parse certificate: %v", err))
+		return nil, x509bundleErr.New("cannot parse certificate: %v", err)
 	}
 	for _, cert := range certs {
 		bundle.AddX509Authority(cert)
@@ -193,12 +195,8 @@ func (b *Bundle) Clone() *Bundle {
 // returned if the trust domain does not match that of the bundle.
 func (b *Bundle) GetX509BundleForTrustDomain(trustDomain spiffeid.TrustDomain) (*Bundle, error) {
 	if b.trustDomain != trustDomain {
-		return nil, wrapX509bundleErr(fmt.Errorf("no X.509 bundle found for trust domain: %q", trustDomain))
+		return nil, x509bundleErr.New("no X.509 bundle found for trust domain: %q", trustDomain)
 	}
 
 	return b, nil
-}
-
-func wrapX509bundleErr(err error) error {
-	return fmt.Errorf("x509bundle: %w", err)
 }

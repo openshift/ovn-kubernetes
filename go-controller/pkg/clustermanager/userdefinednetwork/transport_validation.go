@@ -23,7 +23,7 @@ const (
 // setTransportStatusCondition validates the transport configuration for a CUDN and sets its TransportAccepted status condition.
 // This function is called during CUDN reconciliation to ensure the transport is properly configured.
 //
-// For empty/default Geneve transport, no status condition is set (status is not updated).
+// For Geneve transport (default), the condition is set to True.
 // For no-overlay and EVPN transports, it validates that a RouteAdvertisements CR exists and is accepted.
 //
 // This function only SETS the condition on the provided CUDN object; it does NOT apply status.
@@ -39,9 +39,10 @@ func (c *Controller) setTransportStatusCondition(cudn *userdefinednetworkv1.Clus
 
 	transport := cudn.Spec.Network.GetTransport()
 
-	// Skip setting transport condition for default Geneve transport (empty string)
+	// Handle default Geneve transport (empty string)
 	if transport == "" {
-		return false, nil
+		updated := c.setTransportCondition(cudn, metav1.ConditionTrue, "DefaultTransportAccepted", "Default transport has been configured.")
+		return updated, nil
 	}
 
 	// Handle NoOverlay and EVPN transports - both require RouteAdvertisements validation

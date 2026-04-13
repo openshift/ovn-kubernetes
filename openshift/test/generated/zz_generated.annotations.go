@@ -53,549 +53,425 @@ var AppendedAnnotations = map[string]string{
 
 	"ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It can reach an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It can reach an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 2 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It can reach an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It can reach an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Default And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 2 UDN non advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised VRF-Lite And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On a different node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node Backing a ClusterIP service The pod on the tested network cannot reach the service on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node The pod on the other network cannot reach the pod on the tested network When the networks are IPv6": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv4": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+	"BGP: For a VRF-Lite configured network When the tested network is of type Layer 3 When a pod runs on the tested network When there is other network Of type Layer 3 UDN non advertised And a pod runs on the other network On the same node The pod on the tested network cannot reach the pod on the other network When the networks are IPv6": "[Disabled:Unimplemented]",
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer2": "[Disabled:Unimplemented]",
 
@@ -733,8 +609,6 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect ClusterManagerController full lifecycle workflow comprehensive workflow - create, add, update, remove networks through CNC lifecycle": "[Disabled:Unimplemented]",
 
-	"ClusterNetworkConnect ClusterManagerController reports error on selected networks subnet overlap": "[Disabled:Unimplemented]",
-
 	"ClusterNetworkConnect ClusterManagerController when CNC has no matching networks has only tunnel ID annotation": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect ClusterManagerController when CNC is created before networks full matrix created after CNC - annotations are updated with all 8 networks": "[Disabled:Unimplemented]",
@@ -803,19 +677,9 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect ClusterManagerController when networks exist before CNC creation single network: has both subnet and tunnel ID annotations L3 P-UDN": "[Disabled:Unimplemented]",
 
+	"ClusterNetworkConnect OVN-Kubernetes Controller End-to-end connectivity validation should manage cross-network connectivity through CNC lifecycle": "[Disabled:Unimplemented]",
+
 	"ClusterNetworkConnect OVN-Kubernetes Controller Multiple CNCs with overlapping network selection should maintain non-transitive connectivity when a network is selected by multiple CNCs": "[Disabled:Unimplemented]",
-
-	"ClusterNetworkConnect OVN-Kubernetes Controller Multiple CNCs with overlapping network selection should maintain non-transitive service connectivity when a network is selected by multiple CNCs": "[Disabled:Unimplemented]",
-
-	"ClusterNetworkConnect OVN-Kubernetes Controller Multiple CNCs with overlapping network selection should maintain service connectivity when both CNCs select the exact same networks": "[Disabled:Unimplemented]",
-
-	"ClusterNetworkConnect OVN-Kubernetes Controller Pod to pod connectivity validation should manage cross-network connectivity through CNC lifecycle": "[Disabled:Unimplemented]",
-
-	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation pod and service connectivity through CNC connectivity types toggling [Feature:NetworkConnect]": "[Disabled:Unimplemented]",
-
-	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation should maintain cross-network service connectivity after service protocol update": "[Disabled:Unimplemented]",
-
-	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation should manage cross-network service connectivity through CNC lifecycle": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect: API validations api-server should accept valid ClusterNetworkConnect CRs Valid ClusterNetworkConnect configurations": "[Disabled:Unimplemented]",
 
@@ -825,11 +689,7 @@ var AppendedAnnotations = map[string]string{
 
 	"EVPN: VTEP API validations api-server should accept valid VTEP CRs Valid VTEP configurations": "[Disabled:Unimplemented]",
 
-	"EVPN: VTEP API validations api-server should accept valid VTEP updates Valid VTEP update configurations": "[Disabled:Unimplemented]",
-
 	"EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations": "[Disabled:Unimplemented]",
-
-	"EVPN: VTEP API validations api-server should reject invalid VTEP updates Invalid VTEP update configurations": "[Disabled:Unimplemented]",
 
 	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Disabled:Unimplemented]",
 
@@ -1142,8 +1002,6 @@ var AppendedAnnotations = map[string]string{
 	"Multi Homing A pod with multiple attachments to the same secondary NAD features multiple different IPs and connectivity redundancy L2 secondary NAD": "[Disabled:Unimplemented]",
 
 	"Multi Homing A pod with multiple attachments to the same secondary NAD features multiple different IPs and connectivity redundancy L3 secondary NAD": "[Disabled:Unimplemented]",
-
-	"Multi Homing A pod with multiple attachments to the same secondary NAD features multiple different IPs and connectivity redundancy Localnet secondary NAD": "[Disabled:Unimplemented]",
 
 	"Multi Homing A single pod with an OVN-K secondary network attached to a localnet network mapped to external primary interface bridge can be reached by a client pod in the default network on a different node, when the localnet uses a VLAN and an external router": "[Disabled:Unimplemented]",
 
@@ -1522,12 +1380,6 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation: services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L2 primary UDN, cluster-networked pods, NodePort service": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L3 primary UDN, cluster-networked pods, NodePort service": "[Disabled:Unimplemented]",
-
-	"No-Overlay: Default network is enabled with no-overlay when connectivity tests should maintain pod2pod/pod2service/host2pod/host2service connectivity without overlay before and after ovnkube-node pod restarted": "[Suite:openshift/conformance/parallel]",
-
-	"No-Overlay: Default network is enabled with no-overlay when managed mode routing is enabled should reconcile FRRConfiguration if manually deleted in managed mode": "[Suite:openshift/conformance/parallel]",
-
-	"No-Overlay: Default network is enabled with no-overlay when managed mode routing is enabled should reconcile RA CR if manually deleted in managed mode": "[Suite:openshift/conformance/parallel]",
 
 	"Node IP and MAC address migration when the node IPv4 address is updated when ETP=Local service with host network backend is configured makes sure that the flows are updated with new IP address (update kubelet first, the IP address later)": "[Disabled:Unimplemented]",
 

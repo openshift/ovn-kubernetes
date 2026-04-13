@@ -56,7 +56,6 @@ type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]interface{}) error
 	SetAnnotationsOnService(namespace, serviceName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
-	SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations map[string]interface{}, fieldManager string) error
 	SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error
 	SetLabelsOnNode(nodeName string, labels map[string]interface{}) error
 	PatchNode(old, new *corev1.Node) error
@@ -247,13 +246,8 @@ func (k *Kube) PatchPodStatusAnnotations(oldPod, newPod *corev1.Pod) error {
 
 // SetAnnotationsOnNode takes the node name and map of key/value string pairs to set as annotations
 func (k *Kube) SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error {
-	return k.SetAnnotationsOnNodeWithFieldManager(nodeName, annotations, "")
-}
-
-// SetAnnotationsOnNodeWithFieldManager is like SetAnnotationsOnNode but allows
-// specifying a field manager for the patch operation. If fieldManager is empty,
-// the server default is used.
-func (k *Kube) SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations map[string]interface{}, fieldManager string) error {
+	var err error
+	var patchData []byte
 	patch := struct {
 		Metadata map[string]interface{} `json:"metadata"`
 	}{
@@ -263,18 +257,13 @@ func (k *Kube) SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations
 	}
 
 	klog.Infof("Setting annotations %v on node %s", annotations, nodeName)
-	patchData, err := json.Marshal(&patch)
+	patchData, err = json.Marshal(&patch)
 	if err != nil {
 		klog.Errorf("Error in setting annotations on node %s: %v", nodeName, err)
 		return err
 	}
 
-	patchOpts := metav1.PatchOptions{}
-	if fieldManager != "" {
-		patchOpts.FieldManager = fieldManager
-	}
-
-	_, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.StrategicMergePatchType, patchData, patchOpts, "status")
+	_, err = k.KClient.CoreV1().Nodes().PatchStatus(context.TODO(), nodeName, patchData)
 	if err != nil {
 		klog.Errorf("Error in setting annotation on node %s: %v", nodeName, err)
 	}

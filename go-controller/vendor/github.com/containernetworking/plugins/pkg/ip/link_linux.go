@@ -24,21 +24,21 @@ import (
 	"github.com/safchain/ethtool"
 	"github.com/vishvananda/netlink"
 
-	"github.com/containernetworking/plugins/pkg/netlinksafe"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/utils/sysctl"
 )
 
-var ErrLinkNotFound = errors.New("link not found")
+var (
+	ErrLinkNotFound = errors.New("link not found")
+)
 
 // makeVethPair is called from within the container's network namespace
 func makeVethPair(name, peer string, mtu int, mac string, hostNS ns.NetNS) (netlink.Link, error) {
-	linkAttrs := netlink.NewLinkAttrs()
-	linkAttrs.Name = name
-	linkAttrs.MTU = mtu
-
 	veth := &netlink.Veth{
-		LinkAttrs:     linkAttrs,
+		LinkAttrs: netlink.LinkAttrs{
+			Name: name,
+			MTU:  mtu,
+		},
 		PeerName:      peer,
 		PeerNamespace: netlink.NsFd(int(hostNS.Fd())),
 	}
@@ -53,7 +53,7 @@ func makeVethPair(name, peer string, mtu int, mac string, hostNS ns.NetNS) (netl
 		return nil, err
 	}
 	// Re-fetch the container link to get its creation-time parameters, e.g. index and mac
-	veth2, err := netlinksafe.LinkByName(name)
+	veth2, err := netlink.LinkByName(name)
 	if err != nil {
 		netlink.LinkDel(veth) // try and clean up the link if possible.
 		return nil, err
@@ -63,43 +63,44 @@ func makeVethPair(name, peer string, mtu int, mac string, hostNS ns.NetNS) (netl
 }
 
 func peerExists(name string) bool {
-	if _, err := netlinksafe.LinkByName(name); err != nil {
+	if _, err := netlink.LinkByName(name); err != nil {
 		return false
 	}
 	return true
 }
 
-func makeVeth(name, vethPeerName string, mtu int, mac string, hostNS ns.NetNS) (string, netlink.Link, error) {
-	var peerName string
-	var veth netlink.Link
-	var err error
+func makeVeth(name, vethPeerName string, mtu int, mac string, hostNS ns.NetNS) (peerName string, veth netlink.Link, err error) {
 	for i := 0; i < 10; i++ {
 		if vethPeerName != "" {
 			peerName = vethPeerName
 		} else {
 			peerName, err = RandomVethName()
 			if err != nil {
-				return peerName, nil, err
+				return
 			}
 		}
 
 		veth, err = makeVethPair(name, peerName, mtu, mac, hostNS)
 		switch {
 		case err == nil:
-			return peerName, veth, nil
+			return
 
 		case os.IsExist(err):
 			if peerExists(peerName) && vethPeerName == "" {
 				continue
 			}
-			return peerName, veth, fmt.Errorf("container veth name (%q) peer provided (%q) already exists", name, peerName)
+			err = fmt.Errorf("container veth name provided (%v) already exists", name)
+			return
+
 		default:
-			return peerName, veth, fmt.Errorf("failed to make veth pair: %v", err)
+			err = fmt.Errorf("failed to make veth pair: %v", err)
+			return
 		}
 	}
 
 	// should really never be hit
-	return peerName, nil, fmt.Errorf("failed to find a unique veth name")
+	err = fmt.Errorf("failed to find a unique veth name")
+	return
 }
 
 // RandomVethName returns string "veth" with random prefix (hashed from entropy)
@@ -115,7 +116,7 @@ func RandomVethName() (string, error) {
 }
 
 func RenameLink(curName, newName string) error {
-	link, err := netlinksafe.LinkByName(curName)
+	link, err := netlink.LinkByName(curName)
 	if err == nil {
 		err = netlink.LinkSetName(link, newName)
 	}
@@ -146,7 +147,7 @@ func SetupVethWithName(contVethName, hostVethName string, mtu int, contVethMac s
 
 	var hostVeth netlink.Link
 	err = hostNS.Do(func(_ ns.NetNS) error {
-		hostVeth, err = netlinksafe.LinkByName(hostVethName)
+		hostVeth, err = netlink.LinkByName(hostVethName)
 		if err != nil {
 			return fmt.Errorf("failed to lookup %q in %q: %v", hostVethName, hostNS.Path(), err)
 		}
@@ -175,7 +176,7 @@ func SetupVeth(contVethName string, mtu int, contVethMac string, hostNS ns.NetNS
 
 // DelLinkByName removes an interface link.
 func DelLinkByName(ifName string) error {
-	iface, err := netlinksafe.LinkByName(ifName)
+	iface, err := netlink.LinkByName(ifName)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); ok {
 			return ErrLinkNotFound
@@ -192,7 +193,7 @@ func DelLinkByName(ifName string) error {
 
 // DelLinkByNameAddr remove an interface and returns its addresses
 func DelLinkByNameAddr(ifName string) ([]*net.IPNet, error) {
-	iface, err := netlinksafe.LinkByName(ifName)
+	iface, err := netlink.LinkByName(ifName)
 	if err != nil {
 		if _, ok := err.(netlink.LinkNotFoundError); ok {
 			return nil, ErrLinkNotFound
@@ -200,7 +201,7 @@ func DelLinkByNameAddr(ifName string) ([]*net.IPNet, error) {
 		return nil, fmt.Errorf("failed to lookup %q: %v", ifName, err)
 	}
 
-	addrs, err := netlinksafe.AddrList(iface, netlink.FAMILY_ALL)
+	addrs, err := netlink.AddrList(iface, netlink.FAMILY_ALL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get IP addresses for %q: %v", ifName, err)
 	}
@@ -223,7 +224,7 @@ func DelLinkByNameAddr(ifName string) ([]*net.IPNet, error) {
 // veth, or an error. This peer ifindex will only be valid in the peer's
 // network namespace.
 func GetVethPeerIfindex(ifName string) (netlink.Link, int, error) {
-	link, err := netlinksafe.LinkByName(ifName)
+	link, err := netlink.LinkByName(ifName)
 	if err != nil {
 		return nil, -1, fmt.Errorf("could not look up %q: %v", ifName, err)
 	}

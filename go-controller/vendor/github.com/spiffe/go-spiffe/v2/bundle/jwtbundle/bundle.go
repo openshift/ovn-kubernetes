@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -12,7 +11,10 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/spiffe/go-spiffe/v2/internal/jwtutil"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/zeebo/errs"
 )
+
+var jwtbundleErr = errs.Class("jwtbundle")
 
 // Bundle is a collection of trusted JWT authorities for a trust domain.
 type Bundle struct {
@@ -42,7 +44,7 @@ func FromJWTAuthorities(trustDomain spiffeid.TrustDomain, jwtAuthorities map[str
 func Load(trustDomain spiffeid.TrustDomain, path string) (*Bundle, error) {
 	bundleBytes, err := os.ReadFile(path)
 	if err != nil {
-		return nil, wrapJwtbundleErr(fmt.Errorf("unable to read JWT bundle: %w", err))
+		return nil, jwtbundleErr.New("unable to read JWT bundle: %w", err)
 	}
 
 	return Parse(trustDomain, bundleBytes)
@@ -52,7 +54,7 @@ func Load(trustDomain spiffeid.TrustDomain, path string) (*Bundle, error) {
 func Read(trustDomain spiffeid.TrustDomain, r io.Reader) (*Bundle, error) {
 	b, err := io.ReadAll(r)
 	if err != nil {
-		return nil, wrapJwtbundleErr(fmt.Errorf("unable to read: %v", err))
+		return nil, jwtbundleErr.New("unable to read: %v", err)
 	}
 
 	return Parse(trustDomain, b)
@@ -62,13 +64,13 @@ func Read(trustDomain spiffeid.TrustDomain, r io.Reader) (*Bundle, error) {
 func Parse(trustDomain spiffeid.TrustDomain, bundleBytes []byte) (*Bundle, error) {
 	jwks := new(jose.JSONWebKeySet)
 	if err := json.Unmarshal(bundleBytes, jwks); err != nil {
-		return nil, wrapJwtbundleErr(fmt.Errorf("unable to parse JWKS: %v", err))
+		return nil, jwtbundleErr.New("unable to parse JWKS: %v", err)
 	}
 
 	bundle := New(trustDomain)
 	for i, key := range jwks.Keys {
 		if err := bundle.AddJWTAuthority(key.KeyID, key.Key); err != nil {
-			return nil, wrapJwtbundleErr(fmt.Errorf("error adding authority %d of JWKS: %v", i, errors.Unwrap(err)))
+			return nil, jwtbundleErr.New("error adding authority %d of JWKS: %v", i, errors.Unwrap(err))
 		}
 	}
 
@@ -114,7 +116,7 @@ func (b *Bundle) HasJWTAuthority(keyID string) bool {
 // under the given key ID, it is replaced. A key ID must be specified.
 func (b *Bundle) AddJWTAuthority(keyID string, jwtAuthority crypto.PublicKey) error {
 	if keyID == "" {
-		return wrapJwtbundleErr(errors.New("keyID cannot be empty"))
+		return jwtbundleErr.New("keyID cannot be empty")
 	}
 
 	b.mtx.Lock()
@@ -191,12 +193,8 @@ func (b *Bundle) GetJWTBundleForTrustDomain(trustDomain spiffeid.TrustDomain) (*
 	defer b.mtx.RUnlock()
 
 	if b.trustDomain != trustDomain {
-		return nil, wrapJwtbundleErr(fmt.Errorf("no JWT bundle for trust domain %q", trustDomain))
+		return nil, jwtbundleErr.New("no JWT bundle for trust domain %q", trustDomain)
 	}
 
 	return b, nil
-}
-
-func wrapJwtbundleErr(err error) error {
-	return fmt.Errorf("jwtbundle: %w", err)
 }

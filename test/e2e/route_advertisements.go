@@ -1935,29 +1935,21 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				),
 			).To(gomega.Succeed())
 			servers = append(servers, agnhostName)
-		case cudnAdvertisedEVPN, cudnAdvertisedEVPNRandomVTEP:
+		case cudnAdvertisedEVPN:
 			ginkgo.By("Running a EVPN network with an agnhost server")
 			ipVRFAgnhostIPv4, ipVRFAgnhostIPv6 := randomIPVRFAgnhostSubnets()
 			ipVRFAgnhostSubnets := []string{ipVRFAgnhostIPv4, ipVRFAgnhostIPv6}
 			framework.Logf("Networks allocated for EVPN Agnhost servers: %v", ipVRFAgnhostSubnets)
-
-			var vtepSubnets []string
-			if networkType == cudnAdvertisedEVPNRandomVTEP {
-				// Random VTEP subnets: IPs are added to loopback by the test
-				// and discovered by the node-side EVPN controller automatically
-				vtepV4, _ := randomVTEPSubnets()
-				vtepSubnets = []string{vtepV4}
-			} else {
-				// KIND network subnet: node InternalIPs fall within this range,
-				// so the node-side controller can discover them via host-cidrs.
-				kindNetwork, err := infraprovider.Get().GetNetwork("kind")
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				kindV4Subnet, _, err := kindNetwork.IPv4IPv6Subnets()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				vtepSubnets = []string{kindV4Subnet}
-			}
+			// TODO: Only unmanaged mode is supported currently
+			// TODO: Enable ipv6 once FRR supports it
+			// Derive VTEP subnet from the kind network CIDRs(unmanaged mode)
+			// NOTE: FRR does not support anything else than IPv4 vteps today
+			kindNetwork, err := infraprovider.Get().GetNetwork("kind")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			kindV4Subnet, _, err := kindNetwork.IPv4IPv6Subnets()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			vtepSubnets := []string{kindV4Subnet}
 			framework.Logf("Networks used for EVPN VTEPs: %v", vtepSubnets)
-
 			macVRFAgnhostName := networkName + "-macvrf-agnhost"
 			macVRFNetworkName := macVRFAgnhostName
 			ipVRFAgnhostName := networkName + "-ipvrf-agnhost"
@@ -2217,9 +2209,6 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF", feature.EVPN, cudnAdvertisedEVPN, layer3IPVRFNetworkSpecGen),
 		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF", feature.EVPN, cudnAdvertisedEVPN, layer2MACVRFNetworkSpecGen),
 		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF", feature.EVPN, cudnAdvertisedEVPN, layer2MACVRFIPVRFNetworkSpecGen),
-		ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer3IPVRFNetworkSpecGen),
-		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer2MACVRFNetworkSpecGen),
-		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer2MACVRFIPVRFNetworkSpecGen),
 	}
 
 	ginkgo.DescribeTableSubtree("When the tested network is of type",
@@ -2525,9 +2514,6 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF", feature.EVPN, cudnAdvertisedEVPN, layer3IPVRFNetworkSpecGen),
 						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF", feature.EVPN, cudnAdvertisedEVPN, layer2MACVRFNetworkSpecGen),
 						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF", feature.EVPN, cudnAdvertisedEVPN, layer2MACVRFIPVRFNetworkSpecGen),
-						ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer3IPVRFNetworkSpecGen),
-						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer2MACVRFNetworkSpecGen),
-						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer2MACVRFIPVRFNetworkSpecGen),
 					}
 
 					ginkgo.DescribeTableSubtree("Of type",
@@ -2987,13 +2973,12 @@ func runBGPNetworkAndServer(
 type networkType string
 
 const (
-	defaultNetwork               networkType = "DEFAULT"
-	udn                          networkType = "UDN"
-	cudn                         networkType = "CUDN"
-	cudnAdvertised               networkType = "CUDN_ADVERTISED"
-	cudnAdvertisedVRFLite        networkType = "CUDN_ADVERTISED_VRFLITE"
-	cudnAdvertisedEVPN           networkType = "CUDN_ADVERTISED_EVPN"
-	cudnAdvertisedEVPNRandomVTEP networkType = "CUDN_ADVERTISED_EVPN_RANDOM_VTEP"
+	defaultNetwork        networkType = "DEFAULT"
+	udn                   networkType = "UDN"
+	cudn                  networkType = "CUDN"
+	cudnAdvertised        networkType = "CUDN_ADVERTISED"
+	cudnAdvertisedVRFLite networkType = "CUDN_ADVERTISED_VRFLITE"
+	cudnAdvertisedEVPN    networkType = "CUDN_ADVERTISED_EVPN"
 )
 
 // createNamespaceWithPrimaryNetworkOfType helper function configures a
@@ -3016,7 +3001,7 @@ func createNamespaceWithPrimaryNetworkOfType(
 	case cudnAdvertised:
 		networkLabels = map[string]string{"advertise": networkName}
 		frrConfigurationLabels = map[string]string{"name": "receive-all"}
-	case cudnAdvertisedVRFLite, cudnAdvertisedEVPN, cudnAdvertisedEVPNRandomVTEP:
+	case cudnAdvertisedVRFLite, cudnAdvertisedEVPN:
 		targetVRF = networkName
 		networkLabels = map[string]string{"advertise": networkName}
 		frrConfigurationLabels = map[string]string{"network": networkName}
