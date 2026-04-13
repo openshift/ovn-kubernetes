@@ -382,9 +382,6 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 	if oc.podHandler != nil {
 		oc.watchFactory.RemovePodHandler(oc.podHandler)
 	}
-	if oc.nodeHandler != nil {
-		oc.watchFactory.RemoveNodeHandler(oc.nodeHandler)
-	}
 	if oc.namespaceHandler != nil {
 		oc.watchFactory.RemoveNamespaceHandler(oc.namespaceHandler)
 	}
@@ -661,7 +658,8 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 			syncZoneIC = syncZoneIC || zoneClusterChanged
 			_, failed = oc.gatewaysFailed.Load(newNode.Name)
 			syncGw := failed ||
-				gatewayChanged(oldNode, newNode) ||
+				gatewayChanged(oldNode, newNode, oldState, newState, oc.GetNetworkName()) ||
+				nodeChassisChanged(oldNode, newNode) ||
 				nodeSubnetChange ||
 				hostCIDRsChanged(oldNode, newNode) ||
 				nodeGatewayMTUSupportChanged(oldNode, newNode)

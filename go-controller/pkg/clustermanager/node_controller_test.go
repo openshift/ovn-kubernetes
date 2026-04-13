@@ -15,7 +15,7 @@ func TestClusterManagerNodePolicyAlwaysActive(t *testing.T) {
 
 func TestClusterManagerNodePolicyNeverFiltersRemoteActivity(t *testing.T) {
 	policy := clusterManagerNodePolicy{}
-	if policy.ShouldFilterByRemoteNetworkActivity(&corev1.Node{}) {
+	if policy.ShouldFilterByRemoteNetworkActivity(&corev1.Node{}, "net-a") {
 		t.Fatal("expected cluster-manager node policy to never filter remote activity")
 	}
 }
