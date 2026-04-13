@@ -33,6 +33,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 		return
 	}
 	klog.Infof("Stop secondary %s network controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	oc.DeregisterNodeHandler()
 	close(oc.stopChan)
 	oc.stopChan = nil
 	oc.cancelableCtx.Cancel()
@@ -66,6 +67,7 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 	netName := oc.GetNetworkName()
 	klog.Infof("Delete OVN logical entities for network %s", netName)
+
 	// delete layer 2 logical switches
 	ops, err := libovsdbops.DeleteLogicalSwitchesWithPredicateOps(oc.nbClient, nil,
 		func(item *nbdb.LogicalSwitch) bool {
@@ -78,6 +80,13 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 	ops, err = cleanupPolicyLogicalEntities(oc.nbClient, ops, oc.controllerName)
 	if err != nil {
 		return err
+	}
+
+	// cleanup address sets after ACLs are deleted to avoid ovn-controller errors
+	if oc.addressSetManager != nil {
+		if err := oc.addressSetManager.CleanupForController(oc.controllerName); err != nil {
+			return fmt.Errorf("failed to cleanup address sets for controller %s: %v", oc.controllerName, err)
+		}
 	}
 
 	ops, err = libovsdbops.DeleteQoSesWithPredicateOps(oc.nbClient, ops,
@@ -106,12 +115,8 @@ func (oc *BaseLayer2UserDefinedNetworkController) cleanup() error {
 
 func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 	// WatchNamespaces() should be started first because it has no other
-	// dependencies, and WatchNodes() depends on it
+	// dependencies.
 	if err := oc.WatchNamespaces(); err != nil {
-		return err
-	}
-
-	if err := oc.WatchNodes(); err != nil {
 		return err
 	}
 
@@ -249,6 +254,23 @@ func (oc *BaseLayer2UserDefinedNetworkController) initializeLogicalSwitch(switch
 		return nil, fmt.Errorf("failed to create logical switch %+v: %v", logicalSwitch, err)
 	}
 
+	// Add the MACVRF port to ClusterRtrPortGroupNameBase so the
+	// higher-priority AllowInterNode multicast ACL overrides the
+	// default deny multicast ACL and permits multicast traffic
+	// to/from the EVPN fabric.
+	if oc.multicastSupport && oc.Transport() == types.NetworkTransportEVPN {
+		for _, lsp := range lsps {
+			if lsp.Name == util.GetMACVRFPortName(switchName) {
+				ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops,
+					oc.getClusterPortGroupName(types.ClusterRtrPortGroupNameBase), lsp.UUID)
+				if err != nil {
+					return nil, fmt.Errorf("failed to create ops to add MACVRF port to router port group: %w", err)
+				}
+				break
+			}
+		}
+	}
+
 	_, err = libovsdbops.TransactAndCheckAndSetUUIDs(oc.nbClient, lsps, ops)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transact logical switch operations: %w", err)
@@ -379,7 +401,7 @@ func getDenyARPAndNSOnMACVRF(controllerName, macvrfportName string, nodeLRPMAC n
 				"outport==%q && eth.dst==%s && nd && icmp.type==135 && nd.target==%s",
 				macvrfportName,
 				nodeLRPMAC.String(),
-				gwIfAddrv4.IP.String(),
+				gwIfAddrv6.IP.String(),
 			),
 			nbdb.ACLActionDrop,
 			nil,

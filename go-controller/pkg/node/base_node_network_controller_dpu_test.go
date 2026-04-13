@@ -317,65 +317,14 @@ var _ = Describe("Node DPU tests", func() {
 					Cmd:    genOfctlDumpFlowsCmd("table=0,in_port=1"),
 					Output: "non-empty-output",
 				})
-			})
-
-			Context("Fails if link configuration fails on", func() {
-				It("LinkByName()", func() {
-					netlinkOpsMock.On("LinkByName", vfRep).Return(nil, fmt.Errorf("failed to get link"))
-					// Mock ovs calls for cleanup
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-
-					err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
-					Expect(err).To(HaveOccurred())
-					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
-				})
-
-				It("LinkSetMTU()", func() {
-					netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-					netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(fmt.Errorf("failed to set mtu"))
-					// Mock netlink/ovs calls for cleanup
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-
-					err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
-					Expect(err).To(HaveOccurred())
-					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
-				})
-
-				It("LinkSetUp()", func() {
-					netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-					netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
-					netlinkOpsMock.On("LinkSetUp", vfLink).Return(fmt.Errorf("failed to set link up"))
-					// Mock netlink/ovs calls for cleanup
-					checkOVSPortPodInfo(execMock, vfRep, true, "15", "a8d09931", "default")
-					netlinkOpsMock.On("LinkSetDown", vfLink).Return(nil)
-					execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-						Cmd: genOVSDelPortCmd("pf0vf9"),
-					})
-
-					podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-
-					err := dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
-					Expect(err).To(HaveOccurred())
-					Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc())
-				})
+				// ConfigureOVS now calls LinkByName/LinkSetMTU/LinkSetUp when deviceID != ""
+				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
+				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
+				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
 			})
 
 			It("Sets dpu.connection-status pod annotation on success", func() {
 				var err error
-				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
-				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
 				dcs := util.DPUConnectionStatus{
 					Status: "Ready",
 				}
@@ -387,7 +336,7 @@ var _ = Describe("Node DPU tests", func() {
 				podInformer.On("Lister").Return(&podLister)
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeMock.On("UpdatePodStatus", cpod).Return(nil)
+				kubeMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(nil)
 
 				err = dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
 				Expect(err).ToNot(HaveOccurred())
@@ -396,9 +345,6 @@ var _ = Describe("Node DPU tests", func() {
 
 			It("cleans up representor port if set pod annotation fails", func() {
 				var err error
-				netlinkOpsMock.On("LinkByName", vfRep).Return(vfLink, nil)
-				netlinkOpsMock.On("LinkSetMTU", vfLink, ifInfo.MTU).Return(nil)
-				netlinkOpsMock.On("LinkSetUp", vfLink).Return(nil)
 				dcs := util.DPUConnectionStatus{
 					Status: "Ready",
 				}
@@ -416,7 +362,7 @@ var _ = Describe("Node DPU tests", func() {
 				podInformer.On("Lister").Return(&podLister)
 				podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 				podNamespaceLister.On("Get", mock.AnythingOfType("string")).Return(&pod, nil)
-				kubeMock.On("UpdatePodStatus", cpod).Return(fmt.Errorf("failed to set pod annotations"))
+				kubeMock.On("PatchPodStatusAnnotations", &pod, cpod).Return(fmt.Errorf("failed to set pod annotations"))
 
 				err = dnnc.addRepPort(&pod, &scd, ifInfo, clientset)
 				Expect(err).To(HaveOccurred())

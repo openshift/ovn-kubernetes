@@ -40,7 +40,7 @@ set_common_default_params() {
   KIND_CREATE=${KIND_CREATE:-true}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-  K8S_VERSION=${K8S_VERSION:-v1.34.0}
+  K8S_VERSION=${K8S_VERSION:-v1.35.0}
   KIND_SETTLE_DURATION=${KIND_SETTLE_DURATION:-30}
   KIND_CONFIG=${KIND_CONFIG:-${DIR}/kind.yaml.j2}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
@@ -186,15 +186,16 @@ set_common_default_params() {
   
 
   ENABLE_NO_OVERLAY=${ENABLE_NO_OVERLAY:-false}
+  ENABLE_NO_OVERLAY_OUTBOUND_SNAT=${ENABLE_NO_OVERLAY_OUTBOUND_SNAT:-false}
+  ENABLE_NO_OVERLAY_MANAGED_ROUTING=${ENABLE_NO_OVERLAY_MANAGED_ROUTING:-false}
   if [ "$ENABLE_NO_OVERLAY" == true ] && [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
     echo "No-overlay mode requires route advertisement to be enabled (-rae)"
     exit 1
   fi
-  if [ "$ENABLE_NO_OVERLAY" == true ] && [ "$ADVERTISE_DEFAULT_NETWORK" != true ]; then
-    echo "No-overlay mode requires advertise the default network (-adv)"
+  if [ "$ENABLE_NO_OVERLAY" == true ] && [ "$ADVERTISE_DEFAULT_NETWORK" != true ] && [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" != true ]; then
+    echo "No-overlay mode requires advertise the default network (-adv) in unmanaged routing mode"
     exit 1
   fi
-
   if [ "$ENABLE_NO_OVERLAY" == true ]; then
     # Set default MTU for no-overlay mode (1500) if not already set
     OVN_MTU=${OVN_MTU:-1500}
@@ -202,9 +203,12 @@ set_common_default_params() {
     # Set default MTU for overlay mode (1400) if not already set
     OVN_MTU=${OVN_MTU:-1400}
   fi
-  ENABLE_NO_OVERLAY_OUTBOUND_SNAT=${ENABLE_NO_OVERLAY_OUTBOUND_SNAT:-false}
   if [ "$ENABLE_NO_OVERLAY_OUTBOUND_SNAT" == true ] && [ "$ENABLE_NO_OVERLAY" != true ]; then
     echo "No-overlay outbound SNAT can only be enabled when no-overlay mode is enabled (-noe)"
+    exit 1
+  fi
+  if [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" == true ] && [ "$ENABLE_NO_OVERLAY" != true ]; then
+    echo "No-overlay managed routing can only be enabled when no-overlay mode is enabled (-noe)"
     exit 1
   fi
 }
@@ -745,7 +749,7 @@ build_dnsnameresolver_images() {
   rm -rf /tmp/coredns-ocp-dnsnameresolver
   git clone https://github.com/openshift/coredns-ocp-dnsnameresolver.git /tmp/coredns-ocp-dnsnameresolver
   pushd /tmp/coredns-ocp-dnsnameresolver
-  git checkout release-4.21
+  git checkout release-4.22
   popd
  
   build_image /tmp/coredns-ocp-dnsnameresolver ${COREDNS_WITH_OCP_DNSNAMERESOLVER} Dockerfile.upstream
@@ -848,13 +852,7 @@ install_dnsnameresolver_operator() {
   sed -i -e 's/^\(.*--coredns-namespace=\).*/\1kube-system/' \
     -e 's/^\(.*--coredns-service-name=\).*/\1kube-dns/' \
     -e 's/^\(.*--dns-name-resolver-namespace=\).*/\1ovn-kubernetes/' \
-    -e 's/^\(.*--coredns-port=\).*/\153/' config/default/manager_auth_proxy_patch.yaml
-
-  # gcr.io Container Registry shutdown issue
-  # See https://github.com/kubernetes-sigs/kubebuilder/discussions/3907#discussioncomment-11477582 for more details.
-  # REVERT ME: when coredns team fixes image in upstream, we can revert this patch.
-  sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
-    config/default/manager_auth_proxy_patch.yaml
+    -e 's/^\(.*--coredns-port=\).*/\153/' config/default/manager_dnsnameresolver_patch.yaml
 
   make install CONTROLLER_TOOLS_VERSION=v0.19.0
   make deploy IMG=${DNSNAMERESOLVER_OPERATOR} CONTROLLER_TOOLS_VERSION=v0.19.0
@@ -973,10 +971,11 @@ clone_frr() {
     # https://github.com/FRRouting/frr/pull/15714).
     #
     # Bump to 10.4.1 for upstream demo was posted here: https://github.com/metallb/frr-k8s/pull/404
-    # We bump further to 10.4.2 to include additional fixes for EVPN:
+    # We bump further to 10.4.3 to include additional fixes for EVPN:
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3907335193
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3898408592
-    sed -i 's|quay.io/frrouting/frr:9.1.0|quay.io/frrouting/frr:10.4.2|g' hack/demo/demo.sh
+    # https://github.com/FRRouting/frr/pull/20496
+    sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' hack/demo/demo.sh
 
     popd
 
@@ -1038,6 +1037,16 @@ deploy_frr_external_container() {
     # Neighbors are already configured by demo.sh; extract them from the running config.
     # This is cluster-level infrastructure shared across all EVPN tests; configured once
     # at install time so individual tests don't need to manage it.
+    # Wait for FRR daemons to be ready ("Not all daemons are up, cannot write config").
+    local attempts=0 daemon_status
+    while ! daemon_status=$($OCI_BIN exec frr vtysh -c "show daemons" 2>&1); do
+      if (( ++attempts > 30 )); then
+        echo "error: FRR daemons did not become ready after 30 attempts"
+        echo "last daemon status: $daemon_status"
+        exit 1
+      fi
+      sleep 1
+    done
     local bgp_neighbors vtysh_cmds
     bgp_neighbors=$($OCI_BIN exec frr vtysh -c "show running-config" | grep "^ neighbor.*remote-as" | awk '{print $2}')
     vtysh_cmds=(-c "configure terminal" -c "router bgp 64512" -c "address-family l2vpn evpn")
@@ -1142,6 +1151,7 @@ destroy_bgp() {
 }
 
 install_frr_k8s() {
+  local bgp_port=${1:-0}
   echo "Installing frr-k8s ..."
   clone_frr
 
@@ -1158,10 +1168,31 @@ install_frr_k8s() {
   # REVERT ME: when https://github.com/metallb/metallb/issues/2619 is fixed
   sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+  # Bump frr in frr-k8s to 10.4.3 to consume the following fix
+  # https://github.com/FRRouting/frr/pull/20496
+  sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' \
+    "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+  if [ "${bgp_port}" -ne 0 ]; then
+    local frr_yaml="${FRR_TMP_DIR}/frr-k8s/config/all-in-one/frr-k8s.yaml"
+    grep -q 'bgpd_options=.*-p 0' "$frr_yaml" || {
+      echo "expected bgpd_options with '-p 0' not found in $frr_yaml"
+      exit 1
+    }
+    sed -i "s/bgpd_options=\"\(.*\)-p 0\(.*\)\"/bgpd_options=\"\1-p ${bgp_port}\2\"/g" "$frr_yaml"
+    grep -q "bgpd_options=.*-p ${bgp_port}" "$frr_yaml" || {
+      echo "failed to patch bgpd_options to use port ${bgp_port}"
+      exit 1
+    }
+  fi
   kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+}
+
+wait_for_frr_k8s() {
   kubectl wait -n frr-k8s-system deployment frr-k8s-statuscleaner --for condition=Available --timeout 2m
   kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
+}
 
+configure_frr_k8s() {
   # apply a BGP peer configration with the external gateway that does not
   # exchange routes
   pushd "${FRR_TMP_DIR}"/frr-k8s/hack/demo/configs || exit 1
@@ -1524,14 +1555,11 @@ create_kind_cluster() {
   ovn_ha=${OVN_HA} \
   net_cidr="${KIND_CIDR}" \
   svc_cidr=${SVC_CIDR} \
-  use_local_registry=${KIND_LOCAL_REGISTRY} \
   dns_domain=${KIND_DNS_DOMAIN} \
   ovn_num_master=${KIND_NUM_MASTER} \
   ovn_num_worker=${KIND_NUM_WORKER} \
   kind_num_infra=${KIND_NUM_INFRA} \
   cluster_log_level=${KIND_CLUSTER_LOGLEVEL:-4} \
-  kind_local_registry_port=${KIND_LOCAL_REGISTRY_PORT} \
-  kind_local_registry_name=${KIND_LOCAL_REGISTRY_NAME} \
   jinjanate "${KIND_CONFIG}" -o "${KIND_CONFIG_LCL}"
 
   # Create KIND cluster. For additional debug, add '--verbosity <int>': 0 None .. 3 Debug

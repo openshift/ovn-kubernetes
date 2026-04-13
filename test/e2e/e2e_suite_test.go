@@ -11,12 +11,13 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/diagnostics"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/label"
 
 	deploymentkind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/configs/kind"
-	infrakind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/providers/kind"
+	infraproviderkind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/providers/kind"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
@@ -40,6 +41,10 @@ var _ = ginkgo.BeforeSuite(func() {
 	// Make sure the framework's kubeconfig is set.
 	gomega.Expect(framework.TestContext.KubeConfig).NotTo(gomega.Equal(""), fmt.Sprintf("%s env var not set", clientcmd.RecommendedConfigPathEnvVar))
 
+	// Preload e2e test images into the cluster to avoid runtime pull
+	// failures and timeouts during test execution.
+	infraprovider.Get().PreloadImages(images.Required())
+
 	_, err := framework.LoadClientset()
 	framework.ExpectNoError(err)
 	config, err := framework.LoadConfig()
@@ -57,24 +62,10 @@ func TestMain(m *testing.M) {
 	ProcessTestContextAndSetupLogging()
 
 	// Set up infrastructure provider and deployment config
-	// Upstream currently uses KinD as its preferred platform infra, So TestMain
-	// is expected to run only there.
-	if !infrakind.IsProvider() {
-		klog.Fatal("Cluster provider must be KinD type")
-	}
-	infrastructure := infrakind.New()
-	if infrastructure == nil {
-		klog.Fatal("Failed to determine the infrastructure provider")
-	}
-	infraprovider.Set(infrastructure)
-	if !deploymentkind.IsKind() {
-		klog.Fatal("Deployment Config must be KinD type")
-	}
-	deployment := deploymentkind.New()
-	if deployment == nil {
-		klog.Fatal("Failed to determine the deployment config")
-	}
-	deploymentconfig.Set(deployment)
+	// Upstream currently uses KinD as its preferred platform infra
+	// So TestMain is expected to run only there.
+	infraprovider.Set(infraproviderkind.New())
+	deploymentconfig.Set(deploymentkind.New())
 
 	os.Exit(m.Run())
 }

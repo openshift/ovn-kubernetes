@@ -162,7 +162,6 @@ rules:
           - egressfirewalls/status
           - adminpolicybasedexternalroutes/status
           - egressqoses/status
-          - routeadvertisements/status
           - networkqoses/status
       verbs: [ "patch", "update" ]
     - apiGroups: ["policy.networking.k8s.io"]
@@ -185,10 +184,16 @@ rules:
           - adminpolicybasedexternalroutes
           - userdefinednetworks
           - clusteruserdefinednetworks
-          - routeadvertisements
           - networkqoses
           - clusternetworkconnects
+          - vteps
       verbs: [ "get", "list", "watch" ]
+    {{- if or (eq (hasKey .Values.global "enableRouteAdvertisements" | ternary .Values.global.enableRouteAdvertisements false) true) (eq (hasKey .Values.global "enableNoOverlayManagedRouting" | ternary .Values.global.enableNoOverlayManagedRouting false) true) }}
+    - apiGroups: ["k8s.ovn.org"]
+      resources:
+          - routeadvertisements
+      verbs: [ "get", "list", "watch" ]
+    {{- end }}
     {{- if eq (hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true) true }}
     - apiGroups: ["certificates.k8s.io"]
       resources:

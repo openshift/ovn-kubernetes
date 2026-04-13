@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -23,12 +24,14 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -1990,6 +1993,75 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			}
 
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+
+		ginkgo.It("requests immediate local pod retries only for policies matching the pod selector", func() {
+			startOvn(initialDB, nil, nil, nil, nil)
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "selected-pod",
+					Namespace: namespaceName1,
+					Labels: map[string]string{
+						"app": "selected",
+					},
+				},
+			}
+			key, err := retry.GetResourceKey(pod)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			newRetryFramework := func() *retry.RetryFramework {
+				return retry.NewRetryFramework(
+					"test/netpol",
+					make(chan struct{}),
+					&sync.WaitGroup{},
+					nil,
+					&retry.ResourceHandler{
+						ObjType: factory.LocalPodSelectorType,
+						EventHandler: &networkControllerPolicyEventHandler{
+							objType: factory.LocalPodSelectorType,
+						},
+					},
+				)
+			}
+
+			matchingSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "selected"},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			nonMatchingSelector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{
+				MatchLabels: map[string]string{"app": "other"},
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			matchingRetry := newRetryFramework()
+			nonMatchingRetry := newRetryFramework()
+			retry.InitRetryObjWithAdd(pod, key, matchingRetry)
+			retry.InitRetryObjWithAdd(pod, key, nonMatchingRetry)
+
+			bnc := &BaseNetworkController{
+				networkPolicies: syncmap.NewSyncMap[*networkPolicy](),
+			}
+			bnc.networkPolicies.Store("match", &networkPolicy{
+				name:             "match",
+				namespace:        namespaceName1,
+				localPodSelector: matchingSelector,
+				localPodRetry:    matchingRetry,
+			})
+			bnc.networkPolicies.Store("other", &networkPolicy{
+				name:             "other",
+				namespace:        namespaceName1,
+				localPodSelector: nonMatchingSelector,
+				localPodRetry:    nonMatchingRetry,
+			})
+
+			gomega.Expect(retry.GetBackoffFromRetryObj(key, matchingRetry)).To(gomega.Equal(time.Second))
+			gomega.Expect(retry.GetBackoffFromRetryObj(key, nonMatchingRetry)).To(gomega.Equal(time.Second))
+
+			bnc.requestLocalPodPolicyRetriesForPod(pod, "logical port cache update")
+
+			gomega.Expect(retry.GetBackoffFromRetryObj(key, matchingRetry)).To(gomega.BeZero())
+			gomega.Expect(retry.GetBackoffFromRetryObj(key, nonMatchingRetry)).To(gomega.Equal(time.Second))
 		})
 
 		ginkgo.It("correctly creates networkpolicy targeting hostNetwork pods with non-nil podSelector", func() {

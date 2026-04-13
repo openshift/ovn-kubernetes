@@ -10,24 +10,44 @@ import (
 
 // Provider represents the infrastructure provider
 type Provider interface {
-	// Name returns the name of the provider, example 'kind'.
-	Name() string
+	ExternalContainerProvider
+	ClusterProvider
 	// NewTestContext providers a per test sandbox. Dependent infra test constructs are created within each test and automatically cleaned
 	// after each test.
 	NewTestContext() Context
+}
 
+type ClusterProvider interface {
 	// PrimaryNetwork returns OVN-Kubernetes primary infrastructure network information
 	PrimaryNetwork() (Network, error)
+	GetK8NodeNetworkInterface(instance string, network Network) (NetworkInterface, error)
+	// ExecK8NodeCommand executes a command on a K8 Node host network namespace and filesystem
+	ExecK8NodeCommand(nodeName string, cmd []string) (string, error)
+	// GetK8HostPort returns a Node port. Requesting a port that maybe exposed in tests to avoid multiple parallel
+	// tests utilizing conflicting ports. It also allows infra provider implementations to set Nodes
+	// allowed port range and therefore comply with cloud provider firewall rules.
+	GetK8HostPort() uint16 // supported K8 host ports
+	// ShutdownNode shuts down the specified node
+	ShutdownNode(nodeName string) error
+	// StartNode starts the specified node
+	StartNode(nodeName string) error
+	// PreloadImages pulls the given images and loads them into the cluster
+	// so that they are available to pods without a runtime pull. Providers
+	// that do not support preloading may implement this as a no-op.
+	PreloadImages(images []string)
+	// Name returns the name of the cluster provider, example 'kind'.
+	Name() string
+	// Get platform specific timeout values
+	GetDefaultTimeoutContext() *framework.TimeoutContext
+}
+
+type ExternalContainerProvider interface {
 	// ListNetworks returns the names of all networks
 	ListNetworks() ([]string, error)
 	// GetNetwork returns a network
 	GetNetwork(name string) (Network, error)
 	// GetExternalContainerNetworkInterface fetches network interface information from the external container attached to a specific network
 	GetExternalContainerNetworkInterface(container ExternalContainer, network Network) (NetworkInterface, error)
-	GetK8NodeNetworkInterface(instance string, network Network) (NetworkInterface, error)
-
-	// ExecK8NodeCommand executes a command on a K8 Node host network namespace and filesystem
-	ExecK8NodeCommand(nodeName string, cmd []string) (string, error)
 	ExecExternalContainerCommand(container ExternalContainer, cmd []string) (string, error)
 	GetExternalContainerLogs(container ExternalContainer) (string, error)
 	// GetExternalContainerPort returns a port. Requesting a port that maybe exposed in tests to avoid multiple parallel
@@ -35,18 +55,6 @@ type Provider interface {
 	// allowed port range and therefore comply with cloud provider firewall rules.
 	GetExternalContainerPort() uint16
 	ExternalContainerPrimaryInterfaceName() string
-	// GetK8HostPort returns a Node port. Requesting a port that maybe exposed in tests to avoid multiple parallel
-	// tests utilizing conflicting ports. It also allows infra provider implementations to set Nodes
-	// allowed port range and therefore comply with cloud provider firewall rules.
-	GetK8HostPort() uint16 // supported K8 host ports
-
-	// ShutdownNode shuts down the specified node
-	ShutdownNode(nodeName string) error
-	// StartNode starts the specified node
-	StartNode(nodeName string) error
-
-	// Get platform specific timeout values
-	GetDefaultTimeoutContext() *framework.TimeoutContext
 }
 
 // Underlay represents the configuration for an underlay network.
@@ -65,17 +73,23 @@ type Underlay struct {
 }
 
 type Context interface {
-	CreateExternalContainer(container ExternalContainer) (ExternalContainer, error)
-	DeleteExternalContainer(container ExternalContainer) error
+	ExternalContainerContextProvider
+	ClusterContextProvider
+	AddCleanUpFn(func() error)
+}
 
+type ExternalContainerContextProvider interface {
 	CreateNetwork(name string, subnets ...string) (Network, error)
 	DeleteNetwork(network Network) error
+	CreateExternalContainer(container ExternalContainer) (ExternalContainer, error)
+	DeleteExternalContainer(container ExternalContainer) error
 	AttachNetwork(network Network, instance string) (NetworkInterface, error)
 	DetachNetwork(network Network, instance string) error
-	GetAttachedNetworks() (Networks, error)
-	SetupUnderlay(f *framework.Framework, underlay Underlay) error
+}
 
-	AddCleanUpFn(func() error)
+type ClusterContextProvider interface {
+	// anything done on the cluster that could be cleaned up after test
+	SetupUnderlay(f *framework.Framework, underlay Underlay) error
 }
 
 type Network interface {
@@ -176,7 +190,7 @@ func (n NetworkInterface) GetIPv4Prefix() string {
 }
 
 func (n NetworkInterface) GetIPv6Gateway() string {
-	return n.IPv4Gateway
+	return n.IPv6Gateway
 }
 
 func (n NetworkInterface) GetIPv6() string {
@@ -297,4 +311,14 @@ func condenseErrors(errs []error) error {
 		err = errors.Join(err, e)
 	}
 	return err
+}
+
+// Runner abstracts command execution for various tools (docker, podman,
+// ssh, kcli, etc.)
+// Implementations execute commands with the provided arguments
+// and return combined stdout/stderr.
+type Runner interface {
+	// Run executes a command with the given arguments
+	// and returns its output, or an error on failure.
+	Run(command string, args ...string) (string, error)
 }

@@ -100,6 +100,12 @@ func newControllerRuntimeClient() (crclient.Client, error) {
 	})
 }
 
+func init() {
+	if os.Getenv("KIND_INSTALL_KUBEVIRT") == "true" {
+		images.Add(images.IPerf3())
+	}
+}
+
 var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, func() {
 	var (
 		fr                  = wrappedTestFramework("kv-live-migration")
@@ -1491,6 +1497,7 @@ fi
 			d.ConntrackDumpingDaemonSet()
 			d.OVSFlowsDumpingDaemonSet(deploymentconfig.Get().ExternalBridgeName())
 			d.IPTablesDumpingDaemonSet()
+			d.NFTablesDumpingDaemonSet()
 
 			bandwidthPerMigration := resource.MustParse("40Mi")
 			forcePostCopyMigrationPolicy := &kvmigrationsv1alpha1.MigrationPolicy{

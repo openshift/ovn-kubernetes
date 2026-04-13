@@ -10,7 +10,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	nodeutil "k8s.io/component-helpers/node/util"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -55,6 +54,7 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 		return fmt.Errorf("%s can only be set to %s or %s, it cannot be removed", util.OvnNodeZoneName, types.OvnDefaultZone, nodeName)
 	},
 	util.OVNNodeEncapIPs: nil,
+	util.OVNNodeVTEPs:    nil,
 }
 
 // interconnectNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in IC environments
@@ -96,21 +96,19 @@ func NewNodeAdmissionWebhook(enableInterconnect, enableHybridOverlay bool, extra
 	}
 }
 
-var _ admission.CustomValidator = &NodeAdmission{}
+var _ admission.Validator[*corev1.Node] = &NodeAdmission{}
 
-func (p NodeAdmission) ValidateCreate(_ context.Context, _ runtime.Object) (warnings admission.Warnings, err error) {
+func (p NodeAdmission) ValidateCreate(_ context.Context, _ *corev1.Node) (warnings admission.Warnings, err error) {
 	// Ignore creation, the webhook is configured to only handle nodes/status updates
 	return nil, nil
 }
 
-func (p NodeAdmission) ValidateDelete(_ context.Context, _ runtime.Object) (warnings admission.Warnings, err error) {
+func (p NodeAdmission) ValidateDelete(_ context.Context, _ *corev1.Node) (warnings admission.Warnings, err error) {
 	// Ignore deletion, the webhook is configured to only handle nodes/status updates
 	return nil, nil
 }
 
-func (p NodeAdmission) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (warnings admission.Warnings, err error) {
-	oldNode := oldObj.(*corev1.Node)
-	newNode := newObj.(*corev1.Node)
+func (p NodeAdmission) ValidateUpdate(ctx context.Context, oldNode, newNode *corev1.Node) (warnings admission.Warnings, err error) {
 
 	req, err := admission.RequestFromContext(ctx)
 	if err != nil {

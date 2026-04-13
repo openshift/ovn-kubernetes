@@ -93,7 +93,7 @@ type ClusterNetworkConnectSpec struct {
 // +kubebuilder:validation:MaxLength=43
 type CIDR string
 
-// +kubebuilder:validation:XValidation:rule="!has(self.networkPrefix) || !isCIDR(self.cidr) || self.networkPrefix > cidr(self.cidr).prefixLength()", message="NetworkPrefix must be smaller than CIDR subnet"
+// +kubebuilder:validation:XValidation:rule="!has(self.networkPrefix) || !isCIDR(self.cidr) || self.networkPrefix > cidr(self.cidr).prefixLength()", message="NetworkPrefix must be longer than the CIDR prefix length"
 // +kubebuilder:validation:XValidation:rule="!has(self.networkPrefix) || !isCIDR(self.cidr) || (cidr(self.cidr).ip().family() != 4 || self.networkPrefix < 32)", message="NetworkPrefix must < 32 for ipv4 CIDR"
 type ConnectSubnet struct {
 	// CIDR specifies ConnectSubnet, which is split into smaller subnets for every connected network.
@@ -113,7 +113,7 @@ type ConnectSubnet struct {
 	CIDR CIDR `json:"cidr"`
 
 	// NetworkPrefix specifies the prefix length for every connected network.
-	// This prefix length should be equal to or longer than the length of the CIDR prefix.
+	// This prefix length should be strictly longer than the length of the CIDR prefix.
 	//
 	// For example, if the CIDR is 10.0.0.0/16 and the networkPrefix is 24,
 	// then the connect subnet for each connected layer3 network will be 10.0.0.0/24, 10.0.1.0/24, 10.0.2.0/24 etc.

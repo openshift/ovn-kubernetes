@@ -246,8 +246,20 @@ const (
 	UDNEnabledServiceExternalID = OvnK8sPrefix + "/" + "udn-enabled-default-service"
 	// key for management port name, indicating the netdev link name associated with the given management port representor OVS interface
 	OvnManagementPortNameExternalID = OvnK8sPrefix + "/management-port-name"
+	// EVPNVTEPExternalID is the external-id key used to tag OVS ports with their EVPN VTEP name
+	EVPNVTEPExternalID = "evpn-vtep"
 	// RequiredUDNNamespaceLabel is the required namespace label for enabling primary UDNs
 	RequiredUDNNamespaceLabel = "k8s.ovn.org/primary-user-defined-network"
+	// NodeSubnetsAnnotation contains the pod subnets allocated to each node+network
+	NodeSubnetsAnnotation = OvnK8sPrefix + "/node-subnets"
+	// UDNLayer2NodeGRLRPTunnelIDAnnotation is the constant string representing the tunnel id allocated for the
+	// UDN L2 network for this node's GR LRP by cluster manager. This is used to create the remote tunnel
+	// ports for each node.
+	// "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{
+	//		"l2-network-a":"5",
+	//		"l2-network-b":"10"}
+	// }",
+	UDNLayer2NodeGRLRPTunnelIDAnnotation = "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids"
 
 	// different user-defined network topology types defined in CNI netconf
 	Layer3Topology   = "layer3"
