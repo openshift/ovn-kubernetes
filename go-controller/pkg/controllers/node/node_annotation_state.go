@@ -2,6 +2,7 @@ package node
 
 import (
 	"net"
+	"reflect"
 	"strconv"
 
 	"k8s.io/klog/v2"
@@ -22,6 +23,9 @@ type NodeAnnotationState struct {
 	tunnelIDs    map[string]string
 	tunnelIDsErr error
 
+	l3GatewayConfigs    map[string]*util.L3GatewayConfig
+	l3GatewayConfigsErr error
+
 	subnets    map[string][]*net.IPNet
 	subnetsErr error
 }
@@ -32,17 +36,21 @@ func newNodeAnnotationState(
 	networkIDsErr error,
 	tunnelIDs map[string]string,
 	tunnelIDsErr error,
+	l3GatewayConfigs map[string]*util.L3GatewayConfig,
+	l3GatewayConfigsErr error,
 	subnets map[string][]*net.IPNet,
 	subnetsErr error,
 ) *NodeAnnotationState {
 	return &NodeAnnotationState{
-		nodeName:      nodeName,
-		networkIDs:    networkIDs,
-		networkIDsErr: networkIDsErr,
-		tunnelIDs:     tunnelIDs,
-		tunnelIDsErr:  tunnelIDsErr,
-		subnets:       subnets,
-		subnetsErr:    subnetsErr,
+		nodeName:            nodeName,
+		networkIDs:          networkIDs,
+		networkIDsErr:       networkIDsErr,
+		tunnelIDs:           tunnelIDs,
+		tunnelIDsErr:        tunnelIDsErr,
+		l3GatewayConfigs:    l3GatewayConfigs,
+		l3GatewayConfigsErr: l3GatewayConfigsErr,
+		subnets:             subnets,
+		subnetsErr:          subnetsErr,
 	}
 }
 
@@ -111,4 +119,25 @@ func TunnelIDAnnotationChangedForNetworkWithState(oldState, newState *NodeAnnota
 		return false
 	}
 	return oldState.tunnelIDs[netName] != newState.tunnelIDs[netName]
+}
+
+// GatewayAnnotationChangedForNetworkWithState returns true if the node's
+// per-network gateway annotation changed using pre-parsed annotation state.
+func GatewayAnnotationChangedForNetworkWithState(oldState, newState *NodeAnnotationState, netName string) bool {
+	if oldState == nil || newState == nil {
+		return false
+	}
+	if oldState.l3GatewayConfigsErr != nil {
+		if !util.IsAnnotationNotSetError(oldState.l3GatewayConfigsErr) {
+			klog.Errorf("Failed to parse old node %s gateway annotation: %v", oldState.nodeName, oldState.l3GatewayConfigsErr)
+		}
+		return false
+	}
+	if newState.l3GatewayConfigsErr != nil {
+		if !util.IsAnnotationNotSetError(newState.l3GatewayConfigsErr) {
+			klog.Errorf("Failed to parse new node %s gateway annotation: %v", newState.nodeName, newState.l3GatewayConfigsErr)
+		}
+		return false
+	}
+	return !reflect.DeepEqual(oldState.l3GatewayConfigs[netName], newState.l3GatewayConfigs[netName])
 }
