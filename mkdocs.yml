@@ -34,7 +34,7 @@ theme:
     - navigation.tabs
     - navigation.tabs.sticky
     - content.code.annotate
-    - navigation.instant.preview
+    
 plugins:
   - search
   - awesome-pages
@@ -92,6 +92,7 @@ nav:
     - Setup and Building: getting-started/building-ovn-kubernetes.md
   - Developer Guide:
       - Contributing Guide: governance/CONTRIBUTING.md
+      - Governance: governance/GOVERNANCE.md
       - Reviewing Guide: governance/REVIEWING.md
       - Coding Guide: developer-guide/developer.md
       - OVN-Kubernetes Container Images: developer-guide/image-build.md
@@ -162,5 +163,6 @@ nav:
     - No-Overlay Mode: okeps/okep-5259-no-overlay.md
     - EVPN: okeps/okep-5088-evpn.md
     - DPU Healthcheck: okeps/okep-5674-dpu-healthcheck.md
+    - Extend Primary UDN/CUDN to Support Multiple Cluster Subnets in Layer3 Topology: okeps/okep-5377-extend-udn-to-support-multiple-cluster-subnets-in-layer3-topology.md
   - Blog:
     - blog/index.md
