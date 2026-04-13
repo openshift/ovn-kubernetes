@@ -46,10 +46,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - name: Check out code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         # Disabling cache to avoid warnings until these two issues are fixed
@@ -103,13 +103,13 @@ jobs:
     # only run the following steps if the base image was not found in the cache
     - name: Check out code into the Go module directory - from base branch
       if: steps.is_base_image_build_needed.outputs.BASE_IMAGE_RESTORED != 'true' && success()
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         ref: ${{ github.base_ref || github.ref_name }}
 
     - name: Set up Go
       if: steps.is_base_image_build_needed.outputs.BASE_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         # Disabling cache to avoid warnings until these two issues are fixed
@@ -154,7 +154,7 @@ jobs:
         gzip ${CI_IMAGE_CACHE}${CI_IMAGE_BASE_TAR}
 
     # run the following always if none of the steps before failed
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: test-image-base
         path: ${{ env.CI_IMAGE_BASE_TAR }}
@@ -187,11 +187,11 @@ jobs:
     # only run the following steps if the PR image was not found in the cache
     - name: Check out code into the Go module directory - from current pr branch
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         # Disabling cache to avoid warnings until these two issues are fixed
@@ -242,7 +242,7 @@ jobs:
         gzip ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
 
     # run the following if none of the previous steps failed
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: test-image-pr
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}
@@ -252,10 +252,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         # Disabling cache to avoid warnings until these two issues are fixed
@@ -320,12 +320,12 @@ jobs:
     steps:
 
     - name: Check out code into the Go module directory - from Base branch
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
           ref: ${{ github.base_ref || github.ref_name }}
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         # Disabling cache to avoid warnings until these two issues are fixed
@@ -345,7 +345,7 @@ jobs:
       uses: ./.github/actions/free-disk-space
 
     - name: Download test-image-base
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: test-image-base
 
@@ -380,7 +380,7 @@ jobs:
         make -C test install-kind
 
     - name: Check out code into the Go module directory - from PR branch
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Export kind logs
       if: always()
@@ -394,13 +394,13 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
 
     - name: Download test-image-pr
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: test-image-pr
 
@@ -435,7 +435,7 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}-after-upgrade
         path: /tmp/kind/logs-kind-pr-branch
@@ -556,7 +556,7 @@ jobs:
       ENABLE_NO_OVERLAY_MANAGED_ROUTING: "${{ matrix.no-overlay == 'managed' }}"
     steps:
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Runner Diagnostics
       if: always()
@@ -591,7 +591,7 @@ jobs:
         docker system info
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         # Disabling cache to avoid warnings until these two issues are fixed
@@ -653,7 +653,7 @@ jobs:
         sudo ufw disable
 
     - name: Download test-image-pr
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: test-image-pr
 
@@ -761,7 +761,7 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
@@ -794,14 +794,14 @@ jobs:
     steps:
 
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Runner Diagnostics
       if: always()
       uses: ./.github/actions/diagnostics
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         # Disabling cache to avoid warnings until these two issues are fixed
@@ -827,7 +827,7 @@ jobs:
         sudo ufw disable
 
     - name: Download test-image-pr
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: test-image-pr
 
@@ -886,7 +886,7 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: kind-logs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/logs
@@ -903,7 +903,7 @@ jobs:
 
     - name: Upload ovn dbs
       if: ${{ failure() }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: kind-ovndbs-${{ env.JOB_NAME }}-${{ github.run_id }}
         path: /tmp/kind/ovndbs
