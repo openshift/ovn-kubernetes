@@ -7,5 +7,4 @@ type DeploymentConfig interface {
 	FRRK8sNamespace() string
 	ExternalBridgeName() string
 	PrimaryInterfaceName() string
-	GetAgnHostContainerImage() string
 }

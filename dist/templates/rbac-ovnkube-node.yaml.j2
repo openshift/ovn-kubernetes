@@ -188,7 +188,6 @@ rules:
           - routeadvertisements
           - networkqoses
           - clusternetworkconnects
-          - vteps
       verbs: [ "get", "list", "watch" ]
     {% if ovn_enable_ovnkube_identity == "true" -%}
     - apiGroups: ["certificates.k8s.io"]

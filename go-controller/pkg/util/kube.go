@@ -117,7 +117,6 @@ type OVNKubeControllerClientset struct {
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
 	NetworkQoSClient          networkqosclientset.Interface
 	NetworkConnectClient      networkconnectclientset.Interface
-	VTEPClient                vtepclientset.Interface
 }
 
 type OVNNodeClientset struct {
@@ -128,7 +127,6 @@ type OVNNodeClientset struct {
 	NetworkAttchDefClient     networkattchmentdefclientset.Interface
 	UserDefinedNetworkClient  userdefinednetworkclientset.Interface
 	RouteAdvertisementsClient routeadvertisementsclientset.Interface
-	VTEPClient                vtepclientset.Interface
 }
 
 type OVNClusterManagerClientset struct {
@@ -199,7 +197,6 @@ func (cs *OVNMasterClientset) GetOVNKubeControllerClientset() *OVNKubeController
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
-		VTEPClient:                cs.VTEPClient,
 	}
 }
 
@@ -220,7 +217,6 @@ func (cs *OVNClientset) GetOVNKubeControllerClientset() *OVNKubeControllerClient
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
 		NetworkQoSClient:          cs.NetworkQoSClient,
 		NetworkConnectClient:      cs.NetworkConnectClient,
-		VTEPClient:                cs.VTEPClient,
 	}
 }
 
@@ -255,7 +251,6 @@ func (cs *OVNClientset) GetNodeClientset() *OVNNodeClientset {
 		NetworkAttchDefClient:     cs.NetworkAttchDefClient,
 		UserDefinedNetworkClient:  cs.UserDefinedNetworkClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
-		VTEPClient:                cs.VTEPClient,
 	}
 }
 
@@ -266,7 +261,6 @@ func (cs *OVNMasterClientset) GetNodeClientset() *OVNNodeClientset {
 		EgressIPClient:            cs.EgressIPClient,
 		NetworkAttchDefClient:     cs.NetworkAttchDefClient,
 		RouteAdvertisementsClient: cs.RouteAdvertisementsClient,
-		VTEPClient:                cs.VTEPClient,
 	}
 }
 

@@ -1560,7 +1560,7 @@ spec:
 			var actualConditions []metav1.Condition
 			g.Expect(json.Unmarshal([]byte(conditionsJSON), &actualConditions)).To(Succeed())
 			return normalizeConditions(actualConditions)
-		}, 5*time.Second, 1*time.Second).Should(ContainElement(metav1.Condition{
+		}, 5*time.Second, 1*time.Second).Should(ConsistOf(metav1.Condition{
 			Type:    "NetworkCreated",
 			Status:  metav1.ConditionFalse,
 			Reason:  "NetworkAttachmentDefinitionSyncError",
@@ -2252,31 +2252,23 @@ func validateClusterUDNStatusReportsActiveNamespacesFunc(client dynamic.Interfac
 			return fmt.Errorf("expected at least one condition in %v", cUDN)
 		}
 
-		// Find NetworkCreated condition among all conditions
-		var networkCreatedCond *metav1.Condition
-		for i := range conditions {
-			if conditions[i].Type == "NetworkCreated" {
-				networkCreatedCond = &conditions[i]
-				break
-			}
+		c := conditions[0]
+		if c.Type != "NetworkCreated" {
+			return fmt.Errorf("expected NetworkCreated type in %v", c)
 		}
-		if networkCreatedCond == nil {
-			return fmt.Errorf("NetworkCreated condition not found in conditions: %v", conditions)
+		if c.Status != metav1.ConditionTrue {
+			return fmt.Errorf("expected True status in %v", c)
 		}
-
-		if networkCreatedCond.Status != metav1.ConditionTrue {
-			return fmt.Errorf("expected True status in NetworkCreated condition, got: %v", networkCreatedCond)
+		if c.Reason != "NetworkAttachmentDefinitionCreated" {
+			return fmt.Errorf("expected NetworkAttachmentDefinitionCreated reason in %v", c)
 		}
-		if networkCreatedCond.Reason != "NetworkAttachmentDefinitionCreated" {
-			return fmt.Errorf("expected NetworkAttachmentDefinitionCreated reason in NetworkCreated condition, got: %v", networkCreatedCond)
-		}
-		if !strings.Contains(networkCreatedCond.Message, "NetworkAttachmentDefinition has been created in following namespaces:") {
-			return fmt.Errorf("expected \"NetworkAttachmentDefinition has been created in following namespaces:\" in %s", networkCreatedCond.Message)
+		if !strings.Contains(c.Message, "NetworkAttachmentDefinition has been created in following namespaces:") {
+			return fmt.Errorf("expected \"NetworkAttachmentDefinition has been created in following namespaces:\" in %s", c.Message)
 		}
 
 		for _, ns := range expectedActiveNsNames {
-			if !strings.Contains(networkCreatedCond.Message, ns) {
-				return fmt.Errorf("expected to find %q namespace in %s", ns, networkCreatedCond.Message)
+			if !strings.Contains(c.Message, ns) {
+				return fmt.Errorf("expected to find %q namespace in %s", ns, c.Message)
 			}
 		}
 		return nil
@@ -2293,30 +2285,17 @@ func validateClusterUDNStatusReportConsumers(client dynamic.Interface, cUDNName,
 		return err
 	}
 	conditions = normalizeConditions(conditions)
-
-	// Find NetworkCreated condition among all conditions
-	var networkCreatedCond *metav1.Condition
-	for i := range conditions {
-		if conditions[i].Type == "NetworkCreated" {
-			networkCreatedCond = &conditions[i]
-			break
-		}
-	}
-	if networkCreatedCond == nil {
-		return fmt.Errorf("NetworkCreated condition not found in conditions: %v", conditions)
-	}
-
 	expectedMsg := fmt.Sprintf("failed to delete NetworkAttachmentDefinition [%[1]s/%[2]s]: network in use by the following pods: [%[1]s/%[3]s]",
 		udnNamespace, cUDNName, expectedPodName)
-	expectedCondition := metav1.Condition{
-		Type:    "NetworkCreated",
-		Status:  "False",
-		Reason:  "NetworkAttachmentDefinitionSyncError",
-		Message: expectedMsg,
-	}
-
-	if !reflect.DeepEqual(*networkCreatedCond, expectedCondition) {
-		return fmt.Errorf("expected NetworkCreated condition: %v, got: %v", expectedCondition, *networkCreatedCond)
+	expectedConditions := []metav1.Condition{
+		{
+			Type:    "NetworkCreated",
+			Status:  "False",
+			Reason:  "NetworkAttachmentDefinitionSyncError",
+			Message: expectedMsg,
+		}}
+	if !reflect.DeepEqual(conditions, expectedConditions) {
+		return fmt.Errorf("expected conditions: %v, got: %v", expectedConditions, conditions)
 	}
 	return nil
 }

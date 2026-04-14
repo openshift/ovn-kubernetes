@@ -815,11 +815,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 			podListerMock.On("Pods", mock.AnythingOfType("string")).Return(podNamespaceLister)
 
 			var allocated bool
-			kubeMock.On(
-				"PatchPodStatusAnnotations",
-				mock.AnythingOfType(fmt.Sprintf("%T", &corev1.Pod{})),
-				mock.AnythingOfType(fmt.Sprintf("%T", &corev1.Pod{})),
-			).Run(
+			kubeMock.On("UpdatePodStatus", mock.AnythingOfType(fmt.Sprintf("%T", &corev1.Pod{}))).Run(
 				func(mock.Arguments) {
 					allocated = true
 				},

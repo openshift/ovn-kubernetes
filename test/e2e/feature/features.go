@@ -23,7 +23,6 @@ var (
 	Multicast             = New("Multicast")
 	MultiHoming           = New("MultiHoming")
 	NodeIPMACMigration    = New("NodeIPMACMigration")
-	NoOverlay             = New("NoOverlay")
 	OVSCPUPin             = New("OVSCPUPin")
 	RouteAdvertisements   = New("RouteAdvertisements")
 	Unidle                = New("Unidle")

@@ -165,10 +165,6 @@ if [ "$ENABLE_EVPN" != true ]; then
   skip_label "Feature:EVPN"
 fi
 
-if [ "$ENABLE_NO_OVERLAY" != true ]; then
-  skip_label "Feature:NoOverlay"
-fi
-
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
   skip_label "Feature:RouteAdvertisements"
 else

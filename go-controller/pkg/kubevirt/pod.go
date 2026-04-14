@@ -139,7 +139,7 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 	}
 
 	var modifiedPod *corev1.Pod
-	resultErr := retry.OnError(util.OvnConflictBackoff, util.IsPodAnnotationUpdateRetryable, func() error {
+	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := watchFactory.GetPod(pod.Namespace, pod.Name)
 		if err != nil {
@@ -153,7 +153,7 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 				return err
 			}
 		}
-		return kube.PatchPodStatusAnnotations(pod, modifiedPod)
+		return kube.UpdatePodStatus(modifiedPod)
 	})
 	if resultErr != nil {
 		return nil, fmt.Errorf("failed to update labels and annotations on pod %s/%s: %v", pod.Namespace, pod.Name, resultErr)
@@ -464,17 +464,13 @@ func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
 //
 // Note: The function assumes that the pod is part of a VirtualMachine resource managed
 // by KubeVirt.
-func DiscoverLiveMigrationStatus(podLister v1.PodLister, pod *corev1.Pod) (*LiveMigrationStatus, error) {
+func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) (*LiveMigrationStatus, error) {
 	vmKey := ExtractVMNameFromPod(pod)
 	if vmKey == nil {
 		return nil, nil
 	}
 
-	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
-	if err != nil {
-		return nil, err
-	}
-	vmPods, err := podLister.Pods(pod.Namespace).List(selector)
+	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
 	if err != nil {
 		return nil, err
 	}

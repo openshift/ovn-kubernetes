@@ -26,20 +26,10 @@ import (
 //
 // VTEPSpec defines the desired state of VTEP.
 type VTEPSpecApplyConfiguration struct {
-	// CIDRs is the list of IP ranges from which VTEP IPs are discovered (unmanaged mode) or allocated (managed mode).
-	// Multiple CIDRs may be specified to expand capacity over time without recreating the VTEP.
-	// Each entry must be a valid network address in CIDR notation (for example, "100.64.0.0/24" or "fd00:100::/64").
-	// Each node receives at most one IP per address family from the CIDRs listed here.
-	// In managed mode, CIDRs are consumed sequentially: IPs are allocated from the first CIDR until it is
-	// exhausted, then from the next, and so on.
-	// In managed mode, CIDRs are append-only: existing entries cannot be removed, reordered, or shrunk to a
-	// smaller mask; they can only be expanded to a wider mask, and new entries may be appended.
-	// In unmanaged mode, if multiple IPs on a node match the configured CIDRs, or if the match is otherwise
-	// ambiguous, the VTEP will be placed into a failed status.
-	// In unmanaged mode, CIDRs may be freely added, removed, reordered, or resized.
-	// Caution: removing or modifying CIDRs in unmanaged mode that are actively in use may cause traffic disruption;
-	// no downtime guarantees are provided for such operations.
-	CIDRs []vtepv1.CIDR `json:"cidrs,omitempty"`
+	// CIDRs is the list of IP ranges from which VTEP IPs are allocated.
+	// Dual-stack clusters may set 2 CIDRs (one for each IP family), otherwise only 1 CIDR is allowed.
+	// The format should match standard CIDR notation (for example, "100.64.0.0/24" or "fd00::/64").
+	CIDRs *vtepv1.DualStackCIDRs `json:"cidrs,omitempty"`
 	// Mode specifies how VTEP IPs are managed.
 	// "Managed" means OVN-Kubernetes allocates and assigns VTEP IPs per node automatically.
 	// "Unmanaged" means an external provider handles IP assignment; OVN-Kubernetes discovers existing IPs on nodes.
@@ -53,13 +43,11 @@ func VTEPSpec() *VTEPSpecApplyConfiguration {
 	return &VTEPSpecApplyConfiguration{}
 }
 
-// WithCIDRs adds the given value to the CIDRs field in the declarative configuration
-// and returns the receiver, so that objects can be build by chaining "With" function invocations.
-// If called multiple times, values provided by each call will be appended to the CIDRs field.
-func (b *VTEPSpecApplyConfiguration) WithCIDRs(values ...vtepv1.CIDR) *VTEPSpecApplyConfiguration {
-	for i := range values {
-		b.CIDRs = append(b.CIDRs, values[i])
-	}
+// WithCIDRs sets the CIDRs field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the CIDRs field is set to the value of the last call.
+func (b *VTEPSpecApplyConfiguration) WithCIDRs(value vtepv1.DualStackCIDRs) *VTEPSpecApplyConfiguration {
+	b.CIDRs = &value
 	return b
 }
 

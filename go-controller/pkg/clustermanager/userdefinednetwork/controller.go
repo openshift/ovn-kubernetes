@@ -35,9 +35,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
-	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
-	rainformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
-	ralister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/listers/routeadvertisements/v1"
 	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnapplyconfkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/applyconfiguration/userdefinednetwork/v1"
 	userdefinednetworkclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
@@ -134,10 +131,6 @@ type Controller struct {
 	vtepLister vteplister.VTEPLister
 	// vtepNotifier notifies subscribing controllers about VTEP events.
 	vtepNotifier *notifier.VTEPNotifier
-	// raLister provides read access to RouteAdvertisements CRs for validating no-overlay transport.
-	raLister ralister.RouteAdvertisementsLister
-	// raNotifier notifies subscribing controllers about RouteAdvertisements events.
-	raNotifier *notifier.RouteAdvertisementsNotifier
 
 	networkInUseRequeueInterval time.Duration
 	eventRecorder               record.EventRecorder
@@ -154,7 +147,6 @@ func New(
 	podInformer corev1informer.PodInformer,
 	namespaceInformer corev1informer.NamespaceInformer,
 	vtepInformer vtepinformer.VTEPInformer,
-	raInformer rainformer.RouteAdvertisementsInformer,
 	eventRecorder record.EventRecorder,
 ) *Controller {
 	udnLister := udnInformer.Lister()
@@ -207,12 +199,6 @@ func New(
 		c.vtepNotifier = notifier.NewVTEPNotifier(vtepInformer, c)
 	}
 
-	// Setup RouteAdvertisements watching for no-overlay and EVPN transport validation.
-	if raInformer != nil {
-		c.raLister = raInformer.Lister()
-		c.raNotifier = notifier.NewRouteAdvertisementsNotifier(raInformer, c)
-	}
-
 	return c
 }
 
@@ -227,9 +213,6 @@ func (c *Controller) Run() error {
 	}
 	if c.vtepNotifier != nil {
 		controllers = append(controllers, c.vtepNotifier.Controller)
-	}
-	if c.raNotifier != nil {
-		controllers = append(controllers, c.raNotifier.Controller)
 	}
 
 	if err := controller.StartWithInitialSync(c.initializeController, controllers...); err != nil {
@@ -470,9 +453,6 @@ func (c *Controller) Shutdown() {
 	}
 	if c.vtepNotifier != nil {
 		controllers = append(controllers, c.vtepNotifier.Controller)
-	}
-	if c.raNotifier != nil {
-		controllers = append(controllers, c.raNotifier.Controller)
 	}
 	controller.Stop(controllers...)
 }
@@ -800,15 +780,7 @@ func (c *Controller) reconcileCUDN(key string) error {
 
 	nads, syncErr := c.syncClusterUDN(cudnCopy)
 
-	// Set transport status condition (TransportAccepted) on cudnCopy
-	// The actual status update will be performed by updateClusterUDNStatus() below
-	transportUpdated, transportErr := c.setTransportStatusCondition(cudnCopy)
-	if transportErr != nil {
-		return fmt.Errorf("failed to validate transport for ClusterUserDefinedNetwork %q: %v", cudnCopy.Name, transportErr)
-	}
-
-	// Update status with ALL conditions (TransportAccepted + NetworkCreated) in a single API call
-	updateStatusErr := c.updateClusterUDNStatus(cudnCopy, nads, syncErr, transportUpdated)
+	updateStatusErr := c.updateClusterUDNStatus(cudnCopy, nads, syncErr)
 
 	var networkInUse *networkInUseError
 	if errors.As(syncErr, &networkInUse) {
@@ -958,7 +930,7 @@ func (c *Controller) getSelectedNamespaces(sel metav1.LabelSelector) (sets.Set[s
 	return selectedNamespaces, nil
 }
 
-func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, nads []netv1.NetworkAttachmentDefinition, syncError error, transportUpdated bool) error {
+func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, nads []netv1.NetworkAttachmentDefinition, syncError error) error {
 	if cudn == nil {
 		return nil
 	}
@@ -970,10 +942,8 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 
 	networkCreatedCondition := newClusterNetworkCreatedCondition(nads, syncError)
 
-	networkCreatedOrUpdated := meta.SetStatusCondition(&cudn.Status.Conditions, networkCreatedCondition)
-
-	// Apply status if either NetworkCreated or TransportAccepted condition changed
-	if !networkCreatedOrUpdated && !transportUpdated {
+	updated := meta.SetStatusCondition(&cudn.Status.Conditions, networkCreatedCondition)
+	if !updated {
 		return nil
 	}
 	conditionsApply := make([]*metaapplyv1.ConditionApplyConfiguration, len(cudn.Status.Conditions))
@@ -1107,63 +1077,4 @@ func cudnReferencesVTEP(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, vt
 		return false
 	}
 	return cudn.Spec.Network.EVPN.VTEP == vtepName
-}
-
-// ReconcileRouteAdvertisements handles RouteAdvertisements events by re-queuing CUDNs that are selected by the RA.
-// This is called when a RouteAdvertisements CR is created, updated, or deleted to trigger validation
-// of CUDNs that depend on RouteAdvertisements for transport validation.
-func (c *Controller) ReconcileRouteAdvertisements(raName string) error {
-	cudns, err := c.cudnLister.List(labels.Everything())
-	if err != nil {
-		return fmt.Errorf("failed to list CUDNs: %w", err)
-	}
-
-	// Try to get the RA object to check which CUDNs it selects
-	ra, err := c.raLister.Get(raName)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// RA not found (likely a delete event) - fall back to requeueing all no-overlay/EVPN CUDNs
-			// since we can't determine which CUDNs were selected by the deleted RA
-			klog.V(4).InfoS("RouteAdvertisements not found, re-queueing all CUDNs with no-overlay or EVPN transport", "ra", raName)
-			for _, cudn := range cudns {
-				transport := cudn.Spec.Network.GetTransport()
-				if transport == userdefinednetworkv1.TransportOptionNoOverlay || transport == userdefinednetworkv1.TransportOptionEVPN {
-					klog.V(4).InfoS("Re-queueing CUDN following RouteAdvertisements deletion", "cudn", cudn.Name, "ra", raName, "transport", transport)
-					c.cudnController.Reconcile(cudn.Name)
-				}
-			}
-			return nil
-		}
-		return fmt.Errorf("failed to get RA %q: %w", raName, err)
-	}
-
-	// RA exists (create/update event) - only requeue CUDNs that are selected by this RA
-	var errs []error
-	for _, cudn := range cudns {
-		transport := cudn.Spec.Network.GetTransport()
-
-		// Only consider CUDNs with no-overlay or EVPN transport (both require RouteAdvertisements)
-		if transport != userdefinednetworkv1.TransportOptionNoOverlay && transport != userdefinednetworkv1.TransportOptionEVPN {
-			continue
-		}
-
-		// Check if this RA selects this CUDN
-		selects, err := isRASelectingCUDN(ra, cudn)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("failed to check if RouteAdvertisements %q selects CUDN %q: %w", raName, cudn.Name, err))
-			continue
-		}
-
-		if selects {
-			// Check if it advertises pod networks (required for CUDN transport validation)
-			if !slices.Contains(ra.Spec.Advertisements, ratypes.PodNetwork) {
-				continue
-			}
-
-			klog.V(4).InfoS("Re-queueing CUDN selected by RouteAdvertisements", "cudn", cudn.Name, "ra", raName, "transport", transport)
-			c.cudnController.Reconcile(cudn.Name)
-		}
-	}
-
-	return errors.Join(errs...)
 }

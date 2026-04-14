@@ -25,7 +25,6 @@ import (
 	udntemplate "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	networkconnectclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/clientset/versioned"
-	rainformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
 	vtepinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
@@ -173,11 +172,6 @@ func NewClusterManager(
 		if util.IsEVPNEnabled() {
 			vtepInformer = wf.VTEPInformer()
 		}
-		// RouteAdvertisements informer for no-overlay transport validation
-		var raInformer rainformer.RouteAdvertisementsInformer
-		if util.IsRouteAdvertisementsEnabled() {
-			raInformer = wf.RouteAdvertisementsInformer()
-		}
 		udnController := udncontroller.New(
 			ovnClient.NetworkAttchDefClient, wf.NADInformer(),
 			ovnClient.UserDefinedNetworkClient,
@@ -187,7 +181,6 @@ func NewClusterManager(
 			wf.PodCoreInformer(),
 			wf.NamespaceInformer(),
 			vtepInformer,
-			raInformer,
 			cm.recorder,
 		)
 		cm.userDefinedNetworkController = udnController
