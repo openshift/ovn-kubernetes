@@ -15,8 +15,6 @@ import (
 	"github.com/openshift-eng/openshift-tests-extension/pkg/ginkgo"
 	"github.com/spf13/cobra"
 
-	"k8s.io/apimachinery/pkg/util/sets"
-
 	// ensure providers are initialised for configuring infra
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/aws"
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/azure"
@@ -28,6 +26,14 @@ import (
 	// ensure that logging flags are part of the command line.
 	_ "k8s.io/component-base/logs/testinit"
 )
+
+func loadBlockingTests() map[string]bool {
+	blockingTests := make(map[string]bool)
+	for _, testName := range test.BlockingTests {
+		blockingTests[testName] = true
+	}
+	return blockingTests
+}
 
 func main() {
 	// Create our registry of openshift-tests extensions
@@ -64,8 +70,7 @@ func main() {
 		}
 	})
 
-	informingTests := sets.New(test.InformingTests...)
-	blockingTests := sets.New(test.BlockingTests...)
+	blockingTests := loadBlockingTests()
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
 		for _, label := range getTestExtensionLabels() {
@@ -83,19 +88,14 @@ func main() {
 		}
 		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
 
-		switch {
-		case informingTests.Has(spec.Name):
+		if !blockingTests[spec.Name] {
 			spec.Lifecycle = extensiontests.LifecycleInforming
-		case blockingTests.Has(spec.Name):
-			spec.Lifecycle = extensiontests.LifecycleBlocking
-		default:
-			spec.Lifecycle = ""
 		}
 	})
 
 	specs = specs.Select(func(spec *extensiontests.ExtensionTestSpec) bool {
-		// Disable specs that are not explicitly assigned a lifecycle
-		if spec.Lifecycle == "" {
+		// Disable informing specs for now
+		if spec.Lifecycle == extensiontests.LifecycleInforming {
 			return false
 		}
 
