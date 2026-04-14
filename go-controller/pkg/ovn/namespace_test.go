@@ -308,8 +308,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			err = fakeOvn.controller.WatchNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			err = fakeOvn.controller.WatchNodes()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			startDefaultNodeController(fakeOvn.controller)
 
 			err = fakeOvn.controller.StartServiceController(wg, false)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())

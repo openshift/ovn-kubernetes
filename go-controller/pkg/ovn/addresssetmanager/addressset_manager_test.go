@@ -402,6 +402,26 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		// should not be present in given address set
 		eventuallyExpectEmptyAddressSetsExist(asf, peer, namespace1.Name)
 	})
+
+	ginkgo.It("CleanupForController removes controller entries", func() {
+		namespace1 := *testing.NewNamespace(namespaceName1)
+		pod1 := testing.NewPod(namespace1.Name, "pod1", nodeName, ip1)
+		startAddrSetManager(initialDB, []corev1.Namespace{namespace1}, []corev1.Pod{*pod1})
+
+		peer := knet.NetworkPolicyPeer{
+			PodSelector: &metav1.LabelSelector{},
+		}
+		backRef := "NetworkPolicy/namespace1/testpolicy"
+
+		_, _, _, err := addressSetManager.EnsureAddressSet(
+			peer.PodSelector, peer.NamespaceSelector, namespace1.Name, backRef, controllerName, &util.DefaultNetInfo{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		dbIDs := GetPodSelectorAddrSetDbIDs(peer.PodSelector, peer.NamespaceSelector, namespace1.Name, controllerName)
+		asf.EventuallyExpectAddressSetWithAddresses(dbIDs, []string{ip1})
+
+		gomega.Expect(addressSetManager.CleanupForController(controllerName)).To(gomega.Succeed())
+		asf.EventuallyExpectNoAddressSet(dbIDs)
+	})
 })
 
 var _ = ginkgo.Describe("shortLabelSelectorString function", func() {

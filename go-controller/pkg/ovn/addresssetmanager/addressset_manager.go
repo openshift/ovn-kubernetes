@@ -25,6 +25,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 // podSelectorAddressSet stores address set for modifications and used selectors that define this address set.
@@ -216,6 +217,27 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector *met
 	return
 }
 
+// CleanupForController destroys all address sets owned by the given controller
+func (m *AddressSetManager) CleanupForController(controllerName string) error {
+	var errs []error
+	for _, key := range m.addressSets.GetKeys() {
+		if err := m.addressSets.DoWithLock(key, func(key string) error {
+			psAddrSet, found := m.addressSets.Load(key)
+			if !found || psAddrSet.controllerName != controllerName {
+				return nil
+			}
+			if err := psAddrSet.addressSet.Destroy(); err != nil {
+				return fmt.Errorf("failed to destroy address set %s: %w", key, err)
+			}
+			m.addressSets.Delete(key)
+			return nil
+		}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return utilerrors.Join(errs...)
+}
+
 func (m *AddressSetManager) DeleteAddressSet(addrSetKey, backRef string) error {
 	return m.addressSets.DoWithLock(addrSetKey, func(key string) error {
 		psAddrSet, found := m.addressSets.Load(key)
@@ -228,7 +250,6 @@ func (m *AddressSetManager) DeleteAddressSet(addrSetKey, backRef string) error {
 			if err != nil {
 				return err
 			}
-			// only delete from map after successful cleanup
 			m.addressSets.Delete(key)
 		}
 		return nil
