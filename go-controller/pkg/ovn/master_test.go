@@ -1838,6 +1838,66 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+
+	ginkgo.It("includes node primary IP in host-network-namespace address_set when NoOverlay mode is enabled", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			config.Kubernetes.HostNetworkNamespace = "ovn-host-network"
+			// Enable NoOverlay transport mode
+			config.Default.Transport = "no-overlay"
+
+			// Start with empty NodeList, then add node after namespace is created
+			fakeOvn.startWithDBSetup(dbSetup,
+				&corev1.NamespaceList{
+					Items: []corev1.Namespace{*ovntest.NewNamespace(config.Kubernetes.HostNetworkNamespace)},
+				},
+				&corev1.NodeList{
+					Items: []corev1.Node{},
+				},
+			)
+
+			gomega.Expect(fakeOvn.controller.WatchNamespaces()).To(gomega.Succeed(), "Namespace should be created fine")
+			startDefaultNodeController(fakeOvn.controller)
+
+			// Wait for empty address set to be created
+			fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(config.Kubernetes.HostNetworkNamespace)
+
+			// Now create the node with all required annotations
+			newNodeSubnet := "10.1.1.0/24"
+			testNode.Annotations["k8s.ovn.org/node-subnets"] = fmt.Sprintf("{\"default\":[\"%s\"]}", newNodeSubnet)
+			testNode.Annotations["k8s.ovn.org/node-chassis-id"] = chassisIDForNode(testNode.Name)
+			testNode.Annotations["k8s.ovn.org/node-primary-ifaddr"] = "{\"ipv4\":\"192.168.1.10/24\"}"
+			createdNode, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &testNode, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Build expected IPs following the same pattern as the remote zone test
+			var ips []string
+			hostSubnets, err := util.ParseNodeHostSubnetAnnotation(createdNode, types.DefaultNetworkName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			mgmt_ips := util.GetNodeManagementIfAddr(hostSubnets[0])
+			ips = append(ips, mgmt_ips.IP.String())
+			lrpips, err := udn.GetGWRouterIPs(createdNode, fakeOvn.controller.GetNetInfo())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			lrpip, _, _ := net.ParseCIDR(lrpips[0].String())
+			ips = append(ips, lrpip.String())
+
+			// When NoOverlay is enabled, primary interface IPv4 should also be included
+			ips = append(ips, "192.168.1.10") // IPv4 primary interface IP
+
+			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(config.Kubernetes.HostNetworkNamespace, ips)
+
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+			"--init-gateways",
+			"--nodeport",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
 })
 
 func nodeNoHostSubnetAnnotation() map[string]string {
