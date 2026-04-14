@@ -20,8 +20,9 @@ type NodeAnnotationCache struct {
 }
 
 type nodeAnnotationEntry struct {
-	networkMaps map[string]cachedNetworkMap
-	subnetMaps  map[string]cachedSubnetMap
+	networkMaps       map[string]cachedNetworkMap
+	gatewayConfigMaps map[string]cachedGatewayConfigMap
+	subnetMaps        map[string]cachedSubnetMap
 }
 
 type cachedNetworkMap struct {
@@ -36,6 +37,13 @@ type cachedSubnetMap struct {
 	raw string
 	// parsed holds the parsed annotation of network names -> subnets
 	parsed map[string][]*net.IPNet
+}
+
+type cachedGatewayConfigMap struct {
+	// raw is used for fast comparisons within the cache
+	raw string
+	// parsed holds the parsed annotation of network names -> gateway configs
+	parsed map[string]*util.L3GatewayConfig
 }
 
 // NewNodeAnnotationCache creates an empty per-node annotation parse cache.
@@ -61,8 +69,9 @@ func (c *NodeAnnotationCache) updateNodeAnnotationState(node *corev1.Node, updat
 	}
 	networkIDs, networkIDsErr := c.parseNetworkMapCached(node, util.OvnNetworkIDs, updateCache)
 	tunnelIDs, tunnelIDsErr := c.parseNetworkMapCached(node, types.UDNLayer2NodeGRLRPTunnelIDAnnotation, updateCache)
+	l3GatewayConfigs, l3GatewayConfigsErr := c.parseGatewayConfigMapCached(node, util.OvnNodeL3GatewayConfig, updateCache)
 	subnets, subnetsErr := c.parseSubnetMapCached(node, types.NodeSubnetsAnnotation, updateCache)
-	return newNodeAnnotationState(node.Name, networkIDs, networkIDsErr, tunnelIDs, tunnelIDsErr, subnets, subnetsErr)
+	return newNodeAnnotationState(node.Name, networkIDs, networkIDsErr, tunnelIDs, tunnelIDsErr, l3GatewayConfigs, l3GatewayConfigsErr, subnets, subnetsErr)
 }
 
 // ParseUDNLayer2NodeGRLRPTunnelIDCached returns the per-network tunnel ID from the
@@ -110,6 +119,35 @@ func (c *NodeAnnotationCache) parseNetworkMapCached(node *corev1.Node, annotatio
 
 func parseNetworkMapValue(annotationName, annotation string) (map[string]string, error) {
 	out := map[string]string{}
+	if err := json.Unmarshal([]byte(annotation), &out); err != nil {
+		return nil, fmt.Errorf("could not parse %q annotation %q : %v", annotationName, annotation, err)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("unexpected empty %s annotation", annotationName)
+	}
+	return out, nil
+}
+
+func (c *NodeAnnotationCache) parseGatewayConfigMapCached(node *corev1.Node, annotationName string, updateCache bool) (map[string]*util.L3GatewayConfig, error) {
+	annotation, ok := node.Annotations[annotationName]
+	if !ok {
+		return nil, util.NewAnnotationNotSetError("could not find %q annotation", annotationName)
+	}
+	if cached, ok := c.getParsedGatewayConfigMap(node.Name, annotationName, annotation); ok {
+		return cached, nil
+	}
+	parsed, err := parseGatewayConfigMapValue(annotationName, annotation)
+	if err != nil {
+		return nil, err
+	}
+	if updateCache {
+		c.setGatewayConfigMap(node.Name, annotationName, annotation, parsed)
+	}
+	return parsed, nil
+}
+
+func parseGatewayConfigMapValue(annotationName, annotation string) (map[string]*util.L3GatewayConfig, error) {
+	out := map[string]*util.L3GatewayConfig{}
 	if err := json.Unmarshal([]byte(annotation), &out); err != nil {
 		return nil, fmt.Errorf("could not parse %q annotation %q : %v", annotationName, annotation, err)
 	}
@@ -248,6 +286,27 @@ func (c *NodeAnnotationCache) getParsedSubnetMap(nodeName, annotationName, raw s
 	return parsed, ok
 }
 
+// getParsedGatewayConfigMap returns a cached parsed gateway-config annotation
+// for a node.
+func (c *NodeAnnotationCache) getParsedGatewayConfigMap(nodeName, annotationName, raw string) (map[string]*util.L3GatewayConfig, bool) {
+	var parsed map[string]*util.L3GatewayConfig
+	var ok bool
+	_ = c.nodes.DoWithLock(nodeName, func(key string) error {
+		entry, loaded := c.nodes.Load(key)
+		if !loaded || entry == nil {
+			return nil
+		}
+		cached, found := entry.gatewayConfigMaps[annotationName]
+		if !found || cached.raw != raw {
+			return nil
+		}
+		parsed = cached.parsed
+		ok = true
+		return nil
+	})
+	return parsed, ok
+}
+
 // setSubnetMap stores a parsed subnet annotation for a node keyed by
 // annotationName and the exact raw annotation string from the node object.
 // The parsed map is stored by reference and is not deep-copied.
@@ -255,6 +314,17 @@ func (c *NodeAnnotationCache) setSubnetMap(nodeName, annotationName, raw string,
 	_ = c.nodes.DoWithLock(nodeName, func(key string) error {
 		entry := c.ensureEntryLocked(key)
 		entry.subnetMaps[annotationName] = cachedSubnetMap{raw: raw, parsed: parsed}
+		return nil
+	})
+}
+
+// setGatewayConfigMap stores a parsed gateway-config annotation for a node
+// keyed by annotationName and the exact raw annotation string from the node
+// object.
+func (c *NodeAnnotationCache) setGatewayConfigMap(nodeName, annotationName, raw string, parsed map[string]*util.L3GatewayConfig) {
+	_ = c.nodes.DoWithLock(nodeName, func(key string) error {
+		entry := c.ensureEntryLocked(key)
+		entry.gatewayConfigMaps[annotationName] = cachedGatewayConfigMap{raw: raw, parsed: parsed}
 		return nil
 	})
 }
@@ -276,8 +346,9 @@ func (c *NodeAnnotationCache) DeleteNode(nodeName string) {
 // needed. Caller must hold the per-node syncmap key lock.
 func (c *NodeAnnotationCache) ensureEntryLocked(nodeName string) *nodeAnnotationEntry {
 	entry, _ := c.nodes.LoadOrStore(nodeName, &nodeAnnotationEntry{
-		networkMaps: map[string]cachedNetworkMap{},
-		subnetMaps:  map[string]cachedSubnetMap{},
+		networkMaps:       map[string]cachedNetworkMap{},
+		gatewayConfigMaps: map[string]cachedGatewayConfigMap{},
+		subnetMaps:        map[string]cachedSubnetMap{},
 	})
 	return entry
 }

@@ -532,11 +532,15 @@ func (g *gateway) Reconcile() error {
 	klog.Info("Reconciling gateway with updates")
 	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		if g.openflowManager != nil {
-			if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
-				return err
+			if g.nodeIPManager == nil {
+				klog.V(5).Info("Skipping gateway OpenFlow reconcile because node IP manager is not initialized yet")
+			} else {
+				if err := g.openflowManager.updateBridgeFlowCache(g.nodeIPManager.ListAddresses()); err != nil {
+					return err
+				}
+				// let's sync these flows immediately
+				g.openflowManager.requestFlowSync()
 			}
-			// let's sync these flows immediately
-			g.openflowManager.requestFlowSync()
 		}
 	}
 	// TBD updateSNATRules() gets node host-cidr by accessing gateway.nodeIPManager, which does not
@@ -578,11 +582,19 @@ func (g *gateway) addAllServices() []error {
 }
 
 func (g *gateway) updateSNATRules() error {
-	subnets := util.IPsToNetworkIPs(g.nodeIPManager.mgmtPort.GetAddresses()...)
-
 	if config.Gateway.Mode != config.GatewayModeLocal {
 		return delLocalGatewayPodSubnetNFTRules()
 	}
+
+	if g.nodeIPManager == nil {
+		klog.V(5).Info("Skipping SNAT rule update because node IP manager is not initialized yet")
+		return nil
+	}
+	if g.nodeIPManager.mgmtPort == nil {
+		klog.V(5).Info("Skipping SNAT rule update because management port is not initialized yet")
+		return nil
+	}
+	subnets := util.IPsToNetworkIPs(g.nodeIPManager.mgmtPort.GetAddresses()...)
 
 	return addOrUpdateLocalGatewayPodSubnetNFTRules(g.GetDefaultPodNetworkAdvertised(), subnets...)
 }

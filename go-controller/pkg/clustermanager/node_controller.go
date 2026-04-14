@@ -17,7 +17,7 @@ func (clusterManagerNodePolicy) NodeHasNetwork(_, _ string) bool {
 	return true
 }
 
-func (clusterManagerNodePolicy) ShouldFilterByRemoteNetworkActivity(_ *corev1.Node) bool {
+func (clusterManagerNodePolicy) ShouldFilterByRemoteNetworkActivity(_ *corev1.Node, _ string) bool {
 	return false
 }
 

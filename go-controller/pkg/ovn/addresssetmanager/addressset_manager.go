@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -25,6 +26,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 // podSelectorAddressSet stores address set for modifications and used selectors that define this address set.
@@ -37,12 +39,17 @@ type podSelectorAddressSet struct {
 	namespaceSelector labels.Selector
 	// namespace is used when namespaceSelector is nil to set static namespace
 	namespace string
+	// nodeSelector decides which nodes' pods should be added to the address set; nil means all nodes
+	nodeSelector labels.Selector
 
 	addressSet addressset.AddressSet
 
 	// selectedNamespaces is a cache for namespaces that were selected by this address set during the last reconciliation
 	// used to optimize events processing.
 	selectedNamespaces sets.Set[string]
+	// selectedNodes is a cache for nodes that were selected by this address set during the last reconciliation
+	// used to optimize node event processing. Only set when nodeSelector is non-nil.
+	selectedNodes sets.Set[string]
 
 	// network-specific fields
 	controllerName string
@@ -66,9 +73,11 @@ type AddressSetManager struct {
 
 	podLister       listers.PodLister
 	namespaceLister listers.NamespaceLister
+	nodeLister      listers.NodeLister
 
 	podController        controller.Controller
 	nsController         controller.Controller
+	nodeController       controller.Controller
 	addressSetReconciler controller.Reconciler
 
 	// All network controllers are getting this function from the same networkmanager, so we can share it
@@ -76,7 +85,7 @@ type AddressSetManager struct {
 }
 
 func NewAddressSetManager(podInformer coreinformers.PodInformer, namespaceInformer coreinformers.NamespaceInformer,
-	nbClient libovsdbclient.Client, getNetworkNameForNADKey func(nadKey string) string) *AddressSetManager {
+	nodeInformer coreinformers.NodeInformer, nbClient libovsdbclient.Client, getNetworkNameForNADKey func(nadKey string) string) *AddressSetManager {
 	m := &AddressSetManager{
 		name:                       "pod-selector-address-set-manager",
 		nbClient:                   nbClient,
@@ -86,6 +95,7 @@ func NewAddressSetManager(podInformer coreinformers.PodInformer, namespaceInform
 		addressSets:                syncmap.NewSyncMap[*podSelectorAddressSet](),
 		podLister:                  podInformer.Lister(),
 		namespaceLister:            namespaceInformer.Lister(),
+		nodeLister:                 nodeInformer.Lister(),
 		getNetworkNameForNADKey:    getNetworkNameForNADKey,
 	}
 	podCfg := &controller.ControllerConfig[corev1.Pod]{
@@ -110,7 +120,18 @@ func NewAddressSetManager(podInformer coreinformers.PodInformer, namespaceInform
 	}
 	m.nsController = controller.NewController[corev1.Namespace](m.name+"-namespace", nsCfg)
 
-	// addressSetReconciler is fed from the pod and namespace controllers
+	nodeCfg := &controller.ControllerConfig[corev1.Node]{
+		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile:      m.reconcileNode,
+		ObjNeedsUpdate: m.nodeNeedUpdate,
+		MaxAttempts:    controller.InfiniteAttempts,
+		Threadiness:    1,
+		Informer:       nodeInformer.Informer(),
+		Lister:         nodeInformer.Lister().List,
+	}
+	m.nodeController = controller.NewController[corev1.Node](m.name+"-node", nodeCfg)
+
+	// addressSetReconciler is fed from the pod, namespace and node controllers
 	m.addressSetReconciler = controller.NewReconciler(
 		m.name+"-addrset",
 		&controller.ReconcilerConfig{
@@ -125,30 +146,32 @@ func NewAddressSetManager(podInformer coreinformers.PodInformer, namespaceInform
 
 func (m *AddressSetManager) Start() error {
 	klog.Infof("Starting %s controller", m.name)
-	return controller.StartWithInitialSync(m.initialSync, m.podController, m.nsController, m.addressSetReconciler)
+	return controller.StartWithInitialSync(m.initialSync, m.podController, m.nsController, m.nodeController, m.addressSetReconciler)
 }
 
 func (m *AddressSetManager) Stop() {
 	klog.Infof("Stopping %s controller", m.name)
-	controller.Stop(m.podController, m.nsController, m.addressSetReconciler)
+	controller.Stop(m.podController, m.nsController, m.nodeController, m.addressSetReconciler)
 }
 
 func (m *AddressSetManager) initialSync() error {
 	return libovsdbutil.DeleteAddrSetsWithoutACLRefAnyController(libovsdbops.AddressSetPodSelector, m.nbClient)
 }
 
-// EnsureAddressSet returns address set for requested (podSelector, namespaceSelector, namespace).
+// EnsureAddressSet returns address set for requested (podSelector, namespaceSelector, namespace, nodeSelector).
 // If namespaceSelector is nil, namespace will be used with podSelector statically.
 // podSelector should not be nil, use metav1.LabelSelector{} to match all pods.
 // namespaceSelector can only be nil when namespace is set, use metav1.LabelSelector{} to match all namespaces.
+// nodeSelector is optional; nil means pods on all nodes are included.
 // podSelector = metav1.LabelSelector{} + static namespace may be replaced with namespace address set,
 // podSelector = metav1.LabelSelector{} + namespaceSelector may be replaced with a set of namespace address sets,
 // but both cases will work here too.
 //
 // backRef is the key that should be used for cleanup.
 // psAddrSetHashV4, psAddrSetHashV6 may be set to empty string if address set for that ipFamily wasn't created.
-func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector *metav1.LabelSelector,
+func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nodeSelector *metav1.LabelSelector,
 	namespace, backRef, controllerName string, netInfo util.NetInfo) (addrSetKey, psAddrSetHashV4, psAddrSetHashV6 string, err error) {
+	nodeSelector = normalizeNodeSelector(nodeSelector)
 	if podSelector == nil {
 		err = fmt.Errorf("pod selector is nil")
 		return
@@ -161,7 +184,7 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector *met
 		// namespace will be ignored in this case
 		namespace = ""
 	}
-	var nsSel, podSel labels.Selector
+	var nsSel, podSel, nodeSel labels.Selector
 	if namespaceSelector != nil {
 		nsSel, err = metav1.LabelSelectorAsSelector(namespaceSelector)
 		if err != nil {
@@ -175,12 +198,19 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector *met
 		err = fmt.Errorf("can't parse pod selector %v: %w", podSelector, err)
 		return
 	}
-	addrSetKey = getInternalKey(podSelector, namespaceSelector, namespace, controllerName)
+	if nodeSelector != nil {
+		nodeSel, err = metav1.LabelSelectorAsSelector(nodeSelector)
+		if err != nil {
+			err = fmt.Errorf("can't parse node selector %v: %w", nodeSelector, err)
+			return
+		}
+	}
+	addrSetKey = getInternalKey(podSelector, namespaceSelector, nodeSelector, namespace, controllerName)
 
 	err = m.addressSets.DoWithLock(addrSetKey, func(key string) error {
 		psAddrSet, found := m.addressSets.Load(key)
 		if !found {
-			addrSetDbIDs := GetPodSelectorAddrSetDbIDs(podSelector, namespaceSelector, namespace, controllerName)
+			addrSetDbIDs := GetPodSelectorAddrSetDbIDs(podSelector, namespaceSelector, nodeSelector, namespace, controllerName)
 			ipv4Mode, ipv6Mode := netInfo.IPMode()
 			var addrSet addressset.AddressSet
 			switch {
@@ -200,6 +230,7 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector *met
 				podSelector:       podSel,
 				namespaceSelector: nsSel,
 				namespace:         namespace,
+				nodeSelector:      nodeSel,
 				addressSet:        addrSet,
 				controllerName:    controllerName,
 				netInfo:           netInfo,
@@ -216,6 +247,27 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector *met
 	return
 }
 
+// CleanupForController destroys all address sets owned by the given controller
+func (m *AddressSetManager) CleanupForController(controllerName string) error {
+	var errs []error
+	for _, key := range m.addressSets.GetKeys() {
+		if err := m.addressSets.DoWithLock(key, func(key string) error {
+			psAddrSet, found := m.addressSets.Load(key)
+			if !found || psAddrSet.controllerName != controllerName {
+				return nil
+			}
+			if err := psAddrSet.addressSet.Destroy(); err != nil {
+				return fmt.Errorf("failed to destroy address set %s: %w", key, err)
+			}
+			m.addressSets.Delete(key)
+			return nil
+		}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return utilerrors.Join(errs...)
+}
+
 func (m *AddressSetManager) DeleteAddressSet(addrSetKey, backRef string) error {
 	return m.addressSets.DoWithLock(addrSetKey, func(key string) error {
 		psAddrSet, found := m.addressSets.Load(key)
@@ -228,7 +280,6 @@ func (m *AddressSetManager) DeleteAddressSet(addrSetKey, backRef string) error {
 			if err != nil {
 				return err
 			}
-			// only delete from map after successful cleanup
 			m.addressSets.Delete(key)
 		}
 		return nil
@@ -267,10 +318,11 @@ func (m *AddressSetManager) podNeedUpdate(old, new *corev1.Pod) bool {
 }
 
 func (m *AddressSetManager) reconcilePod(podKey string) error {
-	namespace, _, err := cache.SplitMetaNamespaceKey(podKey)
+	namespace, name, err := cache.SplitMetaNamespaceKey(podKey)
 	if err != nil {
 		return fmt.Errorf("failed to split meta namespace key %q: %v", podKey, err)
 	}
+	var pod *corev1.Pod
 	// only reconcile if this pod is in a namespace that is selected by an address set
 	// Get all existing keys, then lock address sets per key and check if they are affected.
 	// If the new keys are added, it will always call reconcile for that new key, so there is no race.
@@ -278,10 +330,29 @@ func (m *AddressSetManager) reconcilePod(podKey string) error {
 	existingAddrSets := m.addressSets.GetKeys()
 	for _, addrSetKey := range existingAddrSets {
 		// never returns error
-		_ = m.addressSets.DoWithLock(addrSetKey, func(addrSetKey string) error {
+		if err = m.addressSets.DoWithLock(addrSetKey, func(addrSetKey string) error {
 			addrSet, found := m.addressSets.Load(addrSetKey)
 			if !found {
 				// nothing to do
+				return nil
+			}
+			if addrSet.nodeSelector != nil {
+				if pod == nil {
+					pod, err = m.podLister.Pods(namespace).Get(name)
+					if err != nil {
+						if apierrors.IsNotFound(err) {
+							// pod deleted
+							pod = nil
+						} else {
+							return fmt.Errorf("failed to get pod %s in namespace %s: %v", name, namespace, err)
+						}
+					}
+				}
+				// check if pod's node matches address set's node selector
+				if pod == nil || addrSet.selectedNodes == nil || addrSet.selectedNodes.Has(pod.Spec.NodeName) {
+					m.addressSetReconciler.Reconcile(addrSetKey)
+					return nil
+				}
 				return nil
 			}
 			// only check address sets that have previously matched pod's namespace to avoid extra reconciliations
@@ -291,7 +362,9 @@ func (m *AddressSetManager) reconcilePod(podKey string) error {
 				return nil
 			}
 			return nil
-		})
+		}); err != nil {
+			return fmt.Errorf("failed to reconcile address set %s for pod %s: %v", addrSetKey, podKey, err)
+		}
 	}
 	return nil
 }
@@ -346,6 +419,56 @@ func (m *AddressSetManager) reconcileNamespace(nsKey string) error {
 	return nil
 }
 
+func (m *AddressSetManager) nodeNeedUpdate(old, new *corev1.Node) bool {
+	if new == nil || old == nil {
+		return true
+	}
+	if !labels.Equals(new.Labels, old.Labels) {
+		// if node labels change, we need to reconcile address sets that use a node selector
+		return true
+	}
+	return false
+}
+
+func (m *AddressSetManager) reconcileNode(nodeKey string) error {
+	// find address sets that could be affected by this node event
+	// Get all existing keys, then lock address sets per key and check if they are affected.
+	// If the new keys are added, it will always call reconcile for that new key, so there is no race.
+	// If some keys are deleted, we just ignore it.
+	existingAddrSets := m.addressSets.GetKeys()
+	for _, addrSetKey := range existingAddrSets {
+		err := m.addressSets.DoWithLock(addrSetKey, func(addrSetKey string) error {
+			addrSet, _ := m.addressSets.Load(addrSetKey)
+			if addrSet == nil || addrSet.nodeSelector == nil || addrSet.nodeSelector.Empty() {
+				// nothing to do
+				return nil
+			}
+			// first find nodes that currently match this address set
+			currentlyMatchedNodes, err := m.getSelectedNodes(addrSet.nodeSelector)
+			if err != nil {
+				return err
+			}
+			if currentlyMatchedNodes.Has(nodeKey) {
+				// this node is relevant for this address set, reconcile
+				m.addressSetReconciler.Reconcile(addrSetKey)
+				return nil
+			}
+			// reconcile the address set if the node matches the previous selected nodes
+			previouslyMatchedNodes := addrSet.selectedNodes
+			// previouslyMatchedNodes == nil means the address set hasn't been reconciled yet, so need to reconcile
+			if previouslyMatchedNodes == nil || previouslyMatchedNodes.Has(nodeKey) {
+				m.addressSetReconciler.Reconcile(addrSetKey)
+				return nil
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to reconcile address set %s for node %s: %v", addrSetKey, nodeKey, err)
+		}
+	}
+	return nil
+}
+
 func (m *AddressSetManager) reconcileAddressSet(key string) error {
 	return m.addressSets.DoWithLock(key, func(key string) error {
 		psAddrSet, found := m.addressSets.Load(key)
@@ -392,6 +515,21 @@ func (m *AddressSetManager) reconcileAddressSet(key string) error {
 				}
 			}
 		}
+		// apply node selector filter if it's not empty
+		if psAddrSet.nodeSelector != nil && !psAddrSet.nodeSelector.Empty() {
+			selectedNodes, err := m.getSelectedNodes(psAddrSet.nodeSelector)
+			if err != nil {
+				return fmt.Errorf("failed to get selected nodes for address set %s: %v", key, err)
+			}
+			filtered := make([]*corev1.Pod, 0, len(pods))
+			for _, pod := range pods {
+				if pod.Spec.NodeName != "" && selectedNodes.Has(pod.Spec.NodeName) {
+					filtered = append(filtered, pod)
+				}
+			}
+			pods = filtered
+			psAddrSet.selectedNodes = selectedNodes
+		}
 		ips, err := m.getPodIPs(pods, psAddrSet.netInfo)
 		if err != nil {
 			return fmt.Errorf("failed to get pod IPs: %v", err)
@@ -430,6 +568,19 @@ func (m *AddressSetManager) getSelectedNamespaces(s *podSelectorAddressSet) (set
 	return matchedNamespaces, nil
 }
 
+// getSelectedNodes returns the set of node names that match the node selector.
+func (m *AddressSetManager) getSelectedNodes(nodeSelector labels.Selector) (sets.Set[string], error) {
+	nodes, err := m.nodeLister.List(nodeSelector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %v", err)
+	}
+	names := sets.New[string]()
+	for _, n := range nodes {
+		names.Insert(n.Name)
+	}
+	return names, nil
+}
+
 func (m *AddressSetManager) getPodIPs(pods []*corev1.Pod, netInfo util.NetInfo) ([]string, error) {
 	ips := []string{}
 	for _, pod := range pods {
@@ -452,8 +603,9 @@ func (m *AddressSetManager) getPodIPs(pods []*corev1.Pod, netInfo util.NetInfo) 
 	return ips, nil
 }
 
-func GetPodSelectorAddrSetDbIDs(podSelector, namespaceSelector *metav1.LabelSelector, namespace, controller string) *libovsdbops.DbObjectIDs {
-	addrsetKey := getPodSelectorKey(podSelector, namespaceSelector, namespace)
+func GetPodSelectorAddrSetDbIDs(podSelector, namespaceSelector, nodeSelector *metav1.LabelSelector, namespace, controller string) *libovsdbops.DbObjectIDs {
+	nodeSelector = normalizeNodeSelector(nodeSelector)
+	addrsetKey := getPodSelectorKey(podSelector, namespaceSelector, nodeSelector, namespace)
 	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetPodSelector, controller, map[libovsdbops.ExternalIDKey]string{
 		// pod selector address sets are cluster-scoped, only need name
 		libovsdbops.ObjectNameKey: addrsetKey,
@@ -526,11 +678,11 @@ func shortLabelSelectorString(sel *metav1.LabelSelector) string {
 
 // Since we have joined this manager for multiple controllers, we need to make keys unique across controllers.
 // In the db it is already achieved by using controller name in ExternalIDs, but for internal map we also need to add controller name
-func getInternalKey(podSelector, namespaceSelector *metav1.LabelSelector, namespace, controllerName string) string {
-	return controllerName + "_" + getPodSelectorKey(podSelector, namespaceSelector, namespace)
+func getInternalKey(podSelector, namespaceSelector, nodeSelector *metav1.LabelSelector, namespace, controllerName string) string {
+	return controllerName + "_" + getPodSelectorKey(podSelector, namespaceSelector, nodeSelector, namespace)
 }
 
-func getPodSelectorKey(podSelector, namespaceSelector *metav1.LabelSelector, namespace string) string {
+func getPodSelectorKey(podSelector, namespaceSelector, nodeSelector *metav1.LabelSelector, namespace string) string {
 	var namespaceKey string
 	if namespaceSelector == nil {
 		// namespace is static
@@ -538,5 +690,16 @@ func getPodSelectorKey(podSelector, namespaceSelector *metav1.LabelSelector, nam
 	} else {
 		namespaceKey = shortLabelSelectorString(namespaceSelector)
 	}
-	return namespaceKey + "_" + shortLabelSelectorString(podSelector)
+	key := namespaceKey + "_" + shortLabelSelectorString(podSelector)
+	if nodeSelector != nil {
+		key += "_" + shortLabelSelectorString(nodeSelector)
+	}
+	return key
+}
+
+func normalizeNodeSelector(sel *metav1.LabelSelector) *metav1.LabelSelector {
+	if sel != nil && len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
+		return nil
+	}
+	return sel
 }

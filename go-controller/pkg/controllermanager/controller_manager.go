@@ -66,7 +66,7 @@ type ControllerManager struct {
 	// networkManager creates and deletes network controllers
 	networkManager     networkmanager.Controller
 	routeImportManager routeimport.Controller
-	udnNodeController  *nodecontroller.NodeController
+	nodeController     *nodecontroller.NodeController
 
 	// eIPController programs OVN to support EgressIP
 	eIPController *ovn.EgressIPController
@@ -85,21 +85,21 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 	switch topoType {
 	case ovntypes.Layer3Topology:
 		oc, err := ovn.NewLayer3UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.eIPController, cm.portCache, cm.addressSetManager, cm.udnNodeController)
+			cm.eIPController, cm.portCache, cm.addressSetManager, cm.nodeController)
 		if err != nil {
 			return nil, err
 		}
 		return oc, nil
 	case ovntypes.Layer2Topology:
 		oc, err := ovn.NewLayer2UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.portCache, cm.eIPController, cm.addressSetManager, cm.udnNodeController)
+			cm.portCache, cm.eIPController, cm.addressSetManager, cm.nodeController)
 		if err != nil {
 			return nil, err
 		}
 		return oc, nil
 	case ovntypes.LocalnetTopology:
 		oc := ovn.NewLocalnetUserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.addressSetManager,
-			cm.udnNodeController)
+			cm.nodeController)
 		return oc, nil
 	}
 	return nil, fmt.Errorf("topology type %s not supported", topoType)
@@ -297,8 +297,8 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 		if err != nil {
 			return nil, err
 		}
-		cm.udnNodeController = nodecontroller.NewNodeController(cm.watchFactory, cm.networkManager.Interface())
 	}
+	cm.nodeController = nodecontroller.NewNodeController(cm.watchFactory, cm.networkManager.Interface())
 
 	if util.IsRouteAdvertisementsEnabled() {
 		if !config.OVNKubernetesFeature.EnableInterconnect {
@@ -307,7 +307,7 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 		cm.routeImportManager = routeimport.New(config.Default.Zone, cm.nbClient)
 	}
 	cm.addressSetManager = addresssetmanager.NewAddressSetManager(cm.watchFactory.PodCoreInformer(),
-		cm.watchFactory.NamespaceInformer(), cm.nbClient, cm.networkManager.Interface().GetNetworkNameForNADKey)
+		cm.watchFactory.NamespaceInformer(), cm.watchFactory.NodeCoreInformer(), cm.nbClient, cm.networkManager.Interface().GetNetworkNameForNADKey)
 
 	return cm, nil
 }
@@ -373,7 +373,7 @@ func (cm *ControllerManager) initDefaultNetworkController(observManager *observa
 	if err != nil {
 		return fmt.Errorf("failed to create common network controller info: %w", err)
 	}
-	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache, cm.addressSetManager)
+	defaultController, err := ovn.NewDefaultNetworkController(cnci, observManager, cm.networkManager.Interface(), cm.routeImportManager, cm.eIPController, cm.portCache, cm.addressSetManager, cm.nodeController)
 	if err != nil {
 		return err
 	}
@@ -516,8 +516,8 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 	}
 
 	if cm.networkManager != nil {
-		if cm.udnNodeController != nil {
-			if err = cm.udnNodeController.Start(); err != nil {
+		if cm.nodeController != nil {
+			if err = cm.nodeController.Start(); err != nil {
 				return fmt.Errorf("failed to start UDN node topology controller: %v", err)
 			}
 		}
@@ -553,8 +553,8 @@ func (cm *ControllerManager) Stop() {
 
 	// stop the NAD controller
 	if cm.networkManager != nil {
-		if cm.udnNodeController != nil {
-			cm.udnNodeController.Stop()
+		if cm.nodeController != nil {
+			cm.nodeController.Stop()
 		}
 		cm.networkManager.Stop()
 	}

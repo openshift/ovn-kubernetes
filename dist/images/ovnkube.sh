@@ -1245,8 +1245,8 @@ ovnkube-identity() {
     --webhook-cert-dir="/etc/webhook-cert" \
     ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_hybrid_overlay_flag} \
-    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovnkube-cluster-manager" \
-    --extra-allowed-user="system:serviceaccount:ovn-kubernetes:ovnkube-master" \
+    --extra-allowed-user="system:serviceaccount:${ovn_kubernetes_namespace}:ovnkube-cluster-manager" \
+    --extra-allowed-user="system:serviceaccount:${ovn_kubernetes_namespace}:ovnkube-master" \
     --loglevel="${ovnkube_loglevel}"
 
     exit 9
@@ -1563,6 +1563,7 @@ ovn-master() {
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --metrics-enable-pprof \
     --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
+    --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --pidfile ${OVN_RUNDIR}/ovnkube-master.pid &
 
   echo "=============== ovn-master ========== running"
@@ -1925,6 +1926,7 @@ ovnkube-controller() {
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
     --metrics-enable-pprof \
+    --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
     --zone ${ovn_zone} &
 
@@ -2472,6 +2474,7 @@ ovnkube-controller-with-node() {
     --metrics-enable-pprof \
     --mtu=${mtu} \
     --nodeport \
+    --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
     --zone ${ovn_zone} &
@@ -2739,6 +2742,7 @@ ovn-cluster-manager() {
     --loglevel=${ovnkube_loglevel} \
     --metrics-bind-address ${ovnkube_cluster_manager_metrics_bind_address} \
     --metrics-enable-pprof \
+    --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --pidfile ${OVN_RUNDIR}/ovnkube-cluster-manager.pid &
 
   echo "=============== ovn-cluster-manager ========== running"
@@ -3175,6 +3179,7 @@ ovn-node() {
         --metrics-enable-pprof \
         --mtu=${mtu} \
         --nodeport \
+        --ovn-config-namespace ${ovn_kubernetes_namespace} \
         --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
         --pidfile ${OVN_RUNDIR}/ovnkube.pid \
         --zone ${ovn_zone} &
@@ -3211,7 +3216,8 @@ cleanup-ovn-node() {
   /usr/bin/ovnkube --cleanup-node ${K8S_NODE} --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
     --k8s-token=${k8s_token} --k8s-apiserver=${K8S_APISERVER} --k8s-cacert=${k8s_cacert} \
     --loglevel=${ovnkube_loglevel} \
-    --logfile /var/log/ovn-kubernetes/ovnkube.log
+    --logfile /var/log/ovn-kubernetes/ovnkube.log \
+    --ovn-config-namespace ${ovn_kubernetes_namespace}
 
 }
 
