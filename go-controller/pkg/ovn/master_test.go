@@ -1858,7 +1858,8 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 			)
 
 			gomega.Expect(fakeOvn.controller.WatchNamespaces()).To(gomega.Succeed(), "Namespace should be created fine")
-			startDefaultNodeController(fakeOvn.controller)
+			err = fakeOvn.controller.WatchNodes()
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Wait for empty address set to be created
 			fakeOvn.asf.EventuallyExpectEmptyAddressSetExist(config.Kubernetes.HostNetworkNamespace)
