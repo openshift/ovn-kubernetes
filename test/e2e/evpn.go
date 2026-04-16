@@ -1125,7 +1125,7 @@ func randomVTEPSubnets() (ipv4, ipv6 string) {
 // =============================================================================
 
 func getExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
-	kindNetwork, err := infraprovider.Get().GetNetwork("kind")
+	kindNetwork, err := infraprovider.Get().PrimaryNetwork()
 	if err != nil {
 		return "", err
 	}
