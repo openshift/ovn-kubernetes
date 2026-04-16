@@ -23,6 +23,8 @@ the [Kubernetes Network Custom Resource Definition De-facto Standard](https://gi
 ## Prerequisites
 - [multus-cni](https://github.com/k8snetworkplumbingwg/multus-cni)
 
+Always check the dependencies on the [Requirements page](../requirements.md)
+
 ## Motivation
 Multihoming is essential when you need more than one network interface on your pods. This can be useful for various
 use cases, such as virtual network functions (VNFs), firewalls, or virtualization (virt) where the default
@@ -308,8 +310,8 @@ spec:
 OVN-Kubernetes supports attaching a pod to the same non-primary user-defined
 network multiple times, allowing the pod to have multiple interfaces connected
 to the same network. This is useful for workloads that require multiple network
-interfaces on the same network for advanced networking scenarios. Note that only
-layer 2 and layer 3 networks are supported.
+interfaces on the same network for advanced networking scenarios. Note that
+layer 2, layer 3 and localnet networks are all supported.
 
 To request multiple interfaces on the same network, specify the network
 multiple times in the `k8s.v1.cni.cncf.io/networks` annotation:

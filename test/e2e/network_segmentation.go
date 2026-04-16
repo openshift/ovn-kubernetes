@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/feature"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
-	infraapi "github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
+	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubectl/pkg/util/podutils"
@@ -281,7 +282,7 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 						udnPodConfig podConfiguration,
 					) {
 						if !isInterconnectEnabled() {
-							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4528"
+							const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4528"
 							e2eskipper.Skipf(
 								"These tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
 							)
@@ -1559,7 +1560,7 @@ spec:
 			var actualConditions []metav1.Condition
 			g.Expect(json.Unmarshal([]byte(conditionsJSON), &actualConditions)).To(Succeed())
 			return normalizeConditions(actualConditions)
-		}, 5*time.Second, 1*time.Second).Should(ConsistOf(metav1.Condition{
+		}, 5*time.Second, 1*time.Second).Should(ContainElement(metav1.Condition{
 			Type:    "NetworkCreated",
 			Status:  metav1.ConditionFalse,
 			Reason:  "NetworkAttachmentDefinitionSyncError",
@@ -1598,7 +1599,7 @@ spec:
 					"can be accessed to from the pods running in the Kubernetes cluster",
 					func(netConfigParams *networkAttachmentConfigParams, clientPodConfig podConfiguration) {
 						if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
-							const upstreamIssue = "https://github.com/ovn-org/ovn-kubernetes/issues/4642"
+							const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4642"
 							e2eskipper.Skipf(
 								"Egress e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
 							)
@@ -2251,23 +2252,31 @@ func validateClusterUDNStatusReportsActiveNamespacesFunc(client dynamic.Interfac
 			return fmt.Errorf("expected at least one condition in %v", cUDN)
 		}
 
-		c := conditions[0]
-		if c.Type != "NetworkCreated" {
-			return fmt.Errorf("expected NetworkCreated type in %v", c)
+		// Find NetworkCreated condition among all conditions
+		var networkCreatedCond *metav1.Condition
+		for i := range conditions {
+			if conditions[i].Type == "NetworkCreated" {
+				networkCreatedCond = &conditions[i]
+				break
+			}
 		}
-		if c.Status != metav1.ConditionTrue {
-			return fmt.Errorf("expected True status in %v", c)
+		if networkCreatedCond == nil {
+			return fmt.Errorf("NetworkCreated condition not found in conditions: %v", conditions)
 		}
-		if c.Reason != "NetworkAttachmentDefinitionCreated" {
-			return fmt.Errorf("expected NetworkAttachmentDefinitionCreated reason in %v", c)
+
+		if networkCreatedCond.Status != metav1.ConditionTrue {
+			return fmt.Errorf("expected True status in NetworkCreated condition, got: %v", networkCreatedCond)
 		}
-		if !strings.Contains(c.Message, "NetworkAttachmentDefinition has been created in following namespaces:") {
-			return fmt.Errorf("expected \"NetworkAttachmentDefinition has been created in following namespaces:\" in %s", c.Message)
+		if networkCreatedCond.Reason != "NetworkAttachmentDefinitionCreated" {
+			return fmt.Errorf("expected NetworkAttachmentDefinitionCreated reason in NetworkCreated condition, got: %v", networkCreatedCond)
+		}
+		if !strings.Contains(networkCreatedCond.Message, "NetworkAttachmentDefinition has been created in following namespaces:") {
+			return fmt.Errorf("expected \"NetworkAttachmentDefinition has been created in following namespaces:\" in %s", networkCreatedCond.Message)
 		}
 
 		for _, ns := range expectedActiveNsNames {
-			if !strings.Contains(c.Message, ns) {
-				return fmt.Errorf("expected to find %q namespace in %s", ns, c.Message)
+			if !strings.Contains(networkCreatedCond.Message, ns) {
+				return fmt.Errorf("expected to find %q namespace in %s", ns, networkCreatedCond.Message)
 			}
 		}
 		return nil
@@ -2284,17 +2293,30 @@ func validateClusterUDNStatusReportConsumers(client dynamic.Interface, cUDNName,
 		return err
 	}
 	conditions = normalizeConditions(conditions)
+
+	// Find NetworkCreated condition among all conditions
+	var networkCreatedCond *metav1.Condition
+	for i := range conditions {
+		if conditions[i].Type == "NetworkCreated" {
+			networkCreatedCond = &conditions[i]
+			break
+		}
+	}
+	if networkCreatedCond == nil {
+		return fmt.Errorf("NetworkCreated condition not found in conditions: %v", conditions)
+	}
+
 	expectedMsg := fmt.Sprintf("failed to delete NetworkAttachmentDefinition [%[1]s/%[2]s]: network in use by the following pods: [%[1]s/%[3]s]",
 		udnNamespace, cUDNName, expectedPodName)
-	expectedConditions := []metav1.Condition{
-		{
-			Type:    "NetworkCreated",
-			Status:  "False",
-			Reason:  "NetworkAttachmentDefinitionSyncError",
-			Message: expectedMsg,
-		}}
-	if !reflect.DeepEqual(conditions, expectedConditions) {
-		return fmt.Errorf("expected conditions: %v, got: %v", expectedConditions, conditions)
+	expectedCondition := metav1.Condition{
+		Type:    "NetworkCreated",
+		Status:  "False",
+		Reason:  "NetworkAttachmentDefinitionSyncError",
+		Message: expectedMsg,
+	}
+
+	if !reflect.DeepEqual(*networkCreatedCond, expectedCondition) {
+		return fmt.Errorf("expected NetworkCreated condition: %v, got: %v", expectedCondition, *networkCreatedCond)
 	}
 	return nil
 }
@@ -2404,6 +2426,24 @@ func filterL3Subnets(cs clientset.Interface, l3Subnets []udnv1.Layer3Subnet) []u
 		filteredL3Subnets = append(filteredL3Subnets, l3Subnet)
 	}
 	return filteredL3Subnets
+}
+
+func matchL3SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1.Layer3Subnet) (out []udnv1.Layer3Subnet) {
+	for _, subnet := range in {
+		if families.Has(utilnet.IPFamilyOfCIDRString(string(subnet.CIDR))) {
+			out = append(out, subnet)
+		}
+	}
+	return
+}
+
+func matchL2SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1.CIDR) (out []udnv1.CIDR) {
+	for _, subnet := range in {
+		if families.Has(utilnet.IPFamilyOfCIDRString(string(subnet))) {
+			out = append(out, subnet)
+		}
+	}
+	return
 }
 
 func generateCIDRforClusterUDN(cs clientset.Interface, v4, v6 string) string {
@@ -2549,4 +2589,21 @@ func unmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[strin
 		}
 	}
 	return podNetworks, nil
+}
+
+func getNetworkSubnetsFromSpec(networkSpec *udnv1.NetworkSpec) []string {
+	var subnets []string
+	switch {
+	case networkSpec.Layer2 != nil:
+		for _, cidr := range networkSpec.Layer2.Subnets {
+			subnets = append(subnets, string(cidr))
+		}
+	case networkSpec.Layer3 != nil:
+		for _, subnet := range networkSpec.Layer3.Subnets {
+			subnets = append(subnets, string(subnet.CIDR))
+		}
+	default:
+		panic("unsupported network type")
+	}
+	return subnets
 }

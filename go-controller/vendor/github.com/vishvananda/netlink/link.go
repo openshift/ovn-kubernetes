@@ -29,6 +29,8 @@ type LinkAttrs struct {
 	HardwareAddr   net.HardwareAddr
 	Flags          net.Flags
 	RawFlags       uint32
+	Headroom       uint16      // Query only
+	Tailroom       uint16      // Query only
 	ParentIndex    int         // index of the parent link device
 	MasterIndex    int         // must be the index of a bridge
 	Namespace      interface{} // nil | NsPid | NsFd
@@ -287,6 +289,21 @@ func (bridge *Bridge) Type() string {
 	return "bridge"
 }
 
+// OpenvSwitch links are Open vSwitch bridge devices.
+// Note: their lifecycle is typically managed by OVS (OVSDB/ovs-vsctl),
+// while netlink is used to query/link them.
+type OpenvSwitch struct {
+	LinkAttrs
+}
+
+func (ovs *OpenvSwitch) Attrs() *LinkAttrs {
+	return &ovs.LinkAttrs
+}
+
+func (ovs *OpenvSwitch) Type() string {
+	return "openvswitch"
+}
+
 // Vlan links have ParentIndex set in their Attrs()
 type Vlan struct {
 	LinkAttrs
@@ -405,14 +422,16 @@ func (n *Netkit) SetPeerAttrs(Attrs *LinkAttrs) {
 
 type Netkit struct {
 	LinkAttrs
-	Mode          NetkitMode
-	Policy        NetkitPolicy
-	PeerPolicy    NetkitPolicy
-	Scrub         NetkitScrub
-	PeerScrub     NetkitScrub
-	supportsScrub bool
-	isPrimary     bool
-	peerLinkAttrs LinkAttrs
+	Mode            NetkitMode
+	Policy          NetkitPolicy
+	PeerPolicy      NetkitPolicy
+	Scrub           NetkitScrub
+	PeerScrub       NetkitScrub
+	DesiredHeadroom uint16 // Named due to presence of Headroom in LinkAttrs
+	DesiredTailroom uint16 // Named due to presence of Tailroom in LinkAttrs
+	supportsScrub   bool
+	isPrimary       bool
+	peerLinkAttrs   LinkAttrs
 }
 
 func (n *Netkit) Attrs() *LinkAttrs {
@@ -501,6 +520,7 @@ type Vxlan struct {
 	NoAge          bool
 	GBP            bool
 	FlowBased      bool
+	VniFilter      bool
 	Age            int
 	Limit          int
 	Port           int
@@ -1061,6 +1081,12 @@ func (v *VrfSlave) SlaveType() string {
 	return "vrf"
 }
 
+type OpenvSwitchSlave struct{}
+
+func (o *OpenvSwitchSlave) SlaveType() string {
+	return "openvswitch"
+}
+
 // Geneve devices must specify RemoteIP and ID (VNI) on create
 // https://github.com/torvalds/linux/blob/47ec5303d73ea344e84f46660fff693c57641386/drivers/net/geneve.c#L1209-L1223
 type Geneve struct {
@@ -1116,7 +1142,15 @@ type Gretap struct {
 	EncapFlags uint16
 	Link       uint32
 	FlowBased  bool
+	IgnoreDf   GretapIgnoreDf
 }
+
+type GretapIgnoreDf uint8
+
+const (
+	GRETAP_IGNORE_DF_FALSE = iota
+	GRETAP_IGNORE_DF_TRUE
+)
 
 func (gretap *Gretap) Attrs() *LinkAttrs {
 	return &gretap.LinkAttrs

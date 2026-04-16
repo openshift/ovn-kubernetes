@@ -19,7 +19,7 @@ package v1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 )
 
 // ClusterNetworkConnect enables connecting multiple User Defined Networks
@@ -93,7 +93,7 @@ type ClusterNetworkConnectSpec struct {
 // +kubebuilder:validation:MaxLength=43
 type CIDR string
 
-// +kubebuilder:validation:XValidation:rule="!has(self.networkPrefix) || !isCIDR(self.cidr) || self.networkPrefix > cidr(self.cidr).prefixLength()", message="NetworkPrefix must be smaller than CIDR subnet"
+// +kubebuilder:validation:XValidation:rule="!has(self.networkPrefix) || !isCIDR(self.cidr) || self.networkPrefix > cidr(self.cidr).prefixLength()", message="NetworkPrefix must be longer than the CIDR prefix length"
 // +kubebuilder:validation:XValidation:rule="!has(self.networkPrefix) || !isCIDR(self.cidr) || (cidr(self.cidr).ip().family() != 4 || self.networkPrefix < 32)", message="NetworkPrefix must < 32 for ipv4 CIDR"
 type ConnectSubnet struct {
 	// CIDR specifies ConnectSubnet, which is split into smaller subnets for every connected network.
@@ -113,7 +113,7 @@ type ConnectSubnet struct {
 	CIDR CIDR `json:"cidr"`
 
 	// NetworkPrefix specifies the prefix length for every connected network.
-	// This prefix length should be equal to or longer than the length of the CIDR prefix.
+	// This prefix length should be strictly longer than the length of the CIDR prefix.
 	//
 	// For example, if the CIDR is 10.0.0.0/16 and the networkPrefix is 24,
 	// then the connect subnet for each connected layer3 network will be 10.0.0.0/24, 10.0.1.0/24, 10.0.2.0/24 etc.
@@ -139,15 +139,17 @@ type ConnectSubnet struct {
 }
 
 // ConnectivityType represents the different connectivity types that can be enabled for connected networks.
-// +kubebuilder:validation:Enum=PodNetwork;ClusterIPServiceNetwork
+// +kubebuilder:validation:Enum=PodNetwork;ServiceNetwork
 type ConnectivityType string
 
 const (
 	// PodNetwork enables direct pod-to-pod communication across connected networks.
 	PodNetwork ConnectivityType = "PodNetwork"
 
-	// ClusterIPServiceNetwork enables ClusterIP service access across connected networks.
-	ClusterIPServiceNetwork ConnectivityType = "ClusterIPServiceNetwork"
+	// ServiceNetwork enables ClusterIP service access across connected networks.
+	// Note that services of type nodeports and loadbalancers are already reachable
+	// across networks by default.
+	ServiceNetwork ConnectivityType = "ServiceNetwork"
 )
 
 // StatusType represents the status of a ClusterNetworkConnect.

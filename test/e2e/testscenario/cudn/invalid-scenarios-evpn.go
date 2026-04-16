@@ -1,6 +1,6 @@
 package cudn
 
-import "github.com/ovn-org/ovn-kubernetes/test/e2e/testscenario"
+import "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"
 
 var EVPNCUDNInvalid = []testscenario.ValidateCRScenario{
 	{
@@ -450,8 +450,32 @@ spec:
 `,
 	},
 	{
+		Description: "macVRF and ipVRF must use different VNIs",
+		ExpectedErr: `macVRF and ipVRF must use different VNIs`,
+		Manifest: `
+apiVersion: k8s.ovn.org/v1
+kind: ClusterUserDefinedNetwork
+metadata:
+  name: evpn-same-vni
+spec:
+  namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: red}}
+  network:
+    topology: Layer2
+    layer2:
+      role: Primary
+      subnets: ["10.20.100.0/24"]
+    transport: EVPN
+    evpn:
+      vtep: evpn-vtep
+      macVRF:
+        vni: 100
+      ipVRF:
+        vni: 100
+`,
+	},
+	{
 		Description: "routeTarget exceeds maximum length of 21 characters",
-		ExpectedErr: `Too long: may not be longer than 21`,
+		ExpectedErr: `Too long`,
 		Manifest: `
 apiVersion: k8s.ovn.org/v1
 kind: ClusterUserDefinedNetwork

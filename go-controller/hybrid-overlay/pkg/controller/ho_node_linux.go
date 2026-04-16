@@ -9,9 +9,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 // HONodeController is the node hybrid overlay controller
@@ -91,7 +91,7 @@ func (n *HONodeController) AddPod(pod *corev1.Pod) error {
 		klog.Infof("Remove the ovnkube pod annotation from pod %s", pod.Name)
 		podToUpdate := pod.DeepCopy()
 		delete(podToUpdate.Annotations, util.OvnPodAnnotationName)
-		if err := n.kube.UpdatePodStatus(podToUpdate); err != nil {
+		if err := n.kube.PatchPodStatusAnnotations(pod, podToUpdate); err != nil {
 			return fmt.Errorf("failed to remove ovnkube pod annotation from pod %s: %v", pod.Name, err)
 		}
 		return nil

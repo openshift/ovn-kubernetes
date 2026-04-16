@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  K8S_VERSION: v1.34.0
+  K8S_VERSION: v1.35.0
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -44,7 +44,7 @@ jobs:
         # target: ["shard-conformance", "control-plane", "multi-homing", "multi-node-zones", "node-ip-mac-migration", "compact-mode", "serial"]
         #         shard-conformance: hybrid-overlay = multicast-enable = emptylb-enable = false
         #         control-plane: hybrid-overlay = multicast-enable = emptylb-enable = true
-        # perf-test: ["all","kubelet-density-cni", "udn-density-l2-noPods", "cudn-density-l2-noPods"]
+        # perf-test: ["all","kubelet-density-cni", "udn-density-l2-noPods", "cudn-density-l2-noPods", "udn-density-l2-pods", "cudn-density-l2-pods-netpol", "udn-density-l2-pods-netpol", "udn-density-l3-pods-netpol"]
         # ha: ["HA", "noHA"]
         # gateway-mode: ["local", "shared"]
         # ipfamily: ["ipv4", "ipv6", "dualstack"]
@@ -62,10 +62,13 @@ jobs:
           - {"target": "control-plane", perf-test: "udn-density-l2-noPods", "ha": "HA", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
           - {"target": "control-plane", perf-test: "cudn-density-l2-noPods", "ha": "HA", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
           - {"target": "control-plane", perf-test: "udn-density-l2-pods", "ha": "HA", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "cudn-density-l2-pods-netpol", "ha": "HA", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "udn-density-l2-pods-netpol", "ha": "HA", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
+          - {"target": "control-plane", perf-test: "udn-density-l3-pods-netpol", "ha": "HA", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "num-workers": "3", "network-segmentation": ""}
     env:
       ES_SERVER: "${{ secrets.PERF_DATASTORE }}"
       JOB_NAME: "${{ matrix.target }}-${{ matrix.ha }}-${{ matrix.gateway-mode }}-${{ matrix.ipfamily }}-${{ matrix.disable-snat-multiple-gws }}-${{ matrix.second-bridge }}-${{ matrix.ic }}"
-      OVN_HYBRID_OVERLAY_ENABLE: ${{ (matrix.target == 'control-plane' || matrix.target == 'control-plane-helm') && (matrix.ipfamily == 'ipv4' || matrix.ipfamily == 'dualstack' ) }}
+      OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_MULTICAST_ENABLE:  "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' || matrix.target == 'network-segmentation' || matrix.target == 'bgp' || matrix.target == 'bgp-loose-isolation' }}"
       OVN_EMPTY_LB_EVENTS: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' || matrix.target == 'bgp' || matrix.target == 'bgp-loose-isolation' }}"
       OVN_HA: "${{ matrix.ha == 'HA' }}"
@@ -183,6 +186,13 @@ jobs:
           echo "IPv6 POSTROUTING rules:"
           sudo ip6tables -t nat -L POSTROUTING -v
         fi
+
+    - name: Install VRF kernel module
+      run: |
+        set -x
+        sudo apt update
+        sudo apt-get install linux-modules-extra-$(uname -r) -y
+        sudo modprobe vrf
 
     - name: Free up disk space
       uses: ./.github/actions/free-disk-space
@@ -311,9 +321,9 @@ jobs:
         path: prometheus-install.log
         retention-days: 7
 
-    - name: Download and setup kube-burner v2.1.0
+    - name: Download and setup kube-burner v2.5.0
       run: |
-        curl -L https://github.com/kube-burner/kube-burner/releases/download/v2.1.0/kube-burner-V2.1.0-linux-x86_64.tar.gz | tar xz
+        curl -L https://github.com/kube-burner/kube-burner/releases/download/v2.5.0/kube-burner-V2.5.0-linux-x86_64.tar.gz | tar xz
         chmod +x kube-burner
         sudo mv kube-burner /usr/local/bin/
 
@@ -346,7 +356,7 @@ jobs:
         cp -r * /tmp/${{ matrix.perf-test }}/perf
 
     - name: Generate performance report
-      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' }}
+      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
       run: |
         cd contrib/perf
         # Generate the performance report
@@ -362,21 +372,21 @@ jobs:
         cat /tmp/${{ matrix.perf-test }}/performance_report.md
 
     - name: Upload performance report
-      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' }}
+      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.perf-test }}-performance-report-${{ github.run_id }}
         path: /tmp/${{ matrix.perf-test }}/performance_report.md
 
     - name: Upload pprof data
-      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' }}
+      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.perf-test }}-pprof-${{ github.run_id }}
         path: /tmp/${{ matrix.perf-test }}/pprof-data
 
     - name: Upload performance test data
-      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' }}
+      if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.perf-test }}-performance-test-data-${{ github.run_id }}
@@ -400,12 +410,20 @@ jobs:
     runs-on: ubuntu-24.04
     if: |
       (github.event_name != 'issue_comment') ||
-      (github.event.issue.pull_request && 
+      (github.event.issue.pull_request &&
        contains(github.event.comment.body, '/perf-test kubelet-density-cni')) ||
-      (github.event.issue.pull_request && 
+      (github.event.issue.pull_request &&
        contains(github.event.comment.body, '/perf-test udn-density-l2-noPods')) ||
-      (github.event.issue.pull_request && 
+      (github.event.issue.pull_request &&
        contains(github.event.comment.body, '/perf-test cudn-density-l2-noPods')) ||
+      (github.event.issue.pull_request &&
+       contains(github.event.comment.body, '/perf-test udn-density-l2-pods')) ||
+      (github.event.issue.pull_request &&
+       contains(github.event.comment.body, '/perf-test cudn-density-l2-pods-netpol')) ||
+      (github.event.issue.pull_request &&
+       contains(github.event.comment.body, '/perf-test udn-density-l2-pods-netpol')) ||
+      (github.event.issue.pull_request &&
+       contains(github.event.comment.body, '/perf-test udn-density-l3-pods-netpol')) ||
       (github.event_name == 'workflow_dispatch')
     steps:
     - name: Restore PR image cache
