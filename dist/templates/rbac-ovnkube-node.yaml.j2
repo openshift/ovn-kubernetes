@@ -235,3 +235,36 @@ rules:
           {% if ovn_enable_interconnect == "true" -%}
           - create
           {%- endif %}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: ovnkube-node-dpu-leases
+    namespace: ovn-kubernetes
+roleRef:
+    name: ovnkube-node-dpu-leases
+    kind: Role
+    apiGroup: rbac.authorization.k8s.io
+subjects:
+    {% if ovn_enable_ovnkube_identity == "true" -%}
+    - kind: Group
+      name: system:ovn-nodes
+      apiGroup: rbac.authorization.k8s.io
+    {% else %}
+    - kind: ServiceAccount
+      name: ovnkube-node
+      namespace: ovn-kubernetes
+    {%- endif %}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+    name: ovnkube-node-dpu-leases
+    namespace: ovn-kubernetes
+rules:
+    - apiGroups: ["coordination.k8s.io"]
+      resources:
+          - leases
+      verbs: [ "get", "create", "update" ]

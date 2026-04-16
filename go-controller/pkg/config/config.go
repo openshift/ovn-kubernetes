@@ -236,7 +236,9 @@ var (
 
 	// OvnKubeNode holds ovnkube-node parsed config file parameters and command-line overrides
 	OvnKubeNode = OvnKubeNodeConfig{
-		Mode: types.NodeModeFull,
+		Mode:                      types.NodeModeFull,
+		DPUNodeLeaseRenewInterval: 10,
+		DPUNodeLeaseDuration:      40,
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -507,6 +509,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableServiceTemplateSupport    bool `gcfg:"enable-svc-template-support"`
 	EnableObservability             bool `gcfg:"enable-observability"`
 	EnableNetworkQoS                bool `gcfg:"enable-network-qos"`
+	AllowICMPNetworkPolicy          bool `gcfg:"allow-icmp-network-policy"`
 	// This feature requires a kernel fix https://github.com/torvalds/linux/commit/7f3287db654395f9c5ddd246325ff7889f550286
 	// to work on a kind cluster. Flag allows to disable it for current CI, will be turned on when github runners have this fix.
 	AdvertisedUDNIsolationMode string `gcfg:"advertised-udn-isolation-mode"`
@@ -639,9 +642,11 @@ type HybridOverlayConfig struct {
 
 // OvnKubeNodeConfig holds ovnkube-node configurations
 type OvnKubeNodeConfig struct {
-	Mode                   string `gcfg:"mode"`
-	MgmtPortNetdev         string `gcfg:"mgmt-port-netdev"`
-	MgmtPortDPResourceName string `gcfg:"mgmt-port-dp-resource-name"`
+	Mode                      string `gcfg:"mode"`
+	MgmtPortNetdev            string `gcfg:"mgmt-port-netdev"`
+	MgmtPortDPResourceName    string `gcfg:"mgmt-port-dp-resource-name"`
+	DPUNodeLeaseRenewInterval int    `gcfg:"dpu-node-lease-renew-interval"`
+	DPUNodeLeaseDuration      int    `gcfg:"dpu-node-lease-duration"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -1268,6 +1273,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Value:       OVNKubernetesFeature.EnableStatelessNetPol,
 	},
 	&cli.BoolFlag{
+		Name:        "allow-icmp-network-policy",
+		Usage:       "Allow ICMP/ICMPv6 traffic to bypass NetworkPolicy default-deny rules.",
+		Destination: &cliConfig.OVNKubernetesFeature.AllowICMPNetworkPolicy,
+		Value:       OVNKubernetesFeature.AllowICMPNetworkPolicy,
+	},
+	&cli.BoolFlag{
 		Name:        "enable-interconnect",
 		Usage:       "Enable interconnecting multiple zones.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableInterconnect,
@@ -1831,6 +1842,18 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortDPResourceName,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
+	},
+	&cli.IntFlag{
+		Name:        "dpu-node-lease-renew-interval",
+		Usage:       "Interval in seconds at which the DPU updates its custom node lease. Set to 0 to disable DPU health checking",
+		Value:       OvnKubeNode.DPUNodeLeaseRenewInterval,
+		Destination: &cliConfig.OvnKubeNode.DPUNodeLeaseRenewInterval,
+	},
+	&cli.IntFlag{
+		Name:        "dpu-node-lease-duration",
+		Usage:       "Lease duration in seconds before the DPU is considered unhealthy",
+		Value:       OvnKubeNode.DPUNodeLeaseDuration,
+		Destination: &cliConfig.OvnKubeNode.DPUNodeLeaseDuration,
 	},
 }
 
@@ -3180,6 +3203,17 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	// ovnkube-node-mode dpu/dpu-host does not support hybrid overlay
 	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
+	}
+
+	if OvnKubeNode.DPUNodeLeaseRenewInterval < 0 {
+		return fmt.Errorf("invalid dpu-node-lease-renew-interval '%d'. must be >= 0", OvnKubeNode.DPUNodeLeaseRenewInterval)
+	}
+	if OvnKubeNode.DPUNodeLeaseDuration <= 0 {
+		return fmt.Errorf("invalid dpu-node-lease-duration '%d'. must be > 0", OvnKubeNode.DPUNodeLeaseDuration)
+	}
+	if OvnKubeNode.DPUNodeLeaseDuration <= OvnKubeNode.DPUNodeLeaseRenewInterval {
+		return fmt.Errorf("invalid dpu-node-lease-duration '%d'. must be > dpu-node-lease-renew-interval '%d'",
+			OvnKubeNode.DPUNodeLeaseDuration, OvnKubeNode.DPUNodeLeaseRenewInterval)
 	}
 
 	// Warn the user if both MgmtPortNetdev and MgmtPortDPResourceName are specified since they

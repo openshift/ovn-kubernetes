@@ -1141,11 +1141,15 @@ var AppendedAnnotations = map[string]string{
 
 	"Multicast when multicast enabled for namespace should be able to send multicast UDP traffic between nodes": "[Disabled:Unimplemented]",
 
+	"Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network": "[Disabled:Unimplemented]",
+
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller pod connected to ClusterUserDefinedNetwork CR & managed NADs cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should create NAD according to spec in each target namespace and report active namespaces": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should create NAD in new created namespaces that apply to namespace-selector": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should delete NAD when target namespace is terminating": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller when CR is deleted, should delete all managed NAD in each target namespace": "[Suite:openshift/conformance/parallel]",
 
@@ -1337,6 +1341,10 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology": "[Disabled:Unimplemented]",
 
+	"Network Segmentation: Network Policies on a user defined primary network ICMP should bypass default deny policy for UDNs when enabled in L2 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation: Network Policies on a user defined primary network ICMP should bypass default deny policy for UDNs when enabled in L3 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+
 	"Network Segmentation: Network Policies on a user defined primary network allow ingress traffic to one pod from a particular namespace in L2 primary UDN": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: Network Policies on a user defined primary network allow ingress traffic to one pod from a particular namespace in L3 primary UDN": "[Disabled:Unimplemented]",
@@ -1364,6 +1372,8 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation: Preconfigured Layer2 UDN unmasked reserved / infrastructure subnets are not allowed Layer2 with unmasked IPv6 infrastructure subnets": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation: Preconfigured Layer2 UDN unmasked reserved / infrastructure subnets are not allowed Layer2 with unmasked IPv6 reserved subnets": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation: integration should recover ovnkube pods after restart with primary and secondary UDN resources": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation: services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L2 primary UDN with custom network, cluster-networked pods, NodePort service": "[Suite:openshift/conformance/parallel]",
 
