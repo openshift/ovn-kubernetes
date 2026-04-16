@@ -386,5 +386,31 @@ func (oc *DefaultNetworkController) getHostNamespaceAddressesForNode(node *corev
 	for _, lrpIP := range lrpIPs {
 		ips = append(ips, lrpIP.IP)
 	}
+
+	// When NoOverlay mode is enabled, also include the node's primary physical interface IP
+	if oc.GetNetInfo().Transport() == types.NetworkTransportNoOverlay {
+		nodeIfAddr, err := util.GetNodeIfAddrAnnotation(node)
+		if err != nil {
+			if !util.IsAnnotationNotSetError(err) {
+				return nil, fmt.Errorf("failed to get node primary interface address: %w", err)
+			}
+		} else {
+			if nodeIfAddr.IPv4 != "" {
+				ipv4, _, err := net.ParseCIDR(nodeIfAddr.IPv4)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse node primary IPv4 address %s: %w", nodeIfAddr.IPv4, err)
+				}
+				ips = append(ips, ipv4)
+			}
+			if nodeIfAddr.IPv6 != "" {
+				ipv6, _, err := net.ParseCIDR(nodeIfAddr.IPv6)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse node primary IPv6 address %s: %w", nodeIfAddr.IPv6, err)
+				}
+				ips = append(ips, ipv6)
+			}
+		}
+	}
+
 	return ips, nil
 }
