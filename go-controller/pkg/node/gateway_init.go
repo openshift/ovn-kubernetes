@@ -286,10 +286,11 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 			watchFactory: nc.watchFactory.(*factory.WatchFactory),
 		}
 
-		// Get node object for chassis-id lookup
-		node, err := nc.Kube.GetNodeForWindows(nc.name)
+		// Get node object for chassis-id lookup using watchFactory
+		// This is the correct approach instead of GetNodeForWindows which is Windows-only
+		node, err := nc.watchFactory.GetNode(nc.name)
 		if err != nil {
-			klog.Warningf("Failed to get node %s for chassis-id lookup: %v, will fall back to OVS", nc.name, err)
+			klog.Warningf("Failed to get node %s from watchFactory for chassis-id lookup: %v, will fall back to OVS", nc.name, err)
 			node = nil
 		}
 

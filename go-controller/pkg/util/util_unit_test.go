@@ -538,8 +538,8 @@ func TestServiceFromEndpointSlice(t *testing.T) {
 
 func TestGetNodeChassisIDWithFallback(t *testing.T) {
 	const (
-		annotationChassisID = "annotation-chassis-id-123"
-		ovsChassisID        = "ovs-chassis-id-456"
+		annotationChassisID = "b1f96182-2bdd-42b6-88f9-9a1fc1c85ece"
+		ovsChassisID        = "a2e85271-1acc-31a5-77e8-8b2ea2c74dbd"
 		nodeName            = "test-node"
 	)
 
@@ -551,7 +551,7 @@ func TestGetNodeChassisIDWithFallback(t *testing.T) {
 		expectError       bool
 	}{
 		{
-			name: "annotation exists - should use annotation and set OVS",
+			name: "annotation exists with valid UUID - should use annotation and set OVS",
 			node: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: nodeName,
@@ -568,6 +568,20 @@ func TestGetNodeChassisIDWithFallback(t *testing.T) {
 			},
 			expectedChassisID: annotationChassisID,
 			expectError:       false,
+		},
+		{
+			name: "annotation exists with invalid UUID format - should return error",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						OvnNodeChassisID: "not-a-valid-uuid",
+					},
+				},
+			},
+			ovsCommands:       []ovntest.ExpectedCmd{},
+			expectedChassisID: "",
+			expectError:       true,
 		},
 		{
 			name: "annotation missing - should fall back to OVS",
@@ -598,7 +612,7 @@ func TestGetNodeChassisIDWithFallback(t *testing.T) {
 			expectError:       false,
 		},
 		{
-			name: "annotation exists but OVS set fails - should still return annotation value",
+			name: "annotation exists but OVS set fails - should return error",
 			node: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: nodeName,
@@ -613,8 +627,8 @@ func TestGetNodeChassisIDWithFallback(t *testing.T) {
 					Err: fmt.Errorf("OVS error"),
 				},
 			},
-			expectedChassisID: annotationChassisID,
-			expectError:       false,
+			expectedChassisID: "",
+			expectError:       true,
 		},
 		{
 			name: "annotation missing and OVS fails - should return error",
@@ -654,6 +668,72 @@ func TestGetNodeChassisIDWithFallback(t *testing.T) {
 
 			// Verify all expected commands were called
 			assert.NoError(t, fexec.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestIsValidUUID(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{
+			name:  "valid UUID lowercase",
+			input: "b1f96182-2bdd-42b6-88f9-9a1fc1c85ece",
+			want:  true,
+		},
+		{
+			name:  "valid UUID uppercase",
+			input: "B1F96182-2BDD-42B6-88F9-9A1FC1C85ECE",
+			want:  true,
+		},
+		{
+			name:  "valid UUID mixed case",
+			input: "b1F96182-2BdD-42b6-88F9-9a1fc1c85ece",
+			want:  true,
+		},
+		{
+			name:  "invalid UUID - too short",
+			input: "b1f96182-2bdd-42b6-88f9",
+			want:  false,
+		},
+		{
+			name:  "invalid UUID - too long",
+			input: "b1f96182-2bdd-42b6-88f9-9a1fc1c85ece-extra",
+			want:  false,
+		},
+		{
+			name:  "invalid UUID - missing hyphens",
+			input: "b1f961822bdd42b688f99a1fc1c85ece",
+			want:  false,
+		},
+		{
+			name:  "invalid UUID - wrong hyphen position",
+			input: "b1f9618-22bdd-42b6-88f9-9a1fc1c85ece",
+			want:  false,
+		},
+		{
+			name:  "invalid UUID - non-hex characters",
+			input: "g1f96182-2bdd-42b6-88f9-9a1fc1c85ece",
+			want:  false,
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  false,
+		},
+		{
+			name:  "random string",
+			input: "not-a-uuid-at-all",
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isValidUUID(tt.input)
+			assert.Equal(t, tt.want, got, "isValidUUID(%q)", tt.input)
 		})
 	}
 }

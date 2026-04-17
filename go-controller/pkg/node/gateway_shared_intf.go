@@ -1702,10 +1702,11 @@ func newGateway(
 
 	advertised := util.IsPodNetworkAdvertisedAtNode(networkManager.GetNetwork(types.DefaultNetworkName), nodeName)
 
-	// Get node object for chassis-id lookup
-	node, err := kube.GetNodeForWindows(nodeName)
+	// Get node object for chassis-id lookup using watchFactory
+	// This is the correct approach instead of GetNodeForWindows which is Windows-only
+	node, err := watchFactory.GetNode(nodeName)
 	if err != nil {
-		klog.Warningf("Failed to get node %s for chassis-id lookup: %v, will fall back to OVS", nodeName, err)
+		klog.Warningf("Failed to get node %s from watchFactory for chassis-id lookup: %v, will fall back to OVS", nodeName, err)
 		node = nil
 	}
 
