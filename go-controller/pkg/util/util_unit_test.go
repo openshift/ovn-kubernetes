@@ -535,3 +535,125 @@ func TestServiceFromEndpointSlice(t *testing.T) {
 		})
 	}
 }
+
+func TestGetNodeChassisIDWithFallback(t *testing.T) {
+	const (
+		annotationChassisID = "annotation-chassis-id-123"
+		ovsChassisID        = "ovs-chassis-id-456"
+		nodeName            = "test-node"
+	)
+
+	tests := []struct {
+		name              string
+		node              *corev1.Node
+		ovsCommands       []ovntest.ExpectedCmd
+		expectedChassisID string
+		expectError       bool
+	}{
+		{
+			name: "annotation exists - should use annotation and set OVS",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						OvnNodeChassisID: annotationChassisID,
+					},
+				},
+			},
+			ovsCommands: []ovntest.ExpectedCmd{
+				{
+					Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:system-id=%s", annotationChassisID),
+					Output: "",
+				},
+			},
+			expectedChassisID: annotationChassisID,
+			expectError:       false,
+		},
+		{
+			name: "annotation missing - should fall back to OVS",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			},
+			ovsCommands: []ovntest.ExpectedCmd{
+				{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+					Output: ovsChassisID,
+				},
+			},
+			expectedChassisID: ovsChassisID,
+			expectError:       false,
+		},
+		{
+			name: "nil node - should fall back to OVS",
+			node: nil,
+			ovsCommands: []ovntest.ExpectedCmd{
+				{
+					Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+					Output: ovsChassisID,
+				},
+			},
+			expectedChassisID: ovsChassisID,
+			expectError:       false,
+		},
+		{
+			name: "annotation exists but OVS set fails - should still return annotation value",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						OvnNodeChassisID: annotationChassisID,
+					},
+				},
+			},
+			ovsCommands: []ovntest.ExpectedCmd{
+				{
+					Cmd: fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:system-id=%s", annotationChassisID),
+					Err: fmt.Errorf("OVS error"),
+				},
+			},
+			expectedChassisID: annotationChassisID,
+			expectError:       false,
+		},
+		{
+			name: "annotation missing and OVS fails - should return error",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				},
+			},
+			ovsCommands: []ovntest.ExpectedCmd{
+				{
+					Cmd: "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
+					Err: fmt.Errorf("OVS error"),
+				},
+			},
+			expectedChassisID: "",
+			expectError:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fexec := ovntest.NewFakeExec()
+			for _, cmd := range tt.ovsCommands {
+				fexec.AddFakeCmd(&cmd)
+			}
+			err := SetExec(fexec)
+			require.NoError(t, err)
+
+			chassisID, err := GetNodeChassisIDWithFallback(tt.node)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedChassisID, chassisID)
+			}
+
+			// Verify all expected commands were called
+			assert.NoError(t, fexec.ExpectationsWereMet())
+		})
+	}
+}
