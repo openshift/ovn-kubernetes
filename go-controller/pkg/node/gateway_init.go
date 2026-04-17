@@ -285,7 +285,15 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 			readyFunc:    func() (bool, error) { return true, nil },
 			watchFactory: nc.watchFactory.(*factory.WatchFactory),
 		}
-		chassisID, err = util.GetNodeChassisID()
+
+		// Get node object for chassis-id lookup
+		node, err := nc.Kube.GetNodeForWindows(nc.name)
+		if err != nil {
+			klog.Warningf("Failed to get node %s for chassis-id lookup: %v, will fall back to OVS", nc.name, err)
+			node = nil
+		}
+
+		chassisID, err = util.GetNodeChassisIDWithFallback(node)
 		if err != nil {
 			return nil, err
 		}

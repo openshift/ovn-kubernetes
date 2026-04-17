@@ -1701,8 +1701,16 @@ func newGateway(
 	}
 
 	advertised := util.IsPodNetworkAdvertisedAtNode(networkManager.GetNetwork(types.DefaultNetworkName), nodeName)
+
+	// Get node object for chassis-id lookup
+	node, err := kube.GetNodeForWindows(nodeName)
+	if err != nil {
+		klog.Warningf("Failed to get node %s for chassis-id lookup: %v, will fall back to OVS", nodeName, err)
+		node = nil
+	}
+
 	gwBridge, exGwBridge, err := gatewayInitInternal(
-		nodeName, gwIntf, egressGWIntf, gwNextHops, subnets, gwIPs, advertised, nodeAnnotator)
+		node, nodeName, gwIntf, egressGWIntf, gwNextHops, subnets, gwIPs, advertised, nodeAnnotator)
 	if err != nil {
 		return nil, err
 	}
