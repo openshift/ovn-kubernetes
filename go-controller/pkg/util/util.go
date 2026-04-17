@@ -234,6 +234,46 @@ func GetNodeChassisID() (string, error) {
 	return chassisID, nil
 }
 
+// GetNodeChassisIDWithFallback retrieves the chassis-id for a node.
+// It first checks the node annotation as the source of truth. If found,
+// it ensures OVS has the same value (overwrites OVS if different).
+// If annotation is not set, it falls back to reading from OVS.
+// This ensures annotation persistence across node reprovisioning.
+// See: OCPBUGS-80960
+func GetNodeChassisIDWithFallback(node *corev1.Node) (string, error) {
+	if node == nil {
+		klog.Info("Node object is nil, falling back to OVS for chassis-id")
+		return GetNodeChassisID()
+	}
+
+	nodeName := node.Name
+
+	// Step 1: Try to get chassis-id from node annotation (source of truth)
+	if node.Annotations != nil {
+		if chassisID, ok := node.Annotations[OvnNodeChassisID]; ok && chassisID != "" {
+			klog.Infof("Node %s: found chassis-id in annotation: %s", nodeName, chassisID)
+
+			// Ensure OVS has the same value (overwrite if different)
+			// This is critical during reprovisioning when OVS resets
+			_, stderr, err := RunOVSVsctl("set", "Open_vSwitch", ".",
+				fmt.Sprintf("external_ids:system-id=%s", chassisID))
+			if err != nil {
+				klog.Warningf("Node %s: failed to set chassis-id in OVS, stderr: %q, error: %v", nodeName, stderr, err)
+				// Don't fail - annotation is source of truth, OVS update can be retried
+			} else {
+				klog.Infof("Node %s: set chassis-id in OVS from annotation: %s", nodeName, chassisID)
+			}
+
+			return chassisID, nil
+		}
+	}
+
+	// Step 2: Annotation not found, fall back to reading from OVS (existing behavior)
+	// This handles fresh node creation where annotation doesn't exist yet
+	klog.Infof("Node %s: no chassis-id in annotation, reading from OVS", nodeName)
+	return GetNodeChassisID()
+}
+
 // GetHybridOverlayPortName returns the name of the hybrid overlay switch port
 // for a given node
 func GetHybridOverlayPortName(nodeName string) string {
