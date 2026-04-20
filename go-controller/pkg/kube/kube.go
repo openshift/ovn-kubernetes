@@ -3,6 +3,8 @@ package kube
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	ipamclaimssclientset "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned"
@@ -21,14 +23,14 @@ import (
 	"k8s.io/klog/v2"
 	anpclientset "sigs.k8s.io/network-policy-api/pkg/client/clientset/versioned"
 
-	adminpolicybasedrouteclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
-	egressfirewall "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
-	egressqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
-	egressserviceclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
-	networkqosclientset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
+	adminpolicybasedrouteclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned"
+	egressfirewall "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned"
+	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned"
+	egressqosclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned"
+	egressserviceclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned"
+	networkqosclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned"
 )
 
 // InterfaceOVN represents the exported methods for dealing with getting/setting
@@ -54,11 +56,12 @@ type Interface interface {
 	SetAnnotationsOnPod(namespace, podName string, annotations map[string]interface{}) error
 	SetAnnotationsOnService(namespace, serviceName string, annotations map[string]interface{}) error
 	SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error
+	SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations map[string]interface{}, fieldManager string) error
 	SetAnnotationsOnNamespace(namespaceName string, annotations map[string]interface{}) error
 	SetLabelsOnNode(nodeName string, labels map[string]interface{}) error
 	PatchNode(old, new *corev1.Node) error
 	UpdateNodeStatus(node *corev1.Node) error
-	UpdatePodStatus(pod *corev1.Pod) error
+	PatchPodStatusAnnotations(oldPod, newPod *corev1.Pod) error
 	// GetPodsForDBChecker should only be used by legacy DB checker. Use watchFactory instead to get pods.
 	GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error)
 	// GetNodeForWindows should only be used for windows hybrid overlay binary and never in linux code
@@ -116,10 +119,141 @@ func (k *Kube) SetAnnotationsOnPod(namespace, podName string, annotations map[st
 	return err
 }
 
+type jsonPatchOp struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value,omitempty"`
+}
+
+func escapeJSONPatchPathKey(key string) string {
+	key = strings.ReplaceAll(key, "~", "~0")
+	return strings.ReplaceAll(key, "/", "~1")
+}
+
+// PatchPodStatusAnnotations patches only pod annotations through the status
+// subresource using compare-and-retry semantics on the old pod state.
+//
+// There are two concurrency cases to handle:
+//  1. The annotation key already exists on the old pod. In that case we can use a
+//     narrow JSON patch "test" on that specific key so we only retry if another
+//     writer changed the same annotation.
+//  2. The annotation key does not exist on the old pod. In that case a per-key
+//     "test" cannot protect us because two stale writers could both issue an
+//     unconditional "add" and the last one would win. For that create case we add
+//     a resourceVersion guard so only one writer based on that pod snapshot can
+//     create the missing key; losers will retry from the latest pod state and
+//     recompute a merged annotation value.
+//
+// Real informer/API pods always have a resourceVersion. If a synthetic caller
+// passes an object without one, we skip that extra guard and fall back to the
+// narrower per-key tests that are available.
+func (k *Kube) PatchPodStatusAnnotations(oldPod, newPod *corev1.Pod) error {
+	if oldPod.Namespace != newPod.Namespace || oldPod.Name != newPod.Name {
+		return fmt.Errorf("cannot patch annotations for different pods %s/%s and %s/%s",
+			oldPod.Namespace, oldPod.Name, newPod.Namespace, newPod.Name)
+	}
+
+	changedKeys := make(map[string]struct{})
+	for key, oldValue := range oldPod.Annotations {
+		if newValue, ok := newPod.Annotations[key]; !ok || oldValue != newValue {
+			changedKeys[key] = struct{}{}
+		}
+	}
+	for key, newValue := range newPod.Annotations {
+		if oldValue, ok := oldPod.Annotations[key]; !ok || oldValue != newValue {
+			changedKeys[key] = struct{}{}
+		}
+	}
+	if len(changedKeys) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(changedKeys))
+	for key := range changedKeys {
+		keys = append(keys, key)
+	}
+
+	ops := []jsonPatchOp{}
+	requiresResourceVersionGuard := false
+	if oldPod.Annotations == nil {
+		ops = append(ops, jsonPatchOp{
+			Op:    "add",
+			Path:  "/metadata/annotations",
+			Value: map[string]string{},
+		})
+		requiresResourceVersionGuard = true
+	}
+	for _, key := range keys {
+		path := "/metadata/annotations/" + escapeJSONPatchPathKey(key)
+		oldValue, oldOK := oldPod.Annotations[key]
+		newValue, newOK := newPod.Annotations[key]
+		if oldOK {
+			ops = append(ops, jsonPatchOp{
+				Op:    "test",
+				Path:  path,
+				Value: oldValue,
+			})
+		} else if newOK {
+			requiresResourceVersionGuard = true
+		}
+		switch {
+		case newOK && oldOK:
+			ops = append(ops, jsonPatchOp{
+				Op:    "replace",
+				Path:  path,
+				Value: newValue,
+			})
+		case newOK:
+			ops = append(ops, jsonPatchOp{
+				Op:    "add",
+				Path:  path,
+				Value: newValue,
+			})
+		default:
+			ops = append(ops, jsonPatchOp{
+				Op:   "remove",
+				Path: path,
+			})
+		}
+	}
+	if requiresResourceVersionGuard && oldPod.ResourceVersion != "" {
+		ops = append([]jsonPatchOp{{
+			Op:    "test",
+			Path:  "/metadata/resourceVersion",
+			Value: oldPod.ResourceVersion,
+		}}, ops...)
+	}
+
+	patchData, err := json.Marshal(ops)
+	if err != nil {
+		return fmt.Errorf("failed to marshal annotation patch for pod %s/%s: %w", oldPod.Namespace, oldPod.Name, err)
+	}
+
+	podDesc := oldPod.Namespace + "/" + oldPod.Name
+	klog.Infof("Patching annotations on pod %s", podDesc)
+	_, err = k.KClient.CoreV1().Pods(oldPod.Namespace).Patch(
+		context.TODO(),
+		oldPod.Name,
+		types.JSONPatchType,
+		patchData,
+		metav1.PatchOptions{},
+		"status",
+	)
+	if err != nil {
+		klog.Errorf("Error in patching annotations on pod %s: %v", podDesc, err)
+	}
+	return err
+}
+
 // SetAnnotationsOnNode takes the node name and map of key/value string pairs to set as annotations
 func (k *Kube) SetAnnotationsOnNode(nodeName string, annotations map[string]interface{}) error {
-	var err error
-	var patchData []byte
+	return k.SetAnnotationsOnNodeWithFieldManager(nodeName, annotations, "")
+}
+
+// SetAnnotationsOnNodeWithFieldManager is like SetAnnotationsOnNode but allows
+// specifying a field manager for the patch operation. If fieldManager is empty,
+// the server default is used.
+func (k *Kube) SetAnnotationsOnNodeWithFieldManager(nodeName string, annotations map[string]interface{}, fieldManager string) error {
 	patch := struct {
 		Metadata map[string]interface{} `json:"metadata"`
 	}{
@@ -129,13 +263,18 @@ func (k *Kube) SetAnnotationsOnNode(nodeName string, annotations map[string]inte
 	}
 
 	klog.Infof("Setting annotations %v on node %s", annotations, nodeName)
-	patchData, err = json.Marshal(&patch)
+	patchData, err := json.Marshal(&patch)
 	if err != nil {
 		klog.Errorf("Error in setting annotations on node %s: %v", nodeName, err)
 		return err
 	}
 
-	_, err = k.KClient.CoreV1().Nodes().PatchStatus(context.TODO(), nodeName, patchData)
+	patchOpts := metav1.PatchOptions{}
+	if fieldManager != "" {
+		patchOpts.FieldManager = fieldManager
+	}
+
+	_, err = k.KClient.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.StrategicMergePatchType, patchData, patchOpts, "status")
 	if err != nil {
 		klog.Errorf("Error in setting annotation on node %s: %v", nodeName, err)
 	}
@@ -248,13 +387,6 @@ func (k *Kube) PatchNode(old, new *corev1.Node) error {
 func (k *Kube) UpdateNodeStatus(node *corev1.Node) error {
 	klog.Infof("Updating status on node %s", node.Name)
 	_, err := k.KClient.CoreV1().Nodes().UpdateStatus(context.TODO(), node, metav1.UpdateOptions{})
-	return err
-}
-
-// UpdatePodStatus update pod with provided pod data, limited to .Status and .ObjectMeta fields
-func (k *Kube) UpdatePodStatus(pod *corev1.Pod) error {
-	klog.Infof("Updating pod %s/%s", pod.Namespace, pod.Name)
-	_, err := k.KClient.CoreV1().Pods(pod.Namespace).UpdateStatus(context.TODO(), pod, metav1.UpdateOptions{})
 	return err
 }
 

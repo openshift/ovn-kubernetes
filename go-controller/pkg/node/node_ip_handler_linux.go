@@ -18,13 +18,13 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type addressManager struct {
@@ -41,7 +41,13 @@ type addressManager struct {
 	nodePrimaryAddr net.IP
 	gatewayBridge   *bridgeconfig.BridgeConfiguration
 
-	OnChanged func()
+	onAddressesChangedHandlers []func()
+	OnMasqueradeIPChanged      func()
+	// gatewayIfIndex caches the link index of config.Gateway.Interface.
+	// Used in DPUHost mode to filter address events to only the gateway
+	// interface. Refreshed in sync() every 30s; all access is from the
+	// runInternal goroutine so no synchronization is needed.
+	gatewayIfIndex int
 	sync.Mutex
 }
 
@@ -55,14 +61,14 @@ func newAddressManager(nodeName string, k kube.Interface, mgmtPort managementpor
 // reproducibility of unit tests.
 func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort managementport.Interface, watchFactory factory.NodeWatchFactory, gwBridge *bridgeconfig.BridgeConfiguration, useNetlink bool) *addressManager {
 	mgr := &addressManager{
-		nodeName:      nodeName,
-		watchFactory:  watchFactory,
-		cidrs:         sets.New[string](),
-		mgmtPort:      mgmtPort,
-		gatewayBridge: gwBridge,
-		OnChanged:     func() {},
-		useNetlink:    useNetlink,
-		syncPeriod:    30 * time.Second,
+		nodeName:              nodeName,
+		watchFactory:          watchFactory,
+		cidrs:                 sets.New[string](),
+		mgmtPort:              mgmtPort,
+		gatewayBridge:         gwBridge,
+		OnMasqueradeIPChanged: func() {},
+		useNetlink:            useNetlink,
+		syncPeriod:            30 * time.Second,
 	}
 	mgr.nodeAnnotator = kube.NewNodeAnnotator(k, nodeName)
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
@@ -128,6 +134,26 @@ func (c *addressManager) ListAddresses() ([]net.IP, []*net.IPNet) {
 	return addresses, networkAddresses
 }
 
+// AddOnAddressesChangedHandler registers a callback that will be invoked whenever
+// the node's addresses change. Safe to call after the address manager goroutine
+// has started. No corresponding remove is provided: callers are expected to be
+// lifecycle-bound to the process.
+func (c *addressManager) AddOnAddressesChangedHandler(handler func()) {
+	c.Lock()
+	defer c.Unlock()
+	c.onAddressesChangedHandlers = append(c.onAddressesChangedHandlers, handler)
+}
+
+func (c *addressManager) notifyAddressesChanged() {
+	c.Lock()
+	handlers := make([]func(), len(c.onAddressesChangedHandlers))
+	copy(handlers, c.onAddressesChangedHandlers)
+	c.Unlock()
+	for _, handler := range handlers {
+		handler()
+	}
+}
+
 type subscribeFn func() (bool, chan netlink.AddrUpdate, error)
 
 func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
@@ -135,7 +161,9 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 		return
 	}
 
-	c.addHandlerForAddrChange()
+	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+		c.addHandlerForAddrChange()
+	}
 	doneWg.Add(1)
 	go func() {
 		c.runInternal(stopChan, c.getNetlinkAddrSubFunc(stopChan))
@@ -169,6 +197,16 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscri
 				}
 				continue
 			}
+			if a.LinkAddress.IP != nil && util.IsAddressReservedForInternalUse(a.LinkAddress.IP) {
+				c.reconcileMasqueradeResources()
+				continue
+			}
+			if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+				if c.gatewayIfIndex != 0 && a.LinkIndex == c.gatewayIfIndex {
+					c.reconcileMasqueradeResources()
+				}
+				continue
+			}
 			addrChanged := false
 			if a.NewAddr {
 				addrChanged = c.addAddr(a.LinkAddress, a.LinkIndex)
@@ -183,7 +221,7 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscri
 				if err != nil {
 					klog.Errorf("Address Manager failed to update node address annotations: %v", err)
 				}
-				c.OnChanged()
+				c.notifyAddressesChanged()
 			}
 		case <-addressSyncTimer.C:
 			if subscribed {
@@ -474,8 +512,30 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 	return true
 }
 
+func (c *addressManager) reconcileMasqueradeResources() {
+	c.OnMasqueradeIPChanged()
+	c.refreshGatewayIfIndex()
+}
+
+func (c *addressManager) refreshGatewayIfIndex() {
+	if config.Gateway.Interface == "" {
+		return
+	}
+	link, err := util.GetNetLinkOps().LinkByName(config.Gateway.Interface)
+	if err != nil {
+		klog.V(5).Infof("Gateway interface %s not found, resetting cached index: %v", config.Gateway.Interface, err)
+		c.gatewayIfIndex = 0
+		return
+	}
+	c.gatewayIfIndex = link.Attrs().Index
+}
+
 func (c *addressManager) sync() {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		return
+	}
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		c.reconcileMasqueradeResources()
 		return
 	}
 
@@ -488,7 +548,7 @@ func (c *addressManager) sync() {
 			return
 		}
 		for _, link := range links {
-			foundAddrs, err := netlink.AddrList(link, getSupportedIPFamily())
+			foundAddrs, err := util.GetNetLinkOps().AddrList(link, getSupportedIPFamily())
 			if err != nil {
 				klog.Errorf("Failed sync due to being unable to list addresses for %q: %v", link.Attrs().Name, err)
 				return
@@ -515,8 +575,9 @@ func (c *addressManager) sync() {
 		if err != nil {
 			klog.Errorf("Address Manager failed to update node address annotations: %v", err)
 		}
-		c.OnChanged()
+		c.notifyAddressesChanged()
 	}
+	c.reconcileMasqueradeResources()
 }
 
 // getSecondaryHostEgressIPs returns the set of egress IPs that are assigned to standard linux interfaces (non ovs type). The

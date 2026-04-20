@@ -10,12 +10,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni/types"
-	kubeMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
-	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	kubeMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	v1mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -77,7 +77,7 @@ var _ = Describe("cni_dpu tests", func() {
 			cpod := pod.DeepCopy()
 			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("UpdatePodStatus", cpod).Return(nil)
+			fakeKubeInterface.On("PatchPodStatusAnnotations", pod, cpod).Return(nil)
 			err = pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).ToNot(HaveOccurred())
 
@@ -131,7 +131,7 @@ var _ = Describe("cni_dpu tests", func() {
 			cpod := pod.DeepCopy()
 			cpod.Annotations, err = util.MarshalPodDPUConnDetails(cpod.Annotations, &dpuCd, ovntypes.DefaultNetworkName)
 			Expect(err).ToNot(HaveOccurred())
-			fakeKubeInterface.On("UpdatePodStatus", cpod).Return(fmt.Errorf("failed to set annotation"))
+			fakeKubeInterface.On("PatchPodStatusAnnotations", pod, cpod).Return(fmt.Errorf("failed to set annotation"))
 			err = pr.addDPUConnectionDetailsAnnot(&fakeKubeInterface, &podLister, "")
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("failed to set annotation"))

@@ -14,12 +14,6 @@ networking:
 {%- if ovn_ip_family %}
   ipFamily: {{ ovn_ip_family }}
 {%- endif %}
-{%- if use_local_registry == "true"%}
-containerdConfigPatches:
-  - |-
-    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:{{ kind_local_registry_port }}"]
-      endpoint = ["http://{{ kind_local_registry_name }}:5000"]
-{%- endif %}
 kubeadmConfigPatches:
 - |
   kind: ClusterConfiguration
@@ -35,7 +29,7 @@ kubeadmConfigPatches:
       # https://github.com/kubernetes/kubernetes/issues/128121
       # Once the upstream issue is fixed we can remove this controller
       # customization fully. Tracked with
-      # https://github.com/ovn-org/ovn-kubernetes/issues/4785
+      # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4785
       "controllers": "*,bootstrap-signer-controller,token-cleaner-controller,-service-lb-controller"
   scheduler:
     extraArgs:

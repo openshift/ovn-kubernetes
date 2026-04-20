@@ -14,8 +14,8 @@ import (
 	"github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 )
 
 func NewFakeAddressSetFactory(controllerName string) *FakeAddressSetFactory {
@@ -300,6 +300,7 @@ type removeFunc func(string)
 type fakeAddressSet struct {
 	name      string
 	hashName  string
+	uuid      string
 	addresses map[string]string
 	destroyed uint32
 }
@@ -340,10 +341,12 @@ func (f *FakeAddressSetFactory) newFakeAddressSets(addresses []string, dbIDs *li
 
 func (f *FakeAddressSetFactory) newFakeAddressSet(addresses []string, dbIDs *libovsdbops.DbObjectIDs, ipFamily string) *fakeAddressSet {
 	name := getDbIDsWithIPFamily(dbIDs, ipFamily).String()
+	hashName := hashedAddressSet(name)
 
 	as := &fakeAddressSet{
 		name:      name,
-		hashName:  hashedAddressSet(name),
+		hashName:  hashName,
+		uuid:      "uuid-" + hashName,
 		addresses: make(map[string]string),
 	}
 	for _, address := range addresses {
@@ -360,6 +363,18 @@ func (as *fakeAddressSets) GetASHashNames() (string, string) {
 	}
 	if as.ipv6 != nil {
 		ipv6AS = as.ipv6.getHashName()
+	}
+	return ipv4AS, ipv6AS
+}
+
+func (as *fakeAddressSets) GetASUUID() (string, string) {
+	var ipv4AS string
+	var ipv6AS string
+	if as.ipv4 != nil {
+		ipv4AS = as.ipv4.uuid
+	}
+	if as.ipv6 != nil {
+		ipv6AS = as.ipv6.uuid
 	}
 	return ipv4AS, ipv6AS
 }

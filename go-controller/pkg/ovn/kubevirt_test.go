@@ -17,14 +17,14 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kubevirt"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -290,7 +290,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			if t.podName == "" {
 				return nil
 			}
-			pod := newPod(t.namespace, t.podName, t.nodeName, t.podIP)
+			pod := testing.NewPod(t.namespace, t.podName, t.nodeName, t.podIP)
 			pod.Annotations = t.annotations
 			pod.Labels = t.labels
 			return pod
@@ -310,7 +310,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 			GinkgoHelper()
 			dhcpOptions := kubevirt.ComposeDHCPv4Options(
 				t.cidr,
-				DefaultNetworkControllerName,
+				ovntypes.DefaultNetworkControllerName,
 				ktypes.NamespacedName{
 					Namespace: namespace,
 					Name:      t.hostname,
@@ -327,7 +327,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 		ComposeDHCPv6Options = func(uuid, namespace string, t *testDHCPOptions) *nbdb.DHCPOptions {
 			dhcpOptions := kubevirt.ComposeDHCPv6Options(
 				t.cidr,
-				DefaultNetworkControllerName,
+				ovntypes.DefaultNetworkControllerName,
 				ktypes.NamespacedName{
 					Namespace: namespace,
 					Name:      t.hostname,
@@ -724,7 +724,7 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 				fakeOvn.startWithDBSetup(initialDB,
 					&corev1.NamespaceList{
 						Items: []corev1.Namespace{
-							*newNamespace(t.namespace),
+							*testing.NewNamespace(t.namespace),
 						},
 					},
 					&corev1.PodList{

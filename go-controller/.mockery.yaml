@@ -4,36 +4,51 @@ filename: "{{.InterfaceName}}.go"
 mockname: "{{.InterfaceName}}"
 outpkg: "mocks"
 packages:
-  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory:
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory:
     interfaces:
       NodeWatchFactory:
       ObjectCacheInterface:
     config:
       dir: pkg/factory/mocks/
-  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/cni:
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni:
     interfaces:
       CNIPluginLibOps:
     config:
       dir: pkg/cni/mocks
-  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube:
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube:
     config:
       all: true
       dir: pkg/kube/mocks
-  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/healthcheck:
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/healthcheck:
     config:
       all: true
       dir: pkg/kube/mocks
-  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport:
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport:
     interfaces:
       Interface:
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/netlinkdevicemanager:
+    interfaces:
+      Interface:
+    config:
+      dir: pkg/node/netlinkdevicemanager/mocks
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1:
+    interfaces:
+      VTEPInformer:
+    config:
+      dir: pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1/mocks
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/listers/vtep/v1:
+    interfaces:
+      VTEPLister:
+    config:
+      dir: pkg/crd/vtep/v1/apis/listers/vtep/v1/mocks
   k8s.io/kubelet/pkg/apis/podresources/v1:
     interfaces:
       PodResourcesListerClient:
-  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set:
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set:
     config:
       all: true
       dir: pkg/ovn/address_set/mocks
-  github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util:
+  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util:
     interfaces:
       DNSOps:
       ExecRunner:

@@ -12,14 +12,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/controller"
-	rafake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
-	udnv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
-	vtepv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
-	vtepv1fake "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/fake"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
+	rafake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
+	udnv1fake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
+	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
+	vtepv1fake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/fake"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -41,6 +41,8 @@ var _ = Describe("VTEPNotifier", func() {
 		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 		config.OVNKubernetesFeature.EnableRouteAdvertisements = true
 		config.OVNKubernetesFeature.EnableEVPN = true
+		// satisfy EVPN LGW restriction, otherwise no effect
+		config.Gateway.Mode = config.GatewayModeLocal
 		fakeClient := &util.OVNClusterManagerClientset{
 			KubeClient:                fake.NewSimpleClientset(),
 			NetworkAttchDefClient:     netv1fake.NewSimpleClientset(),
@@ -123,7 +125,7 @@ var _ = Describe("VTEPNotifier", func() {
 		// Update VTEP spec (change CIDRs)
 		vtep, err := vtepClient.K8sV1().VTEPs().Get(context.Background(), "test-vtep-1", metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
-		vtep.Spec.CIDRs = vtepv1.DualStackCIDRs{"192.168.0.0/24"}
+		vtep.Spec.CIDRs = []vtepv1.CIDR{"192.168.0.0/24"}
 		_, err = vtepClient.K8sV1().VTEPs().Update(context.Background(), vtep, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -168,7 +170,7 @@ func testVTEP(name string) *vtepv1.VTEP {
 			Name: name,
 		},
 		Spec: vtepv1.VTEPSpec{
-			CIDRs: vtepv1.DualStackCIDRs{"10.10.10.0/24"},
+			CIDRs: []vtepv1.CIDR{"10.10.10.0/24"},
 			Mode:  vtepv1.VTEPModeManaged,
 		},
 	}

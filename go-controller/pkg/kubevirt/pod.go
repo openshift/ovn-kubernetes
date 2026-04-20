@@ -16,16 +16,16 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
-	logicalswitchmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/ndp"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
+	logicalswitchmanager "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/ndp"
 )
 
 // DefaultGatewayReconciler is responsible for reconciling the default gateway
@@ -139,7 +139,7 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 	}
 
 	var modifiedPod *corev1.Pod
-	resultErr := retry.RetryOnConflict(util.OvnConflictBackoff, func() error {
+	resultErr := retry.OnError(util.OvnConflictBackoff, util.IsPodAnnotationUpdateRetryable, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		pod, err := watchFactory.GetPod(pod.Namespace, pod.Name)
 		if err != nil {
@@ -153,7 +153,7 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 				return err
 			}
 		}
-		return kube.UpdatePodStatus(modifiedPod)
+		return kube.PatchPodStatusAnnotations(pod, modifiedPod)
 	})
 	if resultErr != nil {
 		return nil, fmt.Errorf("failed to update labels and annotations on pod %s/%s: %v", pod.Namespace, pod.Name, resultErr)
@@ -276,19 +276,19 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 	return nil
 }
 
-func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool) error {
+func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool, controllerName string) error {
 	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale vm static routes: %v", err)
 	}
 	if err := libovsdbops.DeleteLogicalRouterPoliciesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterPolicy) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale vm policies: %v", err)
 	}
 	if err := libovsdbops.DeleteDHCPOptionsWithPredicate(nbClient, func(item *nbdb.DHCPOptions) bool {
-		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms)
+		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
 	}); err != nil {
 		return fmt.Errorf("failed deleting stale dhcp options: %v", err)
 	}
@@ -464,19 +464,31 @@ func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
 //
 // Note: The function assumes that the pod is part of a VirtualMachine resource managed
 // by KubeVirt.
-func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) (*LiveMigrationStatus, error) {
+func DiscoverLiveMigrationStatus(podLister v1.PodLister, pod *corev1.Pod) (*LiveMigrationStatus, error) {
 	vmKey := ExtractVMNameFromPod(pod)
 	if vmKey == nil {
 		return nil, nil
 	}
 
-	vmPods, err := client.GetPodsBySelector(pod.Namespace, metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+	if err != nil {
+		return nil, err
+	}
+	vmPods, err := podLister.Pods(pod.Namespace).List(selector)
 	if err != nil {
 		return nil, err
 	}
 
 	// no migration
 	if len(vmPods) < 2 {
+		// If the only remaining pod has the migration target ready
+		// annotation, the migration completed and the source pod is gone.
+		if len(vmPods) == 1 && isTargetPodReady(vmPods[0]) {
+			return &LiveMigrationStatus{
+				TargetPod: vmPods[0],
+				State:     LiveMigrationTargetDomainReady,
+			}, nil
+		}
 		return nil, nil
 	}
 
@@ -503,8 +515,15 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 		}, nil
 	}
 
-	// no active migration
+	// Source pod completed but target is still living. If the target has the
+	// migration ready annotation, the migration completed successfully.
 	if len(livingPods) < 2 {
+		if isTargetPodReady(targetPod) {
+			return &LiveMigrationStatus{
+				TargetPod: targetPod,
+				State:     LiveMigrationTargetDomainReady,
+			}, nil
+		}
 		return nil, nil
 	}
 

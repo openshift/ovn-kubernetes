@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	ovnkconfig "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider/portalloc"
+	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 
 	"github.com/onsi/ginkgo/v2"
 	"k8s.io/client-go/kubernetes"
@@ -68,6 +68,10 @@ func New(config *rest.Config) (api.Provider, error) {
 		hostPortAlloc:              portalloc.New(30000, 32767),
 		kubeClient:                 kubeClient,
 	}, nil
+}
+
+func (o openshift) PreloadImages(images []string) {
+	// no-op: OpenShift clusters pull images at runtime
 }
 
 func (o openshift) Name() string {

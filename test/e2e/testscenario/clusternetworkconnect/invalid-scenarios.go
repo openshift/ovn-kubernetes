@@ -1,6 +1,6 @@
 package clusternetworkconnect
 
-import "github.com/ovn-org/ovn-kubernetes/test/e2e/testscenario"
+import "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"
 
 var InvalidScenarios = []testscenario.ValidateCRScenario{
 
@@ -263,7 +263,7 @@ spec:
   connectSubnets:
     - cidr: "192.168.0.0/16"
       networkPrefix: 24
-  connectivity: ["PodNetwork", "ClusterIPServiceNetwork", "PodNetwork"]
+  connectivity: ["PodNetwork", "ServiceNetwork", "PodNetwork"]
 `,
 	},
 

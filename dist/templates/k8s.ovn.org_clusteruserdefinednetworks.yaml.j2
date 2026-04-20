@@ -11,6 +11,8 @@ spec:
     kind: ClusterUserDefinedNetwork
     listKind: ClusterUserDefinedNetworkList
     plural: clusteruserdefinednetworks
+    shortNames:
+    - cudn
     singular: clusteruserdefinednetwork
   scope: Cluster
   versions:
@@ -123,32 +125,32 @@ spec:
                             - message: RT global administrator must be either '*',
                                 an IPv4 address, or a number
                               rule: self.split(':').size() != 2 || (self.startsWith('*:')
-                                || isIP(self.split(':')[0]) || self.split(':')[0].matches('[0-9]+'))
+                                || isIP(self.split(':')[0]) || self.split(':')[0].matches('^[0-9]+$'))
                             - message: RT local administrator must be a number
-                              rule: self.split(':').size() != 2 || self.split(':')[1].matches('[0-9]+')
+                              rule: self.split(':').size() != 2 || self.split(':')[1].matches('^[0-9]+$')
                             - message: RT with wildcard global administrator must
                                 have format *:OPQR where OPQR <= 4294967295
                               rule: self.split(':').size() != 2 || !self.startsWith('*:')
-                                || (self.split(':')[1].matches('[0-9]+') && uint(self.split(':')[1])
+                                || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1])
                                 <= 4294967295u)
                             - message: RT with IPv4 global administrator must have
                                 format A.B.C.D:MN where MN <= 65535
                               rule: self.split(':').size() != 2 || !self.split(':')[0].contains('.')
-                                || (self.split(':')[1].matches('[0-9]+') && uint(self.split(':')[1])
+                                || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1])
                                 <= 65535u)
                             - message: RT with 4-byte ASN global administrator must
                                 have format GHJK:MN where GHJK <= 4294967295 and MN
                                 <= 65535
                               rule: self.split(':').size() != 2 || self.startsWith('*:')
-                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('[0-9]+')
-                                || !self.split(':')[1].matches('[0-9]+') || uint(self.split(':')[0])
+                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$')
+                                || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0])
                                 <= 65535u || uint(self.split(':')[1]) <= 65535u
                             - message: RT with 2-byte ASN global administrator must
                                 have format EF:OPQR where EF <= 65535 and OPQR <=
                                 4294967295
                               rule: self.split(':').size() != 2 || self.startsWith('*:')
-                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('[0-9]+')
-                                || !self.split(':')[1].matches('[0-9]+') || uint(self.split(':')[0])
+                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$')
+                                || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0])
                                 > 65535u || uint(self.split(':')[1]) <= 4294967295u
                           vni:
                             description: |-
@@ -190,32 +192,32 @@ spec:
                             - message: RT global administrator must be either '*',
                                 an IPv4 address, or a number
                               rule: self.split(':').size() != 2 || (self.startsWith('*:')
-                                || isIP(self.split(':')[0]) || self.split(':')[0].matches('[0-9]+'))
+                                || isIP(self.split(':')[0]) || self.split(':')[0].matches('^[0-9]+$'))
                             - message: RT local administrator must be a number
-                              rule: self.split(':').size() != 2 || self.split(':')[1].matches('[0-9]+')
+                              rule: self.split(':').size() != 2 || self.split(':')[1].matches('^[0-9]+$')
                             - message: RT with wildcard global administrator must
                                 have format *:OPQR where OPQR <= 4294967295
                               rule: self.split(':').size() != 2 || !self.startsWith('*:')
-                                || (self.split(':')[1].matches('[0-9]+') && uint(self.split(':')[1])
+                                || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1])
                                 <= 4294967295u)
                             - message: RT with IPv4 global administrator must have
                                 format A.B.C.D:MN where MN <= 65535
                               rule: self.split(':').size() != 2 || !self.split(':')[0].contains('.')
-                                || (self.split(':')[1].matches('[0-9]+') && uint(self.split(':')[1])
+                                || (self.split(':')[1].matches('^[0-9]+$') && uint(self.split(':')[1])
                                 <= 65535u)
                             - message: RT with 4-byte ASN global administrator must
                                 have format GHJK:MN where GHJK <= 4294967295 and MN
                                 <= 65535
                               rule: self.split(':').size() != 2 || self.startsWith('*:')
-                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('[0-9]+')
-                                || !self.split(':')[1].matches('[0-9]+') || uint(self.split(':')[0])
+                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$')
+                                || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0])
                                 <= 65535u || uint(self.split(':')[1]) <= 65535u
                             - message: RT with 2-byte ASN global administrator must
                                 have format EF:OPQR where EF <= 65535 and OPQR <=
                                 4294967295
                               rule: self.split(':').size() != 2 || self.startsWith('*:')
-                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('[0-9]+')
-                                || !self.split(':')[1].matches('[0-9]+') || uint(self.split(':')[0])
+                                || self.split(':')[0].contains('.') || !self.split(':')[0].matches('^[0-9]+$')
+                                || !self.split(':')[1].matches('^[0-9]+$') || uint(self.split(':')[0])
                                 > 65535u || uint(self.split(':')[1]) <= 4294967295u
                           vni:
                             description: |-
@@ -241,6 +243,9 @@ spec:
                     x-kubernetes-validations:
                     - message: at least one of macVRF or ipVRF must be specified
                       rule: has(self.macVRF) || has(self.ipVRF)
+                    - message: macVRF and ipVRF must use different VNIs
+                      rule: '!has(self.macVRF) || !has(self.ipVRF) || self.macVRF.vni
+                        != self.ipVRF.vni'
                   layer2:
                     description: Layer2 is the Layer2 topology configuration.
                     properties:
@@ -803,14 +808,13 @@ spec:
                   transport:
                     description: |-
                       Transport describes the transport technology for pod-to-pod traffic.
-                      Allowed values are "NoOverlay", "Geneve", and "EVPN".
+                      Allowed values are "NoOverlay" and "EVPN".
                       - "NoOverlay": The network operates in no-overlay mode.
-                      - "Geneve": The network uses Geneve overlay.
                       - "EVPN": The network uses EVPN transport.
-                      When omitted, the default behaviour is Geneve.
+                      When omitted, the network uses the default OVN overlay transport (e.g. Geneve, VXLAN)
+                      as configured by ovn-encap-type.
                     enum:
                     - NoOverlay
-                    - Geneve
                     - EVPN
                     type: string
                 required:
@@ -839,7 +843,8 @@ spec:
                     has(self.noOverlay)'
                 - message: spec.noOverlay is forbidden when transport type is not
                     'NoOverlay'
-                  rule: self.transport == 'NoOverlay' || !has(self.noOverlay)
+                  rule: (has(self.transport) && self.transport == 'NoOverlay') ||
+                    !has(self.noOverlay)
                 - message: transport 'EVPN' is only supported for Layer2 or Layer3
                     primary networks
                   rule: '!has(self.transport) || self.transport != ''EVPN'' || ((self.topology
@@ -849,7 +854,7 @@ spec:
                 - message: spec.evpn field is required when transport is 'EVPN'
                   rule: '!has(self.transport) || self.transport != ''EVPN'' || has(self.evpn)'
                 - message: spec.evpn field is forbidden when transport is not 'EVPN'
-                  rule: self.transport == 'EVPN' || !has(self.evpn)
+                  rule: (has(self.transport) && self.transport == 'EVPN') || !has(self.evpn)
                 - message: spec.evpn.macVRF field is required for Layer2 topology
                     when transport is 'EVPN'
                   rule: '!has(self.transport) || self.transport != ''EVPN'' || self.topology

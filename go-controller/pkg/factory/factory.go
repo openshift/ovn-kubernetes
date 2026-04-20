@@ -58,50 +58,50 @@ import (
 	anpinformerfactory "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions"
 	anpinformer "sigs.k8s.io/network-policy-api/pkg/client/informers/externalversions/apis/v1alpha1"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	adminbasedpolicyapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
-	adminbasedpolicyscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/scheme"
-	adminbasedpolicyinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
-	adminpolicybasedrouteinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
-	networkconnectapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
-	networkconnectscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/clientset/versioned/scheme"
-	networkconnectinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions"
-	networkconnectinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions/clusternetworkconnect/v1"
-	egressfirewallapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
-	egressfirewallscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
-	egressfirewallinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
-	egressfirewallinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
-	egressfirewalllister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
-	egressipapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	egressipscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
-	egressipinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
-	egressipinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
-	egressiplister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
-	egressqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
-	egressqosscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/scheme"
-	egressqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
-	egressqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
-	egressserviceapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
-	egressservicescheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/scheme"
-	egressserviceinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions"
-	egressserviceinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions/egressservice/v1"
-	networkqosapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
-	networkqosscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/scheme"
-	networkqosinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions"
-	networkqosinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions/networkqos/v1alpha1"
-	networkqoslister "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/listers/networkqos/v1alpha1"
-	routeadvertisementsapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
-	routeadvertisementsscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/scheme"
-	routeadvertisementsinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions"
-	routeadvertisementsinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
-	userdefinednetworkapi "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
-	userdefinednetworkscheme "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
-	userdefinednetworkapiinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
-	userdefinednetworkinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
-	vtepinformerfactory "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions"
-	vtepinformer "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	adminbasedpolicyapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	adminbasedpolicyscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/scheme"
+	adminbasedpolicyinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions"
+	adminpolicybasedrouteinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
+	networkconnectapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
+	networkconnectscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/clientset/versioned/scheme"
+	networkconnectinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions"
+	networkconnectinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions/clusternetworkconnect/v1"
+	egressfirewallapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/scheme"
+	egressfirewallinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions"
+	egressfirewallinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/informers/externalversions/egressfirewall/v1"
+	egressfirewalllister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/listers/egressfirewall/v1"
+	egressipapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	egressipscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
+	egressipinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions"
+	egressipinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
+	egressiplister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
+	egressqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	egressqosscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/scheme"
+	egressqosinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions"
+	egressqosinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
+	egressserviceapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	egressservicescheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/scheme"
+	egressserviceinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions"
+	egressserviceinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/informers/externalversions/egressservice/v1"
+	networkqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
+	networkqosscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/clientset/versioned/scheme"
+	networkqosinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions"
+	networkqosinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/informers/externalversions/networkqos/v1alpha1"
+	networkqoslister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/listers/networkqos/v1alpha1"
+	routeadvertisementsapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	routeadvertisementsscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/scheme"
+	routeadvertisementsinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions"
+	routeadvertisementsinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/informers/externalversions/routeadvertisements/v1"
+	userdefinednetworkapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	userdefinednetworkscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/scheme"
+	userdefinednetworkapiinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions"
+	userdefinednetworkinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
+	vtepinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions"
+	vtepinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type handlerCounter struct {
@@ -212,9 +212,7 @@ func SetEventQueueSize(newEventQueueSize uint32) {
 }
 
 // types for dynamic handlers created when adding a network policy
-type addressSetNamespaceAndPodSelector struct{}
 type peerNamespaceSelector struct{}
-type addressSetPodSelector struct{}
 type localPodSelector struct{}
 
 // types for handlers related to egress IP
@@ -231,33 +229,31 @@ type serviceForFakeNodePortWatcher struct{} // only for unit tests
 
 var (
 	// Resource types used in ovnk master
-	PodType                               reflect.Type = reflect.TypeOf(&corev1.Pod{})
-	ServiceType                           reflect.Type = reflect.TypeOf(&corev1.Service{})
-	EndpointSliceType                     reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
-	PolicyType                            reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
-	NamespaceType                         reflect.Type = reflect.TypeOf(&corev1.Namespace{})
-	NodeType                              reflect.Type = reflect.TypeOf(&corev1.Node{})
-	EgressFirewallType                    reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
-	EgressIPType                          reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
-	EgressIPNamespaceType                 reflect.Type = reflect.TypeOf(&egressIPNamespace{})
-	EgressIPPodType                       reflect.Type = reflect.TypeOf(&egressIPPod{})
-	EgressNodeType                        reflect.Type = reflect.TypeOf(&egressNode{})
-	CloudPrivateIPConfigType              reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
-	EgressQoSType                         reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
-	EgressServiceType                     reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
-	AdminNetworkPolicyType                reflect.Type = reflect.TypeOf(&anpapi.AdminNetworkPolicy{})
-	BaselineAdminNetworkPolicyType        reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
-	AddressSetNamespaceAndPodSelectorType reflect.Type = reflect.TypeOf(&addressSetNamespaceAndPodSelector{})
-	PeerNamespaceSelectorType             reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
-	AddressSetPodSelectorType             reflect.Type = reflect.TypeOf(&addressSetPodSelector{})
-	LocalPodSelectorType                  reflect.Type = reflect.TypeOf(&localPodSelector{})
-	NetworkAttachmentDefinitionType       reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
-	MultiNetworkPolicyType                reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
-	IPAMClaimsType                        reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
-	UserDefinedNetworkType                reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
-	ClusterUserDefinedNetworkType         reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
-	NetworkQoSType                        reflect.Type = reflect.TypeOf(&networkqosapi.NetworkQoS{})
-	ClusterNetworkConnectType             reflect.Type = reflect.TypeOf(&networkconnectapi.ClusterNetworkConnect{})
+	PodType                         reflect.Type = reflect.TypeOf(&corev1.Pod{})
+	ServiceType                     reflect.Type = reflect.TypeOf(&corev1.Service{})
+	EndpointSliceType               reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
+	PolicyType                      reflect.Type = reflect.TypeOf(&knet.NetworkPolicy{})
+	NamespaceType                   reflect.Type = reflect.TypeOf(&corev1.Namespace{})
+	NodeType                        reflect.Type = reflect.TypeOf(&corev1.Node{})
+	EgressFirewallType              reflect.Type = reflect.TypeOf(&egressfirewallapi.EgressFirewall{})
+	EgressIPType                    reflect.Type = reflect.TypeOf(&egressipapi.EgressIP{})
+	EgressIPNamespaceType           reflect.Type = reflect.TypeOf(&egressIPNamespace{})
+	EgressIPPodType                 reflect.Type = reflect.TypeOf(&egressIPPod{})
+	EgressNodeType                  reflect.Type = reflect.TypeOf(&egressNode{})
+	CloudPrivateIPConfigType        reflect.Type = reflect.TypeOf(&ocpcloudnetworkapi.CloudPrivateIPConfig{})
+	EgressQoSType                   reflect.Type = reflect.TypeOf(&egressqosapi.EgressQoS{})
+	EgressServiceType               reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
+	AdminNetworkPolicyType          reflect.Type = reflect.TypeOf(&anpapi.AdminNetworkPolicy{})
+	BaselineAdminNetworkPolicyType  reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
+	PeerNamespaceSelectorType       reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
+	LocalPodSelectorType            reflect.Type = reflect.TypeOf(&localPodSelector{})
+	NetworkAttachmentDefinitionType reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
+	MultiNetworkPolicyType          reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
+	IPAMClaimsType                  reflect.Type = reflect.TypeOf(&ipamclaimsapi.IPAMClaim{})
+	UserDefinedNetworkType          reflect.Type = reflect.TypeOf(&userdefinednetworkapi.UserDefinedNetwork{})
+	ClusterUserDefinedNetworkType   reflect.Type = reflect.TypeOf(&userdefinednetworkapi.ClusterUserDefinedNetwork{})
+	NetworkQoSType                  reflect.Type = reflect.TypeOf(&networkqosapi.NetworkQoS{})
+	ClusterNetworkConnectType       reflect.Type = reflect.TypeOf(&networkconnectapi.ClusterNetworkConnect{})
 	// Resource types used in ovnk node
 	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
 	EndpointSliceForStaleConntrackRemovalType reflect.Type = reflect.TypeOf(&endpointSliceForStaleConntrackRemoval{})
@@ -292,6 +288,13 @@ func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory
 		wf.vtepFactory.K8s().V1().VTEPs().Informer()
 	}
 
+	// Initialize FRR factory for Route Advertisement support in combined mode (cluster-manager + ovnkube-controller).
+	if util.IsRouteAdvertisementsEnabled() {
+		wf.frrFactory = frrinformerfactory.NewSharedInformerFactory(ovnClientset.FRRClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.frrFactory.Start() it is initialized and caches are synced.
+		wf.frrFactory.Api().V1beta1().FRRConfigurations().Informer()
+	}
+
 	return wf, nil
 }
 
@@ -301,12 +304,42 @@ func informerObjectTrim(obj interface{}) (interface{}, error) {
 		accessor.SetManagedFields(nil)
 	}
 	if pod, ok := obj.(*corev1.Pod); ok {
+		// OVN-K does not consume pod volumes from informer cache.
 		pod.Spec.Volumes = []corev1.Volume{}
+		// Scheduling-only pod fields are not read from the informer cache.
+		pod.Spec.Tolerations = nil
+		pod.Spec.Affinity = nil
+		pod.Spec.NodeSelector = nil
+		pod.OwnerReferences = nil
+		// OVN-K only walks pod containers for named ports, so trim the per-container
+		// runtime and resource payload that is not read from the informer cache.
 		for i := range pod.Spec.Containers {
 			pod.Spec.Containers[i].Command = nil
 			pod.Spec.Containers[i].Args = nil
 			pod.Spec.Containers[i].Env = nil
+			pod.Spec.Containers[i].EnvFrom = nil
 			pod.Spec.Containers[i].VolumeMounts = nil
+			pod.Spec.Containers[i].Resources = corev1.ResourceRequirements{}
+			pod.Spec.Containers[i].LivenessProbe = nil
+			pod.Spec.Containers[i].ReadinessProbe = nil
+			pod.Spec.Containers[i].StartupProbe = nil
+			pod.Spec.Containers[i].Lifecycle = nil
+			pod.Spec.Containers[i].SecurityContext = nil
+		}
+		// Init and ephemeral containers are not read from the informer cache.
+		pod.Spec.InitContainers = nil
+		pod.Spec.EphemeralContainers = nil
+		// OVN-K only needs pod phase/IPs/host IP and a small subset of conditions.
+		// Container status arrays are retained heavily in heap profiles and are not read.
+		pod.Status.ContainerStatuses = nil
+		pod.Status.InitContainerStatuses = nil
+		pod.Status.EphemeralContainerStatuses = nil
+		// Current informer consumers only read condition type/status/transition time.
+		for i := range pod.Status.Conditions {
+			pod.Status.Conditions[i].LastProbeTime = metav1.Time{}
+			pod.Status.Conditions[i].Reason = ""
+			pod.Status.Conditions[i].Message = ""
+			pod.Status.Conditions[i].ObservedGeneration = 0
 		}
 	}
 	return obj, nil
@@ -550,6 +583,12 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if util.IsEVPNEnabled() {
+		wf.vtepFactory = vtepinformerfactory.NewSharedInformerFactory(ovnClientset.VTEPClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.vtepFactory.Start() it is initialized and caches are synced.
+		wf.vtepFactory.K8s().V1().VTEPs().Informer()
 	}
 
 	return wf, nil
@@ -876,6 +915,12 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 		wf.raFactory = routeadvertisementsinformerfactory.NewSharedInformerFactory(ovnClientset.RouteAdvertisementsClient, resyncInterval)
 		// make sure shared informer is created for a factory, so on wf.raFactory.Start() it is initialized and caches are synced.
 		wf.raFactory.K8s().V1().RouteAdvertisements().Informer()
+	}
+
+	if util.IsEVPNEnabled() {
+		wf.vtepFactory = vtepinformerfactory.NewSharedInformerFactory(ovnClientset.VTEPClient, resyncInterval)
+		// make sure shared informer is created for a factory, so on wf.vtepFactory.Start() it is initialized and caches are synced.
+		wf.vtepFactory.K8s().V1().VTEPs().Informer()
 	}
 
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
@@ -1245,26 +1290,22 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // GetHandlerPriority returns the priority of each objType's handler
 // Priority of the handler is what determine which handler would get an event first
 // This is relevant only for handlers that are sharing the same resources:
-// Pods: shared by PodType (0), EgressIPPodType (1), AddressSetPodSelectorType (2), LocalPodSelectorType (3)
-// Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (3), AddressSetNamespaceAndPodSelectorType (4)
+// Pods: shared by PodType (0), EgressIPPodType (1), LocalPodSelectorType (3)
+// Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (2)
 // Nodes: shared by NodeType (0), EgressNodeType (1)
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
-// Example: EgressIPPodType will always get the pod event after PodType and AddressSetPodSelectorType will always get the event after PodType and EgressIPPodType
+// Example: EgressIPPodType will always get the pod event after PodType
 // NOTE: If you are touching this function to add a new object type that uses shared objects, please make sure to update `minHandlerPriority` if needed
 func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) {
 	switch objType {
 	case EgressIPPodType:
 		return 1
-	case AddressSetPodSelectorType:
-		return 2
 	case LocalPodSelectorType:
 		return 3
 	case EgressIPNamespaceType:
 		return 1
 	case PeerNamespaceSelectorType:
 		return 2
-	case AddressSetNamespaceAndPodSelectorType:
-		return 3
 	case EgressNodeType:
 		return 1
 	default:
@@ -1300,12 +1341,12 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddFilteredServiceHandler(namespace, funcs, processExisting)
 		}, nil
 
-	case AddressSetPodSelectorType, LocalPodSelectorType, PodType, EgressIPPodType:
+	case LocalPodSelectorType, PodType, EgressIPPodType:
 		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
-	case AddressSetNamespaceAndPodSelectorType, PeerNamespaceSelectorType, EgressIPNamespaceType:
+	case PeerNamespaceSelectorType, EgressIPNamespaceType:
 		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil

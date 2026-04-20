@@ -20,7 +20,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	certificatesv1 "k8s.io/api/certificates/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listers "k8s.io/client-go/listers/core/v1"
@@ -39,10 +38,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/csrapprover"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovnwebhook"
-	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/csrapprover"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovnwebhook"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 type config struct {
@@ -314,7 +313,7 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 	// We cannot use the default implementation of the webhook server because we need to enable SO_REUSEPORT
 	// on the socket to allow for two instances running at the same time (required during upgrades).
 	// The webhook server is set up and started in a very similar way to the default one:
-	// https://github.com/ovn-org/ovn-kubernetes/blob/7c0838bb46d6de202f509abe47609c8da09311b2/go-controller/vendor/sigs.k8s.io/controller-runtime/pkg/webhook/server.go#L212
+	// https://github.com/ovn-kubernetes/ovn-kubernetes/blob/7c0838bb46d6de202f509abe47609c8da09311b2/go-controller/vendor/sigs.k8s.io/controller-runtime/pkg/webhook/server.go#L212
 
 	client, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
@@ -326,9 +325,8 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 
 	webhookMux := http.NewServeMux()
 
-	nodeWebhook := admission.WithCustomValidator(
+	nodeWebhook := admission.WithValidator(
 		scheme.Scheme,
-		&corev1.Node{},
 		ovnwebhook.NewNodeAdmissionWebhook(cliCfg.enableInterconnect, cliCfg.enableHybridOverlay, cliCfg.extraAllowedUsers.Value()...),
 	).WithRecoverPanic(true)
 
@@ -353,9 +351,8 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 		cache.WaitForCacheSync(ctx.Done(), nodeInformer.HasSynced)
 
 		nodeLister := listers.NewNodeLister(nodeInformer.GetIndexer())
-		podWebhook := admission.WithCustomValidator(
+		podWebhook := admission.WithValidator(
 			scheme.Scheme,
-			&corev1.Pod{},
 			ovnwebhook.NewPodAdmissionWebhook(nodeLister, cliCfg.podAdmissionConditions, cliCfg.extraAllowedUsers.Value()...),
 		).WithRecoverPanic(true)
 		podHandler, err := admission.StandaloneWebhook(
@@ -462,7 +459,7 @@ func runCSRApproverManager(ctx context.Context, leaderID string, restCfg *rest.C
 			cliCfg.csrAcceptanceConditions,
 			csrapprover.Usages,
 			csrapprover.MaxDuration,
-			mgr.GetEventRecorderFor(csrapprover.ControllerName),
+			mgr.GetEventRecorder(csrapprover.ControllerName),
 		))
 	if err != nil {
 		klog.Errorf("Failed to create %s: %v", csrapprover.ControllerName, err)

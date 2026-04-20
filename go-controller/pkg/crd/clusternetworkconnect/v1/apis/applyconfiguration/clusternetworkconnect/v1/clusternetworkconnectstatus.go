@@ -18,14 +18,20 @@ limitations under the License.
 package v1
 
 import (
-	clusternetworkconnectv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
+	clusternetworkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
 // ClusterNetworkConnectStatusApplyConfiguration represents a declarative configuration of the ClusterNetworkConnectStatus type for use
 // with apply.
+//
+// ClusterNetworkConnectStatus defines the observed state of ClusterNetworkConnect.
 type ClusterNetworkConnectStatusApplyConfiguration struct {
-	Status     *clusternetworkconnectv1.StatusType  `json:"status,omitempty"`
+	// status is a concise indication of whether the ClusterNetworkConnect
+	// resource is applied with success.
+	Status *clusternetworkconnectv1.StatusType `json:"status,omitempty"`
+	// conditions is an array of condition objects indicating details about
+	// status of ClusterNetworkConnect object.
 	Conditions []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
 }
 

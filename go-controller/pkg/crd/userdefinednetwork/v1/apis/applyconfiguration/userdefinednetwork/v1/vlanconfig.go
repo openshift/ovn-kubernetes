@@ -18,13 +18,19 @@ limitations under the License.
 package v1
 
 import (
-	userdefinednetworkv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 )
 
 // VLANConfigApplyConfiguration represents a declarative configuration of the VLANConfig type for use
 // with apply.
+//
+// VLANConfig describes the network VLAN configuration.
 type VLANConfigApplyConfiguration struct {
-	Mode   *userdefinednetworkv1.VLANMode      `json:"mode,omitempty"`
+	// mode describe the network VLAN mode.
+	// Allowed value is "Access".
+	// Access sets the network logical switch port in access mode, according to the config.
+	Mode *userdefinednetworkv1.VLANMode `json:"mode,omitempty"`
+	// Access is the access VLAN configuration
 	Access *AccessVLANConfigApplyConfiguration `json:"access,omitempty"`
 }
 

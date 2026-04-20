@@ -8,10 +8,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 type FakeNetworkController struct {
@@ -156,6 +156,8 @@ func (fnm *FakeNetworkManager) GetActiveNetworkForNamespaceFast(namespace string
 }
 
 func (fnm *FakeNetworkManager) GetNetwork(networkName string) util.NetInfo {
+	fnm.Lock()
+	defer fnm.Unlock()
 	for _, ni := range fnm.PrimaryNetworks {
 		if ni.GetNetworkName() == networkName {
 			return ni
@@ -199,6 +201,8 @@ func (fnm *FakeNetworkManager) GetNADKeysForNetwork(networkName string) []string
 }
 
 func (fnm *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([]string, error) {
+	fnm.Lock()
+	defer fnm.Unlock()
 	namespaces := make([]string, 0)
 	for namespaceName, primaryNAD := range fnm.PrimaryNetworks {
 		if primaryNAD == nil || primaryNAD.GetNetworkName() != networkName {
@@ -210,8 +214,15 @@ func (fnm *FakeNetworkManager) GetActiveNetworkNamespaces(networkName string) ([
 }
 
 func (fnm *FakeNetworkManager) DoWithLock(f func(network util.NetInfo) error) error {
-	var errs []error
+	fnm.Lock()
+	networks := make([]util.NetInfo, 0, len(fnm.PrimaryNetworks))
 	for _, ni := range fnm.PrimaryNetworks {
+		networks = append(networks, ni)
+	}
+	fnm.Unlock()
+
+	var errs []error
+	for _, ni := range networks {
 		if err := f(ni); err != nil {
 			errs = append(errs, err)
 		}
