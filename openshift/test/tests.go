@@ -104,6 +104,8 @@ var InformingTests = []string{
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] EVPN: VTEP API validations api-server should accept valid VTEP updates Valid VTEP update configurations [Suite:openshift/conformance/parallel]",
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations [Suite:openshift/conformance/parallel]",
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] EVPN: VTEP API validations api-server should reject invalid VTEP updates Invalid VTEP update configurations [Suite:openshift/conformance/parallel]",
+	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4 [Suite:openshift/conformance/parallel]",
+	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6 [Suite:openshift/conformance/parallel]",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
