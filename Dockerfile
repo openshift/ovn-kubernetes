@@ -8,8 +8,8 @@ FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.22 AS 
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
-RUN cd go-controller; CGO_ENABLED=1 make
-RUN cd go-controller; CGO_ENABLED=0 make windows
+RUN cd go-controller; CGO_ENABLED=1 LDFLAGS="-w -s" make
+RUN cd go-controller; CGO_ENABLED=0 LDFLAGS="-w -s" make windows
 RUN cd openshift; CGO_ENABLED=0 ./hack/build-tests-ext.sh && \
     gzip ./bin/ovn-kubernetes-tests-ext
 
