@@ -12,6 +12,7 @@ import (
 	operv1 "github.com/openshift/api/operator/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -60,11 +61,17 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 	}
 	o.operNetwork, err = operatorClient.OperatorV1().Networks().Get(context.Background(), "cluster", metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to retrieve network operator cluster object: %w", err)
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to retrieve network operator cluster object: %w", err)
+		}
+		o.operNetwork = nil
 	}
 	o.clusterFeatureGate, err = configClient.ConfigV1().FeatureGates().Get(context.Background(), "cluster", metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to retrieve cluster feature gate: %w", err)
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to retrieve cluster feature gate: %w", err)
+		}
+		o.clusterFeatureGate = nil
 	}
 	// check ovn gateway mode and export required env variable
 	o.configureOVNGatewayMode()
@@ -79,7 +86,7 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 
 // configureOVNGatewayMode detects and configures the OVN gateway mode for tests
 func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
-	if o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
 		return
 	}
 
@@ -94,6 +101,9 @@ func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 
 // CheckForEVPN checks all EVPN prerequisites
 func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
+	if o.operNetwork == nil {
+		return false
+	}
 	return hasEVPNFeatureGate(o.clusterFeatureGate) &&
 		hasFRRRouteProvider(o.operNetwork) &&
 		isLocalGatewayMode(o.operNetwork) &&
@@ -102,6 +112,9 @@ func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
 
 // hasEVPNFeatureGate checks if the EVPN feature gate is enabled in the cluster
 func hasEVPNFeatureGate(clusterFeatureGate *configv1.FeatureGate) bool {
+	if clusterFeatureGate == nil {
+		return false
+	}
 	for _, featureGate := range clusterFeatureGate.Status.FeatureGates {
 		for _, feature := range featureGate.Enabled {
 			if feature.Name == "EVPN" {
