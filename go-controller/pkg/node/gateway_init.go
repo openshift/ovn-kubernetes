@@ -313,15 +313,8 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 		return gw.readyFunc()
 	}
 
-	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
-		if err := nodeAnnotator.Run(); err != nil {
-			klog.Infof("Waiting for node %s gateway annotation update to succeed: %v", nc.name, err)
-			return false, nil
-		}
-		return true, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("timed out trying to set node %s gateway annotations: %w", nc.name, err)
+	if err := runNodeAnnotatorWithRetry(ctx, nodeAnnotator, nc.name, "gateway"); err != nil {
+		return nil, err
 	}
 
 	waiter.AddWait(readyGwFunc, initGwFunc)
@@ -447,15 +440,8 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(ctx context.C
 	}
 
 	// Apply all node annotations to the Kubernetes node object
-	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
-		if err := nodeAnnotator.Run(); err != nil {
-			klog.Infof("Waiting for node %s DPU host annotation update to succeed: %v", nc.name, err)
-			return false, nil
-		}
-		return true, nil
-	})
-	if err != nil {
-		return fmt.Errorf("timed out trying to set node %s DPU host annotations: %w", nc.name, err)
+	if err := runNodeAnnotatorWithRetry(ctx, nodeAnnotator, nc.name, "DPU host"); err != nil {
+		return err
 	}
 
 	// Delete stale masquerade resources if there are any. This is to make sure that there
@@ -614,4 +600,20 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 
 	return nil
 
+}
+
+// runNodeAnnotatorWithRetry retries nodeAnnotator.Run() with exponential backoff
+// to handle transient API server connectivity issues during node startup.
+func runNodeAnnotatorWithRetry(ctx context.Context, nodeAnnotator kube.Annotator, nodeName, annotationType string) error {
+	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
+		if err := nodeAnnotator.Run(); err != nil {
+			klog.Infof("Waiting for node %s %s annotation update to succeed: %v", nodeName, annotationType, err)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timed out trying to set node %s %s annotations: %w", nodeName, annotationType, err)
+	}
+	return nil
 }

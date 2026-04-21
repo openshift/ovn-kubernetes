@@ -52,7 +52,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /readyz
-            port: 9443
+            port: {{ .Values.webhookPort | default 9443 }}
             scheme: HTTPS
           initialDelaySeconds: 5
           periodSeconds: 10

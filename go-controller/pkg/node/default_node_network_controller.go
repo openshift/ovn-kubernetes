@@ -875,15 +875,8 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
-	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
-		if err := nodeAnnotator.Run(); err != nil {
-			klog.Infof("Waiting for node %s annotation update to succeed: %v", nc.name, err)
-			return false, nil
-		}
-		return true, nil
-	})
-	if err != nil {
-		return fmt.Errorf("timed out trying to set node %s annotations: %w", nc.name, err)
+	if err := runNodeAnnotatorWithRetry(ctx, nodeAnnotator, nc.name, "init"); err != nil {
+		return err
 	}
 
 	// Connect ovn-controller to SBDB
