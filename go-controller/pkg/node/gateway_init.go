@@ -602,17 +602,25 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 
 }
 
-// runNodeAnnotatorWithRetry retries nodeAnnotator.Run() with exponential backoff
+const (
+	nodeAnnotatorRetryInterval = 500 * time.Millisecond
+	nodeAnnotatorRetryTimeout  = 300 * time.Second
+)
+
+// runNodeAnnotatorWithRetry retries nodeAnnotator.Run() with fixed-interval polling
 // to handle transient API server connectivity issues during node startup.
 func runNodeAnnotatorWithRetry(ctx context.Context, nodeAnnotator kube.Annotator, nodeName, annotationType string) error {
-	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, nodeAnnotatorRetryInterval, nodeAnnotatorRetryTimeout, true, func(_ context.Context) (bool, error) {
 		if err := nodeAnnotator.Run(); err != nil {
-			klog.Infof("Waiting for node %s %s annotation update to succeed: %v", nodeName, annotationType, err)
+			klog.V(2).Infof("Waiting for node %s %s annotation update to succeed: %v", nodeName, annotationType, err)
 			return false, nil
 		}
 		return true, nil
 	})
 	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("context canceled while setting node %s %s annotations: %w", nodeName, annotationType, err)
+		}
 		return fmt.Errorf("timed out trying to set node %s %s annotations: %w", nodeName, annotationType, err)
 	}
 	return nil
