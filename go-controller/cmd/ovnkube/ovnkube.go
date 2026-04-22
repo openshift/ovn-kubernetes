@@ -623,7 +623,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				opts.EnablePprof = config.Metrics.EnablePprof
 			}
 
-			metrics.StartOVNMetricsServer(opts, ovsClient, ovnClientset.KubeClient, ctx.Done(), wg)
+			metrics.StartOVNMetricsServer(opts, ovsClient, ctx.Done(), wg)
 		}
 	}
 

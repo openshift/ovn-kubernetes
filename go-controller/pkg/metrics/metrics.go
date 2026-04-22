@@ -17,7 +17,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -446,7 +445,7 @@ func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, k
 		Registerer: prometheus.DefaultRegisterer,
 	}
 
-	server := NewMetricServer(opts, nil, nil)
+	server := NewMetricServer(opts, nil)
 
 	wg.Add(1)
 	go func() {
@@ -456,13 +455,10 @@ func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, k
 }
 
 // StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
-func StartOVNMetricsServer(opts MetricServerOptions,
-	ovsClient libovsdbclient.Client,
-	kubeClient kubernetes.Interface,
-	stopChan <-chan struct{}, wg *sync.WaitGroup) *MetricServer {
+func StartOVNMetricsServer(opts MetricServerOptions, ovsClient libovsdbclient.Client, stopChan <-chan struct{}, wg *sync.WaitGroup) *MetricServer {
 
 	klog.Infof("Create OVN Metrics Server on address: %s", opts.BindAddress)
-	metricsServer := NewMetricServer(opts, ovsClient, kubeClient)
+	metricsServer := NewMetricServer(opts, ovsClient)
 	metricsServer.registerMetrics()
 
 	wg.Add(1)
