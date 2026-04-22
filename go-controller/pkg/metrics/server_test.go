@@ -21,9 +21,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
-
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
@@ -47,9 +44,8 @@ func TestNewMetricServerRunAndShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var ovsDBClient libovsdbclient.Client
-	var kubeClient kubernetes.Interface = fake.NewSimpleClientset()
 
-	server := NewMetricServer(opts, ovsDBClient, kubeClient)
+	server := NewMetricServer(opts, ovsDBClient)
 	require.NotNil(t, server, "Server should not be nil")
 	require.NotNil(t, server.mux, "Server mux should not be nil")
 	require.NotNil(t, server.registerer, "Server registerer should not be nil")
@@ -108,9 +104,8 @@ func TestNewMetricServerRunAndFailOnFatalError(t *testing.T) {
 	}
 
 	var ovsDBClient libovsdbclient.Client
-	var kubeClient kubernetes.Interface = fake.NewSimpleClientset()
 
-	server := NewMetricServer(opts, ovsDBClient, kubeClient)
+	server := NewMetricServer(opts, ovsDBClient)
 	require.NotNil(t, server, "Server should not be nil")
 	require.NotNil(t, server.mux, "Server mux should not be nil")
 	require.NotNil(t, server.registerer, "Server registerer should not be nil")
@@ -869,8 +864,7 @@ func TestHandleMetrics(t *testing.T) {
 			}()
 
 			// Create server with OVS client
-			var kubeClient kubernetes.Interface = fake.NewSimpleClientset()
-			server := NewMetricServer(opts, ovsDBClient, kubeClient)
+			server := NewMetricServer(opts, ovsDBClient)
 			server.registerMetrics()
 
 			// Iterate server registry to list all registered metric names.

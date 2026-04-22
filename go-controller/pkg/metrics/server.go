@@ -17,7 +17,6 @@ import (
 
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -48,11 +47,6 @@ type MetricServerOptions struct {
 	// Prometheus plumbing
 	Registerer prometheus.Registerer
 
-	// Kubernetes integration
-	K8sClient   kubernetes.Interface
-	K8sNodeName string
-	OVSDBClient libovsdbclient.Client
-
 	dbIsClustered  bool
 	dbFoundViaPath bool
 }
@@ -63,7 +57,6 @@ type MetricServer struct {
 	opts MetricServerOptions
 
 	ovsDBClient libovsdbclient.Client
-	kubeClient  kubernetes.Interface
 
 	ovsDbProperties []*util.OvsDbProperties
 
@@ -76,7 +69,7 @@ type MetricServer struct {
 }
 
 // NewMetricServer creates a new MetricServer instance
-func NewMetricServer(opts MetricServerOptions, ovsDBClient libovsdbclient.Client, kubeClient kubernetes.Interface) *MetricServer {
+func NewMetricServer(opts MetricServerOptions, ovsDBClient libovsdbclient.Client) *MetricServer {
 	registerer := opts.Registerer
 	if registerer == nil {
 		registerer = prometheus.NewRegistry()
@@ -86,7 +79,6 @@ func NewMetricServer(opts MetricServerOptions, ovsDBClient libovsdbclient.Client
 		opts:        opts,
 		ovsDBClient: ovsDBClient,
 		registerer:  registerer,
-		kubeClient:  kubeClient,
 	}
 
 	server.mux = http.NewServeMux()
