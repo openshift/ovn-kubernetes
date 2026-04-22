@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 set -o errexit # Nozero exit code of any of the commands below will fail the test.
 set -o nounset
 set -o pipefail

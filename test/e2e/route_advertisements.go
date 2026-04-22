@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package e2e
 
 import (
@@ -1950,7 +1953,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			} else {
 				// KIND network subnet: node InternalIPs fall within this range,
 				// so the node-side controller can discover them via host-cidrs.
-				kindNetwork, err := infraprovider.Get().GetNetwork("kind")
+				kindNetwork, err := infraprovider.Get().PrimaryNetwork()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				kindV4Subnet, _, err := kindNetwork.IPv4IPv6Subnets()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

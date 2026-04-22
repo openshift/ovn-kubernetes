@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 E2E_REPORT_DIR:=$(CURDIR)/_artifacts
 JOB_NAME?="$@"
 

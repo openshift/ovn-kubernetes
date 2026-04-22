@@ -34,7 +34,7 @@ theme:
     - navigation.tabs
     - navigation.tabs.sticky
     - content.code.annotate
-    - navigation.instant.preview
+    - content.code.copy
 plugins:
   - search
   - awesome-pages
@@ -47,6 +47,11 @@ plugins:
       blog_toc: true
       post_excerpt: required
       post_excerpt_max_authors: 2
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      zoomable: true
+      draggable: true
 markdown_extensions:
   - admonition
   - meta
@@ -92,6 +97,7 @@ nav:
     - Setup and Building: getting-started/building-ovn-kubernetes.md
   - Developer Guide:
       - Contributing Guide: governance/CONTRIBUTING.md
+      - Governance: governance/GOVERNANCE.md
       - Reviewing Guide: governance/REVIEWING.md
       - Coding Guide: developer-guide/developer.md
       - OVN-Kubernetes Container Images: developer-guide/image-build.md

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 
 # Returns the full directory name of the script
 DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -508,23 +511,6 @@ print_params() {
      echo ""
 }
 
-OPENSSL=""
-set_openssl_binary() {
-  for s in openssl openssl3; do
-      if ! command_exists "${s}" ; then
-          continue
-      fi
-      if [ "$(${s} version | awk -F '[ |.]' '{print $2}')" == "3" ]; then
-          OPENSSL="${s}"
-          echo "Found OpenSSL version 3 in binary ${OPENSSL}"
-          break
-      fi
-  done
-  if [ "${OPENSSL}" == "" ] ; then
-    echo "Dependency not met: Cannot find openssl version 3 (searched for openssl and openssl3)"
-    exit 1
-  fi
-}
 
 set_default_params() {
   set_common_default_params
@@ -539,8 +525,6 @@ set_default_params() {
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   KIND_OPT_OUT_KUBEVIRT_IPAM=${KIND_OPT_OUT_KUBEVIRT_IPAM:-false}
-  KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
-  KIND_LOCAL_REGISTRY_PORT=${KIND_LOCAL_REGISTRY_PORT:-5000}
   KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-"cluster.local"}
   ENABLE_IPSEC=${ENABLE_IPSEC:-false}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
@@ -584,133 +568,7 @@ set_default_params() {
   fi
 }
 
-check_ipv6() {
-  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    # Collect additional IPv6 data on test environment
-    ERROR_FOUND=false
-    TMPVAR=$(sysctl net.ipv6.conf.all.forwarding | awk '{print $3}')
-    echo "net.ipv6.conf.all.forwarding is equal to $TMPVAR"
-    if [ "$TMPVAR" != 1 ]; then
-      if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
-	sudo sysctl -w net.ipv6.conf.all.forwarding=1
-      else
-	echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.forwarding=1' to use IPv6."
-	ERROR_FOUND=true
-      fi
-    fi
-    TMPVAR=$(sysctl net.ipv6.conf.all.disable_ipv6 | awk '{print $3}')
-    echo "net.ipv6.conf.all.disable_ipv6 is equal to $TMPVAR"
-    if [ "$TMPVAR" != 0 ]; then
-      if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
-	sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
-      else
-	echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0' to use IPv6."
-	ERROR_FOUND=true
-      fi
-    fi
-    if [ -f /proc/net/if_inet6 ]; then
-      echo "/proc/net/if_inet6 exists so IPv6 supported in kernel."
-    else
-      echo "/proc/net/if_inet6 does not exists so no IPv6 support found! Compile the kernel!!"
-      ERROR_FOUND=true
-    fi
-    if "$ERROR_FOUND"; then
-      exit 2
-    fi
-  fi
-}
 
-set_cluster_cidr_ip_families() {
-# kind only allows single subnet for pod network, while ovn-kubernetes supports multiple subnets.
-# So we pick the first subnet from the provided list for kind configuration and store it in KIND_CIDR.
-# remove host subnet mask info for kind configuration (when the subnet is set as 10.0.0.0/16/14)
-  KIND_CIDR_IPV4=$(echo "${NET_CIDR_IPV4}"| cut -d',' -f1 | cut -d'/' -f1,2 )
-  KIND_CIDR_IPV6=$(echo "${NET_CIDR_IPV6}"| cut -d',' -f1 | cut -d'/' -f1,2 )
-  if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
-    IP_FAMILY=""
-    KIND_CIDR=$KIND_CIDR_IPV4
-    NET_CIDR=$NET_CIDR_IPV4
-    SVC_CIDR=$SVC_CIDR_IPV4
-    echo "IPv4 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
-  elif [ "$PLATFORM_IPV4_SUPPORT" == false ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    IP_FAMILY="ipv6"
-    KIND_CIDR=$KIND_CIDR_IPV6
-    NET_CIDR=$NET_CIDR_IPV6
-    SVC_CIDR=$SVC_CIDR_IPV6
-    echo "IPv6 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
-  elif [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    IP_FAMILY="dual"
-    KIND_CIDR=$KIND_CIDR_IPV4,$KIND_CIDR_IPV6
-    NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
-    SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
-    echo "Dual Stack Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
-  else
-    echo "Invalid setup. PLATFORM_IPV4_SUPPORT and/or PLATFORM_IPV6_SUPPORT must be true."
-    exit 1
-  fi
-}
-
-create_local_registry() {
-    # create registry container unless it already exists
-    if [ "$($OCI_BIN inspect -f '{{.State.Running}}' "${KIND_LOCAL_REGISTRY_NAME}" 2>/dev/null || true)" != 'true' ]; then
-      $OCI_BIN run \
-        -d --restart=always -p "127.0.0.1:${KIND_LOCAL_REGISTRY_PORT}:5000" --name "${KIND_LOCAL_REGISTRY_NAME}" \
-        registry:2
-    fi
-}
-
-connect_local_registry() {
-    # connect the registry to the cluster network if not already connected
-    if [ "$($OCI_BIN inspect -f='{{json .NetworkSettings.Networks.kind}}' "${KIND_LOCAL_REGISTRY_NAME}")" = 'null' ]; then
-      $OCI_BIN network connect "kind" "${KIND_LOCAL_REGISTRY_NAME}"
-    fi
-
-    # Reference docs for local registry:
-    # - https://kind.sigs.k8s.io/docs/user/local-registry/
-    # - https://github.com/kubernetes/enhancements/tree/master/keps/sig-cluster-lifecycle/generic/1755-communicating-a-local-registry
-    cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: local-registry-hosting
-  namespace: kube-public
-data:
-  localRegistryHosting.v1: |
-    host: "localhost:${KIND_LOCAL_REGISTRY_PORT}"
-    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
-EOF
-
-    # Configure containerd hosts.toml for the local registry (containerd 2.x)
-    local registry_dir="/etc/containerd/certs.d/localhost:${KIND_LOCAL_REGISTRY_PORT}"
-    for node in $(kind get nodes --name "${KIND_CLUSTER_NAME}"); do
-        $OCI_BIN exec "${node}" mkdir -p "${registry_dir}"
-        $OCI_BIN exec "${node}" sh -c \
-            "printf '[host.\"http://${KIND_LOCAL_REGISTRY_NAME}:5000\"]\n' > ${registry_dir}/hosts.toml"
-    done
-}
-
-scale_kind_cluster() {
-  echo "Scaling cluster to ${KIND_NUM_WORKER} workers..."
-  rm -rf /tmp/kindscaler
-  # change this to https://github.com/lobuhi/kindscaler once PR https://github.com/lobuhi/kindscaler/pull/1 is accepted
-  git clone https://github.com/trozet/kindscaler /tmp/kindscaler
-  /tmp/kindscaler/kindscaler.sh ${KIND_CLUSTER_NAME} -r worker -c ${KIND_NUM_WORKER}
-  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
-      if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
-       label_ovn_single_node_zones
-      else
-        label_ovn_multiple_nodes_zones
-      fi
-  fi
-  if [ "$OVN_IMAGE" == local ]; then
-    set_ovn_image
-  fi
-  install_ovn_image
-  if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
-    set_dnsnameresolver_images
-    install_dnsnameresolver_images
-  fi
-}
 
 create_ovn_kube_manifests() {
     local ovnkube_image=${OVN_IMAGE}
@@ -813,13 +671,6 @@ install_ovn_global_zone() {
   run_kubectl apply -f ovnkube-node.yaml
 }
 
-label_ovn_single_node_zones() {
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
-  done
-}
-
 install_ovn_single_node_zones() {
   label_ovn_single_node_zones
 
@@ -830,28 +681,6 @@ install_ovn_single_node_zones() {
   run_kubectl apply -f ovnkube-single-node-zone.yaml
   kubectl patch ds -n ovn-kubernetes ovnkube-node --type='json' -p='[{"op": "add", "path": "/spec/updateStrategy/rollingUpdate", "value": {"maxUnavailable": "100%"}}]'
 }
-
-label_ovn_multiple_nodes_zones() {
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort)
-  zone_idx=1
-  n=1
-  for node in $KIND_NODES; do
-    zone="zone-${zone_idx}"
-    kubectl label node "${node}" k8s.ovn.org/zone-name=${zone} --overwrite
-    if [ "${n}" == "1" ]; then
-      # Mark 1st node of each zone as zone control plane
-      kubectl label node "${node}" node-role.kubernetes.io/zone-controller="" --overwrite
-    fi
-
-    if [ "${n}" == "${KIND_NUM_NODES_PER_ZONE}" ]; then
-      n=1
-      zone_idx=$((zone_idx+1))
-    else
-      n=$((n+1))
-    fi
-  done
-}
-
 
 install_ovn_multiple_nodes_zones() {
   label_ovn_multiple_nodes_zones
@@ -919,67 +748,6 @@ install_ovn() {
   fi
 }
 
-# install_ipsec will apply the IPsec DaemonSet, create a CA that can be used by the IPsec pods. It will then add it to
-# configmap -n ovn-kubernetes signer-ca. After that, it will monitor all CSRs that are pending and it will sign those
-# with the CA cert. After each iteration, it will check if the ovn-ipsec DaemonSet pods rolled out successfully.
-# Make sure to run this at the very end of the setup process.
-install_ipsec() {
-  pushd "${MANIFEST_OUTPUT_DIR}"
-  run_kubectl apply -f ovn-ipsec.yaml
-  popd
-
-  # Create the CA (stored inside the signer-ca ConfigMap) that the IPsec pods use to sign their certificates
-  ca_dir=$(mktemp -d)
-  pushd "${ca_dir}"
-  ${OPENSSL} genrsa -out ca-bundle.key 4096
-  ${OPENSSL} req -x509 -new -nodes -key ca-bundle.key -sha256 -days 10240 -out ca-bundle.crt \
-      -subj "/C=CA/ST=Arctica/L=Northpole/O=Acme Inc/OU=DevOps/CN=www.example.com/emailAddress=dev@www.example.com"
-  kubectl create configmap -n ovn-kubernetes signer-ca --from-file ca-bundle.crt
-
-  # For ca. 5 minutes max (60 * 5 seconds + overhead) ...
-  success=false
-  for i in {1..60}; do
-    # ... try to get all CSRs and sign them
-    csrs=$(oc get csr -o go-template='{{range .items}}{{if not .status}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}')
-    for csr in ${csrs}; do
-      kubectl get csr "${csr}" -o jsonpath='{.spec.request}' | base64 --decode | \
-          sed -n '/BEGIN CERTIFICATE REQUEST/,$p' > "${csr}"
-      ${OPENSSL} x509 -req -in ${csr} -CA ca-bundle.crt -CAkey ca-bundle.key -CAcreateserial -out "${csr}.crt" -days 3650  \
-          -sha256 -extensions v3_req -copy_extensions copy
-      kubectl get csr "${csr}" -o json | \
-          jq '.status.certificate = "'$(base64 "${csr}.crt" | tr -d '\n')'"' | \
-          kubectl replace --raw /apis/certificates.k8s.io/v1/certificatesigningrequests/${csr}/status -f -
-    done
-
-    # ... and then check if the ovn-ipsec DaemonSet rolled out completely (wait for 5 seconds)
-    if kubectl rollout status daemonset -n ovn-kubernetes ovn-ipsec --timeout 5s; then
-        echo "All IPsec pods rolled out successfully"
-        success=true
-        break
-    fi
-    echo "IPsec pods did not roll out successfully yet"
-  done
-  popd
-  rm -Rf "${ca_dir}"
-
-  if ! ${success}; then
-      echo "IPsec pods did not roll out successfully"
-      exit 1
-  fi
-}
-
-docker_create_second_interface() {
-  echo "adding second interfaces to nodes"
-
-  # Create the network as dual stack, regardless of the type of the deployment. Ignore if already exists.
-  "$OCI_BIN" network create --ipv6 --driver=bridge xgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
-
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    "$OCI_BIN" network connect xgw "$n"
-  done
-}
-
 # run_script_in_container should be used when kind.sh is run nested in a container
 # and makes sure the control-plane node is reachable by substituting 127.0.0.1
 # with the control-plane container's IP
@@ -994,40 +762,6 @@ run_script_in_container() {
   chmod a+r $KUBECONFIG
 }
 
-# fixup_config_names should be used to ensure kind clusters are named based off
-# provided values, essentially it removes the 'kind' prefix from the cluster names
-fixup_kubeconfig_names() {
-  sed -i -- "s/user: kind-.*/user: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
-  sed -i -- "s/name: kind-.*/name: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
-  sed -i -- "s/cluster: kind-.*/cluster: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
-  sed -i -- "s/current-context: .*/current-context: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
-}
-
-remove_default_route() {
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  for n in $KIND_NODES; do
-    docker exec "$n" ip route delete default
-  done
-}
-
-add_dns_hostnames() {
-  dns="$'"
-  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
-  # find all IPs and build dns entries
-  for n in $KIND_NODES; do
-	ip=$(docker container inspect -f '{{ .NetworkSettings.Networks.kind.IPAddress }}' $n)
-        dns+="$ip $n \n"
-        ip=$(docker container inspect -f '{{ .NetworkSettings.Networks.kind.GlobalIPv6Address }}' $n)
-	dns+="$ip $n \n"
-  done
-
-  dns+="'"
-
-  # update dns on each node
-  for n in $KIND_NODES; do
-	docker exec $n bash -c "echo  $dns >> /etc/hosts"
-  done
-}
 
 check_common_dependencies
 # In order to allow providing arguments with spaces, e.g. "-vconsole:info -vfile:info"

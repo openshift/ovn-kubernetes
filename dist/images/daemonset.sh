@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 #set -x
 
 #Always exit on errors
@@ -1064,6 +1067,8 @@ ovn_image=${ovnkube_image} \
   ovn_ipfix_cache_active_timeout=${ovn_ipfix_cache_active_timeout} \
   ovn_ex_gw_networking_interface=${ovn_ex_gw_networking_interface} \
   ovnkube_node_mgmt_port_netdev=${ovnkube_node_mgmt_port_netdev} \
+  ovnkube_node_mgmt_port_dp_resource_name=${ovnkube_node_mgmt_port_dp_resource_name} \
+  mgmt_port_vfs_count=${mgmt_port_vfs_count} \
   ovnkube_master_loglevel=${master_loglevel} \
   ovn_loglevel_northd=${ovn_loglevel_northd} \
   ovn_loglevel_nbctld=${ovn_loglevel_nbctld} \
@@ -1322,6 +1327,7 @@ ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
   jinjanate ../templates/rbac-ovnkube-node.yaml.j2 -o ${output_dir}/rbac-ovnkube-node.yaml
 
 ovn_network_segmentation_enable=${ovn_network_segmentation_enable} \
+ovn_network_connect_enable=${ovn_network_connect_enable} \
 ovn_pre_conf_udn_addr_enable=${ovn_pre_conf_udn_addr_enable} \
 ovn_enable_dnsnameresolver=${ovn_enable_dnsnameresolver} \
 ovn_allow_icmp_netpol=${ovn_allow_icmp_netpol} \
