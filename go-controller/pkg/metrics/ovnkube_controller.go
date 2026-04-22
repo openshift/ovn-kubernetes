@@ -240,6 +240,29 @@ var metricPodEventLatency = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		"event",
 	})
 
+var metricPodBatchSize = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemController,
+	Name:      "pod_batch_size",
+	Help:      "Number of pods processed in each batch during high-volume events",
+	Buckets:   prometheus.ExponentialBuckets(1, 2, 10),
+})
+
+var metricPodBatchProcessingDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemController,
+	Name:      "pod_batch_processing_duration_seconds",
+	Help:      "Time taken to process a batch of pods",
+	Buckets:   prometheus.ExponentialBuckets(0.01, 2, 12),
+})
+
+var metricPodOperationsBatchedTotal = prometheus.NewCounter(prometheus.CounterOpts{
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemController,
+	Name:      "pod_operations_batched_total",
+	Help:      "Total number of pod operations that were batched",
+})
+
 var metricEgressFirewallRuleCount = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: types.MetricOvnkubeNamespace,
 	Subsystem: types.MetricOvnkubeSubsystemController,
@@ -408,6 +431,9 @@ func RegisterOVNKubeControllerFunctional(stopChan <-chan struct{}) {
 		prometheus.MustRegister(metricPodSelectorAddrSetPodEventLatency)
 		prometheus.MustRegister(metricPodSelectorAddrSetNamespaceEventLatency)
 		prometheus.MustRegister(metricPodEventLatency)
+		prometheus.MustRegister(metricPodBatchSize)
+		prometheus.MustRegister(metricPodBatchProcessingDuration)
+		prometheus.MustRegister(metricPodOperationsBatchedTotal)
 	}
 	prometheus.MustRegister(metricEgressFirewallRuleCount)
 	prometheus.MustRegister(metricEgressFirewallCount)
@@ -564,6 +590,17 @@ func RecordPodSelectorAddrSetNamespaceEvent(eventName string, duration time.Dura
 
 func RecordPodEvent(eventName string, duration time.Duration) {
 	metricPodEventLatency.WithLabelValues(eventName).Observe(duration.Seconds())
+}
+
+// RecordPodBatchSize records the size of a pod batch
+func RecordPodBatchSize(size int) {
+	metricPodBatchSize.Observe(float64(size))
+	metricPodOperationsBatchedTotal.Add(float64(size))
+}
+
+// RecordPodBatchDuration records the duration of processing a pod batch
+func RecordPodBatchDuration(duration float64) {
+	metricPodBatchProcessingDuration.Observe(duration)
 }
 
 // UpdateEgressFirewallRuleCount records the number of Egress firewall rules.
