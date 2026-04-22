@@ -6,6 +6,7 @@ package webhook
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -41,6 +42,9 @@ type Config struct {
 	CertDir                 string
 	Host                    string
 	Port                    int
+
+	// This field is a constructor used for creating clients and is intended for testing.
+	NewKubernetesClient func(*rest.Config) (kubernetes.Interface, error)
 }
 
 // Run starts the webhook server
@@ -50,7 +54,14 @@ func Run(ctx context.Context, restCfg *rest.Config, config Config) error {
 	// The webhook server is set up and started in a very similar way to the default one:
 	// https://github.com/ovn-kubernetes/ovn-kubernetes/blob/7c0838bb46d6de202f509abe47609c8da09311b2/go-controller/vendor/sigs.k8s.io/controller-runtime/pkg/webhook/server.go#L212
 
-	client, err := kubernetes.NewForConfig(restCfg)
+	newKubernetesClient := config.NewKubernetesClient
+	if newKubernetesClient == nil {
+		newKubernetesClient = func(cfg *rest.Config) (kubernetes.Interface, error) {
+			return kubernetes.NewForConfig(cfg)
+		}
+	}
+
+	kubeClient, err := newKubernetesClient(restCfg)
 	if err != nil {
 		return fmt.Errorf("error creating clientset: %v", err)
 	}
@@ -158,5 +169,12 @@ func Run(ctx context.Context, restCfg *rest.Config, config Config) error {
 	}()
 
 	klog.Infof("Starting the webhook server")
-	return srv.Serve(listener)
+
+	err = srv.Serve(listener)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("webhook server failed: %w", err)
+	}
+
+	return nil
+
 }
