@@ -10,7 +10,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	v1pod "k8s.io/kubernetes/pkg/api/v1/pod"
 	utilnet "k8s.io/utils/net"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func (m *externalPolicyManager) syncPod(pod *v1.Pod, routeQueue workqueue.RateLimitingInterface) error {
@@ -27,6 +30,13 @@ func (m *externalPolicyManager) syncPod(pod *v1.Pod, routeQueue workqueue.RateLi
 }
 
 func getExGwPodIPs(gatewayPod *v1.Pod, networkName string) (sets.Set[string], error) {
+	// If an external gateway pod is in terminating or not ready state then don't return the
+	// IPs for the external gateway pod
+	if util.PodTerminating(gatewayPod) || !v1pod.IsPodReadyConditionTrue(gatewayPod.Status) {
+		klog.Warningf("External gateway pod cannot serve traffic; it's in terminating or not ready state: %s/%s", gatewayPod.Namespace, gatewayPod.Name)
+		return nil, nil
+	}
+
 	if networkName != "" {
 		return getMultusIPsFromNetworkName(gatewayPod, networkName)
 	}
