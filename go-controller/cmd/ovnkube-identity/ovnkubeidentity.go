@@ -371,9 +371,11 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 		webhookMux.Handle("/pod", podHandler)
 	}
 
-	webhookMux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+	webhookMux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		if _, err := w.Write([]byte("ok")); err != nil {
+			klog.Errorf("Failed to write readyz response: %v", err)
+		}
 	})
 
 	cfg := &tls.Config{
