@@ -273,14 +273,15 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) 
 
 	nadKey := types.DefaultNetworkName
 
-	// NOTE: Batch processing is currently disabled by default (batching only works for basic pod creation)
-	// The batch processor handles logical port creation and address sets, but does not handle:
+	// NOTE: Batch processor runs by default (OVN_POD_BATCH_WINDOW_MS=100), but pods are NOT
+	// routed through it yet. The batch processor handles logical port creation and address sets,
+	// but does not handle:
 	// - Port group updates for network segmentation
 	// - Gateway route configuration
 	// - SNAT rule creation
-	// TODO: Extend batch processor to handle complete pod setup before enabling by default
-	// For now, batching is only safe for testing/development and must be explicitly enabled
-	// via OVN_POD_BATCH_WINDOW_MS environment variable
+	// TODO: Extend batch processor to handle complete pod setup before routing pods through it
+	// For now, all pods use the direct path below. Set OVN_POD_BATCH_WINDOW_MS=0 to disable
+	// the batch processor entirely (saves ~1-5MB memory)
 
 	ops, lsp, podAnnotation, newlyCreatedPort, err = oc.addLogicalPortToNetwork(pod, nadKey, network, nil)
 	if err != nil {
