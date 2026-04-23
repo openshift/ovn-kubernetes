@@ -18,6 +18,7 @@ type podBatchItem struct {
 	nadKey  string
 	network *nadapi.NetworkSelectionElement
 	errChan chan error
+	result  error // Stores the result, sent by processBatchWithMetrics
 }
 
 // PodBatchProcessor collects pod operations and processes them in batches
@@ -28,7 +29,7 @@ type PodBatchProcessor struct {
 	maxBatchSize    int
 	parallelBatches int
 	podQueue        chan *podBatchItem
-	processBatch    func([]*podBatchItem) error
+	processBatch    func([]*podBatchItem) // Populates item.result, doesn't return error
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
 	batchSemaphore  chan struct{}
@@ -38,9 +39,9 @@ type PodBatchProcessor struct {
 // batchWindow: time to wait before processing a partial batch
 // maxBatchSize: maximum number of pods to process in a single batch
 // parallelBatches: number of batches that can be processed concurrently
-// processBatch: function to process a batch of pods
+// processBatch: function to process a batch of pods (populates item.result for each)
 func NewPodBatchProcessor(batchWindow time.Duration, maxBatchSize int,
-	parallelBatches int, processBatch func([]*podBatchItem) error) *PodBatchProcessor {
+	parallelBatches int, processBatch func([]*podBatchItem)) *PodBatchProcessor {
 
 	if parallelBatches == 0 {
 		parallelBatches = 4
@@ -138,7 +139,9 @@ func (p *PodBatchProcessor) processBatchWithMetrics(batch []*podBatchItem) {
 
 	klog.Infof("Processing batch of %d pods", batchSize)
 
-	err := p.processBatch(batch)
+	// processBatch populates item.result for each pod
+	// It does NOT send to errChan - that's our job
+	p.processBatch(batch)
 
 	duration := time.Since(start)
 	klog.Infof("Batch of %d pods processed in %v (%.2f pods/sec)",
@@ -149,8 +152,9 @@ func (p *PodBatchProcessor) processBatchWithMetrics(batch []*podBatchItem) {
 	metrics.RecordPodBatchDuration(duration.Seconds())
 
 	// Send results back to all waiting callers
+	// This is the ONLY place that touches errChan (single ownership)
 	for _, item := range batch {
-		item.errChan <- err
+		item.errChan <- item.result
 		close(item.errChan)
 	}
 }
