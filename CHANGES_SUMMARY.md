@@ -240,15 +240,24 @@ ovnkube_controller_pod_batch_config{config_key="window_ms"}
 
 ### Environment Variables
 
-```bash
-# Enable batching (default)
-OVN_POD_BATCH_WINDOW_MS=100    # 0-1000 (0=disabled)
-OVN_POD_BATCH_SIZE=50          # 1-200
-OVN_POD_PARALLEL_BATCHES=4     # 1-16
+**IMPORTANT:** Batch processor starts by default with these values:
 
-# Disable batching
+```bash
+# Default configuration (if environment variables not set)
+OVN_POD_BATCH_WINDOW_MS=100    # Batch processor ENABLED by default
+OVN_POD_BATCH_SIZE=50          # Default batch size
+OVN_POD_PARALLEL_BATCHES=4     # Default parallel batches
+
+# Valid ranges
+OVN_POD_BATCH_WINDOW_MS=0-1000    # 0 = disabled, >0 = enabled
+OVN_POD_BATCH_SIZE=1-200          # Pods per batch
+OVN_POD_PARALLEL_BATCHES=1-16     # Concurrent batches
+
+# To explicitly disable batching
 OVN_POD_BATCH_WINDOW_MS=0
 ```
+
+**Note:** Even with default config, pods are NOT routed through batch processor yet (no functional impact).
 
 ### Prometheus Metrics
 
@@ -272,8 +281,8 @@ ovnkube_controller_pod_operations_batched_total                # counter
 ### Phase 1: Merge These Fixes (Current PR)
 - Fixes critical bugs
 - Makes code functional
-- Batching disabled by default (window=0 or incomplete integration)
-- Safe to merge - no behavioral change
+- Batch processor starts by default but pods NOT routed through it yet
+- Safe to merge - no functional impact (processor runs idle)
 
 ### Phase 2: Complete Integration (Future PR)
 - Implement task #1 (refactor ops building)
@@ -309,10 +318,12 @@ The fixes eliminate the critical bugs without changing behavior (batching not in
 
 ## Deployment Notes
 
-1. **No immediate impact** - batching is not routed through pods yet
-2. **Metrics will show** `enabled=0` until full integration is complete
-3. **Environment variables** are parsed but batching not used
-4. **Safe to deploy** - all changes are defensive improvements
+1. **Batch processor starts by default** - runs with 100ms window unless `OVN_POD_BATCH_WINDOW_MS=0` is set
+2. **Metrics will show** `enabled=1` and batch processor is running
+3. **Pods NOT routed through batch processor yet** - no functional impact on pod creation (still uses old path)
+4. **Resource impact** - minimal (batch processor running idle, consuming ~1-5MB memory)
+5. **To disable** - set `OVN_POD_BATCH_WINDOW_MS=0` environment variable
+6. **Safe to deploy** - batch processor runs but pods aren't routed through it, so no behavioral changes
 
 ---
 
