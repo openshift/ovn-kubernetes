@@ -320,8 +320,15 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	eventRecorder := util.EventRecorder(ovnClientset.KubeClient)
 
 	if config.Metrics.BindAddress != "" && !combineMetricsEndpoints(runMode) {
-		metrics.StartMetricsServer(config.Metrics.BindAddress, config.Metrics.EnablePprof,
-			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), ovnKubeStartWg)
+		opts := metrics.MetricServerOptions{
+			BindAddress: config.Metrics.BindAddress,
+			CertFile:    config.Metrics.NodeServerCert,
+			KeyFile:     config.Metrics.NodeServerPrivKey,
+			EnablePprof: config.Metrics.EnablePprof,
+			// Use default registry so existing metric registrations keep working.
+			Registerer: prometheus.DefaultRegisterer,
+		}
+		metrics.StartMetricsServer(opts, ctx.Done(), ovnKubeStartWg)
 	}
 
 	// In IC mode, only cluster manager runs leader election. Node and
@@ -607,6 +614,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				EnableOVNControllerMetrics: true,
 				EnableOVNNorthdMetrics:     true,
 				EnableOVNDBMetrics:         true,
+				OVSDBClient:                ovsClient,
 			}
 
 			if combineMetricsEndpoints(runMode) {
@@ -615,7 +623,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				opts.EnablePprof = config.Metrics.EnablePprof
 			}
 
-			metrics.StartOVNMetricsServer(opts, ovsClient, ctx.Done(), wg)
+			metrics.StartMetricsServer(opts, ctx.Done(), wg)
 		}
 	}
 
