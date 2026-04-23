@@ -191,6 +191,60 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 }
 ```
 
+## Additional Fix: Shutdown Race Condition
+
+### Problem
+After `Close()` runs, `GetClient()` could still return clients from the closed pool:
+- Batch worker racing with shutdown gets a closed connection
+- OVN transaction fails with confusing "connection closed" error
+- No clear indication that the pool itself is closed
+
+### Fix
+1. **Track closed state:**
+   ```go
+   type ConnectionPool struct {
+       closed bool  // Tracks whether pool has been closed
+   }
+   ```
+
+2. **GetClient returns error when closed:**
+   ```go
+   func (p *ConnectionPool) GetClient() (libovsdbclient.Client, error) {
+       p.mu.Lock()
+       defer p.mu.Unlock()
+       
+       if p.closed {
+           return nil, fmt.Errorf("connection pool is closed")
+       }
+       
+       // ... return client
+   }
+   ```
+
+3. **Make Close idempotent:**
+   ```go
+   func (p *ConnectionPool) Close() {
+       p.mu.Lock()
+       defer p.mu.Unlock()
+       
+       if p.closed {
+           return // Already closed
+       }
+       
+       p.closed = true
+       p.cleanup()
+   }
+   ```
+
+### Impact
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| **GetClient after Close** | Returns closed client | ✅ Returns clear error |
+| **Batch worker at shutdown** | Transaction fails mysteriously | ✅ Gets "pool closed" error |
+| **Multiple Close calls** | Potential double-close panic | ✅ Idempotent, safe |
+| **Error clarity** | "connection closed" | ✅ "connection pool is closed" |
+
 ## Summary
 
 ✅ **Fixed:** Pool owns its own stopCh  
@@ -198,5 +252,8 @@ func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-c
 ✅ **Fixed:** stopCh closed before clients on cleanup  
 ✅ **Fixed:** Proper cleanup on partial failure  
 ✅ **Fixed:** No goroutine leaks  
+✅ **Fixed:** GetClient detects closed pool  
+✅ **Fixed:** Close is idempotent  
+✅ **Fixed:** Clear error messages during shutdown  
 
-**Result:** Safe resource management with zero goroutine leaks.
+**Result:** Safe resource management with zero goroutine leaks and proper shutdown semantics.
