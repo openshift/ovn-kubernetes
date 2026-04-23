@@ -337,9 +337,20 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
-	// Stop batch processor first to drain queued pods
-	oc.stopPodBatching()
+	// CRITICAL SHUTDOWN ORDER:
+	// 1. Signal shutdown to all handlers FIRST (close stopChan)
+	// 2. Stop batch processor to drain queued pods
+	// 3. Wait for handlers to finish
+	//
+	// This prevents in-flight pod handlers from enqueueing to a stopped
+	// batch processor and getting "processor stopped" errors instead of
+	// draining cleanly.
 
+	// Step 1: Signal shutdown to all handlers
+	close(oc.stopChan)
+	oc.cancelableCtx.Cancel()
+
+	// Step 2: Stop other controllers
 	if oc.dnsNameResolver != nil {
 		oc.dnsNameResolver.Shutdown()
 	}
@@ -356,8 +367,11 @@ func (oc *DefaultNetworkController) Stop() {
 		oc.networkConnectController.Stop()
 	}
 
-	close(oc.stopChan)
-	oc.cancelableCtx.Cancel()
+	// Step 3: Stop batch processor AFTER signaling shutdown
+	// This drains remaining queued pods while handlers are winding down
+	oc.stopPodBatching()
+
+	// Step 4: Wait for all handlers to finish
 	oc.wg.Wait()
 }
 
