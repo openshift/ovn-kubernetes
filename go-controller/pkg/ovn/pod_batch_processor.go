@@ -192,21 +192,27 @@ func (p *PodBatchProcessor) AddPod(pod *corev1.Pod, nadKey string,
 	}
 
 	// Non-blocking send with timeout to prevent deadlock if queue is full
+	queueTimer := time.NewTimer(5 * time.Second)
+	defer queueTimer.Stop()
+
 	select {
 	case p.podQueue <- item:
 		// Successfully queued
 		klog.V(5).Infof("Pod %s/%s queued for batch processing", pod.Namespace, pod.Name)
-	case <-time.After(5 * time.Second):
+	case <-queueTimer.C:
 		return fmt.Errorf("timeout queueing pod %s/%s for batch processing (queue may be full)", pod.Namespace, pod.Name)
 	case <-p.stopCh:
 		return fmt.Errorf("batch processor stopped while queueing pod %s/%s", pod.Namespace, pod.Name)
 	}
 
 	// Wait for result with timeout to prevent indefinite blocking
+	resultTimer := time.NewTimer(30 * time.Second)
+	defer resultTimer.Stop()
+
 	select {
 	case err := <-item.errChan:
 		return err
-	case <-time.After(30 * time.Second):
+	case <-resultTimer.C:
 		return fmt.Errorf("timeout waiting for batch result for pod %s/%s (processing may be stuck)", pod.Namespace, pod.Name)
 	case <-p.stopCh:
 		return fmt.Errorf("batch processor stopped while processing pod %s/%s", pod.Namespace, pod.Name)
