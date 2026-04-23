@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -68,6 +69,7 @@ func (bnc *BaseNetworkController) initPodBatching() error {
 	if batchWindow == 0 {
 		klog.Infof("Pod batching disabled (OVN_POD_BATCH_WINDOW_MS=0)")
 		bnc.podBatchingEnabled = false
+		metrics.SetPodBatchConfigDisabled()
 		return nil
 	}
 
@@ -83,6 +85,14 @@ func (bnc *BaseNetworkController) initPodBatching() error {
 
 	bnc.podBatchProcessor.Start()
 	bnc.podBatchingEnabled = true
+
+	// Log effective configuration for operational visibility
+	klog.Infof("Pod batching ENABLED - effective config: window=%dms, batchSize=%d, parallelBatches=%d, queueSize=5000",
+		batchWindow, maxBatchSize, parallelBatches)
+	klog.Infof("Pod batching performance target: reduce OVN transaction count by 10-20x during high-volume pod operations")
+
+	// Expose configuration as metrics for observability
+	metrics.SetPodBatchConfig(float64(batchWindow), float64(maxBatchSize), float64(parallelBatches))
 
 	return nil
 }
@@ -120,12 +130,16 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 	// Collect all IPs that need to be added to namespace address set
 	allPodIPs := sets.NewString()
 
-	// Build operations for all pods
+	// Build operations for all pods - track individual errors
 	for _, item := range items {
 		ops, lsp, podAnnotation, err := bnc.buildLogicalPortOps(item.pod, item.nadKey, item.network, nil)
 		if err != nil {
-			klog.Errorf("Failed to build ops for pod %s/%s: %v",
-				item.pod.Namespace, item.pod.Name, err)
+			klog.Errorf("Failed to build ops for pod %s/%s: %v", item.pod.Namespace, item.pod.Name, err)
+			// Track error for this specific pod
+			podInfos = append(podInfos, podBatchResult{
+				pod: item.pod,
+				err: fmt.Errorf("build ops failed: %w", err),
+			})
 			continue
 		}
 
@@ -143,19 +157,36 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 			podAnnotation: podAnnotation,
 			switchName:    switchName,
 			nadKey:        item.nadKey,
+			err:           nil, // No error yet
 		})
 	}
 
+	// If all pods failed during build phase, send errors and return
 	if len(allOps) == 0 {
-		return nil
+		for i, info := range podInfos {
+			items[i].errChan <- info.err
+			close(items[i].errChan)
+		}
+		return fmt.Errorf("all %d pods in batch failed during build phase", len(podInfos))
 	}
 
 	// Add batch address set update for all pod IPs at once
 	nsInfo, nsUnlock := bnc.getNamespaceLocked(namespace, false)
+	var addrSetOps []ovsdb.Operation
 	if nsInfo != nil && nsInfo.addressSet != nil {
-		defer nsUnlock()
-		addrSetOps, err := nsInfo.addressSet.AddAddressesReturnOps(allPodIPs.List())
+		var err error
+		addrSetOps, err = nsInfo.addressSet.AddAddressesReturnOps(allPodIPs.List())
+		nsUnlock() // CRITICAL: Release lock BEFORE transaction to prevent deadlock
 		if err != nil {
+			// All valid pods fail together if address set fails
+			for i, info := range podInfos {
+				if info.err == nil {
+					items[i].errChan <- fmt.Errorf("address set update failed: %w", err)
+				} else {
+					items[i].errChan <- info.err
+				}
+				close(items[i].errChan)
+			}
 			return fmt.Errorf("failed to build address set ops: %v", err)
 		}
 		allOps = append(allOps, addrSetOps...)
@@ -165,31 +196,42 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 
 	// Execute all operations in a single transaction
 	klog.Infof("Executing batch transaction with %d operations for %d pods in namespace %s",
-		len(allOps), len(podInfos), namespace)
+		len(allOps), len(items), namespace)
 
 	start := time.Now()
-	_, err := libovsdbops.TransactAndCheck(bnc.nbClient, allOps)
+	_, txnErr := libovsdbops.TransactAndCheck(bnc.nbClient, allOps)
 	duration := time.Since(start)
 
-	klog.Infof("Batch transaction for namespace %s completed in %v (%.2f pods/sec)",
-		namespace, duration, float64(len(podInfos))/duration.Seconds())
+	klog.Infof("Batch transaction for namespace %s completed in %v", namespace, duration)
 
-	if err != nil {
-		klog.Errorf("Batch transaction failed for namespace %s: %v, falling back to individual processing", namespace, err)
-		return err
-	}
+	// Send results back with per-pod error tracking
+	for i, info := range podInfos {
+		if info.err != nil {
+			// Pod that failed during build phase
+			items[i].errChan <- info.err
+			close(items[i].errChan)
+			continue
+		}
 
-	// Update caches for all successfully processed pods
-	for _, info := range podInfos {
-		_ = bnc.logicalPortCache.add(info.pod, info.switchName, info.nadKey,
-			info.lsp.UUID, info.podAnnotation.MAC, info.podAnnotation.IPs)
+		if txnErr != nil {
+			// Transaction failed - all remaining pods fail with transaction error
+			items[i].errChan <- fmt.Errorf("batch transaction failed: %w", txnErr)
+			close(items[i].errChan)
+		} else {
+			// Success - update cache
+			_ = bnc.logicalPortCache.add(info.pod, info.switchName, info.nadKey,
+				info.lsp.UUID, info.podAnnotation.MAC, info.podAnnotation.IPs)
 
-		if bnc.onLogicalPortCacheAdd != nil {
-			bnc.onLogicalPortCacheAdd(info.pod, info.nadKey)
+			if bnc.onLogicalPortCacheAdd != nil {
+				bnc.onLogicalPortCacheAdd(info.pod, info.nadKey)
+			}
+
+			items[i].errChan <- nil
+			close(items[i].errChan)
 		}
 	}
 
-	return nil
+	return txnErr
 }
 
 // buildLogicalPortOps builds OVN operations for a single pod without executing them
@@ -210,11 +252,49 @@ func (bnc *BaseNetworkController) buildLogicalPortOps(pod *corev1.Pod, nadKey st
 }
 
 // addLogicalPortIndividual processes a single pod using the traditional path
+// This is used as fallback when batch processing fails
 func (bnc *BaseNetworkController) addLogicalPortIndividual(pod *corev1.Pod, nadKey string,
 	network *nadapi.NetworkSelectionElement) error {
-	// This would call the existing individual processing logic
-	// For now, we'll skip the implementation as it would use existing code paths
-	klog.V(5).Infof("Processing pod %s/%s individually", pod.Namespace, pod.Name)
+
+	klog.Warningf("Processing pod %s/%s individually after batch failure", pod.Namespace, pod.Name)
+
+	// Build operations for this single pod
+	ops, lsp, podAnnotation, err := bnc.buildLogicalPortOps(pod, nadKey, network, nil)
+	if err != nil {
+		return fmt.Errorf("failed to build ops for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+
+	// Add namespace address set update
+	nsInfo, nsUnlock := bnc.getNamespaceLocked(pod.Namespace, false)
+	if nsInfo != nil && nsInfo.addressSet != nil {
+		podIPs := make([]string, 0, len(podAnnotation.IPs))
+		for _, ip := range podAnnotation.IPs {
+			podIPs = append(podIPs, ip.IP.String())
+		}
+		addrSetOps, err := nsInfo.addressSet.AddAddressesReturnOps(podIPs)
+		nsUnlock() // Release lock before transaction
+		if err != nil {
+			return fmt.Errorf("failed to build address set ops: %w", err)
+		}
+		ops = append(ops, addrSetOps...)
+	} else if nsInfo != nil {
+		nsUnlock()
+	}
+
+	// Execute transaction
+	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
+	if err != nil {
+		return fmt.Errorf("failed to execute transaction for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+
+	// Update cache
+	switchName := pod.Spec.NodeName
+	_ = bnc.logicalPortCache.add(pod, switchName, nadKey, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
+
+	if bnc.onLogicalPortCacheAdd != nil {
+		bnc.onLogicalPortCacheAdd(pod, nadKey)
+	}
+
 	return nil
 }
 
@@ -224,6 +304,7 @@ type podBatchResult struct {
 	podAnnotation *util.PodAnnotation
 	switchName    string
 	nadKey        string
+	err           error // Per-pod error tracking
 }
 
 // stopPodBatching stops the pod batch processor

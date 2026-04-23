@@ -242,7 +242,7 @@ func GetNodeChassisID() (string, error) {
 // See: OCPBUGS-80960
 func GetNodeChassisIDWithFallback(node *corev1.Node) (string, error) {
 	if node == nil {
-		klog.Info("Node object is nil, falling back to OVS for chassis-id")
+		klog.V(4).Info("Node object is nil, falling back to OVS for chassis-id")
 		return GetNodeChassisID()
 	}
 
@@ -251,11 +251,30 @@ func GetNodeChassisIDWithFallback(node *corev1.Node) (string, error) {
 	// Step 1: Try to get chassis-id from node annotation (source of truth)
 	if node.Annotations != nil {
 		if chassisID, ok := node.Annotations[OvnNodeChassisID]; ok && chassisID != "" {
-			klog.Infof("Node %s: found chassis-id in annotation: %s", nodeName, chassisID)
+			klog.V(4).Infof("Node %s: found chassis-id in annotation: %s", nodeName, chassisID)
 
 			// Validate chassis-id is a proper UUID to prevent propagating corrupted data
 			if !isValidUUID(chassisID) {
-				return "", fmt.Errorf("node %s has invalid chassis-id format in annotation: %s (expected UUID)", nodeName, chassisID)
+				// Don't fail hard - warn and fall back to OVS instead
+				klog.Warningf("Node %s has invalid chassis-id format in annotation: %s (expected UUID), falling back to OVS",
+					nodeName, chassisID)
+				return GetNodeChassisID()
+			}
+
+			// Read current OVS value to see if sync is needed
+			currentChassisID, _, err := RunOVSVsctl("get", "Open_vSwitch", ".", "external_ids:system-id")
+			if err != nil {
+				klog.Warningf("Node %s: failed to read current chassis-id from OVS: %v, attempting to set from annotation",
+					nodeName, err)
+			} else {
+				// Remove quotes from OVS output
+				currentChassisID = strings.Trim(strings.TrimSpace(currentChassisID), "\"")
+				if currentChassisID == chassisID {
+					klog.V(5).Infof("Node %s: OVS chassis-id already matches annotation", nodeName)
+					return chassisID, nil
+				}
+				klog.Infof("Node %s: OVS chassis-id (%s) differs from annotation (%s), syncing...",
+					nodeName, currentChassisID, chassisID)
 			}
 
 			// Ensure OVS has the same value (overwrite if different)
@@ -263,20 +282,22 @@ func GetNodeChassisIDWithFallback(node *corev1.Node) (string, error) {
 			_, stderr, err := RunOVSVsctl("set", "Open_vSwitch", ".",
 				fmt.Sprintf("external_ids:system-id=%s", chassisID))
 			if err != nil {
-				// Log detailed error context for troubleshooting
-				klog.Errorf("Node %s: failed to set chassis-id %s in OVS, stderr: %q, error: %v", nodeName, chassisID, stderr, err)
-				// Return error instead of just warning - OVS sync is critical
-				return "", fmt.Errorf("failed to sync chassis-id to OVS for node %s: %w", nodeName, err)
+				klog.Errorf("Node %s: failed to set chassis-id %s in OVS, stderr: %q, error: %v",
+					nodeName, chassisID, stderr, err)
+				// Continue with annotation value even if OVS sync fails
+				// OVN controller will eventually pick up the annotation value
+				klog.Warningf("Node %s: continuing with annotation chassis-id despite OVS sync failure", nodeName)
+			} else {
+				klog.Infof("Node %s: successfully synced chassis-id to OVS from annotation: %s", nodeName, chassisID)
 			}
 
-			klog.Infof("Node %s: successfully set chassis-id in OVS from annotation: %s", nodeName, chassisID)
 			return chassisID, nil
 		}
 	}
 
 	// Step 2: Annotation not found, fall back to reading from OVS (existing behavior)
 	// This handles fresh node creation where annotation doesn't exist yet
-	klog.Infof("Node %s: no chassis-id in annotation, reading from OVS", nodeName)
+	klog.V(4).Infof("Node %s: no chassis-id in annotation, reading from OVS", nodeName)
 	return GetNodeChassisID()
 }
 
