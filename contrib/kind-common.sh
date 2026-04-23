@@ -38,6 +38,35 @@ if_error_exit() {
     fi
 }
 
+replace_in_file_or_exit() {
+  local file="$1"
+  local needle="$2"
+  local replacement="$3"
+  local escaped_needle escaped_replacement
+
+  escaped_needle=$(escape_sed_replacement "$needle")
+  escaped_replacement=$(escape_sed_replacement "$replacement")
+
+  if ! grep -Fq -- "$needle" "$file"; then
+    echo "Expected to replace pattern in ${file}, but it was not found: ${needle}" >&2
+    exit 1
+  fi
+
+  if ! sed -i "s|${escaped_needle}|${escaped_replacement}|g" "$file"; then
+    echo "Failed to update ${file}" >&2
+    exit 1
+  fi
+
+  if grep -Fq -- "$needle" "$file"; then
+    echo "Pattern still present in ${file} after replacement: ${needle}" >&2
+    exit 1
+  fi
+}
+
+escape_sed_replacement() {
+  printf '%s' "$1" | sed 's/[\\|&]/\\&/g'
+}
+
 set_common_default_params() {
   # KIND/cluster params
   KIND_CREATE=${KIND_CREATE:-true}
@@ -513,13 +542,42 @@ install_ingress() {
 }
 
 METALLB_DIR="/tmp/metallb"
+
+align_metallb_pool_with_ip_family() {
+  # In single-stack jobs, dev-env can provide dual-stack addresses, which
+  # causes withdraw/announce churn and flaky connectivity checks.
+  if [ "$PLATFORM_IPV4_SUPPORT" == "$PLATFORM_IPV6_SUPPORT" ]; then
+    return
+  fi
+
+  local pool_json filtered_addresses_json matched_count
+  pool_json=$(kubectl -n metallb-system get ipaddresspool dev-env-bgp -o json 2>/dev/null || true)
+  if [ -z "${pool_json}" ]; then
+    echo "Failed to read dev-env-bgp pool"
+    kubectl -n metallb-system get ipaddresspool dev-env-bgp -o yaml || true
+    exit 1
+  fi
+
+  filtered_addresses_json=$(echo "${pool_json}" | jq -c \
+    --arg ipv4 "${PLATFORM_IPV4_SUPPORT}" \
+    --arg ipv6 "${PLATFORM_IPV6_SUPPORT}" '
+    .spec.addresses
+    | if $ipv6 == "true" and $ipv4 != "true" then map(select(test(":")))
+      elif $ipv4 == "true" and $ipv6 != "true" then map(select(test(":") | not))
+      else .
+      end
+  ')
+  matched_count=$(echo "${filtered_addresses_json}" | jq 'length')
+  if [ "${matched_count}" -eq 0 ]; then
+    echo "Failed to derive family-matching addresses from dev-env-bgp pool: $(echo "${pool_json}" | jq -c '.spec.addresses')"
+    exit 1
+  fi
+  kubectl -n metallb-system patch ipaddresspool dev-env-bgp --type='merge' \
+    -p "{\"spec\":{\"addresses\":${filtered_addresses_json}}}"
+}
+
 install_metallb() {
-  # Using latest v0.14.9 as the commit we were using would not build and this
-  # version is the one having least issues for dual stack. However tests might
-  # have to workaround these two outstanding issue until fixed
-  # https://github.com/metallb/metallb/issues/2723
-  # https://github.com/metallb/metallb/issues/2724
-  local metallb_version=v0.14.9
+  local metallb_version=v0.15.3
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
@@ -533,18 +591,10 @@ install_metallb() {
   # when using 'kind load' command however metallb builds and uses older
   # incompatible kind version patch it so that it uses our own kind install
   # instead of their build
-  patch tasks.py << 'EOF'
-@@ -29,7 +29,7 @@ extra_network = "network2"
--controller_gen_version = "v0.16.3"
-+controller_gen_version = "v0.19.0"
- build_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
- kubectl_path = os.path.join(build_path, "kubectl")
--kind_path = os.path.join(build_path, "kind")
-+kind_path = "kind"
- ginkgo_path = os.path.join(build_path, "bin", "ginkgo")
- controller_gen_path = os.path.join(build_path, "bin", "controller-gen")
- kubectl_version = "v1.31.0"
-EOF
+  replace_in_file_or_exit \
+    tasks.py \
+    'kind_path = os.path.join(build_path, "kind")' \
+    'kind_path = "kind"'
 
   pip install -r dev-env/requirements.txt
 
@@ -561,6 +611,8 @@ EOF
   fi
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
   GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
+
+  align_metallb_pool_with_ip_family
 
   $OCI_BIN network rm -f clientnet
   $OCI_BIN network create --subnet="${METALLB_CLIENT_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge clientnet
@@ -1081,6 +1133,12 @@ get_kubevirt_release_url() {
 }
 
 readonly FRR_K8S_VERSION=v0.0.21
+readonly FRR_K8S_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.1
+readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.5.3
+# Override to test newer FRR builds in the in-cluster frr-k8s daemonset
+# without changing the pinned frr-k8s release.
+FRR_K8S_FRR_IMAGE=${FRR_K8S_FRR_IMAGE:-${FRR_DEPLOYED_IMAGE}}
+readonly FRR_EXTERNAL_DEMO_IMAGE=${FRR_DEPLOYED_IMAGE}
 readonly FRR_TMP_DIR=$(mktemp -d -u)
 
 clone_frr() {
@@ -1103,11 +1161,17 @@ clone_frr() {
     # https://github.com/FRRouting/frr/pull/15714).
     #
     # Bump to 10.4.1 for upstream demo was posted here: https://github.com/metallb/frr-k8s/pull/404
-    # We bump further to 10.4.3 to include additional fixes for EVPN:
+    # We bump further to 10.5.3 to include additional fixes for EVPN and coredumps:
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3907335193
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3898408592
     # https://github.com/FRRouting/frr/pull/20496
-    sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' hack/demo/demo.sh
+    #
+    # Note: 10.5.3 is aligned with current metallb trunk:
+    # https://github.com/metallb/metallb/pull/2993
+    replace_in_file_or_exit \
+      hack/demo/demo.sh \
+      "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+      "${FRR_EXTERNAL_DEMO_IMAGE}"
 
     popd
 
@@ -1288,6 +1352,7 @@ install_frr_k8s() {
   clone_frr
 
   # apply frr-k8s
+
   # The all-in-one manifest is only consumed here (deploy_frr_external_container
   # uses CRDs and the demo scripts, not this manifest), so the fix lives here
   # rather than in clone_frr. This covers both kind.sh and kind-helm.sh since
@@ -1300,10 +1365,12 @@ install_frr_k8s() {
   # REVERT ME: when https://github.com/metallb/metallb/issues/2619 is fixed
   sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
-  # Bump frr in frr-k8s to 10.4.3 to consume the following fix
-  # https://github.com/FRRouting/frr/pull/20496
-  sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' \
-    "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+
+  replace_in_file_or_exit \
+    "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml \
+    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${FRR_K8S_FRR_IMAGE}"
+
   if [ "${bgp_port}" -ne 0 ]; then
     local frr_yaml="${FRR_TMP_DIR}/frr-k8s/config/all-in-one/frr-k8s.yaml"
     grep -q 'bgpd_options=.*-p 0' "$frr_yaml" || {
