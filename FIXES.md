@@ -108,12 +108,12 @@ func (bnc *BaseNetworkController) addLogicalPortIndividual(pod *corev1.Pod, nadK
     // Add namespace address set update
     nsInfo, nsUnlock := bnc.getNamespaceLocked(pod.Namespace, false)
     if nsInfo != nil && nsInfo.addressSet != nil {
-        defer nsUnlock()
         podIPs := make([]string, 0, len(podAnnotation.IPs))
         for _, ip := range podAnnotation.IPs {
             podIPs = append(podIPs, ip.IP.String())
         }
         addrSetOps, err := nsInfo.addressSet.AddAddressesReturnOps(podIPs)
+        nsUnlock() // ← CRITICAL: Release lock BEFORE transaction to prevent deadlock
         if err != nil {
             return fmt.Errorf("failed to build address set ops: %w", err)
         }
@@ -282,12 +282,52 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 
 ## FIX #5: Fix Namespace Lock Race Condition
 
-**Already included in Fix #4 above** - note the lock release before transaction:
+**Critical fix included in both Fix #3 and Fix #4** - the namespace lock must be released BEFORE executing the OVN transaction to prevent deadlocks.
 
+### The Problem:
+Holding the namespace lock during a 500ms+ OVN transaction blocks:
+- Other pods in the same namespace
+- Namespace updates
+- NetworkPolicy changes
+
+This can cause system-wide deadlocks if the transaction waits on something that needs the lock.
+
+### The Fix:
 ```go
-addrSetOps, err = nsInfo.addressSet.AddAddressesReturnOps(allPodIPs.List())
-nsUnlock()  // ← RELEASE IMMEDIATELY after building ops
+// ❌ OLD (BUGGY) PATTERN - CAUSES DEADLOCKS:
+nsInfo, nsUnlock := bnc.getNamespaceLocked(namespace, false)
+if nsInfo != nil && nsInfo.addressSet != nil {
+    defer nsUnlock()  // ← BAD: Lock held during transaction!
+    addrSetOps, err := nsInfo.addressSet.AddAddressesReturnOps(allPodIPs.List())
+    if err != nil {
+        return err
+    }
+    allOps = append(allOps, addrSetOps...)
+}
+// Transaction executes here with lock still held (DEADLOCK RISK)
+_, err := libovsdbops.TransactAndCheck(bnc.nbClient, allOps)
+
+// ✅ NEW (CORRECT) PATTERN - LOCK RELEASED FIRST:
+nsInfo, nsUnlock := bnc.getNamespaceLocked(namespace, false)
+if nsInfo != nil && nsInfo.addressSet != nil {
+    addrSetOps, err := nsInfo.addressSet.AddAddressesReturnOps(allPodIPs.List())
+    nsUnlock()  // ← CRITICAL: Release IMMEDIATELY after building ops
+    if err != nil {
+        return err
+    }
+    allOps = append(allOps, addrSetOps...)
+} else if nsInfo != nil {
+    nsUnlock()
+}
+// Transaction executes here WITHOUT holding lock (SAFE)
+_, err := libovsdbops.TransactAndCheck(bnc.nbClient, allOps)
 ```
+
+**Applied in:**
+- Fix #3: `addLogicalPortIndividual()` 
+- Fix #4: `processPodBatchForNamespace()`
+
+Both functions now release the lock before executing transactions.
 
 ---
 
