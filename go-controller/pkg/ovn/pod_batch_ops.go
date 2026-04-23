@@ -97,7 +97,9 @@ func (bnc *BaseNetworkController) initPodBatching() error {
 }
 
 // processPodBatch processes a batch of pod operations
-func (bnc *BaseNetworkController) processPodBatch(items []*podBatchItem) error {
+// It populates item.result for each pod but does NOT send to errChan
+// Result delivery is owned by PodBatchProcessor.processBatchWithMetrics
+func (bnc *BaseNetworkController) processPodBatch(items []*podBatchItem) {
 	klog.V(5).Infof("Processing batch of %d pods", len(items))
 
 	// Group pods by namespace for efficient address set updates
@@ -117,21 +119,20 @@ func (bnc *BaseNetworkController) processPodBatch(items []*podBatchItem) error {
 				// Process each pod synchronously and capture actual result
 				fallbackErr := bnc.addLogicalPortIndividual(item.pod, item.nadKey, item.network)
 
-				// Send actual fallback result through pod's result channel
-				item.errChan <- fallbackErr
-				close(item.errChan)
+				// Store result - do NOT send to errChan (owned by processBatchWithMetrics)
+				item.result = fallbackErr
 			}
 
 			// Don't return error - we've handled each pod individually
-			// Returning would cause retry framework to retry pods we just processed
+			// Each pod's item.result will be sent by processBatchWithMetrics
 			continue
 		}
 	}
-
-	return nil
 }
 
 // processPodBatchForNamespace processes a batch of pods in the same namespace
+// It populates item.result for each pod but does NOT send to errChan
+// Result delivery is owned by PodBatchProcessor.processBatchWithMetrics
 func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, items []*podBatchItem) error {
 	var allOps []ovsdb.Operation
 	var podInfos []podBatchResult
@@ -209,12 +210,12 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 		return fmt.Errorf("batch transaction failed: %w", txnErr)
 	}
 
-	// Transaction succeeded - send success results and update caches
+	// Transaction succeeded - store results and update caches
+	// Do NOT send to errChan - that's owned by processBatchWithMetrics
 	for i, info := range podInfos {
 		if info.err != nil {
-			// Pod that failed during build phase - send its build error
-			items[i].errChan <- info.err
-			close(items[i].errChan)
+			// Pod that failed during build phase - store its build error
+			items[i].result = info.err
 			continue
 		}
 
@@ -226,8 +227,8 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 			bnc.onLogicalPortCacheAdd(info.pod, info.nadKey)
 		}
 
-		items[i].errChan <- nil
-		close(items[i].errChan)
+		// Store success result (nil = success)
+		items[i].result = nil
 	}
 
 	return nil
