@@ -139,15 +139,27 @@ func (p *PodBatchProcessor) Stop() {
 func (p *PodBatchProcessor) run() {
     select {
     case <-p.stopCh:
-        // Process remaining batch before stopping
-        if len(batch) > 0 {
-            p.processBatchAsync(batch)  // ← Drain remaining pods
+        // Drain all remaining items from queue before stopping
+        for {
+            select {
+            case item := <-p.podQueue:
+                batch = append(batch, item)
+                if len(batch) >= p.maxBatchSize {
+                    p.processBatchAsync(batch)  // ← Drain in batches
+                    batch = batch[:0]
+                }
+            default:
+                // Queue empty, process final batch
+                if len(batch) > 0 {
+                    p.processBatchAsync(batch)  // ← Drain remaining
+                }
+                // Wait for all in-flight batches to complete
+                for i := 0; i < p.parallelBatches; i++ {
+                    p.batchSemaphore <- struct{}{}  // ← Wait for workers
+                }
+                return
+            }
         }
-        // Wait for all in-flight batches to complete
-        for i := 0; i < p.parallelBatches; i++ {
-            p.batchSemaphore <- struct{}{}  // ← Wait for workers
-        }
-        return
     }
 }
 ```
@@ -258,20 +270,32 @@ oc.Stop()
 The batch processor itself has correct draining logic:
 
 ```go
-// pkg/ovn/pod_batch_processor.go:81-90
+// pkg/ovn/pod_batch_processor.go:82-101
 case <-p.stopCh:
-    // Process remaining batch before stopping
-    if len(batch) > 0 {
-        p.processBatchAsync(batch)  // ✅ Drains remaining
+    // Drain all remaining items from queue before stopping
+    for {
+        select {
+        case item := <-p.podQueue:
+            batch = append(batch, item)
+            if len(batch) >= p.maxBatchSize {
+                p.processBatchAsync(batch)  // ✅ Drains in batches
+                batch = batch[:0]
+            }
+        default:
+            // Queue empty, process final batch
+            if len(batch) > 0 {
+                p.processBatchAsync(batch)  // ✅ Drains remaining
+            }
+            // Wait for all in-flight batches to complete
+            for i := 0; i < p.parallelBatches; i++ {
+                p.batchSemaphore <- struct{}{}  // ✅ Waits for workers
+            }
+            return
+        }
     }
-    // Wait for all in-flight batches to complete
-    for i := 0; i < p.parallelBatches; i++ {
-        p.batchSemaphore <- struct{}{}  // ✅ Waits for workers
-    }
-    return
 ```
 
-The issue was just the controller calling it too early (before stopping handlers).
+This ensures ALL queued pods are processed before shutdown, not just the current batch.
 
 ---
 
