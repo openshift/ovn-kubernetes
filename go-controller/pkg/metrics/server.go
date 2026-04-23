@@ -40,6 +40,8 @@ type MetricServerOptions struct {
 	EnableOVNNorthdMetrics     bool
 	EnablePprof                bool
 
+	OVSDBClient libovsdbclient.Client
+
 	// OnFatalError is called when an unrecoverable error occurs (e.g., failed to bind to address).
 	// If set, it allows the caller to trigger a graceful shutdown.
 	OnFatalError func()
@@ -56,8 +58,6 @@ type MetricServer struct {
 	// Configuration
 	opts MetricServerOptions
 
-	ovsDBClient libovsdbclient.Client
-
 	ovsDbProperties []*util.OvsDbProperties
 
 	// HTTP server
@@ -69,16 +69,15 @@ type MetricServer struct {
 }
 
 // NewMetricServer creates a new MetricServer instance
-func NewMetricServer(opts MetricServerOptions, ovsDBClient libovsdbclient.Client) *MetricServer {
+func NewMetricServer(opts MetricServerOptions) *MetricServer {
 	registerer := opts.Registerer
 	if registerer == nil {
 		registerer = prometheus.NewRegistry()
 	}
 
 	server := &MetricServer{
-		opts:        opts,
-		ovsDBClient: ovsDBClient,
-		registerer:  registerer,
+		opts:       opts,
+		registerer: registerer,
 	}
 
 	server.mux = http.NewServeMux()
@@ -112,7 +111,7 @@ func NewMetricServer(opts MetricServerOptions, ovsDBClient libovsdbclient.Client
 func (s *MetricServer) registerMetrics() {
 	if s.opts.EnableOVSMetrics {
 		klog.Infof("MetricServer registers OVS metrics")
-		registerOvsMetrics(s.ovsDBClient, s.registerer)
+		registerOvsMetrics(s.opts.OVSDBClient, s.registerer)
 	}
 	if s.opts.EnableOVNDBMetrics {
 		klog.Infof("MetricServer registers OVN DB metrics")
@@ -120,7 +119,7 @@ func (s *MetricServer) registerMetrics() {
 	}
 	if s.opts.EnableOVNControllerMetrics {
 		klog.Infof("MetricServer registers OVN Controller metrics")
-		RegisterOvnControllerMetrics(s.ovsDBClient, s.registerer)
+		RegisterOvnControllerMetrics(s.opts.OVSDBClient, s.registerer)
 	}
 	if s.opts.EnableOVNNorthdMetrics {
 		klog.Infof("MetricServer registers OVN Northd metrics")
@@ -131,16 +130,16 @@ func (s *MetricServer) registerMetrics() {
 // updateOvsMetrics updates the OVS metrics
 func (s *MetricServer) updateOvsMetrics() {
 	ovsDatapathMetricsUpdate()
-	if err := updateOvsBridgeMetrics(s.ovsDBClient, util.RunOVSOfctl); err != nil {
+	if err := updateOvsBridgeMetrics(s.opts.OVSDBClient, util.RunOVSOfctl); err != nil {
 		klog.Errorf("Updating ovs bridge metrics failed: %s", err.Error())
 	}
-	if err := updateOvsInterfaceMetrics(s.ovsDBClient); err != nil {
+	if err := updateOvsInterfaceMetrics(s.opts.OVSDBClient); err != nil {
 		klog.Errorf("Updating ovs interface metrics failed: %s", err.Error())
 	}
 	if err := setOvsMemoryMetrics(util.RunOvsVswitchdAppCtl); err != nil {
 		klog.Errorf("Updating ovs memory metrics failed: %s", err.Error())
 	}
-	if err := setOvsHwOffloadMetrics(s.ovsDBClient); err != nil {
+	if err := setOvsHwOffloadMetrics(s.opts.OVSDBClient); err != nil {
 		klog.Errorf("Updating ovs hardware offload metrics failed: %s", err.Error())
 	}
 	coverageShowMetricsUpdate(ovsVswitchd)
@@ -148,7 +147,7 @@ func (s *MetricServer) updateOvsMetrics() {
 
 // updateOvnControllerMetrics updates the OVN Controller metrics
 func (s *MetricServer) updateOvnControllerMetrics() {
-	if err := setOvnControllerConfigurationMetrics(s.ovsDBClient); err != nil {
+	if err := setOvnControllerConfigurationMetrics(s.opts.OVSDBClient); err != nil {
 		klog.Errorf("Setting ovn controller config metrics failed: %s", err.Error())
 	}
 

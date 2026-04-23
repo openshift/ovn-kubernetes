@@ -21,8 +21,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
-
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -43,9 +41,7 @@ func TestNewMetricServerRunAndShutdown(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	var ovsDBClient libovsdbclient.Client
-
-	server := NewMetricServer(opts, ovsDBClient)
+	server := NewMetricServer(opts)
 	require.NotNil(t, server, "Server should not be nil")
 	require.NotNil(t, server.mux, "Server mux should not be nil")
 	require.NotNil(t, server.registerer, "Server registerer should not be nil")
@@ -103,9 +99,7 @@ func TestNewMetricServerRunAndFailOnFatalError(t *testing.T) {
 		EnableOVNNorthdMetrics:     false,
 	}
 
-	var ovsDBClient libovsdbclient.Client
-
-	server := NewMetricServer(opts, ovsDBClient)
+	server := NewMetricServer(opts)
 	require.NotNil(t, server, "Server should not be nil")
 	require.NotNil(t, server.mux, "Server mux should not be nil")
 	require.NotNil(t, server.registerer, "Server registerer should not be nil")
@@ -844,6 +838,7 @@ func TestHandleMetrics(t *testing.T) {
 				EnableOVNControllerMetrics: tc.enableOVNController,
 				EnableOVNNorthdMetrics:     tc.enableOVNNorthd,
 				Registerer:                 tc.registerer,
+				OVSDBClient:                ovsDBClient,
 			}
 			// Mock the exec runner for RunOvsVswitchdAppCtl calls
 			mockCmd := new(mock_k8s_io_utils_exec.Cmd)
@@ -864,7 +859,7 @@ func TestHandleMetrics(t *testing.T) {
 			}()
 
 			// Create server with OVS client
-			server := NewMetricServer(opts, ovsDBClient)
+			server := NewMetricServer(opts)
 			server.registerMetrics()
 
 			// Iterate server registry to list all registered metric names.
