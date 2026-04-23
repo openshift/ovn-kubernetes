@@ -80,15 +80,28 @@ func (p *PodBatchProcessor) run() {
 	for {
 		select {
 		case <-p.stopCh:
-			// Process remaining batch before stopping
-			if len(batch) > 0 {
-				p.processBatchAsync(batch)
+			// Drain all remaining items from queue before stopping
+			for {
+				select {
+				case item := <-p.podQueue:
+					batch = append(batch, item)
+					// Flush if batch is full
+					if len(batch) >= p.maxBatchSize {
+						p.processBatchAsync(batch)
+						batch = batch[:0]
+					}
+				default:
+					// Queue is empty, process final batch
+					if len(batch) > 0 {
+						p.processBatchAsync(batch)
+					}
+					// Wait for all in-flight batches to complete
+					for i := 0; i < p.parallelBatches; i++ {
+						p.batchSemaphore <- struct{}{}
+					}
+					return
+				}
 			}
-			// Wait for all in-flight batches to complete
-			for i := 0; i < p.parallelBatches; i++ {
-				p.batchSemaphore <- struct{}{}
-			}
-			return
 
 		case item := <-p.podQueue:
 			batch = append(batch, item)
