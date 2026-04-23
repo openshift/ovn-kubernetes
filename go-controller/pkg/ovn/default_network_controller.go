@@ -337,6 +337,9 @@ func (oc *DefaultNetworkController) Start(ctx context.Context) error {
 
 // Stop gracefully stops the controller
 func (oc *DefaultNetworkController) Stop() {
+	// Stop batch processor first to drain queued pods
+	oc.stopPodBatching()
+
 	if oc.dnsNameResolver != nil {
 		oc.dnsNameResolver.Shutdown()
 	}
@@ -393,6 +396,13 @@ func (oc *DefaultNetworkController) init() error {
 		klog.Errorf("Failed to setup master (%v)", err)
 		return err
 	}
+
+	// Initialize pod batch processor for high-volume pod operations
+	if err := oc.initPodBatching(); err != nil {
+		klog.Errorf("Failed to initialize pod batching: %v", err)
+		return err
+	}
+
 	// Sync external gateway routes. External gateway are set via Admin Policy Based External Route CRs.
 	// So execute an individual sync method at startup to cleanup any difference
 	klog.V(4).Info("Cleaning External Gateway ECMP routes")
