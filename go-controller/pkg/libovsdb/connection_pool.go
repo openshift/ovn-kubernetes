@@ -16,6 +16,7 @@ type ConnectionPool struct {
 	current int
 	mu      sync.Mutex
 	stopCh  chan struct{} // Pool-owned stop channel for client cleanup
+	closed  bool          // Tracks whether pool has been closed
 }
 
 // NewConnectionPool creates a pool of OVN NB database connections.
@@ -63,22 +64,33 @@ func (p *ConnectionPool) cleanup() {
 	}
 }
 
-// GetClient returns the next client in round-robin fashion
-func (p *ConnectionPool) GetClient() libovsdbclient.Client {
+// GetClient returns the next client in round-robin fashion.
+// Returns an error if the pool has been closed to prevent using closed connections.
+func (p *ConnectionPool) GetClient() (libovsdbclient.Client, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if p.closed {
+		return nil, fmt.Errorf("connection pool is closed")
+	}
 
 	client := p.clients[p.current]
 	p.current = (p.current + 1) % len(p.clients)
 
-	return client
+	return client, nil
 }
 
 // Close closes all connections in the pool and stops SSL watcher goroutines.
 // This must be called to avoid goroutine leaks from SSL key-pair watchers.
+// Close is idempotent and safe to call multiple times.
 func (p *ConnectionPool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.closed {
+		return // Already closed, nothing to do
+	}
+
+	p.closed = true
 	p.cleanup()
 }
