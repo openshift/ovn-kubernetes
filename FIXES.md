@@ -363,9 +363,10 @@ func GetNodeChassisIDWithFallback(node *corev1.Node) (string, error) {
             // Read current OVS value to see if sync is needed
             currentChassisID, _, err := RunOVSVsctl("get", "Open_vSwitch", ".", "external_ids:system-id")
             if err != nil {
-                klog.Warningf("Node %s: failed to read current chassis-id from OVS: %v, attempting to set from annotation", nodeName, err)
+                klog.Warningf("Node %s: failed to read current chassis-id from OVS: %v, will attempt to set from annotation", nodeName, err)
             } else {
-                currentChassisID = strings.TrimSpace(currentChassisID)
+                // Remove quotes from OVS output
+                currentChassisID = strings.Trim(strings.TrimSpace(currentChassisID), "\"")
                 if currentChassisID == chassisID {
                     klog.V(5).Infof("Node %s: OVS chassis-id already matches annotation", nodeName)
                     return chassisID, nil
@@ -373,18 +374,18 @@ func GetNodeChassisIDWithFallback(node *corev1.Node) (string, error) {
                 klog.Infof("Node %s: OVS chassis-id (%s) differs from annotation (%s), syncing...", nodeName, currentChassisID, chassisID)
             }
 
-            // Ensure OVS has the same value (overwrite if different)
+            // Ensure OVS has the same value (overwrite if different or if read failed)
+            // CRITICAL: if we publish the annotation value as L3 gateway chassis-id
+            // but OVN controller uses a different value from OVS, gateway ownership breaks
             _, stderr, err := RunOVSVsctl("set", "Open_vSwitch", ".",
                 fmt.Sprintf("external_ids:system-id=%s", chassisID))
             if err != nil {
-                klog.Errorf("Node %s: failed to set chassis-id %s in OVS, stderr: %q, error: %v", nodeName, chassisID, stderr, err)
-                // Continue with annotation value even if OVS sync fails
-                // OVN controller will eventually pick up the annotation value
-                klog.Warningf("Node %s: continuing with annotation chassis-id despite OVS sync failure", nodeName)
-            } else {
-                klog.Infof("Node %s: successfully synced chassis-id to OVS from annotation: %s", nodeName, chassisID)
+                // MUST fail here - cannot have annotation/OVS mismatch
+                return "", fmt.Errorf("failed to sync chassis-id %s to OVS for node %s, stderr: %q: %w",
+                    chassisID, nodeName, stderr, err)
             }
 
+            klog.Infof("Node %s: successfully synced chassis-id to OVS from annotation: %s", nodeName, chassisID)
             return chassisID, nil
         }
     }
@@ -393,6 +394,41 @@ func GetNodeChassisIDWithFallback(node *corev1.Node) (string, error) {
     klog.V(4).Infof("Node %s: no chassis-id in annotation, reading from OVS", nodeName)
     return GetNodeChassisID()
 }
+```
+
+**Why OVS sync must succeed:**
+
+The function has two behaviors based on the scenario:
+
+1. **Invalid annotation** - Gracefully falls back to OVS:
+   - Invalid UUID format suggests corruption or misconfiguration
+   - Falls back to reading current OVS value (safe fallback)
+   - Allows system to continue with known-good value
+
+2. **Valid annotation but OVS sync fails** - MUST return error:
+   - Node will publish annotation value in L3 gateway chassis configs
+   - OVN controller reads from `external_ids:system-id` in OVS
+   - If these don't match, gateway ownership breaks after reprovisioning
+   - **Critical:** Returning the annotation without successful OVS sync creates split-brain
+
+**Example failure scenario if we continue despite sync failure:**
+```
+1. Node annotation has chassis-ID: aaaa-bbbb-cccc
+2. OVS external_ids:system-id has: xxxx-yyyy-zzzz
+3. Sync to OVS fails (OVS temporarily unavailable)
+4. Function returns annotation value anyway
+5. Node publishes aaaa-bbbb-cccc in L3 gateway router
+6. OVN controller uses xxxx-yyyy-zzzz from OVS
+7. Gateway ownership breaks - traffic fails ❌
+```
+
+**Correct behavior:**
+```
+1-3. Same as above
+4. Function returns error
+5. Caller retries until OVS sync succeeds
+6. Both annotation and OVS have aaaa-bbbb-cccc
+7. Gateway ownership works correctly ✅
 ```
 
 ---

@@ -100,25 +100,29 @@ allOps = append(allOps, addrSetOps...)
 **Files Modified:** `pkg/util/util.go`
 
 **Changes:**
-- Changed invalid UUID validation from hard error to warning + fallback
-- Changed OVS sync failure from hard error to warning + continue
+- Changed invalid UUID validation from hard error to warning + fallback to OVS
+- OVS sync failure remains a hard error (MUST fail to prevent annotation/OVS mismatch)
 - Read current OVS value before writing to avoid unnecessary writes
 - Better logging with appropriate log levels (V(4), V(5) for verbose)
 - Remove quotes from OVS output when comparing
 
-**Impact:** Prevents chassis-ID churn during node initialization when watchFactory isn't ready yet. System gracefully falls back to OVS instead of failing.
+**Impact:** Prevents invalid annotations from blocking initialization while ensuring annotation and OVS stay synchronized. If sync fails, the function fails fast to trigger retry.
 
-**Key Change:**
+**Why OVS sync must succeed:**
+If the node publishes an annotation chassis-ID in L3 gateway configs but OVN controller uses a different OVS value, gateway ownership breaks after reprovisioning. The function MUST ensure both match before returning.
+
+**Key Changes:**
 ```go
-// Before:
-if !isValidUUID(chassisID) {
-    return "", fmt.Errorf("invalid UUID")  // FAILS
-}
-
-// After:
+// Invalid annotation - graceful fallback:
 if !isValidUUID(chassisID) {
     klog.Warning("invalid UUID, falling back to OVS")
-    return GetNodeChassisID()  // GRACEFUL FALLBACK
+    return GetNodeChassisID()
+}
+
+// OVS sync failure - MUST fail:
+if err := syncToOVS(chassisID); err != nil {
+    return "", fmt.Errorf("failed to sync chassis-id to OVS: %w", err)
+    // Cannot have annotation/OVS mismatch - gateway ownership breaks
 }
 ```
 

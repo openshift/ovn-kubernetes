@@ -640,7 +640,30 @@ func TestGetNodeChassisIDWithFallback(t *testing.T) {
 			expectError:       false,
 		},
 		{
-			name: "annotation exists but OVS set fails - should continue with annotation value",
+			name: "annotation exists, OVS read fails but set succeeds - should sync and return annotation",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						OvnNodeChassisID: annotationChassisID,
+					},
+				},
+			},
+			ovsCommands: []ovntest.ExpectedCmd{
+				{
+					Cmd: "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:system-id",
+					Err: fmt.Errorf("OVS read error"),
+				},
+				{
+					Cmd:    fmt.Sprintf("ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:system-id=%s", annotationChassisID),
+					Output: "",
+				},
+			},
+			expectedChassisID: annotationChassisID,
+			expectError:       false,
+		},
+		{
+			name: "annotation exists but OVS set fails - should return error",
 			node: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: nodeName,
@@ -659,8 +682,8 @@ func TestGetNodeChassisIDWithFallback(t *testing.T) {
 					Err: fmt.Errorf("OVS error"),
 				},
 			},
-			expectedChassisID: annotationChassisID, // Still returns annotation value despite sync failure
-			expectError:       false,
+			expectedChassisID: "",
+			expectError:       true, // Must fail - cannot have annotation/OVS mismatch
 		},
 		{
 			name: "annotation missing and OVS fails - should return error",
