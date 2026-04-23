@@ -16,6 +16,7 @@ type Allocator interface {
 	AllocateID(name string) (int, error)
 	ReserveID(name string, id int) error
 	ReleaseID(name string)
+	GetID(name string) int
 	ForName(name string) NamedAllocator
 }
 
@@ -91,6 +92,16 @@ func (idAllocator *idAllocator) ReleaseID(name string) {
 		idAllocator.idBitmap.Release(v.(int))
 		idAllocator.nameIdMap.Delete(name)
 	}
+}
+
+// GetID returns the id for the resource 'name' if it has been previously
+// allocated or reserved. Returns invalidID if no id is found.
+func (idAllocator *idAllocator) GetID(name string) int {
+	v, ok := idAllocator.nameIdMap.Load(name)
+	if ok {
+		return v.(int)
+	}
+	return invalidID
 }
 
 func (idAllocator *idAllocator) ForName(name string) NamedAllocator {
