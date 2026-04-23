@@ -109,12 +109,22 @@ func (bnc *BaseNetworkController) processPodBatch(items []*podBatchItem) error {
 	// Process each namespace's pods
 	for namespace, nsPods := range podsByNamespace {
 		if err := bnc.processPodBatchForNamespace(namespace, nsPods); err != nil {
-			klog.Errorf("Failed to process pod batch for namespace %s: %v", namespace, err)
-			// Fall back to individual processing
+			klog.Errorf("Failed to process pod batch for namespace %s: %v, falling back to individual processing", namespace, err)
+
+			// Fall back to individual processing - MUST be synchronous to avoid races
+			// If async: caller gets error, retries while fallback running → duplicate OVN mutations
 			for _, item := range nsPods {
-				go bnc.addLogicalPortIndividual(item.pod, item.nadKey, item.network)
+				// Process each pod synchronously and capture actual result
+				fallbackErr := bnc.addLogicalPortIndividual(item.pod, item.nadKey, item.network)
+
+				// Send actual fallback result through pod's result channel
+				item.errChan <- fallbackErr
+				close(item.errChan)
 			}
-			return err
+
+			// Don't return error - we've handled each pod individually
+			// Returning would cause retry framework to retry pods we just processed
+			continue
 		}
 	}
 
@@ -160,12 +170,9 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 		})
 	}
 
-	// If all pods failed during build phase, send errors and return
+	// If all pods failed during build phase, return error
+	// Caller (processPodBatch) will handle fallback
 	if len(allOps) == 0 {
-		for i, info := range podInfos {
-			items[i].errChan <- info.err
-			close(items[i].errChan)
-		}
 		return fmt.Errorf("all %d pods in batch failed during build phase", len(podInfos))
 	}
 
@@ -177,15 +184,8 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 		addrSetOps, err = nsInfo.addressSet.AddAddressesReturnOps(allPodIPs.List())
 		nsUnlock() // CRITICAL: Release lock BEFORE transaction to prevent deadlock
 		if err != nil {
-			// All valid pods fail together if address set fails
-			for i, info := range podInfos {
-				if info.err == nil {
-					items[i].errChan <- fmt.Errorf("address set update failed: %w", err)
-				} else {
-					items[i].errChan <- info.err
-				}
-				close(items[i].errChan)
-			}
+			// Address set build failed, return error
+			// Caller (processPodBatch) will handle fallback
 			return fmt.Errorf("failed to build address set ops: %v", err)
 		}
 		allOps = append(allOps, addrSetOps...)
@@ -203,34 +203,34 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 
 	klog.Infof("Batch transaction for namespace %s completed in %v", namespace, duration)
 
-	// Send results back with per-pod error tracking
+	// If transaction failed, return error for fallback
+	// Don't send results here - let processPodBatch decide fallback
+	if txnErr != nil {
+		return fmt.Errorf("batch transaction failed: %w", txnErr)
+	}
+
+	// Transaction succeeded - send success results and update caches
 	for i, info := range podInfos {
 		if info.err != nil {
-			// Pod that failed during build phase
+			// Pod that failed during build phase - send its build error
 			items[i].errChan <- info.err
 			close(items[i].errChan)
 			continue
 		}
 
-		if txnErr != nil {
-			// Transaction failed - all remaining pods fail with transaction error
-			items[i].errChan <- fmt.Errorf("batch transaction failed: %w", txnErr)
-			close(items[i].errChan)
-		} else {
-			// Success - update cache
-			_ = bnc.logicalPortCache.add(info.pod, info.switchName, info.nadKey,
-				info.lsp.UUID, info.podAnnotation.MAC, info.podAnnotation.IPs)
+		// Success - update cache
+		_ = bnc.logicalPortCache.add(info.pod, info.switchName, info.nadKey,
+			info.lsp.UUID, info.podAnnotation.MAC, info.podAnnotation.IPs)
 
-			if bnc.onLogicalPortCacheAdd != nil {
-				bnc.onLogicalPortCacheAdd(info.pod, info.nadKey)
-			}
-
-			items[i].errChan <- nil
-			close(items[i].errChan)
+		if bnc.onLogicalPortCacheAdd != nil {
+			bnc.onLogicalPortCacheAdd(info.pod, info.nadKey)
 		}
+
+		items[i].errChan <- nil
+		close(items[i].errChan)
 	}
 
-	return txnErr
+	return nil
 }
 
 // buildLogicalPortOps builds OVN operations for a single pod without executing them
