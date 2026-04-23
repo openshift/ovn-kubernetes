@@ -1,10 +1,13 @@
-# Validation Tests for OCPBUGS-61550 Fixes
+# Validation Tests for OCPBUGS-61550 (Pod Batching)
 
-This document describes the test files created to validate all critical fixes.
+This document describes the test file created to validate pod batching fixes.
 
-## Test Files Created
+**Note:** Chassis-ID validation tests are not part of this PR as that functionality 
+should be in a separate PR (OCPBUGS-80960).
 
-### 1. `go-controller/pkg/ovn/pod_batch_processor_shutdown_test.go`
+## Test File
+
+### `go-controller/pkg/ovn/pod_batch_processor_shutdown_test.go`
 
 Validates the **shutdown drain fix**: "Drain queued pods before returning from Stop"
 
@@ -40,81 +43,14 @@ Validates the **shutdown drain fix**: "Drain queued pods before returning from S
 
 ---
 
-### 2. `go-controller/pkg/util/chassis_id_sync_validation_test.go`
-
-Validates the **chassis-ID sync fix**: "Do not continue with annotation when syncing OVS fails"
-
-#### Test Cases:
-
-**TestChassisIDSyncValidation**
-- Tests all scenarios for chassis-ID sync behavior:
-
-1. **Valid annotation with successful OVS sync**
-   - OVS has different value, sync succeeds
-   - **Expected:** Returns annotation value
-
-2. **Valid annotation but OVS sync fails - MUST FAIL** ⚠️
-   - OVS set command fails
-   - **Expected:** Returns error (prevents split-brain)
-   - **Validates:** CRITICAL FIX
-
-3. **Annotation and OVS already match**
-   - OVS read shows same value as annotation
-   - **Expected:** No sync needed, returns immediately
-
-4. **Invalid annotation - graceful fallback**
-   - Annotation has invalid UUID format
-   - **Expected:** Falls back to reading OVS (no error)
-
-5. **OVS read fails but set succeeds**
-   - Can't read current value but can set
-   - **Expected:** Returns annotation after successful set
-
-6. **Nil node - fallback to OVS**
-   - Node object is nil
-   - **Expected:** Falls back to OVS
-
-7. **No annotation - fallback to OVS**
-   - Fresh node without annotation
-   - **Expected:** Reads from OVS
-
-**TestChassisIDSyncFailurePreventsGatewayBreakage**
-- Demonstrates WHY OVS sync must succeed
-- Shows failure scenario:
-  ```
-  Node publishes:     aaaa-1111-2222-3333-444444444444 (annotation)
-  OVN controller uses: bbbb-5555-6666-7777-888888888888 (OVS)
-  Result: Gateway ownership breaks ❌
-  ```
-- Shows success scenario:
-  ```
-  Node publishes:     aaaa-1111-2222-3333-444444444444
-  OVN controller uses: aaaa-1111-2222-3333-444444444444
-  Result: Gateway works correctly ✓
-  ```
-
-**TestChassisIDQuoteStripping**
-- Validates OVS output parsing handles various formats:
-  - `"chassis-id"` (with quotes)
-  - `chassis-id` (without quotes)
-  - `  "chassis-id"  \n` (with whitespace)
-- **Expected:** All formats parsed correctly
-
----
-
 ## Running the Tests
 
-### Run All Validation Tests
+### Run All Pod Batching Tests
 ```bash
 cd go-controller
 
-# Run shutdown drain tests
-go test -v ./pkg/ovn -run TestPodBatchProcessorShutdown
-
-# Run chassis-ID sync tests
-go test -v ./pkg/util -run TestChassisIDSync
-go test -v ./pkg/util -run TestChassisIDSyncFailurePreventsGatewayBreakage
-go test -v ./pkg/util -run TestChassisIDQuoteStripping
+# Run all pod batch processor tests
+go test -v ./pkg/ovn -run TestPodBatchProcessor
 ```
 
 ### Run Specific Critical Tests
@@ -122,17 +58,11 @@ go test -v ./pkg/util -run TestChassisIDQuoteStripping
 # CRITICAL: Test shutdown queue drain
 go test -v ./pkg/ovn -run TestPodBatchProcessorShutdownDrain
 
-# CRITICAL: Test OVS sync failure handling
-go test -v ./pkg/util -run "TestChassisIDSyncValidation/valid_annotation_but_OVS_sync_fails"
-
 # CRITICAL: Test result delivery (no double-close)
 go test -v ./pkg/ovn -run TestPodBatchProcessorResultDelivery
-```
 
-### Run All Tests Together
-```bash
-# Run all new validation tests
-go test -v ./pkg/ovn -run "TestPodBatchProcessor.*" ./pkg/util -run "TestChassisID.*"
+# CRITICAL: Test shutdown doesn't deadlock
+go test -v ./pkg/ovn -run TestPodBatchProcessorShutdownNoDeadlock
 ```
 
 ---
@@ -148,10 +78,9 @@ go test -v ./pkg/ovn -run "TestPodBatchProcessor.*" ./pkg/util -run "TestChassis
     pod_batch_processor_shutdown_test.go:XXX: Successfully processed 150/150 pods during shutdown
 --- PASS: TestPodBatchProcessorShutdownDrain (X.XXs)
 
-=== RUN   TestChassisIDSyncValidation
-=== RUN   TestChassisIDSyncValidation/valid_annotation_but_OVS_sync_fails_-_MUST_FAIL
-    chassis_id_sync_validation_test.go:XXX: ✓ Correctly failed with error: failed to sync chassis-id to OVS
---- PASS: TestChassisIDSyncValidation (X.XXs)
+=== RUN   TestPodBatchProcessorShutdownNoDeadlock
+    pod_batch_processor_shutdown_test.go:XXX: Shutdown completed successfully without deadlock
+--- PASS: TestPodBatchProcessorShutdownNoDeadlock (X.XXs)
 
 PASS
 ```
@@ -165,9 +94,6 @@ PASS
 | TestPodBatchProcessorShutdownDrain | Entire podQueue drained on shutdown | ✅ Yes |
 | TestPodBatchProcessorShutdownNoDeadlock | No deadlocks during shutdown | ✅ Yes |
 | TestPodBatchProcessorResultDelivery | No double-close panic on errChan | ✅ Yes |
-| TestChassisIDSyncValidation | OVS sync failure returns error | ✅ Yes |
-| TestChassisIDSyncFailurePreventsGatewayBreakage | Explains why sync must succeed | ⚠️ Critical |
-| TestChassisIDQuoteStripping | OVS output parsing robustness | ✓ Important |
 | TestPodBatchProcessorInFlightBatchesComplete | In-flight work completes | ✓ Important |
 | TestPodBatchProcessorAddPodAfterStop | Proper error after Stop() | ✓ Important |
 
@@ -192,38 +118,22 @@ kill -TERM <pid>
 # Verify: All queued pods processed before shutdown completed
 ```
 
-### 2. Test Chassis-ID Sync
+### 2. Test Batch Processing
 ```bash
-# Set valid annotation
-kubectl annotate node worker1 k8s.ovn.org/node-chassis-id=aaaa-1111-2222-3333-444444444444
-
-# Simulate OVS having different value
-ovs-vsctl set Open_vSwitch . external_ids:system-id=bbbb-5555-6666-7777-888888888888
-
-# Restart ovnkube-node
-systemctl restart ovnkube-node
-
-# Verify: Function retries until OVS sync succeeds
-# Verify: Both annotation and OVS have same value after startup
-# Verify: Gateway chassis-id matches in OVN NB database
-```
-
-### 3. Test Batch Processing
-```bash
-# Enable batching
+# Enable batching (note: pods aren't routed through batching yet)
 export OVN_POD_BATCH_WINDOW_MS=100
 export OVN_POD_BATCH_SIZE=50
 
-# Create many pods at once
-kubectl create -f pod-batch-test.yaml  # 200 pods
-
-# Verify metrics
-curl localhost:9102/metrics | grep ovnkube_controller_pod_batch
+# Verify batch processor is running
+curl localhost:9102/metrics | grep ovnkube_controller_pod_batch_config
 
 # Expected:
-# ovnkube_controller_pod_batch_size_bucket{le="50"} > 0
-# ovnkube_controller_pod_batch_processing_duration_seconds > 0
-# ovnkube_controller_pod_operations_batched_total = 200
+# ovnkube_controller_pod_batch_config{config_key="enabled"} 1
+# ovnkube_controller_pod_batch_config{config_key="window_ms"} 100
+# ovnkube_controller_pod_batch_config{config_key="batch_size"} 50
+
+# Note: ovnkube_controller_pod_operations_batched_total will be 0
+# because pods aren't routed through batching yet
 ```
 
 ---
@@ -253,14 +163,15 @@ Add to test pipeline:
 The validation tests cover:
 
 - ✅ Shutdown drain (100% coverage of drain loop)
-- ✅ Chassis-ID sync (7 scenarios covering all code paths)
 - ✅ Result delivery (no double-close)
 - ✅ Deadlock prevention
 - ✅ Error handling after Stop()
 - ✅ In-flight batch completion
-- ✅ OVS output parsing
 
-**Total:** 8 new test functions with 20+ test cases
+**Total:** 5 test functions with 10+ test cases
+
+**Note:** Chassis-ID tests are not included as that functionality should be 
+in a separate PR (OCPBUGS-80960).
 
 ---
 
@@ -271,15 +182,15 @@ The validation tests cover:
 - Verify the drain loop reads from podQueue until empty
 - Check logs for "Queue is empty, process final batch"
 
-### If TestChassisIDSyncValidation fails on "OVS sync fails":
-- Check that `util.go` line 284-287 returns error (not nil)
-- Verify error message contains "failed to sync chassis-id to OVS"
-- Ensure no "continuing with annotation despite sync failure" log
-
 ### If TestPodBatchProcessorResultDelivery fails:
 - Check that only `processBatchWithMetrics` sends to errChan
 - Verify `item.result` field exists in `podBatchItem` struct
 - Ensure lower layers populate `item.result`, not send to `errChan`
+
+### If TestPodBatchProcessorShutdownNoDeadlock fails:
+- Check that shutdown completes within 5 seconds
+- Verify the processor waits for in-flight batches
+- Check for goroutine leaks using pprof
 
 ---
 
@@ -288,9 +199,9 @@ The validation tests cover:
 These validation tests provide automated verification that:
 
 1. **Shutdown drain works**: All queued pods processed, no timeouts
-2. **Chassis-ID sync is critical**: Fails fast when OVS sync fails
-3. **No double-close panics**: Single ownership of errChan
-4. **No deadlocks**: Shutdown completes cleanly
-5. **Graceful degradation**: Invalid annotations fall back to OVS
+2. **No double-close panics**: Single ownership of errChan
+3. **No deadlocks**: Shutdown completes cleanly
+4. **Timer cleanup**: No goroutine leaks from time.After
+5. **In-flight work completes**: Batches finish before shutdown
 
 Run these tests before merging to ensure all fixes are working correctly.
