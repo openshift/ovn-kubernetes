@@ -113,7 +113,7 @@ func main() {
 	cli.HelpPrinterCustom = printOvnKubeHelp
 	c := cli.NewApp()
 	c.Name = "ovnkube"
-	c.Usage = "run ovnkube to start master, node, and gateway services"
+	c.Usage = "run ovnkube to start control plane, node, and gateway services"
 	c.Version = config.Version
 	c.CustomAppHelpTemplate = CustomAppHelpTemplate
 	c.Flags = config.GetFlags(nil)
@@ -191,8 +191,8 @@ func setupPIDFile(pidfile string) error {
 
 // ovnkubeRunMode object stores the run mode of the ovnkube
 type ovnkubeRunMode struct {
-	ovnkubeController bool // ovnkube controller (--init-ovnkube-controller or --init-master) is enabled
-	clusterManager    bool // cluster manager (--init-cluster-manager or --init-master) is enabled
+	ovnkubeController bool // ovnkube controller (--init-ovnkube-controller) is enabled
+	clusterManager    bool // cluster manager (--init-cluster-manager) is enabled
 	node              bool // node (--init-node) is enabled
 	cleanupNode       bool // cleanup (--cleanup-node) is enabled
 
@@ -206,24 +206,15 @@ type ovnkubeRunMode struct {
 // determineOvnkubeRunMode determines the run modes of ovnkube
 // based on the init flags set.  It is possible to run ovnkube in
 // multiple modes.  Allowed multiple modes are:
-//   - master (ovnkube controller + cluster manager) + node
 //   - ovnkube controller + cluster manager
 //   - ovnkube controller + node
 func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 	mode := &ovnkubeRunMode{}
 
-	master := ctx.String("init-master")
 	cm := ctx.String("init-cluster-manager")
 	ovnkController := ctx.String("init-ovnkube-controller")
 	node := ctx.String("init-node")
 	cleanup := ctx.String("cleanup-node")
-
-	if master != "" {
-		// If init-master is set, then both ovnkube controller and cluster manager
-		// are enabled
-		mode.ovnkubeController = true
-		mode.clusterManager = true
-	}
 
 	if cm != "" {
 		mode.clusterManager = true
@@ -253,7 +244,7 @@ func determineOvnkubeRunMode(ctx *cli.Context) (*ovnkubeRunMode, error) {
 		return nil, fmt.Errorf("cannot run in both cluster manager and node mode")
 	}
 
-	identities := sets.NewString(master, cm, ovnkController, node, cleanup)
+	identities := sets.NewString(cm, ovnkController, node, cleanup)
 	identities.Delete("")
 	if identities.Len() != 1 {
 		return nil, fmt.Errorf("provided no identity or different identities for different modes")

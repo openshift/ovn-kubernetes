@@ -905,10 +905,6 @@ var cliConfig config
 var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
-		Name:  "init-master",
-		Usage: "initialize master (both cluster-manager and ovnkube-controller), requires the hostname as argument",
-	},
-	&cli.StringFlag{
 		Name:  "init-cluster-manager",
 		Usage: "initialize cluster manager (but not ovnkube-controller), requires the hostname as argument",
 	},
@@ -1060,7 +1056,7 @@ var CommonFlags = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multicast",
-		Usage:       "Adds multicast support. Valid only with --init-master option.",
+		Usage:       "Adds multicast support. Valid only with ovnkube-controller mode.",
 		Destination: &EnableMulticast,
 	},
 	// Logging options
