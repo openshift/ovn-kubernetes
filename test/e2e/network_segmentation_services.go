@@ -107,7 +107,7 @@ var _ = Describe("Network Segmentation: services", feature.NetworkSegmentation, 
 				if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
 					const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4703"
 					e2eskipper.Skipf(
-						"Service e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+						"Service e2e tests for layer2 topologies are known to fail when interconnect is disabled. Upstream issue: %s", upstreamIssue,
 					)
 				}
 

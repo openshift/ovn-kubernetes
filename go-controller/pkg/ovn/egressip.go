@@ -880,7 +880,7 @@ func (e *EgressIPController) addPodEgressIPAssignmentsWithLock(ni util.NetInfo, 
 
 // addPodEgressIPAssignments tracks the setup made for each egress IP matching
 // pod w.r.t to each status. This is mainly done to avoid a lot of duplicated
-// work on ovnkube-master restarts when all egress IP handlers will most likely
+// work on ovnkube-controller restarts when all egress IP handlers will most likely
 // match and perform the setup for the same pod and status multiple times over.
 // requires holding the podAssignmentMutex lock
 func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name string, statusAssignments []egressipv1.EgressIPStatusItem, mark util.EgressIPMark, pod *corev1.Pod) error {
@@ -1353,12 +1353,12 @@ func (r redirectIPs) containsIP(ip string) bool {
 
 func (e *EgressIPController) syncEgressIPs(_ []interface{}) error {
 	// This part will take of syncing stale data which we might have in OVN if
-	// there's no ovnkube-master running for a while, while there are changes to
+	// there's no ovnkube-controller running for a while, while there are changes to
 	// pods/egress IPs.
 	// It will sync:
-	// - Egress IPs which have been deleted while ovnkube-master was down
+	// - Egress IPs which have been deleted while ovnkube-controller was down
 	// - pods/namespaces which have stopped matching on egress IPs while
-	//   ovnkube-master was down
+	//   ovnkube-controller was down
 	// - create an address-set that can hold all the egressIP pods and sync the address set by
 	//   resetting pods that are managed by egressIPs based on the constructed kapi cache
 	// This function is called when handlers for EgressIPNamespaceType are started
@@ -1853,7 +1853,7 @@ func (e *EgressIPController) syncPodAssignmentCache(egressIPCache egressIPCache)
 }
 
 // This function implements a portion of syncEgressIPs.
-// It removes OVN logical router policies used by EgressIPs deleted while ovnkube-master was down.
+// It removes OVN logical router policies used by EgressIPs deleted while ovnkube-controller was down.
 // It also removes stale nexthops from router policies used by EgressIPs.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart.
 func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) error {
@@ -1968,7 +1968,7 @@ func (e *EgressIPController) syncStaleEgressReroutePolicy(cache egressIPCache) e
 }
 
 // This function implements a portion of syncEgressIPs.
-// It removes OVN NAT rules used by EgressIPs deleted while ovnkube-master was down for the default cluster network only.
+// It removes OVN NAT rules used by EgressIPs deleted while ovnkube-controller was down for the default cluster network only.
 // Upon failure, it may be invoked multiple times in order to avoid a pod restart. For UDNs, we do not SNAT to the EgressIP
 // using OVNs gateway router and in-fact we do not use OVN, but instead we add OVS flows in the external bridge to SNAT to the EgressIP. This is not managed here.
 func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) error {

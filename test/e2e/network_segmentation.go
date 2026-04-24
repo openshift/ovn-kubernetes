@@ -287,7 +287,7 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 						if !isInterconnectEnabled() {
 							const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4528"
 							e2eskipper.Skipf(
-								"These tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+								"These tests are known to fail when interconnect is disabled. Upstream issue: %s", upstreamIssue,
 							)
 						}
 
@@ -1703,7 +1703,7 @@ spec:
 						if netConfigParams.topology == "layer2" && !isInterconnectEnabled() {
 							const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4642"
 							e2eskipper.Skipf(
-								"Egress e2e tests for layer2 topologies are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+								"Egress e2e tests for layer2 topologies are known to fail when interconnect is disabled. Upstream issue: %s", upstreamIssue,
 							)
 						}
 						clientPodConfig.namespace = f.Namespace.Name
@@ -1951,7 +1951,7 @@ spec:
 				if netConfig.topology == "layer2" && !isInterconnectEnabled() {
 					const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4958"
 					e2eskipper.Skipf(
-						"Test skipped for layer2 topology due to known issue for non-IC deployments. Upstream issue: %s", upstreamIssue,
+						"Test skipped for layer2 topology due to known issue when interconnect is disabled. Upstream issue: %s", upstreamIssue,
 					)
 				}
 				By("creating the network")

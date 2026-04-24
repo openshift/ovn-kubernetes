@@ -185,11 +185,9 @@ func injectStaticRoutesViaExternalContainer(f *framework.Framework, cs clientset
 
 // injectStaticRoutesIntoNodes adds routes for externalNetworkSubnetV4/V6
 // via the external container IPs on the primary provider network.
-// The type of routes differs according to the OVNK architecture (interconnect vs centralized)
-// and the gateway mode:
-// |        | Local GW                  | Shared GW                                                                  |
-// | IC     | linux route on all node   | linux routes on all nodes; OVN routes on all nodes for the local GW router |
-// | non-IC | linux routes on all nodes | linux routes on all nodes; OVN routes on NBDB leader for all GW routers    |
+// Route injection differs by gateway mode:
+// | Local GW  | linux route on all nodes                                                 |
+// | Shared GW | linux routes on all nodes; OVN routes on all nodes for the local GW router |
 func injectStaticRoutesIntoNodes(f *framework.Framework, cs clientset.Interface, externalContainerName string) error {
 	framework.Logf("Injecting Linux kernel routes for host-networked pods (and for OVN pods when in local gateway mode)")
 	if err := injectRoutesWithCommandBuilder(f, cs, externalContainerName, hostRoutingTableCommandBuilder{}); err != nil {

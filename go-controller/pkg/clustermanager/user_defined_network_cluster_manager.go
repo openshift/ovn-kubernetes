@@ -88,12 +88,11 @@ func (sncm *userDefinedNetworkClusterManager) isTopologyManaged(nInfo util.NetIn
 		// we need to allocate subnets to each node regardless of configuration
 		return true
 	case ovntypes.Layer2Topology:
-		// for IC, pod IPs and tunnel IDs need to be allocated
-		// in non IC config, this is done from ovnkube-master network controller
+		// With interconnect enabled, pod IPs and tunnel IDs are allocated by
+		// cluster-manager.
 		return config.OVNKubernetesFeature.EnableInterconnect
 	case ovntypes.LocalnetTopology:
-		// for IC, pod IPs need to be allocated
-		// in non IC config, this is done from ovnkube-master network controller
+		// With interconnect enabled, pod IPs are allocated by cluster-manager.
 		return config.OVNKubernetesFeature.EnableInterconnect && len(nInfo.Subnets()) > 0
 	}
 	return false

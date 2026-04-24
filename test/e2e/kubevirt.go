@@ -1866,7 +1866,7 @@ write_files:
 			if td.role == udnv1.NetworkRolePrimary && !isInterconnectEnabled() {
 				const upstreamIssue = "https://github.com/ovn-kubernetes/ovn-kubernetes/issues/4528"
 				e2eskipper.Skipf(
-					"The egress check of tests are known to fail on non-IC deployments. Upstream issue: %s", upstreamIssue,
+					"The egress check of tests is known to fail when interconnect is disabled. Upstream issue: %s", upstreamIssue,
 				)
 			}
 

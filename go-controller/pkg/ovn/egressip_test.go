@@ -93,7 +93,7 @@ type nodeInfo struct {
 
 var egressPodLabel = map[string]string{"egress": "needed"}
 
-var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network", func() {
+var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func() {
 	var (
 		app     *cli.App
 		fakeOvn *FakeOVN
@@ -8854,7 +8854,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should remove stale EgressIP setup when node label is removed while ovnkube-master is not running and assign to newly labelled node", func() {
+		ginkgo.It("should remove stale EgressIP setup when node label is removed while ovnkube-controller is not running and assign to newly labelled node", func() {
 			app.Action = func(*cli.Context) error {
 
 				egressIP1 := "192.168.126.25"
@@ -9130,7 +9130,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should remove stale EgressIP setup when pod is deleted while ovnkube-master is not running", func() {
+		ginkgo.It("should remove stale EgressIP setup when pod is deleted while ovnkube-controller is not running", func() {
 			app.Action = func(*cli.Context) error {
 
 				egressIP1 := "192.168.126.25"
@@ -9329,7 +9329,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should remove stale pod SNAT referring to wrong logical port after ovnkube-master is started", func() {
+		ginkgo.It("should remove stale pod SNAT referring to wrong logical port after ovnkube-controller is started", func() {
 			app.Action = func(*cli.Context) error {
 				config.Gateway.DisableSNATMultipleGWs = true
 				egressIP := "192.168.126.25"

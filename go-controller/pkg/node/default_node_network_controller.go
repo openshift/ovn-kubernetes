@@ -1058,11 +1058,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if config.IsModeDPU() || config.IsModeFull() {
-		// If interconnect is disabled OR interconnect is running in single-zone-mode,
-		// the ovnkube-master is responsible for patching ICNI managed namespaces with
-		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
-		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
-		// directly on the ovnkube-controller code to avoid an extra namespace annotation
+		// In single-zone deployments (default zone), ovnkube-controller patches the
+		// "k8s.ovn.org/external-gw-pod-ips" namespace annotation; ovnkube-node
+		// watches it here and flushes conntrack on every node. In multi-zone
+		// interconnect, ovnkube-controller flushes conntrack directly and skips
+		// the annotation.
 		if !config.OVNKubernetesFeature.EnableInterconnect || nc.sbZone == types.OvnDefaultZone {
 			err := nc.WatchNamespaces()
 			if err != nil {

@@ -208,7 +208,7 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *corev1.Pod, portInfo
 	podDesc := fmt.Sprintf("pod %s/%s/%s", nadKey, pod.Namespace, pod.Name)
 	logicalPort = bnc.GetLogicalPortName(pod, nadKey)
 	if portInfo == nil {
-		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
+		// If ovnkube-controller restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
 		annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
 		if err != nil {
@@ -554,10 +554,9 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	}
 
 	// Bind the port to the node's chassis.
-	// For IC this is required for Layer 2 networks with remote ports.
-	// For Legacy with OVN Central Mode it prevents ping-ponging between
-	// chassis if ovnkube-node isn't running correctly and hasn't cleared
-	// out iface-id for an old instance of this pod, and the pod got
+	// This is required for Layer 2 networks with remote ports. It also prevents
+	// chassis ping-ponging if ovnkube-node isn't running correctly, hasn't
+	// cleared iface-id for an old instance of this pod, and the pod got
 	// rescheduled.
 	var node *corev1.Node
 	if !config.Kubernetes.DisableRequestedChassis {

@@ -37,11 +37,11 @@ func TestNewNodeAdmissionWebhook(t *testing.T) {
 		expectedKeys []string
 	}{
 		{
-			name:         "should only contain common annotation in non-IC",
+			name:         "should only contain common annotations when interconnect is disabled",
 			expectedKeys: maps.Keys(commonNodeAnnotationChecks),
 		},
 		{
-			name:               "should contain common and IC annotations in IC",
+			name:               "should contain common and interconnect annotations when interconnect is enabled",
 			enableInterconnect: true,
 			expectedKeys:       maps.Keys(icAnnotations),
 		},

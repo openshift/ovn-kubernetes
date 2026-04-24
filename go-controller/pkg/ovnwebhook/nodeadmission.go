@@ -25,7 +25,7 @@ import (
 // checkNodeAnnot defines additional checks for the allowed annotations
 type checkNodeAnnot func(v annotationChange, nodeName string) error
 
-// commonNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in non-IC and IC environments
+// commonNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in all environments.
 var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 	util.OVNNodeBridgeEgressIPs:            nil,
 	util.OVNNodeHostCIDRs:                  nil,

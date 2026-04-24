@@ -276,7 +276,7 @@ func (c *Controller) Run(wg *sync.WaitGroup, threadiness int) error {
 }
 
 // This takes care of syncing stale data which we might have in OVN if
-// there's no ovnkube-master running for a while.
+// there's no ovnkube-controller running for a while.
 // It deletes all logical router policies from OVN that belong to services which are no longer
 // egress services, and the policies of endpoints that do not belong to an egress service.
 func (c *Controller) repair() error {

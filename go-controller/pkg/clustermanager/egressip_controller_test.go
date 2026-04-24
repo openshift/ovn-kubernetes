@@ -1394,7 +1394,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("should remove stale EgressIP setup when node label is removed while ovnkube-master is not running and assign to newly labelled node", func() {
+		ginkgo.It("should remove stale EgressIP setup when node label is removed while ovnkube-cluster-manager is not running and assign to newly labelled node", func() {
 			app.Action = func(*cli.Context) error {
 
 				egressIP1 := "192.168.126.25"
