@@ -168,7 +168,6 @@ COPY --from=ovnkube-builder /workspace/ovn-kubernetes/dist/images/LICENSES/ /usr
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
 COPY --from=ovnkube-builder /workspace/ovn-kubernetes/dist/images/ovnkube.sh /root/
-COPY --from=ovnkube-builder /workspace/ovn-kubernetes/dist/images/ovndb-raft-functions.sh /root/
 
 # iptables wrappers
 COPY --from=ovnkube-builder /workspace/ovn-kubernetes/dist/images/iptables-scripts/iptables /usr/sbin/

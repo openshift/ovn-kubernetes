@@ -9,9 +9,6 @@ if [[ "${OVNKUBE_SH_VERBOSE:-}" == "true" ]]; then
   set -x
 fi
 
-# source the functions in ovndb-raft-functions.sh
-. /root/ovndb-raft-functions.sh
-
 # This script is the entrypoint to the image.
 # Supports version 1.3.0 daemonsets
 #    Keep the daemonset versioning aligned with the ovnkube release versions
@@ -107,6 +104,8 @@ fi
 # ovn-controller ovn-node display display_env ovn_debug
 # a cmd must be provided, there is no default
 cmd=${1:-""}
+
+bracketify() { case "$1" in *:*) echo "[$1]" ;; *) echo "$1" ;; esac; }
 
 # ovn daemon log levels
 ovn_loglevel_northd=${OVN_LOGLEVEL_NORTHD:-"-vconsole:info"}
@@ -692,6 +691,48 @@ display() {
 
 setup_cni() {
   cp -f /usr/libexec/cni/ovn-k8s-cni-overlay /opt/cni/bin/ovn-k8s-cni-overlay
+}
+
+check_ovnkube_db_ep() {
+  local dbaddr=${1}
+  local dbport=${2}
+
+  echo "======= checking [${dbaddr}]:${dbport} OVSDB instance ==============="
+  ovsdb-client ${ovndb_ctl_ssl_opts} list-dbs ${transport}:[${dbaddr}]:${dbport} >/dev/null
+  if [[ $? != 0 ]]; then
+    return 1
+  fi
+  return 0
+}
+
+set_northd_probe_interval() {
+  # OVN_NORTHD_PROBE_INTERVAL - probe interval of northd for NB and SB DB
+  # connections in ms (default 5000)
+  northd_probe_interval=${OVN_NORTHD_PROBE_INTERVAL:-5000}
+
+  echo "setting northd probe interval to ${northd_probe_interval} ms"
+
+  output=$(ovn-nbctl --if-exists get NB_GLOBAL . options:northd_probe_interval)
+  if [[ $? == 0 ]]; then
+    output=$(echo ${output} | tr -d '\"')
+    echo "the current value of northd probe interval is ${output} ms"
+    if [[ "${output}" != "${northd_probe_interval}" ]]; then
+      ovn-nbctl set NB_GLOBAL . options:northd_probe_interval=${northd_probe_interval}
+      if [[ $? != 0 ]]; then
+        echo "Failed to set northd probe interval to ${northd_probe_interval}. Exiting....."
+        exit 13
+      fi
+      echo "successfully set northd probe interval to ${northd_probe_interval} ms"
+    fi
+  fi
+  return 0
+}
+
+ovsdb_cleanup() {
+  local db=${1}
+  ovs-appctl -t ${OVN_RUNDIR}/ovn${db}_db.ctl exit >/dev/null 2>&1
+  kill $(jobs -p) >/dev/null 2>&1
+  exit 0
 }
 
 display_version() {
@@ -2970,12 +3011,6 @@ case ${cmd} in
 "cleanup-ovn-node")
   cleanup-ovn-node
   ;;
-"nb-ovsdb-raft")
-  ovsdb-raft nb ${ovn_nb_port} ${ovn_nb_raft_port} ${ovn_nb_raft_election_timer}
-  ;;
-"sb-ovsdb-raft")
-  ovsdb-raft sb ${ovn_sb_port} ${ovn_sb_raft_port} ${ovn_sb_raft_election_timer}
-  ;;
 "ovs-metrics")
   ovs-metrics
   ;;
@@ -2983,7 +3018,7 @@ case ${cmd} in
   echo "invalid command ${cmd}"
   echo "valid v3 commands: ovs-server nb-ovsdb sb-ovsdb run-ovn-northd " \
     "ovnkube-identity ovn-controller ovn-node display_env display ovn_debug cleanup-ovs-server " \
-    "cleanup-ovn-node nb-ovsdb-raft sb-ovsdb-raft"
+    "cleanup-ovn-node"
   exit 0
   ;;
 esac
