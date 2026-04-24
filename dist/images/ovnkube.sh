@@ -209,8 +209,7 @@ ovn_kubernetes_namespace=${OVN_KUBERNETES_NAMESPACE:-ovn-kubernetes}
 # namespace used for classifying host network traffic
 ovn_host_network_namespace=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
 
-# host on which ovnkube-db POD is running and this POD contains both
-# OVN NB and SB DB running in their own container.
+# host on which this zone's OVN DB pod is running.
 ovn_db_host=${K8S_NODE_IP:-""}
 
 # OVN_NB_PORT - ovn north db port (default 6641)
@@ -339,7 +338,7 @@ ovn_observ_enable=${OVN_OBSERV_ENABLE:-false}
 # OVN_NOHOSTSUBNET_LABEL - node label indicating nodes managing their own network
 ovn_nohostsubnet_label=${OVN_NOHOSTSUBNET_LABEL:-""}
 # OVN_DISABLE_REQUESTEDCHASSIS - disable requested-chassis option during pod creation
-# should be set to true when dpu nodes are in the cluster for OVN Central mode
+# should be set to true when dpu nodes are in the cluster
 ovn_disable_requestedchassis=${OVN_DISABLE_REQUESTEDCHASSIS:-false}
 
 # external_ids:host-k8s-nodename is set on an Open_vSwitch enabled system if the ovnkube stack
@@ -445,8 +444,9 @@ wait_ovnkube_controller_with_node_done() {
   fi
 }
 
-# The ovnkube-db kubernetes service must be populated with OVN DB service endpoints
-# before various OVN K8s containers can come up. This functions checks for that.
+# The OVN DB service for this zone, ovnkube-db or ovnkube-db-$zone, must be
+# populated with endpoints before other OVN-Kubernetes containers can start.
+# This function checks for those endpoints.
 # If OVN dbs are configured to listen only on unix sockets, then there will not be
 # OVN DB service endpoints.
 ready_to_start_node() {
@@ -1091,7 +1091,7 @@ sb-ovsdb() {
   }
   ovn-sbctl --inactivity-probe=0 set-connection p${transport}:${ovn_sb_port}:$(bracketify ${ovn_db_host})
 
-  # create the ovnkube-db endpoints
+  # create the OVN DB service endpoint for this zone
   wait_for_event attempts=10 check_ovnkube_db_ep ${ovn_db_host} ${ovn_nb_port}
   set_ovnkube_db_ep ${ovn_db_host}
   if memory_trim_on_compaction_supported "sbdb"
@@ -1184,7 +1184,7 @@ run-ovn-northd() {
   echo "ovn_loglevel_northd=${ovn_loglevel_northd}"
 
   # no monitor (and no detach), start northd which connects to the
-  # ovnkube-db service
+  # OVN DB service endpoint for this zone
   local ovn_northd_ssl_opts=""
   [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
     ovn_northd_ssl_opts="
