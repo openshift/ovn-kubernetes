@@ -170,15 +170,6 @@ true
 			<td>Whether or not to enable hybrid overlay functionality</td>
 		</tr>
 		<tr>
-			<td>global.enableInterconnect</td>
-			<td>bool</td>
-			<td><pre lang="json">
-false
-</pre>
-</td>
-			<td>Configure to enable interconnecting multiple zones</td>
-		</tr>
-		<tr>
 			<td>global.enableIpsec</td>
 			<td>bool</td>
 			<td><pre lang="json">
