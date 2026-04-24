@@ -608,7 +608,7 @@ process_healthy() {
 check_health() {
   ctl_file=""
   case ${1} in
-  "ovnkube" | "ovnkube-master" | "ovn-dbchecker" | "ovnkube-cluster-manager" | "ovnkube-controller" | "ovnkube-controller-with-node" | "ovnkube-identity" )
+  "ovnkube" | "ovnkube-master" | "ovnkube-cluster-manager" | "ovnkube-controller" | "ovnkube-controller-with-node" | "ovnkube-identity" )
     # just check for presence of pid
     ;;
   "ovnnb_db" | "ovnsb_db")
@@ -692,7 +692,6 @@ display() {
   display_file "ovsdb-server" ${OVS_RUNDIR}/ovsdb-server.pid ${OVS_LOGDIR}/ovsdb-server.log
   display_file "ovn-controller" ${OVN_RUNDIR}/ovn-controller.pid ${OVN_LOGDIR}/ovn-controller.log
   display_file "ovnkube" ${OVN_RUNDIR}/ovnkube.pid ${ovnkubelogdir}/ovnkube.log
-  display_file "ovn-dbchecker" ${OVN_RUNDIR}/ovn-dbchecker.pid ${OVN_LOGDIR}/ovn-dbchecker.log
 }
 
 setup_cni() {
@@ -1069,56 +1068,6 @@ sb-ovsdb() {
 
   process_healthy ovnsb_db ${ovn_tail_pid}
   echo "=============== run sb_ovsdb ========== terminated"
-}
-
-# v1.3.0 - Runs ovn-dbchecker on ovnkube-db pod.
-ovn-dbchecker() {
-  trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.3.0"
-  rm -f ${OVN_RUNDIR}/ovn-dbchecker.pid
-
-  # wait for ready_to_start_node
-  echo "=============== ovn-dbchecker - (wait for ready_to_start_node)"
-  wait_for_event ready_to_start_node
-  echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
-
-  # wait for nb-ovsdb and sb-ovsdb to start
-  echo "=============== ovn-dbchecker (wait for nb-ovsdb) ========== OVNKUBE_DB"
-  wait_for_event attempts=15 process_ready ovnnb_db
-
-  echo "=============== ovn-dbchecker (wait for sb-ovsdb) ========== OVNKUBE_DB"
-  wait_for_event attempts=15 process_ready ovnsb_db
-
-  local ovn_db_ssl_opts=""
-  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
-    ovn_db_ssl_opts="
-        --nb-client-privkey ${ovn_controller_pk}
-        --nb-client-cert ${ovn_controller_cert}
-        --nb-client-cacert ${ovn_ca_cert}
-        --nb-cert-common-name ${ovn_controller_cname}
-        --sb-client-privkey ${ovn_controller_pk}
-        --sb-client-cert ${ovn_controller_cert}
-        --sb-client-cacert ${ovn_ca_cert}
-        --sb-cert-common-name ${ovn_controller_cname}
-      "
-  }
-
-  echo "=============== ovn-dbchecker ========== OVNKUBE_DB"
-  /usr/bin/ovndbchecker \
-    --nb-address=${ovn_nbdb} --sb-address=${ovn_sbdb} \
-    ${ovn_db_ssl_opts} \
-    --loglevel=${ovnkube_loglevel} \
-    --logfile-maxsize=${ovnkube_logfile_maxsize} \
-    --logfile-maxbackups=${ovnkube_logfile_maxbackups} \
-    --logfile-maxage=${ovnkube_logfile_maxage} \
-    --pidfile ${OVN_RUNDIR}/ovn-dbchecker.pid \
-    --logfile /var/log/ovn-kubernetes/ovn-dbchecker.log &
-
-  echo "=============== ovn-dbchecker ========== running"
-  wait_for_event attempts=3 process_ready ovn-dbchecker
-
-  process_healthy ovn-dbchecker
-  exit 11
 }
 
 # v1.0.0 - run nb_ovsdb in a separate container listening only on
@@ -3288,7 +3237,6 @@ display_version
 # run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
 # nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
 # sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
-# ovn-dbchecker  Runs ovndb checker alongside nb-ovsdb and sb-ovsdb containers (v3)
 # ovn-master     - master only (v3)
 # ovn-identity     - master only (v3)
 # ovn-controller - all nodes (v3)
@@ -3301,9 +3249,6 @@ case ${cmd} in
   ;;
 "sb-ovsdb") # pod ovnkube-db container sb-ovsdb
   sb-ovsdb
-  ;;
-"ovn-dbchecker") # pod ovnkube-db container ovn-dbchecker
-  ovn-dbchecker
   ;;
 "local-nb-ovsdb")
   local-nb-ovsdb
