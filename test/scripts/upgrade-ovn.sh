@@ -11,12 +11,10 @@ export KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 # Stash current replica counts and scale the controller Deployments to 0 so
-# their old pods exit before helm re-creates them with the new image. Only
-# touches Deployments that exist in the active layout (IC vs non-IC have
-# different components). DaemonSets are left to roll via their RollingUpdate
-# strategy.
+# their old pods exit before helm re-creates them with the new image.
+# DaemonSets are left to roll via their RollingUpdate strategy.
 declare -A SAVED_REPLICAS
-for d in ovnkube-master ovnkube-db ovnkube-control-plane; do
+for d in ovnkube-control-plane; do
   if ! kubectl -n ovn-kubernetes get deployment "$d" >/dev/null 2>&1; then
     continue
   fi

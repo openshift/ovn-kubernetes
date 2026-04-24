@@ -109,8 +109,8 @@ if [ "$OVN_GATEWAY_MODE" == "local" ]; then
 fi
 
 # skipping the egress ip legacy health check test because it requires two
-# sequenced rollouts of both ovnkube-node and ovnkube-master that take a lot of
-# time.
+# sequenced rollouts of OVN-Kubernetes control plane components that take a lot
+# of time.
 skip "disabling egress nodes impeding Legacy health check"
 
 if [ "$ENABLE_MULTI_NET" != "true" ]; then
