@@ -187,11 +187,6 @@ set_common_default_params() {
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
 
-  OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-true}
-  if [ "$OVN_ENABLE_INTERCONNECT" != true ]; then
-     echo "OVN_ENABLE_INTERCONNECT must be true."
-     exit 1
-  fi
   KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
   if [[ ${KIND_NUM_NODES_PER_ZONE} -lt 1 ]]; then
     echo "KIND_NUM_NODES_PER_ZONE must be at least 1"
@@ -229,18 +224,9 @@ set_common_default_params() {
     echo "Preconfigured UDN addresses requires network-segmentation to be enabled (-nse)"
     exit 1
   fi
-  if [[ $ENABLE_PRE_CONF_UDN_ADDR == true && $OVN_ENABLE_INTERCONNECT != true ]]; then
-    echo "Preconfigured UDN addresses requires interconnect to be enabled (-ic)"
-    exit 1
-  fi
-
   ENABLE_ROUTE_ADVERTISEMENTS=${ENABLE_ROUTE_ADVERTISEMENTS:-false}
   if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ] && [ "$ENABLE_MULTI_NET" != true ]; then
     echo "Route advertisements requires multi-network to be enabled (-mne)"
-    exit 1
-  fi
-  if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != true ]; then
-    echo "Route advertisements requires interconnect to be enabled (-ic)"
     exit 1
   fi
 
@@ -1520,12 +1506,6 @@ EOF
         fi
       fi
     done
-  fi
-}
-
-interconnect_arg_check() {
-  if [ "${IC_ARG_PROVIDED:-}" = "true" ]; then
-    echo "INFO: Interconnect mode is now the default mode, you do not need to use pass -ic or --enable-interconnect anymore"
   fi
 }
 

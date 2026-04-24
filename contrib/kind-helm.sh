@@ -45,7 +45,6 @@ usage() {
     echo "       [ -n4  | --no-ipv4 ]"
     echo "       [ -i6  | --ipv6 ]"
     echo "       [ -wk  | --num-workers <num> ]"
-    echo "       [ -ic  | --enable-interconnect]"
     echo "       [ -npz | --node-per-zone ]"
     echo "       [ -ov  | --ovn-image <image> ]"
     echo "       [ -ovr | --ovn-repo <repo> ]"
@@ -262,8 +261,6 @@ parse_args() {
                                                   ;;
             --allow-icmp-netpol )                 OVN_ALLOW_ICMP_NETPOL=true
                                                   ;;
-            -ic | --enable-interconnect )         OVN_ENABLE_INTERCONNECT=true
-                                                  ;;
             --disable-ovnkube-identity )          OVN_ENABLE_OVNKUBE_IDENTITY=false
                                                   ;;
             -npz | --nodes-per-zone )             shift
@@ -428,7 +425,6 @@ print_params() {
      echo "OVN_ENABLE_DNSNAMERESOLVER= $OVN_ENABLE_DNSNAMERESOLVER"
      echo "MULTI_POD_SUBNET= $MULTI_POD_SUBNET"
      echo "OVN_ALLOW_ICMP_NETPOL= $OVN_ALLOW_ICMP_NETPOL"
-     echo "OVN_ENABLE_INTERCONNECT = $OVN_ENABLE_INTERCONNECT"
      echo "DYNAMIC_UDN_ALLOCATION = $DYNAMIC_UDN_ALLOCATION"
      echo "DYNAMIC_UDN_GRACE_PERIOD =  $DYNAMIC_UDN_GRACE_PERIOD"
      echo "ENABLE_IPSEC = $ENABLE_IPSEC"
@@ -712,5 +708,3 @@ if [ "$ENABLE_IPSEC" == true ]; then
   set_openssl_binary
   install_ipsec
 fi
-
-interconnect_arg_check
