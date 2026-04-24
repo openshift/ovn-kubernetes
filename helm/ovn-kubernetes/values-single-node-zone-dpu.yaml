@@ -5,9 +5,6 @@
 tags:
   ovs-node: false
   ovn-ipsec: false
-  ovnkube-db: false
-  ovnkube-db-raft: false
-  ovnkube-master: false
   ovnkube-node: false
   ovnkube-control-plane: false
   ovnkube-node-dpu-host: false

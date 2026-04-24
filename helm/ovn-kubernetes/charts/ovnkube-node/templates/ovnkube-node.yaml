@@ -38,7 +38,6 @@ spec:
       hostPID: true
       {{- end }}
       containers:
-      {{- if eq (hasKey .Values.global "enableCompactMode" | ternary .Values.global.enableCompactMode false) false }}
       - name: ovnkube-node
         image: {{ include "getImage" . }}
         imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
@@ -281,7 +280,6 @@ spec:
           initialDelaySeconds: 30
           timeoutSeconds: 30
           periodSeconds: 60
-      {{- end }}
       - name: ovn-controller
         image: {{ include "getImage" . }}
         imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}

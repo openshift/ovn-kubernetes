@@ -599,13 +599,13 @@ false
 			<td>MTU of network interface in a Kubernetes pod</td>
 		</tr>
 		<tr>
-			<td>ovnkube-master.replicas</td>
+			<td>ovnkube-control-plane.replicas</td>
 			<td>int</td>
 			<td><pre lang="json">
 1
 </pre>
 </td>
-			<td>number of ovnkube-master pods</td>
+			<td>number of ovnkube-control-plane pods</td>
 		</tr>
 		<tr>
 			<td>podNetwork</td>
