@@ -229,8 +229,7 @@ spec:
 
 ---
 # Prevent users from adding/modifying the egressip-mark annotation, which is managed by ovn-kubernetes.
-# Only the ovnkube service account that manages EgressIP (cluster-manager in IC mode, master in non-IC mode)
-# is permitted to set this annotation.
+# Only the ovnkube-cluster-manager service account is permitted to set this annotation.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
