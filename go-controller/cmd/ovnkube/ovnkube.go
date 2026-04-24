@@ -21,7 +21,6 @@ import (
 	"github.com/urfave/cli/v2"
 
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/client-go/tools/record"
@@ -642,34 +641,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				opts.EnablePprof = config.Metrics.EnablePprof
 			}
 
-			if !config.OVNKubernetesFeature.EnableInterconnect {
-				// In Central mode, OVNKube Node doesn't need to register OVN Northd and DB metrics unless
-				// OVNKube Master Pod is running on this node.
-				opts.EnableOVNNorthdMetrics = false
-				opts.EnableOVNDBMetrics = false
-			}
-
-			metricsServer := metrics.StartOVNMetricsServer(opts, ovsClient, ovnClientset.KubeClient, ctx.Done(), wg)
-
-			if !config.OVNKubernetesFeature.EnableInterconnect {
-				// In Central mode, check if the OVNKube Master Pod is running on this node;
-				// and if it is, the OVN Northd and DB Metrics will be registered.
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 300*time.Second, true, func(_ context.Context) (bool, error) {
-						return metrics.CheckPodRunsOnGivenNode(ovnClientset.KubeClient, []string{"ovn-db-pod=true"}, runMode.identity, true)
-					})
-					if err != nil {
-						klog.Infof("Not registering OVN Northd and DB Metrics, because OVNKube Master Pod is not running on this node(%s)",
-							runMode.identity)
-					} else {
-						klog.Info("Found OVNKube Master Pod running on this node, registering OVN Northd and DB Metrics")
-						metricsServer.EnableOVNNorthdMetrics()
-						metricsServer.EnableOVNDBMetrics()
-					}
-				}()
-			}
+			metrics.StartOVNMetricsServer(opts, ovsClient, ovnClientset.KubeClient, ctx.Done(), wg)
 		}
 	}
 
