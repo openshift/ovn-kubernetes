@@ -141,7 +141,6 @@ set_common_default_params() {
   ENABLE_COREDUMPS=${ENABLE_COREDUMPS:-false}
   METRICS_IP=${METRICS_IP:-""}
   OVN_ALLOW_ICMP_NETPOL=${OVN_ALLOW_ICMP_NETPOL:-false}
-  OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
   OVN_ENCAP_PORT=${OVN_ENCAP_PORT:-""}
   OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
   ENABLE_IPSEC=${ENABLE_IPSEC:-false}
@@ -159,7 +158,6 @@ set_common_default_params() {
   # Log levels
   MASTER_LOG_LEVEL=${MASTER_LOG_LEVEL:-4}
   NODE_LOG_LEVEL=${NODE_LOG_LEVEL:-4}
-  DBCHECKER_LOG_LEVEL=${DBCHECKER_LOG_LEVEL:-4}
   OVN_LOG_LEVEL_NB=${OVN_LOG_LEVEL_NB:-"-vconsole:info -vfile:info"}
   OVN_LOG_LEVEL_SB=${OVN_LOG_LEVEL_SB:-"-vconsole:info -vfile:info"}
   OVN_LOG_LEVEL_NORTHD=${OVN_LOG_LEVEL_NORTHD:-"-vconsole:info -vfile:info"}
@@ -172,9 +170,6 @@ set_common_default_params() {
   KIND_INSTALL_PROMETHEUS=${KIND_INSTALL_PROMETHEUS:-false}
   KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
   RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
-  if [ "$OVN_COMPACT_MODE" == true ]; then
-    KIND_NUM_WORKER=0
-  fi
   OVN_DUMMY_GATEWAY_BRIDGE=${OVN_DUMMY_GATEWAY_BRIDGE:-false}
   OVN_GATEWAY_OPTS=${OVN_GATEWAY_OPTS:-""}
   if [ "$OVN_ISOLATED" == true ]; then
@@ -193,20 +188,20 @@ set_common_default_params() {
   fi
 
   OVN_ENABLE_INTERCONNECT=${OVN_ENABLE_INTERCONNECT:-true}
-  if [ "$OVN_COMPACT_MODE" == true ] && [ "$OVN_ENABLE_INTERCONNECT" != false ]; then
-     echo "Compact mode cannot be used together with Interconnect"
+  if [ "$OVN_ENABLE_INTERCONNECT" != true ]; then
+     echo "OVN_ENABLE_INTERCONNECT must be true."
      exit 1
   fi
-  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
-    KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
+  KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
+  if [[ ${KIND_NUM_NODES_PER_ZONE} -lt 1 ]]; then
+    echo "KIND_NUM_NODES_PER_ZONE must be at least 1"
+    exit 1
+  fi
 
-    TOTAL_NODES=$((KIND_NUM_WORKER + KIND_NUM_MASTER))
-    if [[ ${KIND_NUM_NODES_PER_ZONE} -gt 1 ]] && [[ $((TOTAL_NODES % KIND_NUM_NODES_PER_ZONE)) -ne 0 ]]; then
-      echo "(Total k8s nodes / number of nodes per zone) should be zero"
-      exit 1
-    fi
-  else
-    KIND_NUM_NODES_PER_ZONE=0
+  TOTAL_NODES=$((KIND_NUM_WORKER + KIND_NUM_MASTER))
+  if [[ ${KIND_NUM_NODES_PER_ZONE} -gt 1 ]] && [[ $((TOTAL_NODES % KIND_NUM_NODES_PER_ZONE)) -ne 0 ]]; then
+    echo "(Total k8s nodes / number of nodes per zone) should be zero"
+    exit 1
   fi
 
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
@@ -767,7 +762,7 @@ delete_metallb_dir() {
 
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
 # DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
-# Next, it iterates over all pods with name=ovnkube-db and ovnkube-master and waits for them to post "Ready".
+# Next, it waits for ovnkube-control-plane pods to post "Ready".
 # Last, it will do the same with all pods in the kube-system namespace.
 kubectl_wait_pods() {
   # IPv6 cluster seems to take a little longer to come up, so extend the wait time.
@@ -796,13 +791,7 @@ kubectl_wait_pods() {
     fi
   done
 
-  pods=""
-  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
-    pods="ovnkube-control-plane"
-  else
-    pods="ovnkube-master ovnkube-db"
-  fi
-  for name in ${pods}; do
+  for name in ovnkube-control-plane; do
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
     kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
@@ -1842,16 +1831,6 @@ remove_no_schedule_taint() {
   done
 }
 
-label_ovn_ha() {
-  MASTER_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}" | sort | head -n "${KIND_NUM_MASTER}")
-  # We want OVN HA not Kubernetes HA
-  # leverage the kubeadm well-known label node-role.kubernetes.io/control-plane=
-  # to choose the nodes where ovn master components will be placed
-  for n in $MASTER_NODES; do
-    kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" --overwrite
-  done
-}
-
 label_ovn_single_node_zones() {
   KIND_NODES=$(kind_get_nodes)
   for n in $KIND_NODES; do
@@ -1904,12 +1883,10 @@ scale_kind_cluster() {
   # change this to https://github.com/lobuhi/kindscaler once PR https://github.com/lobuhi/kindscaler/pull/1 is accepted
   git clone https://github.com/trozet/kindscaler /tmp/kindscaler
   /tmp/kindscaler/kindscaler.sh ${KIND_CLUSTER_NAME} -r worker -c ${KIND_NUM_WORKER}
-  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
-      if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
-       label_ovn_single_node_zones
-      else
-        label_ovn_multiple_nodes_zones
-      fi
+  if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
+    label_ovn_single_node_zones
+  else
+    label_ovn_multiple_nodes_zones
   fi
   if [ "$OVN_IMAGE" == local ]; then
     set_ovn_image
