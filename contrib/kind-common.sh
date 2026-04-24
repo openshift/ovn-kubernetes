@@ -3,10 +3,8 @@
 
 if [ "${BASH_SOURCE[0]}" -ef "$0" ]
 then
-    >&2 echo 'This file contains bash helper functions that are common to'
-    >&2 echo 'kind.sh and kind-helm.sh scripts and is meant to be sourced'
-    >&2 echo 'by them upon invocation. In other words, it is not useful'
-    >&2 echo 'when executed as a standalone script.'
+    >&2 echo 'This file contains bash helper functions used by kind-helm.sh'
+    >&2 echo 'and is meant to be sourced upon invocation.'
     >&2 echo 'Please source this script, do not execute it!'
     exit 1
 fi
@@ -144,11 +142,44 @@ set_common_default_params() {
   METRICS_IP=${METRICS_IP:-""}
   OVN_ALLOW_ICMP_NETPOL=${OVN_ALLOW_ICMP_NETPOL:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
+  OVN_ENCAP_PORT=${OVN_ENCAP_PORT:-""}
+  OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
+  ENABLE_IPSEC=${ENABLE_IPSEC:-false}
+  OVN_METRICS_SCALE_ENABLE=${OVN_METRICS_SCALE_ENABLE:-false}
+  OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-""}
+  OVN_NETFLOW_TARGETS=${OVN_NETFLOW_TARGETS:-""}
+  OVN_SFLOW_TARGETS=${OVN_SFLOW_TARGETS:-""}
+  OVN_IPFIX_TARGETS=${OVN_IPFIX_TARGETS:-""}
+  OVN_IPFIX_SAMPLING=${OVN_IPFIX_SAMPLING:-""}
+  OVN_IPFIX_CACHE_MAX_FLOWS=${OVN_IPFIX_CACHE_MAX_FLOWS:-""}
+  OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-""}
+  LIBOVSDB_CLIENT_LOGFILE=${LIBOVSDB_CLIENT_LOGFILE:-""}
+  OVN_ISOLATED=${OVN_ISOLATED:-false}
+  KIND_ADD_NODES=${KIND_ADD_NODES:-false}
+  # Log levels
+  MASTER_LOG_LEVEL=${MASTER_LOG_LEVEL:-4}
+  NODE_LOG_LEVEL=${NODE_LOG_LEVEL:-4}
+  DBCHECKER_LOG_LEVEL=${DBCHECKER_LOG_LEVEL:-4}
+  OVN_LOG_LEVEL_NB=${OVN_LOG_LEVEL_NB:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_SB=${OVN_LOG_LEVEL_SB:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_NORTHD=${OVN_LOG_LEVEL_NORTHD:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_CONTROLLER=${OVN_LOG_LEVEL_CONTROLLER:-"-vconsole:info"}
+  # Cluster config
+  KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-cluster.local}
+  KIND_NUM_INFRA=${KIND_NUM_INFRA:-0}
+  OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
+  # Script behavior
+  KIND_INSTALL_PROMETHEUS=${KIND_INSTALL_PROMETHEUS:-false}
+  KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
+  RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
   fi
   OVN_DUMMY_GATEWAY_BRIDGE=${OVN_DUMMY_GATEWAY_BRIDGE:-false}
   OVN_GATEWAY_OPTS=${OVN_GATEWAY_OPTS:-""}
+  if [ "$OVN_ISOLATED" == true ]; then
+    OVN_GATEWAY_OPTS="--gateway-interface=eth0"
+  fi
   if [ "$OVN_DUMMY_GATEWAY_BRIDGE" == true ]; then
     OVN_GATEWAY_OPTS="--allow-no-uplink --gateway-interface=br-ex"
   fi
@@ -734,7 +765,18 @@ kubectl_wait_pods() {
   for ds in ovnkube-node ovs-node; do
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
-    kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+    # `kubectl rollout status` errors on DaemonSets with updateStrategy=OnDelete
+    # (upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
+    # OVS out from under still-running ovnkube-node pods). For OnDelete DSes
+    # we can't observe rollout progress; just wait for pods to be Ready.
+    strategy=$(kubectl -n ovn-kubernetes get daemonset ${ds} \
+      -o=jsonpath='{.spec.updateStrategy.type}' 2>/dev/null)
+    if [ "${strategy}" = "OnDelete" ]; then
+      kubectl wait -n ovn-kubernetes --for=condition=ready pods \
+        -l app=${ds} --timeout=${timeout}s
+    else
+      kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+    fi
   done
 
   pods=""
@@ -1355,8 +1397,7 @@ install_frr_k8s() {
 
   # The all-in-one manifest is only consumed here (deploy_frr_external_container
   # uses CRDs and the demo scripts, not this manifest), so the fix lives here
-  # rather than in clone_frr. This covers both kind.sh and kind-helm.sh since
-  # both call install_frr_k8s.
+  # rather than in clone_frr.
   #
   # gcr.io/kubebuilder/kube-rbac-proxy is unavailable after Google's Container
   # Registry shutdown (https://cloud.google.com/container-registry/docs/deprecations/container-registry-deprecation).
@@ -1862,22 +1903,19 @@ scale_kind_cluster() {
   fi
 }
 
-# install_ipsec will apply the IPsec DaemonSet, create a CA that can be used by the IPsec pods. It will then add it to
-# configmap -n ovn-kubernetes signer-ca. After that, it will monitor all CSRs that are pending and it will sign those
-# with the CA cert. After each iteration, it will check if the ovn-ipsec DaemonSet pods rolled out successfully.
+# install_ipsec sets up IPsec once the ovn-ipsec DaemonSet is deployed by the helm chart
+# (tags.ovn-ipsec=true). It creates a CA, publishes it as the ovn-kubernetes/signer-ca
+# ConfigMap, and signs any pending CSRs with that CA until the DaemonSet rolls out.
 # Make sure to run this at the very end of the setup process.
 install_ipsec() {
-  pushd "${MANIFEST_OUTPUT_DIR}"
-  run_kubectl apply -f ovn-ipsec.yaml
-  popd
-
   # Create the CA (stored inside the signer-ca ConfigMap) that the IPsec pods use to sign their certificates
   ca_dir=$(mktemp -d)
   pushd "${ca_dir}"
   ${OPENSSL} genrsa -out ca-bundle.key 4096
   ${OPENSSL} req -x509 -new -nodes -key ca-bundle.key -sha256 -days 10240 -out ca-bundle.crt \
       -subj "/C=CA/ST=Arctica/L=Northpole/O=Acme Inc/OU=DevOps/CN=www.example.com/emailAddress=dev@www.example.com"
-  kubectl create configmap -n ovn-kubernetes signer-ca --from-file ca-bundle.crt
+  kubectl create configmap -n ovn-kubernetes signer-ca --from-file ca-bundle.crt \
+      --dry-run=client -o yaml | kubectl apply -f -
 
   # For ca. 5 minutes max (60 * 5 seconds + overhead) ...
   success=false
@@ -1909,6 +1947,21 @@ install_ipsec() {
       echo "IPsec pods did not roll out successfully"
       exit 1
   fi
+}
+
+# run_script_in_container should be used when the script is run nested in a container
+# and makes sure the control-plane node is reachable by substituting 127.0.0.1
+# with the control-plane container's IP.
+run_script_in_container() {
+  local master_ip
+  if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
+    master_ip=$("$OCI_BIN" inspect -f '{{ (index .NetworkSettings.Networks "kind").IPAddress }}' "${KIND_CLUSTER_NAME}-control-plane")
+    sed -i -- "s/server: .*/server: https:\/\/$master_ip:6443/g" "$KUBECONFIG"
+  else
+    master_ip=$("$OCI_BIN" inspect -f '{{ (index .NetworkSettings.Networks "kind").GlobalIPv6Address }}' "${KIND_CLUSTER_NAME}-control-plane")
+    sed -i -- "s/server: .*/server: https:\/\/[$master_ip]:6443/g" "$KUBECONFIG"
+  fi
+  chmod a+r "$KUBECONFIG"
 }
 
 # fixup_kubeconfig_names ensures kind clusters are named based off provided
