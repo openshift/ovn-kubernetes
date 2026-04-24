@@ -627,6 +627,23 @@ install_metallb() {
     'kind_path = os.path.join(build_path, "kind")' \
     'kind_path = "kind"'
 
+  # MetalLB v0.15.3 still pins its in-cluster FRR speaker containers to 10.4.1.
+  # Keep the pinned upstream string for patching, but replace the actual
+  # deployed image so CI exercises the same FRR build as the rest of our BGP
+  # setup and coredump debugging.
+  replace_in_file_or_exit \
+    config/frr/speaker-patch.yaml \
+    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${FRR_DEPLOYED_IMAGE}"
+  replace_in_file_or_exit \
+    config/manifests/metallb-frr.yaml \
+    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${FRR_DEPLOYED_IMAGE}"
+  replace_in_file_or_exit \
+    charts/metallb/values.yaml \
+    "tag: ${FRR_K8S_UPSTREAM_FRR_IMAGE##*:}" \
+    "tag: ${FRR_DEPLOYED_IMAGE##*:}"
+
   pip install -r dev-env/requirements.txt
 
   local ip_family ipv6_network
@@ -1176,7 +1193,7 @@ get_kubevirt_release_url() {
 
 readonly FRR_K8S_VERSION=v0.0.21
 readonly FRR_K8S_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.1
-readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.5.3
+readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.6.0
 # Override to test newer FRR builds in the in-cluster frr-k8s daemonset
 # without changing the pinned frr-k8s release.
 FRR_K8S_FRR_IMAGE=${FRR_K8S_FRR_IMAGE:-${FRR_DEPLOYED_IMAGE}}
@@ -1203,13 +1220,14 @@ clone_frr() {
     # https://github.com/FRRouting/frr/pull/15714).
     #
     # Bump to 10.4.1 for upstream demo was posted here: https://github.com/metallb/frr-k8s/pull/404
-    # We bump further to 10.5.3 to include additional fixes for EVPN and coredumps:
+    # We bump further to 10.6.0 to include additional fixes for EVPN and coredumps:
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3907335193
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3898408592
     # https://github.com/FRRouting/frr/pull/20496
     #
-    # Note: 10.5.3 is aligned with current metallb trunk:
-    # https://github.com/metallb/metallb/pull/2993
+    # Note: 10.6.0 carries the bfdd coredump fix:
+    # https://github.com/FRRouting/frr/pull/19822
+    # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6299
     replace_in_file_or_exit \
       hack/demo/demo.sh \
       "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
