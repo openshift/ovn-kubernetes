@@ -1226,11 +1226,6 @@ ovnkube-identity() {
     check_ovn_daemonset_version "1.3.0"
     rm -f ${OVN_RUNDIR}/ovnkube-identity.pid
 
-    ovnkube_enable_interconnect_flag=
-    if [[ ${ovn_enable_interconnect} == "true" ]]; then
-      ovnkube_enable_interconnect_flag="--enable-interconnect"
-    fi
-
     ovnkube_enable_hybrid_overlay_flag=
     if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
       ovnkube_enable_hybrid_overlay_flag="--enable-hybrid-overlay"
@@ -1240,7 +1235,6 @@ ovnkube-identity() {
     #   ovnkube-cluster-manager service account - required for multi-homing
     exec /usr/bin/ovnkube-identity  --k8s-apiserver="${K8S_APISERVER}" \
     --webhook-cert-dir="/etc/webhook-cert" \
-    ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_hybrid_overlay_flag} \
     --extra-allowed-user="system:serviceaccount:${ovn_kubernetes_namespace}:ovnkube-cluster-manager" \
     --loglevel="${ovnkube_loglevel}"

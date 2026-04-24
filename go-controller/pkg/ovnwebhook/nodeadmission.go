@@ -60,7 +60,7 @@ var commonNodeAnnotationChecks = map[string]checkNodeAnnot{
 	util.OVNNodeVTEPs:    nil,
 }
 
-// interconnectNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in IC environments
+// interconnectNodeAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users.
 var interconnectNodeAnnotationChecks = map[string]checkNodeAnnot{
 	util.Layer2TopologyVersion: func(v annotationChange, _ string) error {
 		// it is allowed for the annotation to be added or removed
@@ -83,12 +83,10 @@ type NodeAdmission struct {
 	extraAllowedUsers sets.Set[string]
 }
 
-func NewNodeAdmissionWebhook(enableInterconnect, enableHybridOverlay bool, extraAllowedUsers ...string) *NodeAdmission {
+func NewNodeAdmissionWebhook(enableHybridOverlay bool, extraAllowedUsers ...string) *NodeAdmission {
 	checks := make(map[string]checkNodeAnnot)
 	maps.Copy(checks, commonNodeAnnotationChecks)
-	if enableInterconnect {
-		maps.Copy(checks, interconnectNodeAnnotationChecks)
-	}
+	maps.Copy(checks, interconnectNodeAnnotationChecks)
 	if enableHybridOverlay {
 		maps.Copy(checks, hybridOverlayNodeAnnotationChecks)
 	}
