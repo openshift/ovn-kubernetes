@@ -1430,11 +1430,6 @@ func getSupportedIPFamiliesSlice(cs kubernetes.Interface) []utilnet.IPFamily {
 	return nil
 }
 
-func isInterconnectEnabled() bool {
-	val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
-	return present && val == "true"
-}
-
 func isDynamicUDNEnabled() bool {
 	val, present := os.LookupEnv("DYNAMIC_UDN_ALLOCATION")
 	return present && val == "true"

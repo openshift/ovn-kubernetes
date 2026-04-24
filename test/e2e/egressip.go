@@ -631,9 +631,6 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 		if !isNetworkSegmentationEnabled() {
 			return false, "network segmentation is disabled. Environment variable 'ENABLE_NETWORK_SEGMENTATION' must have value true"
 		}
-		if !isInterconnectEnabled() {
-			return false, "interconnect is disabled. Environment variable 'OVN_ENABLE_INTERCONNECT' must have value true"
-		}
 		if netConfigParams.topology == types.LocalnetTopology {
 			return false, "unsupported network topology"
 		}

@@ -53,8 +53,8 @@ export OVS_NODE_UPDATE_STRATEGY=OnDelete
 
 # Run the helm upgrade. contrib/kind-helm.sh --deploy loads the PR image into
 # KIND and runs `helm upgrade --install ovn-kubernetes` with current workflow
-# env vars (OVN_HA, OVN_GATEWAY_MODE, OVN_ENABLE_INTERCONNECT,
-# PLATFORM_IPV{4,6}_SUPPORT, ...). Chart is re-rendered from the PR branch,
+# env vars (OVN_HA, OVN_GATEWAY_MODE, PLATFORM_IPV{4,6}_SUPPORT, ...).
+# Chart is re-rendered from the PR branch,
 # so chart/value changes land too. Scaled-down Deployments come back up at
 # their chart replica count with the new image.
 "${SCRIPT_DIR}/../../contrib/kind-helm.sh" --deploy

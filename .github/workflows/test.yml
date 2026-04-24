@@ -318,7 +318,6 @@ jobs:
       OVN_HYBRID_OVERLAY_ENABLE: "false"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
       OVN_MULTICAST_ENABLE:  "false"
-      OVN_ENABLE_INTERCONNECT: "true"
       # TODO(koolzz): deprecate once infra is switched completely to kind-helm.sh
       USE_HELM: "true"
     steps:
@@ -530,7 +529,6 @@ jobs:
       PLATFORM_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
       KIND_LOCAL_REGISTRY: "${{ matrix.local-kind-registry == 'true' }}"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
-      OVN_ENABLE_INTERCONNECT: "${{ matrix.ic == 'ic-single-node-zones' ||  matrix.ic == 'ic-multi-node-zones'}}"
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
       KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
@@ -777,7 +775,6 @@ jobs:
       OVN_GATEWAY_MODE: "shared"
       OVN_MULTICAST_ENABLE:  "false"
       DUALSTACK_CONVERSION:  "true"
-      OVN_ENABLE_INTERCONNECT: "${{ matrix.interconnect == 'interconnect-single-node-zones' ||  matrix.interconnect == 'interconnect-multi-node-zones'}}"
       KIND_NUM_ZONES: "${{ matrix.num-zones }}"
       KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
     steps:
