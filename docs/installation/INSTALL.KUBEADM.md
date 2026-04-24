@@ -486,7 +486,7 @@ For interconnect (IC) mode — recommended for new production deployments — us
 for n in node1 node2 node3; do kubectl label node $n k8s.ovn.org/zone-name=$n --overwrite; done
 ~~~
 
-The Helm chart deploys the namespace, the OVN database, the master, and the ovnkube-node pods in one step. Watch them come up:
+The Helm chart deploys the namespace, the cluster manager (`ovnkube-control-plane`), and the per-node pods (`ovnkube-single-node-zone` + `ovnkube-node` + `ovs-node`) in one step. Watch them come up:
 ~~~
 kubectl get pods -n ovn-kubernetes -o wide -w
 ~~~
@@ -508,9 +508,9 @@ kube-system      etcd-node1                       1/1     Running   1          7
 kube-system      kube-apiserver-node1             1/1     Running   1          74m     192.168.122.205   node1   <none>           <none>
 kube-system      kube-controller-manager-node1    1/1     Running   1          74m     192.168.122.205   node1   <none>           <none>
 kube-system      kube-scheduler-node1             1/1     Running   1          74m     192.168.122.205   node1   <none>           <none>
-ovn-kubernetes   ovnkube-db-7767c6b7c5-25drn      2/2     Running   2          11m     192.168.122.205   node1   <none>           <none>
-ovn-kubernetes   ovnkube-master-775d45fd5-mzkcb   3/3     Running   3          10m     192.168.122.205   node1   <none>           <none>
-ovn-kubernetes   ovnkube-node-xmgrj               3/3     Running   3          8m49s   192.168.122.205   node1   <none>           <none>
+ovn-kubernetes   ovnkube-control-plane-6f44d456df-bv2x8  1/1   Running   0          11m     192.168.122.205   node1   <none>           <none>
+ovn-kubernetes   ovnkube-node-xmgrj                      3/3   Running   0          8m49s   192.168.122.205   node1   <none>           <none>
+ovn-kubernetes   ovs-node-jl7lh                          1/1   Running   0          8m49s   192.168.122.205   node1   <none>           <none>
 ~~~
 
 ### Verifying the deployment 

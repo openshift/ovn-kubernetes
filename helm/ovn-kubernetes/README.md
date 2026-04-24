@@ -107,22 +107,13 @@ false
 			<td>Whether or not to use Admin Network Policy CRD feature with ovn-kubernetes</td>
 		</tr>
 		<tr>
-			<td>global.enableCompactMode</td>
-			<td>bool</td>
-			<td><pre lang="json">
-false
-</pre>
-</td>
-			<td>Indicate if ovnkube run master and node in one process</td>
-		</tr>
-		<tr>
 			<td>global.enableConfigDuration</td>
 			<td>string</td>
 			<td><pre lang="json">
 ""
 </pre>
 </td>
-			<td>Enables monitoring OVN-Kubernetes master and OVN configuration duration</td>
+			<td>Enables monitoring OVN-Kubernetes control plane and OVN configuration duration</td>
 		</tr>
 		<tr>
 			<td>global.enableDNSNameResolver</td>
@@ -641,7 +632,6 @@ false
 {
   "ovn-ipsec": false,
   "ovnkube-control-plane": false,
-  "ovnkube-db-raft": false,
   "ovnkube-node-dpu": false,
   "ovnkube-node-dpu-host": false,
   "ovnkube-single-node-zone": false,
@@ -653,4 +643,3 @@ false
 		</tr>
 	</tbody>
 </table>
-
