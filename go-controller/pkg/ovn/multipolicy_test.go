@@ -164,6 +164,9 @@ func getExpectedDataPodsAndSwitchesForUserDefinedNetwork(fakeOvn *FakeOVN, pods 
 				if pod.noIfaceIdVer {
 					delete(lsp.Options, "iface-id-ver")
 				}
+				if ocInfo.bnc.isLayer2WithInterconnectTransport() {
+					lsp.Options[libovsdbops.RequestedTnlKey] = "1"
+				}
 				data = append(data, lsp)
 				switch ocInfo.bnc.TopologyType() {
 				case ovntypes.Layer3Topology:
