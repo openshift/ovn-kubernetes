@@ -135,9 +135,9 @@ needs to be passed in for TLS server certificate verification using the
 
 ## One time setup.
 
-As explained [here](../design/architecture.md), OVN architecture has a central component which
-stores your networking intent in a database.  You start this central component
-on the node where you intend to start your k8s central daemons by running:
+As explained [here](../design/architecture.md), OVN stores networking intent
+in its Northbound and Southbound databases. Start ovn-northd on the node where
+you intend to run the OVN database daemons by running:
 
 ```
 /usr/share/openvswitch/scripts/ovn-ctl start_northd

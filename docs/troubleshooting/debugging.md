@@ -85,8 +85,8 @@ You can use the following command to achieve it via iptables.
 
 ### Check ovn-northd's log file.
 
-On the master, look at /var/log/openvswitch/ovn-northd.log to see
-for any errors with the setup of the OVN central node.
+On the node running ovn-northd, look at /var/log/openvswitch/ovn-northd.log
+for any errors with the OVN database and northd setup.
 
 ## Runtime issues
 
