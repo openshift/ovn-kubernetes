@@ -176,8 +176,6 @@ spec:
             configMapKeyRef:
               name: ovn-config
               key: host_network_namespace
-        - name: OVN_ENABLE_INTERCONNECT
-          value: "true"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
         - name: OVN_NETWORK_QOS_ENABLE

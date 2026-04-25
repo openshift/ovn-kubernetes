@@ -256,8 +256,6 @@ spec:
           value: {{ default "strict" .Values.global.advertisedUDNIsolationMode | quote }}
         - name: OVN_NO_OVERLAY_ENABLE
           value: {{ default "false" .Values.global.enableNoOverlay | quote }}
-        - name: OVN_ENABLE_INTERCONNECT
-          value: "true"
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV

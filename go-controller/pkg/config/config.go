@@ -164,6 +164,7 @@ var (
 		EgressIPReachabiltyTotalTimeout: 1,
 		AdvertisedUDNIsolationMode:      AdvertisedUDNIsolationModeStrict,
 		UDNDeletionGracePeriod:          120 * time.Second,
+		EnableInterconnect:              true,
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -500,7 +501,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEVPN                      bool `gcfg:"enable-evpn"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
-	EnableInterconnect              bool `gcfg:"enable-interconnect"`
+	EnableInterconnect              bool
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
 	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
 	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
@@ -1283,12 +1284,6 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Allow ICMP/ICMPv6 traffic to bypass NetworkPolicy default-deny rules.",
 		Destination: &cliConfig.OVNKubernetesFeature.AllowICMPNetworkPolicy,
 		Value:       OVNKubernetesFeature.AllowICMPNetworkPolicy,
-	},
-	&cli.BoolFlag{
-		Name:        "enable-interconnect",
-		Usage:       "Enable interconnecting multiple zones.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnableInterconnect,
-		Value:       OVNKubernetesFeature.EnableInterconnect,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-service",

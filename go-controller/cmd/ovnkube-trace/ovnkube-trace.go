@@ -650,11 +650,11 @@ func getDatabaseURIs(coreclient *corev1client.CoreV1Client, restconfig *rest.Con
 		klog.V(5).Infof("execInPod('%s') failed with err: '%s', stderr: '%s', stdout: '%s', Pod Name '%s' \n", psCmd, err, hostError, hostOutput, podName)
 		return nil, err
 	}
-	podInfo.IsInterConnect = len(regexp.MustCompile("--enable-interconnect").FindString(hostOutput)) > 0
+	podInfo.IsInterConnect = true
 	if podInfo.IsInterConnect {
-		// When interconnect is enabled, then retrieve its zone name from psCmd output.
+		// Retrieve the zone name from psCmd output.
 		// The psCmd output contains zone string like below:
-		// ... --enable-interconnect --zone ovn-worker2 ...
+		// ... --zone ovn-worker2 ...
 		re := regexp.MustCompile(`--zone(=| )[^\s]+`)
 		res := re.FindString(hostOutput)
 		if len(res) > 6 {

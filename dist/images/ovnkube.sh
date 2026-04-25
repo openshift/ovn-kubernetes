@@ -293,8 +293,6 @@ ovn_ipfix_cache_max_flows=${OVN_IPFIX_CACHE_MAX_FLOWS:-} \
 ovn_ipfix_cache_active_timeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-} \
 #OVN_STATELESS_NETPOL_ENABLE - enable stateless network policy for ovn-kubernetes
 ovn_stateless_netpol_enable=${OVN_STATELESS_NETPOL_ENABLE:-false}
-#OVN_ENABLE_INTERCONNECT - enable interconnect with multiple zones
-ovn_enable_interconnect=${OVN_ENABLE_INTERCONNECT:-false}
 #OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway
 ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 #OVN_ENABLE_OVNKUBE_IDENTITY - enable per node cert
@@ -995,11 +993,7 @@ EOF
 
   fi
   if [ -z "$zone" ]; then
-    if [[ ${ovn_enable_interconnect} == "true" ]]; then
-      zone="${K8S_NODE}"
-    else
-      zone="global"
-    fi
+    zone="${K8S_NODE}"
   fi
   echo "$zone"
 }
@@ -1470,12 +1464,6 @@ ovnkube-controller() {
       ovn_dbs="${ovn_dbs} --sb-address=${ovn_sbdb}"
   fi
 
-  ovnkube_enable_interconnect_flag=
-  if [[ ${ovn_enable_interconnect} == "true" ]]; then
-    ovnkube_enable_interconnect_flag="--enable-interconnect"
-  fi
-  echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
-
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
@@ -1566,7 +1554,6 @@ ovnkube-controller() {
     ${ovn_enable_svc_template_support_flag} \
     ${ovn_observ_enable_flag} \
     ${ovnkube_config_duration_enable_flag} \
-    ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_local_cert_flags} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -1634,7 +1621,7 @@ ovnkube-controller-with-node() {
 
   # start temp work around
   # remove when https://issues.redhat.com/browse/FDP-1537 is avilable
-  if [[ ${ovnkube_node_mode} == "full" && ${ovn_enable_interconnect} == "true" && ${ovn_egressip_enable} == "true" ]]; then
+  if [[ ${ovnkube_node_mode} == "full" && ${ovn_egressip_enable} == "true" ]]; then
     echo "=============== ovnkube-controller-with-node - (add GARP drop flows if external bridge exists)"
     # bridge may not yet exist
     local bridge_name="$(get_bridge_name_for_physnet 'physnet')"
@@ -1955,12 +1942,6 @@ ovnkube-controller-with-node() {
       ovn_dbs="${ovn_dbs} --sb-address=${ovn_sbdb}"
   fi
 
-  ovnkube_enable_interconnect_flag=
-  if [[ ${ovn_enable_interconnect} == "true" ]]; then
-    ovnkube_enable_interconnect_flag="--enable-interconnect"
-  fi
-  echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
-
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
@@ -2113,7 +2094,6 @@ ovnkube-controller-with-node() {
     ${ovn_encap_ip_flag} \
     ${ovn_encap_port_flag} \
     ${ovnkube_config_duration_enable_flag} \
-    ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_local_cert_flags} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -2327,12 +2307,6 @@ ovn-cluster-manager() {
   fi
   echo "ovnkube_metrics_tls_opts: ${ovnkube_metrics_tls_opts}"
 
-  ovnkube_enable_interconnect_flag=
-  if [[ ${ovn_enable_interconnect} == "true" ]]; then
-    ovnkube_enable_interconnect_flag="--enable-interconnect"
-  fi
-  echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
-
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
@@ -2395,7 +2369,6 @@ ovn-cluster-manager() {
     ${advertised_udn_isolation_flag} \
     ${ovnkube_config_file_flag} \
     ${persistent_ips_enabled_flag} \
-    ${ovnkube_enable_interconnect_flag} \
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_tls_opts} \
     ${ovn_encap_port_flag} \
@@ -2479,14 +2452,10 @@ ovn-node() {
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
   # ready_to_start_node checks for the NB/SB readiness state.
-  # This is not available on the DPU host when interconnect is enabled,
-  # because the DBs will run locally on the DPU
+  # This is not available on the DPU host because the DBs run locally on the DPU.
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovn-node - (wait for ovs)"
     wait_for_event ovs_ready
-    echo "=============== ovn-node - (wait for ready_to_start_node)"
-    wait_for_event ready_to_start_node
-  elif [[ ${ovn_enable_interconnect} != "true" ]]; then
     echo "=============== ovn-node - (wait for ready_to_start_node)"
     wait_for_event ready_to_start_node
   fi
@@ -2740,12 +2709,6 @@ ovn-node() {
       "
   fi
 
-  ovnkube_enable_interconnect_flag=
-  if [[ ${ovn_enable_interconnect} == "true" ]]; then
-    ovnkube_enable_interconnect_flag="--enable-interconnect"
-  fi
-  echo "ovnkube_enable_interconnect_flag: ${ovnkube_enable_interconnect_flag}"
-
   ovn_zone=$(get_node_zone)
   echo "ovnkube-node's configured zone is ${ovn_zone}"
 
@@ -2837,7 +2800,6 @@ ovn-node() {
         ${ovn_encap_ip_flag} \
         ${ovn_encap_port_flag} \
         ${ovn_conntrack_zone_flag} \
-        ${ovnkube_enable_interconnect_flag} \
         ${ovnkube_enable_multi_external_gateway_flag} \
         ${ovn_v4_masquerade_subnet_opt} \
         ${ovn_v6_masquerade_subnet_opt} \
