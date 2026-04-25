@@ -3168,9 +3168,8 @@ func (e *EgressIPController) getNextHop(ni util.NetInfo, egressNodeName, egressI
 // to equal [gatewayRouterIP]
 // - if the LogicalRouterPolicy does exist: it adds the gatewayRouterIP to the
 // array of nexthops
-// For EIP hosted on secondary host network, logical route policies are needed
-// to redirect the pods to the appropriate management port or if interconnect is
-// enabled, the appropriate transit switch port.
+// For EIP hosted on secondary host network, logical route policies redirect
+// pods to the appropriate management port or transit switch port.
 // This function should be called with lock on nodeZoneState cache key status.Node
 func (e *EgressIPController) createReroutePolicyOps(ni util.NetInfo, ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem,
 	mark util.EgressIPMark, egressIPName, nextHopIP, routerName, podNamespace, podName string) ([]ovsdb.Operation, error) {

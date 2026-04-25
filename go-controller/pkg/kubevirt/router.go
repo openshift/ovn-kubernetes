@@ -57,17 +57,10 @@ func DeleteRoutingForMigratedPod(nbClient libovsdbclient.Client, pod *corev1.Pod
 //
 // NOTE: IC with multiple nodes per zone is not supported
 //
-// Following is the list of NB logical resources created depending if it's interconnected or not:
+// Following is the list of NB logical resources created:
 //
-// IC (on node per zone):
-//   - static route with cluster wide CIDR as src-ip prefix and nexthop GR, it has less
+//   - static route with cluster wide CIDR as src-ip prefix and nexthop GR; it has less
 //     priority than route to use overlay in case of pod to pod communication
-//
-// NO IC:
-//   - low priority policy with src VM ip and reroute GR, since it has low priority
-//     it will not override the policy to enroute pod to pod traffic using overlay
-//
-// Both:
 //   - static route with VM ip as dst-ip prefix and output port the LRP pointing to the VM's node switch
 func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
 	lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, nadKey string, clusterSubnets []config.CIDRNetworkEntry) error {
