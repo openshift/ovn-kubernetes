@@ -145,8 +145,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				app.Action = func(ctx *cli.Context) error {
 					gomega.Expect(
 						initConfig(ctx, config.OVNKubernetesFeatureConfig{
-							EnableMultiNetwork: true,
-							EnableInterconnect: true},
+							EnableMultiNetwork: true},
 						)).To(gomega.Succeed())
 					var err error
 					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
@@ -180,8 +179,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				app.Action = func(ctx *cli.Context) error {
 					gomega.Expect(
 						initConfig(ctx, config.OVNKubernetesFeatureConfig{
-							EnableMultiNetwork: true,
-							EnableInterconnect: true},
+							EnableMultiNetwork: true},
 						)).To(gomega.Succeed())
 
 					var err error
@@ -551,7 +549,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
@@ -608,7 +605,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
@@ -661,7 +657,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
@@ -734,7 +729,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
@@ -810,7 +804,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 
@@ -865,8 +858,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				app.Action = func(ctx *cli.Context) error {
 					gomega.Expect(
 						initConfig(ctx, config.OVNKubernetesFeatureConfig{
-							EnableMultiNetwork: true,
-							EnableInterconnect: true},
+							EnableMultiNetwork: true},
 						)).To(gomega.Succeed())
 
 					var err error
