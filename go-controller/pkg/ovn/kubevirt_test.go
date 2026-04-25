@@ -704,7 +704,6 @@ var _ = Describe("OVN Kubevirt Operations", func() {
 
 			config.IPv4Mode = t.ipv4
 			config.IPv6Mode = t.ipv6
-			config.OVNKubernetesFeature.EnableInterconnect = t.interconnected
 
 			if t.testVirtLauncherPod.vmName != "" {
 				initVirtLauncherPod(&t.testVirtLauncherPod)

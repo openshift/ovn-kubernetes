@@ -460,7 +460,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 				gomega.Expect(initConfig(ctx, config.OVNKubernetesFeatureConfig{
 					EnableMultiNetwork: true,
-					EnableInterconnect: true,
 				})).To(gomega.Succeed())
 				var err error
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)

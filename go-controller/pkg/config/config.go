@@ -164,7 +164,6 @@ var (
 		EgressIPReachabiltyTotalTimeout: 1,
 		AdvertisedUDNIsolationMode:      AdvertisedUDNIsolationModeStrict,
 		UDNDeletionGracePeriod:          120 * time.Second,
-		EnableInterconnect:              true,
 	}
 
 	// OvnNorth holds northbound OVN database client and server authentication and location details
@@ -501,7 +500,6 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEVPN                      bool `gcfg:"enable-evpn"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
-	EnableInterconnect              bool
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
 	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
 	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`

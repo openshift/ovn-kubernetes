@@ -1268,14 +1268,11 @@ func (e *EgressIPController) deletePreviousNetworkPodEgressIPAssignments(ni util
 }
 
 // isPodScheduledinLocalZone returns true if
-//   - e.localZoneNodes map is nil or
-//   - if the pod.Spec.NodeName is in the e.localZoneNodes map
+//   - e.nodeZoneState is nil or
+//   - the pod.Spec.NodeName is in the local zone according to e.nodeZoneState
 //
 // false otherwise.
 func (e *EgressIPController) isPodScheduledinLocalZone(pod *corev1.Pod) bool {
-	if !config.OVNKubernetesFeature.EnableInterconnect {
-		return true
-	}
 	isLocalZonePod := true
 
 	if e.nodeZoneState != nil {
@@ -2370,12 +2367,12 @@ func (e *EgressIPController) addEgressNode(node *corev1.Node) error {
 	}
 	if e.isLocalZoneNode(node) {
 		klog.V(5).Infof("Egress node: %s about to be initialized", node.Name)
-		if config.OVNKubernetesFeature.EnableInterconnect && e.zone != types.OvnDefaultZone {
+		if e.zone != types.OvnDefaultZone {
 			// NOTE: EgressIP is not supported on multi-nodes-in-same-zone case
-			// NOTE2: We don't want this route for all-nodes-in-same-zone (almost nonIC a.k.a single zone) case because
+			// NOTE2: We don't want this route for all-nodes-in-same-zone (default zone) case because
 			// it makes no sense - all nodes are connected via the same ovn_cluster_router
 			// NOTE3: When the node gets deleted we do not remove this route intentionally because
-			// on IC if the node is gone, then the ovn_cluster_router is also gone along with all
+			// if the node is gone, then the ovn_cluster_router is also gone along with all
 			// the routes on it.
 			ni := e.networkManager.GetNetwork(types.DefaultNetworkName)
 			gatewayIPs, err := udn.GetGWRouterIPs(node, &util.DefaultNetInfo{})
@@ -2723,7 +2720,7 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 				}
 			}
 		}
-		if config.OVNKubernetesFeature.EnableInterconnect && ni.IsDefault() && !isOVNNetwork && (loadedPodNode && !isLocalZonePod) {
+		if ni.IsDefault() && !isOVNNetwork && (loadedPodNode && !isLocalZonePod) {
 			// For CDNs, configure LRP with reroute action for non-local-zone pods on egress nodes to support redirect to local management port
 			// when the egress IP is assigned to a host secondary interface
 			routerName, err := getTopologyScopedRouterName(ni, pod.Spec.NodeName)
@@ -2840,7 +2837,7 @@ func (e *EgressIPController) deletePodEgressIPAssignment(ni util.NetInfo, egress
 	}
 
 	if loadedEgressNode && isLocalZoneEgressNode {
-		if config.OVNKubernetesFeature.EnableInterconnect && ni.IsDefault() && !isOVNNetwork && (!loadedPodNode || !isLocalZonePod) { // node is deleted (we can't determine zone so we always try and nuke OR pod is remote to zone)
+		if ni.IsDefault() && !isOVNNetwork && (!loadedPodNode || !isLocalZonePod) { // node is deleted (we can't determine zone so we always try and nuke OR pod is remote to zone)
 			// For CDNs, delete reroute for non-local-zone pods on egress nodes when the egress IP is assigned to a secondary host interface
 			ops, err = e.deleteReroutePolicyOps(ni, ops, status, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
 			if err != nil {
@@ -3152,18 +3149,15 @@ func (e *EgressIPController) getNextHop(ni util.NetInfo, egressNodeName, egressI
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		nextHopIP, err := e.getTransitIP(egressNodeName, isEgressIPv6)
-		if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
-			return "", fmt.Errorf("unable to fetch transit switch IP for node %s: %v", egressNodeName, err)
-		} else if err != nil {
-			klog.Warningf("While attempting to get next hop for Egress IP %s (%s), unable to get transit switch IP: %v",
-				egressIPName, egressIP, err)
-			return "", nil
-		}
-		return nextHopIP, nil
+	nextHopIP, err := e.getTransitIP(egressNodeName, isEgressIPv6)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return "", fmt.Errorf("unable to fetch transit switch IP for node %s: %v", egressNodeName, err)
+	} else if err != nil {
+		klog.Warningf("While attempting to get next hop for Egress IP %s (%s), unable to get transit switch IP: %v",
+			egressIPName, egressIP, err)
+		return "", nil
 	}
-	return "", nil
+	return nextHopIP, nil
 }
 
 // createReroutePolicyOps creates an operation that does idempotent updates of the
@@ -3561,7 +3555,7 @@ func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo, nod
 	if err != nil {
 		return fmt.Errorf("failed to ensure no reroute node policies for network %s: %v", ni.GetNetworkName(), err)
 	}
-	if config.OVNKubernetesFeature.EnableInterconnect && ni.TopologyType() == types.Layer3Topology {
+	if ni.TopologyType() == types.Layer3Topology {
 		gatewayIPs, err := udn.GetGWRouterIPs(node, ni)
 		if err != nil {
 			return fmt.Errorf("failed to get %q network gateway router join IPs for node %q, err: %w", ni.GetNetworkName(), node.Name, err)
@@ -4257,6 +4251,5 @@ func (e *EgressIPController) getTopologyScopedLocalZoneRouterName(ni util.NetInf
 }
 
 func isEgressIPForUDNSupported() bool {
-	return config.OVNKubernetesFeature.EnableInterconnect &&
-		config.OVNKubernetesFeature.EnableNetworkSegmentation
+	return config.OVNKubernetesFeature.EnableNetworkSegmentation
 }
