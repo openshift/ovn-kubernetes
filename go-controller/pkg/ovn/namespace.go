@@ -195,7 +195,7 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *corev1.Namespace
 				}
 			}
 		}
-		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+		if oc.zone != types.OvnDefaultZone {
 			// In multi-zone interconnect, ovnkube-controller flushes conntrack
 			// directly here rather than using the "k8s.ovn.org/external-gw-pod-ips"
 			// namespace annotation that ovnkube-node watches in single-zone

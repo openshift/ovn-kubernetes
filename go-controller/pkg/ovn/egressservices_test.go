@@ -782,7 +782,6 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		},
-			ginkgo.Entry("IC Disabled, all nodes are in a single zone", false),
 			ginkgo.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true),
 		)
 
@@ -949,7 +948,6 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		},
-			ginkgo.Entry("IC Disabled, all nodes are in a single zone", false),
 			ginkgo.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
 	})
 
@@ -1267,7 +1265,6 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		},
-			ginkgo.Entry("IC Disabled, all nodes are in a single zone", false),
 			ginkgo.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
 	})
 
@@ -1572,7 +1569,6 @@ var _ = ginkgo.Describe("OVN Egress Service Operations", func() {
 			err := app.Run([]string{app.Name})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		},
-			ginkgo.Entry("IC Disabled, all nodes are in a single zone", false),
 			ginkgo.Entry("IC Enabled, node1 is in the local zone, node2 in remote", true))
 	})
 

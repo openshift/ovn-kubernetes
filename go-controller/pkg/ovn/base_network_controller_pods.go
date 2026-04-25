@@ -778,13 +778,10 @@ func (bnc *BaseNetworkController) isPodScheduledinLocalZone(pod *corev1.Pod) boo
 		return false
 	}
 
-	// With interconnect enabled, only trust informer fallback when zone
-	// information is explicit. Missing zone annotation defaults to "local" and
-	// can misclassify remote pods.
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		if _, ok := node.Annotations[util.OvnNodeZoneName]; !ok {
-			return false
-		}
+	// Only trust informer fallback when zone information is explicit. Missing
+	// zone annotation defaults to "local" and can misclassify remote pods.
+	if _, ok := node.Annotations[util.OvnNodeZoneName]; !ok {
+		return false
 	}
 	return bnc.isLocalZoneNode(node)
 }
@@ -1072,11 +1069,11 @@ func (bnc *BaseNetworkController) allocatesPodAnnotation() bool {
 	case ovntypes.Layer2Topology:
 		// on layer2 topologies, cluster manager allocates tunnel IDs, allocates
 		// IPs if the network has IPAM, and sets the PodAnnotation
-		return !config.OVNKubernetesFeature.EnableInterconnect
+		return false
 	case ovntypes.LocalnetTopology:
 		// on localnet topologies with IPAM, cluster manager allocates IPs and
 		// sets the PodAnnotation
-		return !config.OVNKubernetesFeature.EnableInterconnect || !bnc.doesNetworkRequireIPAM()
+		return !bnc.doesNetworkRequireIPAM()
 	}
 	return true
 }

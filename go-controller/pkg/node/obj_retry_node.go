@@ -225,7 +225,7 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 		if err != nil {
 			return fmt.Errorf("error retrieving node %s: %v", h.nc.name, err)
 		}
-		if !config.OVNKubernetesFeature.EnableInterconnect || util.GetNodeZone(node) == types.OvnDefaultZone {
+		if util.GetNodeZone(node) == types.OvnDefaultZone {
 			newNs := newObj.(*corev1.Namespace)
 			return h.nc.syncConntrackForExternalGateways(newNs)
 		}

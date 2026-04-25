@@ -94,61 +94,24 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 		return nil
 	}
 
-	// For interconnect at static route with a cluster-wide src-ip address is
-	// needed to route egress n/s traffic
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		// NOTE: EIP & ESVC use same route and if this is already present thanks to those features,
-		// this will be a no-op
-		node, err := watchFactory.GetNode(pod.Spec.NodeName)
-		if err != nil {
-			return fmt.Errorf("failed getting to list node %q for pod %s/%s: %w", pod.Spec.NodeName, pod.Namespace, pod.Name, err)
-		}
-		gatewayIPs, err := udn.GetGWRouterIPs(node, &util.DefaultNetInfo{})
-		if err != nil {
-			return fmt.Errorf("failed to get default network gateway router join IPs for node %q: %w", node.Name, err)
-		}
-		if err := libovsdbutil.CreateDefaultRouteToExternal(nbClient, types.OVNClusterRouter,
-			types.GWRouterPrefix+pod.Spec.NodeName, clusterSubnets, gatewayIPs); err != nil {
-			return err
-		}
+	// NOTE: EIP & ESVC use same route and if this is already present thanks to
+	// those features, this will be a no-op.
+	node, err := watchFactory.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return fmt.Errorf("failed getting to list node %q for pod %s/%s: %w", pod.Spec.NodeName, pod.Namespace, pod.Name, err)
+	}
+	gatewayIPs, err := udn.GetGWRouterIPs(node, &util.DefaultNetInfo{})
+	if err != nil {
+		return fmt.Errorf("failed to get default network gateway router join IPs for node %q: %w", node.Name, err)
+	}
+	if err := libovsdbutil.CreateDefaultRouteToExternal(nbClient, types.OVNClusterRouter,
+		types.GWRouterPrefix+pod.Spec.NodeName, clusterSubnets, gatewayIPs); err != nil {
+		return err
 	}
 
-	lrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + pod.Spec.NodeName
-	lrpAddresses, err := libovsdbutil.GetLRPAddrs(nbClient, lrpName)
-	if err != nil {
-		return fmt.Errorf("failed configuring pod routing when reading LRP %s addresses: %v", lrpName, err)
-	}
 	for _, podIP := range podAnnotation.IPs {
 		podAddress := podIP.IP.String()
 
-		if !config.OVNKubernetesFeature.EnableInterconnect {
-			// Policy to with low priority to route traffic to the gateway
-			ipFamily := utilnet.IPFamilyOfCIDR(podIP)
-			nodeGRAddress, err := util.MatchFirstIPNetFamily(ipFamily == utilnet.IPv6, lrpAddresses)
-			if err != nil {
-				return err
-			}
-
-			// adds a policy so that a migrated pods egress traffic
-			// will be routed to the local GR where it now resides
-			match := fmt.Sprintf("ip%s.src == %s", ipFamily, podAddress)
-			egressPolicy := nbdb.LogicalRouterPolicy{
-				Match:    match,
-				Action:   nbdb.LogicalRouterPolicyActionReroute,
-				Nexthops: []string{nodeGRAddress.IP.String()},
-				Priority: types.EgressLiveMigrationReroutePriority,
-				ExternalIDs: map[string]string{
-					OvnZoneExternalIDKey:         OvnLocalZone,
-					VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
-					NamespaceExternalIDsKey:      pod.Namespace,
-				},
-			}
-			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient, types.OVNClusterRouter, &egressPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
-				return item.Priority == egressPolicy.Priority && item.Match == egressPolicy.Match && item.Action == egressPolicy.Action
-			}); err != nil {
-				return fmt.Errorf("failed adding point to point policy for pod %s/%s : %v", pod.Namespace, pod.Name, err)
-			}
-		}
 		// Add a route for reroute ingress traffic to the VM port since
 		// the subnet is alien to ovn_cluster_router
 		outputPort := types.RouterToSwitchPrefix + pod.Spec.NodeName
