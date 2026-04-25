@@ -240,12 +240,10 @@ func (g *gateway) DeleteEndpointSlice(epSlice *discovery.EndpointSlice) error {
 // canHandleBridgeEgressIP returns true if this node should handle EgressIP
 // configuration on the bridge. Returns false if:
 // - Network segmentation (UDN) is not enabled
-// - Interconnect is not enabled
 // - Gateway mode is disabled
 // - Running in DPU-host mode (EgressIP is handled by ovnkube on the DPU where OVS runs)
 func canHandleBridgeEgressIP() bool {
 	return util.IsNetworkSegmentationSupportEnabled() &&
-		config.OVNKubernetesFeature.EnableInterconnect &&
 		config.Gateway.Mode != config.GatewayModeDisabled &&
 		(config.IsModeDPU() || config.IsModeFull())
 }

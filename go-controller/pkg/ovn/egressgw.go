@@ -100,7 +100,7 @@ func (oc *DefaultNetworkController) addPodExternalGWForNamespace(namespace strin
 	for _, gwInfo := range nsInfo.routingExternalPodGWs {
 		existingGWs.Insert(gwInfo.gws.UnsortedList()...)
 	}
-	if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+	if oc.zone != types.OvnDefaultZone {
 		existingGWs.Insert(nsInfo.routingExternalGWs.gws.UnsortedList()...)
 	}
 	nsUnlock()
@@ -112,7 +112,7 @@ func (oc *DefaultNetworkController) addPodExternalGWForNamespace(namespace strin
 		return err
 	}
 	// add the exgw podIP to the namespace's k8s.ovn.org/external-gw-pod-ips list
-	if !config.OVNKubernetesFeature.EnableInterconnect || oc.zone == types.OvnDefaultZone {
+	if oc.zone == types.OvnDefaultZone {
 		// In single-zone deployments (default zone), ovnkube-controller patches
 		// the "k8s.ovn.org/external-gw-pod-ips" namespace annotation; ovnkube-node
 		// watches it and flushes conntrack on every node. In multi-zone
@@ -377,7 +377,7 @@ func (oc *DefaultNetworkController) deletePodGWRoutesForNamespace(pod *corev1.Po
 	for _, gwInfo := range nsInfo.routingExternalPodGWs {
 		existingGWs.Insert(gwInfo.gws.UnsortedList()...)
 	}
-	if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+	if oc.zone != types.OvnDefaultZone {
 		existingGWs.Insert(nsInfo.routingExternalGWs.gws.UnsortedList()...)
 	}
 	nsUnlock()
@@ -400,7 +400,7 @@ func (oc *DefaultNetworkController) deletePodGWRoutesForNamespace(pod *corev1.Po
 		return fmt.Errorf("failed to delete GW routes for pod %s: %w", pod.Name, err)
 	}
 	// remove the exgw podIP from the namespace's k8s.ovn.org/external-gw-pod-ips list
-	if !config.OVNKubernetesFeature.EnableInterconnect || oc.zone == types.OvnDefaultZone {
+	if oc.zone == types.OvnDefaultZone {
 		// In single-zone deployments (default zone), ovnkube-controller patches
 		// the "k8s.ovn.org/external-gw-pod-ips" namespace annotation; ovnkube-node
 		// watches it and flushes conntrack on every node. In multi-zone

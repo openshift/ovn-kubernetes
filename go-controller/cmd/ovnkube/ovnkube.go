@@ -494,7 +494,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	// Remove when OVN supports native silencing of GARPs on startup: https://issues.redhat.com/browse/FDP-1537
 	// isOVNKubeControllerSyncd is true when ovnkube controller has sync and changes are in OVN Southbound database.
 	var isOVNKubeControllerSyncd *atomic.Bool
-	if runMode.ovnkubeController && runMode.node && config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.IsModeFull() {
+	if runMode.ovnkubeController && runMode.node && config.OVNKubernetesFeature.EnableEgressIP && config.IsModeFull() {
 		isOVNKubeControllerSyncd = &atomic.Bool{}
 	}
 
