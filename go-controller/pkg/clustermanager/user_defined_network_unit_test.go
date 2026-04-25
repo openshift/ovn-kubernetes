@@ -160,13 +160,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					config.OVNKubernetesFeature.EnableInterconnect = false
 					nc, err := sncm.NewNetworkController(netInfo)
-					gomega.Expect(err).To(gomega.Equal(networkmanager.ErrNetworkControllerTopologyNotManaged))
-					gomega.Expect(nc).To(gomega.BeNil())
-
-					config.OVNKubernetesFeature.EnableInterconnect = true
-					nc, err = sncm.NewNetworkController(netInfo)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Expect(nc).NotTo(gomega.BeNil())
 
@@ -276,36 +270,20 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 				},
 				ginkgo.Entry(
-					"does not manage localnet topologies on IC deployments for networks without subnets",
+					"does not manage localnet topologies for networks without subnets",
 					&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: ovntypes.LocalnetTopology},
-					config.OVNKubernetesFeatureConfig{EnableInterconnect: true, EnableMultiNetwork: true},
+					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
 					networkmanager.ErrNetworkControllerTopologyNotManaged,
 				),
 				ginkgo.Entry(
-					"manages localnet topologies on IC deployments for networks with subnets",
+					"manages localnet topologies for networks with subnets",
 					&ovncnitypes.NetConf{
 						NetConf:  cnitypes.NetConf{Name: "blue"},
 						Topology: ovntypes.LocalnetTopology,
 						Subnets:  subnets,
 					},
-					config.OVNKubernetesFeatureConfig{EnableInterconnect: true, EnableMultiNetwork: true},
+					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
 					nil,
-				),
-				ginkgo.Entry(
-					"does not manage localnet topologies on non-IC deployments without subnets",
-					&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: ovntypes.LocalnetTopology},
-					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
-					networkmanager.ErrNetworkControllerTopologyNotManaged,
-				),
-				ginkgo.Entry(
-					"does not manage localnet topologies when interconnect is disabled with subnets",
-					&ovncnitypes.NetConf{
-						NetConf:  cnitypes.NetConf{Name: "blue"},
-						Topology: ovntypes.LocalnetTopology,
-						Subnets:  subnets,
-					},
-					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
-					networkmanager.ErrNetworkControllerTopologyNotManaged,
 				),
 			)
 		})

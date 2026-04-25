@@ -1284,7 +1284,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 	})
 
 	ginkgo.Context("Transit switch port IP allocations", func() {
-		ginkgo.It("Interconnect enabled", func() {
+		ginkgo.It("allocates transit switch port IPs", func() {
 			config.ClusterManager.V4TransitSubnet = "100.89.0.0/16"
 			config.ClusterManager.V6TransitSubnet = "fd99::/64"
 			app.Action = func(ctx *cli.Context) error {
@@ -1381,7 +1381,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("Interconnect enabled - clear the transit switch port ips and check", func() {
+		ginkgo.It("reallocates missing transit switch port IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
 				nodes := []corev1.Node{
 					{
