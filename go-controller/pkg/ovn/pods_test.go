@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
@@ -126,6 +129,7 @@ type testPod struct {
 	nodeGWIP      string
 	podName       string
 	podIP         string
+	hostNetwork   bool
 	podMAC        string
 	namespace     string
 	portName      string

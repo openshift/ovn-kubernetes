@@ -1,3 +1,4 @@
+boilerplate-file: hack/boilerplate.go.txt
 dir: pkg/testing/mocks/{{.PackagePath}}
 with-expecter: false
 filename: "{{.InterfaceName}}.go"

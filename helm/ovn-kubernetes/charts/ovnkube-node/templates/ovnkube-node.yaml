@@ -164,6 +164,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
+        {{- if .Values.global.metricsIp }}
+        - name: METRICS_IP
+          value: {{ .Values.global.metricsIp | quote }}
+        {{- end }}
         - name: OVN_GATEWAY_MODE
           value: {{ default "shared" .Values.global.gatewayMode }}
         - name: OVN_GATEWAY_OPTS
@@ -255,7 +259,7 @@ spec:
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
         - name: OVNKUBE_NODE_MGMT_PORT_NETDEV
-          value: {{ default "" .Values.global.nodeMgmtPortNetdev | quote }}
+          value: {{ default "" .Values.nodeMgmtPortNetdev | quote }}
         - name: OVN_NETWORK_QOS_ENABLE
           value: {{ hasKey .Values.global "enableNetworkQos" | ternary .Values.global.enableNetworkQos false | quote }}
         - name: OVN_HOST_NETWORK_NAMESPACE
@@ -359,6 +363,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: status.hostIP
+        {{- if .Values.global.metricsIp }}
+        - name: METRICS_IP
+          value: {{ .Values.global.metricsIp | quote }}
+        {{- end }}
         # end of container
       nodeSelector:
         kubernetes.io/os: "linux"

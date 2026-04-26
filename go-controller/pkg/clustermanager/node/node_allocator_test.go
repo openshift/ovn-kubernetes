@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -17,6 +20,7 @@ import (
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	sharednode "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -446,6 +450,99 @@ func TestController_CleanupStaleAnnotation(t *testing.T) {
 	// check that unrelated annotation is not changed, and stale one is cleaned up
 	if !reflect.DeepEqual(nodes.Items[0].Annotations, map[string]string{"leave-me": "value"}) {
 		t.Fatalf("Expected annotation %s to be cleaned up, got %v", util.OVNNodeGRLRPAddrs, nodes.Items[0].Annotations)
+	}
+}
+
+func TestNodeAllocatorNeedsNodeAllocationForIPModeChange(t *testing.T) {
+	origClusterSubnets := config.Default.ClusterSubnets
+	t.Cleanup(func() {
+		config.Default.ClusterSubnets = origClusterSubnets
+	})
+
+	tests := []struct {
+		name             string
+		clusterSubnets   []string
+		clusterSubnetLen []int
+		nodeSubnets      []string
+		want             bool
+	}{
+		{
+			name:             "single stack annotation requires reconcile after dual stack conversion",
+			clusterSubnets:   []string{"10.244.0.0/16", "fd00:10:244::/48"},
+			clusterSubnetLen: []int{24, 64},
+			nodeSubnets:      []string{"10.244.2.0/24"},
+			want:             true,
+		},
+		{
+			name:             "dual stack annotation requires reconcile after single stack conversion",
+			clusterSubnets:   []string{"10.244.0.0/16"},
+			clusterSubnetLen: []int{24},
+			nodeSubnets:      []string{"10.244.2.0/24", "fd00:10:244:2::/64"},
+			want:             true,
+		},
+		{
+			name:             "dual stack annotation satisfies dual stack cluster",
+			clusterSubnets:   []string{"10.244.0.0/16", "fd00:10:244::/48"},
+			clusterSubnetLen: []int{24, 64},
+			nodeSubnets:      []string{"10.244.2.0/24", "fd00:10:244:2::/64"},
+			want:             false,
+		},
+		{
+			name:             "single stack annotation satisfies single stack cluster",
+			clusterSubnets:   []string{"10.244.0.0/16"},
+			clusterSubnetLen: []int{24},
+			nodeSubnets:      []string{"10.244.2.0/24"},
+			want:             false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := config.PrepareTestConfig(); err != nil {
+				t.Fatalf("PrepareTestConfig() failed: %v", err)
+			}
+
+			ranges, err := rangesFromStrings(tt.clusterSubnets, tt.clusterSubnetLen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.Default.ClusterSubnets = ranges
+			config.IPv4Mode = false
+			config.IPv6Mode = false
+			for _, subnet := range ranges {
+				if subnet.CIDR.IP.To4() != nil {
+					config.IPv4Mode = true
+				} else {
+					config.IPv6Mode = true
+				}
+			}
+
+			netInfo, err := util.NewNetInfo(
+				&ovncnitypes.NetConf{
+					NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName},
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			annotations, err := util.UpdateNodeHostSubnetAnnotation(map[string]string{}, ovntest.MustParseIPNets(tt.nodeSubnets...), types.DefaultNetworkName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "node1",
+					Annotations: annotations,
+				},
+			}
+
+			na := &NodeAllocator{netInfo: netInfo}
+			state := sharednode.NewNodeAnnotationCache().UpdateNodeAnnotationState(node, true)
+			if got := na.NeedsNodeAllocationWithState(node, state); got != tt.want {
+				t.Fatalf("NeedsNodeAllocationWithState() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

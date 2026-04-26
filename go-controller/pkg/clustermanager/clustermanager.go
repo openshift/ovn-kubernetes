@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package clustermanager
 
 import (
@@ -258,7 +261,9 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
-		if err := cm.endpointSliceMirrorController.Start(ctx, 1); err != nil {
+		// Use 5 workers to match the upstream kube-controller-manager default for EndpointSlice reconciliation:
+		// https://github.com/kubernetes/kubernetes/blob/462e759d1995c143fda094cd7f591b10fd8cdee6/pkg/controller/endpointslice/config/v1alpha1/defaults.go#L35
+		if err := cm.endpointSliceMirrorController.Start(ctx, 5); err != nil {
 			return err
 		}
 	}
