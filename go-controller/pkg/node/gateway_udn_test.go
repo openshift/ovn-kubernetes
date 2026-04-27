@@ -24,6 +24,8 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/knftables"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	rafakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
 	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
@@ -38,6 +40,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	fakenetworkmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
@@ -189,10 +192,6 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Output: "7",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
-		Output: "192.168.1.10",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 ofport",
 		Output: "7",
 	})
@@ -277,11 +276,19 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		mgtPort        = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
 		v4NodeIP       = "192.168.1.10/24"
 		v6NodeIP       = "fc00:f853:ccd:e793::3/64"
+		ovsClient      libovsdbclient.Client
+		ovsCleanup     *libovsdbtest.Context
 	)
 	BeforeEach(func() {
 		// Restore global default values before each testcase
 		err := config.PrepareTestConfig()
 		Expect(err).NotTo(HaveOccurred())
+		// Skip the encap-update path inside addressManager.sync() — these tests
+		// don't fake ovn-appctl and aren't exercising encap reconciliation.
+		config.Default.EncapIP = "test-encap-ip"
+		ovsClient, ovsCleanup = newTestOVSClient()
+		// Ensure gateway tests never rely on host iptables binaries.
+		util.SetFakeIPTablesHelpers()
 
 		// Set dual-stack service CIDRs directly after PrepareTestConfig
 		config.Kubernetes.ServiceCIDRs = ovntest.MustParseIPNets("172.16.1.0/24", "fd02::/112")
@@ -346,6 +353,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 	AfterEach(func() {
 		close(stopCh)
 		wg.Wait()
+		ovsCleanup.Cleanup()
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
 	})
@@ -642,6 +650,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeLocal,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
@@ -875,6 +884,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeLocal,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
@@ -1114,6 +1124,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeLocal,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
