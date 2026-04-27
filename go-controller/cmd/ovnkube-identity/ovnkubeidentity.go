@@ -368,6 +368,13 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 		webhookMux.Handle("/pod", podHandler)
 	}
 
+	webhookMux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("ok")); err != nil {
+			klog.Errorf("Failed to write readyz response: %v", err)
+		}
+	})
+
 	cfg := &tls.Config{
 		NextProtos: []string{"h2"},
 		MinVersion: tls.VersionTLS10,

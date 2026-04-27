@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -226,6 +228,7 @@ func getNodePrimaryIfAddrs(watchFactory factory.NodeWatchFactory, nodeName strin
 // It is split from initGatewayMainStart to allow for the gateway object and openflow manager to be created
 // before the rest of the gateway functionality is started.
 func (nc *DefaultNodeNetworkController) initGatewayPreStart(
+	ctx context.Context,
 	subnets []*net.IPNet,
 	nodeAnnotator kube.Annotator,
 	mgmtPort managementport.Interface,
@@ -310,8 +313,8 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 		return gw.readyFunc()
 	}
 
-	if err := nodeAnnotator.Run(); err != nil {
-		return nil, fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	if err := runNodeAnnotatorWithRetry(ctx, nodeAnnotator, nc.name, "gateway"); err != nil {
+		return nil, err
 	}
 
 	waiter.AddWait(readyGwFunc, initGwFunc)
@@ -385,7 +388,7 @@ func interfaceForEXGW(intfName string) string {
 }
 
 // TODO(adrianc): revisit if support for nodeIPManager is needed.
-func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(kubeNodeIP net.IP, nodeAnnotator kube.Annotator) error {
+func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(ctx context.Context, kubeNodeIP net.IP, nodeAnnotator kube.Annotator) error {
 	klog.Info("Initializing Shared Gateway Functionality for Gateway PreStart on DPU host")
 
 	// Find the network interface that has the Kubernetes node IP assigned to it
@@ -437,8 +440,8 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(kubeNodeIP ne
 	}
 
 	// Apply all node annotations to the Kubernetes node object
-	if err := nodeAnnotator.Run(); err != nil {
-		return fmt.Errorf("failed to set node %s annotations: %w", nc.name, err)
+	if err := runNodeAnnotatorWithRetry(ctx, nodeAnnotator, nc.name, "DPU host"); err != nil {
+		return err
 	}
 
 	// Delete stale masquerade resources if there are any. This is to make sure that there
@@ -584,4 +587,28 @@ func (nc *DefaultNodeNetworkController) updateGatewayMAC(link netlink.Link) erro
 
 	return nil
 
+}
+
+const (
+	nodeAnnotatorRetryInterval = 500 * time.Millisecond
+	nodeAnnotatorRetryTimeout  = 300 * time.Second
+)
+
+// runNodeAnnotatorWithRetry retries nodeAnnotator.Run() with fixed-interval polling
+// to handle transient API server connectivity issues during node startup.
+func runNodeAnnotatorWithRetry(ctx context.Context, nodeAnnotator kube.Annotator, nodeName, annotationType string) error {
+	err := wait.PollUntilContextTimeout(ctx, nodeAnnotatorRetryInterval, nodeAnnotatorRetryTimeout, true, func(_ context.Context) (bool, error) {
+		if err := nodeAnnotator.Run(); err != nil {
+			klog.V(2).Infof("Waiting for node %s %s annotation update to succeed: %v", nodeName, annotationType, err)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("context canceled while setting node %s %s annotations: %w", nodeName, annotationType, err)
+		}
+		return fmt.Errorf("timed out trying to set node %s %s annotations: %w", nodeName, annotationType, err)
+	}
+	return nil
 }
