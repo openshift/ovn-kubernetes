@@ -10,6 +10,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -24,15 +25,30 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	mgmtportmock "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	netlink_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+// newTestOVSClient starts an in-memory OVSDB harness seeded with an empty
+// Open_vSwitch root row so tests that wire an addressManager have a real
+// libovsdb client. Mirrors the pattern used in pkg/metrics/ovs_test.go.
+func newTestOVSClient() (libovsdbclient.Client, *libovsdbtest.Context) {
+	client, ctx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs"},
+		},
+	})
+	Expect(err).NotTo(HaveOccurred())
+	return client, ctx
+}
 
 func ipEvent(ipStr string, isAdd bool, addrChan chan netlink.AddrUpdate) *net.IPNet {
 	ipNet := ovntest.MustParseIPNet(ipStr)
@@ -62,6 +78,7 @@ type testCtx struct {
 	mgmtPortIP4  *net.IPNet
 	mgmtPortIP6  *net.IPNet
 	subscribed   uint32
+	ovsCleanup   *libovsdbtest.Context
 }
 
 var _ = Describe("Node IP Handler event tests", func() {
@@ -80,10 +97,6 @@ var _ = Describe("Node IP Handler event tests", func() {
 		// Restore global default values before each testcase
 		Expect(config.PrepareTestConfig()).To(Succeed())
 		fexec := ovntest.NewFakeExec()
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
-			Output: "10.1.1.10",
-		})
 		Expect(util.SetExec(fexec)).ShouldNot(HaveOccurred())
 		useNetlink := false
 		tc = configureKubeOVNContext(nodeName, useNetlink)
@@ -111,6 +124,7 @@ var _ = Describe("Node IP Handler event tests", func() {
 		close(tc.stopCh)
 		tc.doneWg.Wait()
 		tc.watchFactory.Shutdown()
+		tc.ovsCleanup.Cleanup()
 		close(tc.addrChan)
 		util.ResetRunner()
 	})
@@ -242,10 +256,6 @@ var _ = Describe("Node IP Handler DPUHost event filtering", func() {
 		Expect(config.PrepareTestConfig()).To(Succeed())
 		config.OvnKubeNode.Mode = ovntypes.NodeModeDPUHost
 		fexec := ovntest.NewFakeExec()
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
-			Output: "10.1.1.10",
-		})
 		Expect(util.SetExec(fexec)).ShouldNot(HaveOccurred())
 		tc = configureKubeOVNContext(nodeName, false)
 		tc.ipManager.gatewayIfIndex = gwIfIndex
@@ -269,6 +279,7 @@ var _ = Describe("Node IP Handler DPUHost event filtering", func() {
 		close(tc.stopCh)
 		tc.doneWg.Wait()
 		tc.watchFactory.Shutdown()
+		tc.ovsCleanup.Cleanup()
 		close(tc.addrChan)
 		util.ResetRunner()
 	})
@@ -334,6 +345,103 @@ var _ = Describe("Node IP Handler DPUHost event filtering", func() {
 	})
 })
 
+var _ = Describe("addressManager.updateOVNEncapIPAndReconnect", func() {
+	const ovnAppctlExitRestart = "ovn-appctl --timeout=5 -t ovn-controller exit --restart"
+
+	var (
+		fexec      *ovntest.FakeExec
+		ovsClient  libovsdbclient.Client
+		ovsCleanup *libovsdbtest.Context
+	)
+
+	BeforeEach(func() {
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		fexec = ovntest.NewFakeExec()
+		Expect(util.SetExec(fexec)).To(Succeed())
+		Expect(util.SetupMockOVSPidFile()).To(Succeed())
+	})
+
+	AfterEach(func() {
+		if ovsCleanup != nil {
+			ovsCleanup.Cleanup()
+		}
+		util.ResetRunner()
+	})
+
+	// startHarness seeds the singleton Open_vSwitch row's external_ids with
+	// the given pairs (nil for none) and returns an addressManager wired with
+	// the libovsdb client and a real NodeAnnotator backed by a fake kube
+	// client — both are reached by the function under test.
+	const harnessNodeName = "node1"
+	startHarness := func(initial map[string]string) *addressManager {
+		client, ctx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+			OVSData: []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root-ovs", ExternalIDs: initial},
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		ovsClient = client
+		ovsCleanup = ctx
+		fakeClient := fake.NewSimpleClientset(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: harnessNodeName},
+		})
+		k := &kube.Kube{KClient: fakeClient}
+		return &addressManager{
+			nodeName:      harnessNodeName,
+			ovsClient:     ovsClient,
+			nodeAnnotator: kube.NewNodeAnnotator(k, harnessNodeName),
+		}
+	}
+
+	currentEncapIP := func() string {
+		got := []*vswitchd.OpenvSwitch{}
+		Expect(ovsClient.List(context.Background(), &got)).To(Succeed())
+		Expect(got).To(HaveLen(1))
+		return got[0].ExternalIDs["ovn-encap-ip"]
+	}
+
+	It("is a no-op when the encap IP is already configured", func() {
+		am := startHarness(map[string]string{"ovn-encap-ip": "10.1.1.10"})
+		// fexec has no expectations; if ovn-appctl runs, it fails the test.
+		am.updateOVNEncapIPAndReconnect(net.ParseIP("10.1.1.10"))
+		Expect(currentEncapIP()).To(Equal("10.1.1.10"))
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+	})
+
+	It("writes the encap IP and restarts ovn-controller when it differs", func() {
+		am := startHarness(map[string]string{"ovn-encap-ip": "10.1.1.10"})
+		fexec.AddFakeCmdsNoOutputNoError([]string{ovnAppctlExitRestart})
+		am.updateOVNEncapIPAndReconnect(net.ParseIP("10.1.1.20"))
+		Expect(currentEncapIP()).To(Equal("10.1.1.20"))
+		Expect(config.Default.EffectiveEncapIP).To(Equal("10.1.1.20"))
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+	})
+
+	It("writes the encap IP when no prior value exists", func() {
+		am := startHarness(nil)
+		fexec.AddFakeCmdsNoOutputNoError([]string{ovnAppctlExitRestart})
+		am.updateOVNEncapIPAndReconnect(net.ParseIP("10.1.1.10"))
+		Expect(currentEncapIP()).To(Equal("10.1.1.10"))
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
+	})
+
+	It("preserves unrelated external_ids while updating the encap IP", func() {
+		am := startHarness(map[string]string{
+			"ovn-encap-ip": "10.1.1.10",
+			"system-id":    "node-a",
+		})
+		fexec.AddFakeCmdsNoOutputNoError([]string{ovnAppctlExitRestart})
+		am.updateOVNEncapIPAndReconnect(net.ParseIP("10.1.1.20"))
+
+		got := []*vswitchd.OpenvSwitch{}
+		Expect(ovsClient.List(context.Background(), &got)).To(Succeed())
+		Expect(got[0].ExternalIDs).To(Equal(map[string]string{
+			"ovn-encap-ip": "10.1.1.20",
+			"system-id":    "node-a",
+		}))
+	})
+})
+
 var _ = Describe("refreshGatewayIfIndex", func() {
 	const nodeName = "node1"
 
@@ -342,6 +450,7 @@ var _ = Describe("refreshGatewayIfIndex", func() {
 		config.Gateway.Interface = ""
 		tc := configureKubeOVNContext(nodeName, false)
 		defer tc.watchFactory.Shutdown()
+		defer tc.ovsCleanup.Cleanup()
 
 		tc.ipManager.gatewayIfIndex = 42
 		tc.ipManager.refreshGatewayIfIndex()
@@ -353,6 +462,7 @@ var _ = Describe("refreshGatewayIfIndex", func() {
 		config.Gateway.Interface = "nonexistent0"
 		tc := configureKubeOVNContext(nodeName, false)
 		defer tc.watchFactory.Shutdown()
+		defer tc.ovsCleanup.Cleanup()
 
 		nlMock := new(utilMocks.NetLinkOps)
 		util.SetNetLinkOpMockInst(nlMock)
@@ -370,6 +480,7 @@ var _ = Describe("refreshGatewayIfIndex", func() {
 		config.Gateway.Interface = "breth0"
 		tc := configureKubeOVNContext(nodeName, false)
 		defer tc.watchFactory.Shutdown()
+		defer tc.ovsCleanup.Cleanup()
 
 		nlMock := new(utilMocks.NetLinkOps)
 		linkMock := new(netlink_mocks.Link)
@@ -392,6 +503,7 @@ var _ = Describe("Node IP Handler helper tests", func() {
 		Expect(config.PrepareTestConfig()).To(Succeed())
 		tc := configureKubeOVNContext(nodeName, false)
 		defer tc.watchFactory.Shutdown()
+		defer tc.ovsCleanup.Cleanup()
 
 		tc.ipManager.Lock()
 		tc.ipManager.cidrs.Insert(tc.mgmtPortIP4.String())
@@ -406,6 +518,7 @@ var _ = Describe("Node IP Handler helper tests", func() {
 		Expect(config.PrepareTestConfig()).To(Succeed())
 		tc := configureKubeOVNContext(nodeName, false)
 		defer tc.watchFactory.Shutdown()
+		defer tc.ovsCleanup.Cleanup()
 
 		tc.ipManager.addHandlerForAddrChange()
 
@@ -454,10 +567,6 @@ var _ = Describe("Node IP Handler tests", func() {
 
 	BeforeEach(func() {
 		fexec := ovntest.NewFakeExec()
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
-			Output: dummyBrInternalIPv4,
-		})
 		Expect(util.SetExec(fexec)).ShouldNot(HaveOccurred())
 		// Restore global default values before each testcase
 		Expect(config.PrepareTestConfig()).To(Succeed())
@@ -471,6 +580,7 @@ var _ = Describe("Node IP Handler tests", func() {
 		close(tc.stopCh)
 		tc.doneWg.Wait()
 		tc.watchFactory.Shutdown()
+		tc.ovsCleanup.Cleanup()
 		Expect(tc.ns.Close()).ShouldNot(HaveOccurred())
 		util.ResetRunner()
 	})
@@ -667,7 +777,14 @@ func configureKubeOVNContext(nodeName string, useNetlink bool) *testCtx {
 
 	fakeBridgeConfiguration := bridgeconfig.TestBridgeConfig("breth0")
 
+	// Skip the encap-update path inside addressManager.sync() — these tests
+	// don't fake ovn-appctl and aren't exercising encap reconciliation.
+	config.Default.EncapIP = "test-encap-ip"
+
+	ovsClient, ovsCleanup := newTestOVSClient()
+	tc.ovsCleanup = ovsCleanup
+
 	k := &kube.Kube{KClient: tc.fakeClient}
-	tc.ipManager = newAddressManagerInternal(nodeName, k, mpmock, tc.watchFactory, fakeBridgeConfiguration, useNetlink)
+	tc.ipManager = newAddressManagerInternal(nodeName, k, mpmock, tc.watchFactory, fakeBridgeConfiguration, ovsClient, useNetlink)
 	return tc
 }
