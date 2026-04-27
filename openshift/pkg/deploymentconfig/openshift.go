@@ -42,6 +42,10 @@ func (m openshift) FRRK8sNamespace() string {
 	return "openshift-frr-k8s"
 }
 
+func (m openshift) FRRK8sDaemonSetName() string {
+	return "frr-k8s"
+}
+
 func (m openshift) ExternalBridgeName() string {
 	return "br-ex"
 }

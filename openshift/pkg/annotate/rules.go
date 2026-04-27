@@ -2,6 +2,7 @@ package annotate
 
 import (
 	// ensure all the ginkgo tests are loaded
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 )
 
@@ -9,6 +10,9 @@ var (
 	// LabelToLabelMaps label -> label (ginkgo label)
 	// E2E tests are written with the support of ginkgo. ginkgo tests may contain Labels.
 	LabelToLabelMaps = map[string][]string{
+		// Map the Ginkgo Serial decorator to [Serial] so the annotate tool can assign
+		// the test to openshift/conformance/serial instead of openshift/conformance/parallel.
+		"[Serial]": {"Serial"},
 		"[Disabled:Unimplemented]": {
 			`[Feature:Service]`,
 			`[Feature:NetworkPolicy]`,
