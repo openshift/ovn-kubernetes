@@ -817,6 +817,16 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation should manage cross-network service connectivity through CNC lifecycle": "[Disabled:Unimplemented]",
 
+	"ClusterNetworkConnect ValidatingAdmissionPolicy should allow CREATE with unmanaged annotations": "[Disabled:Unimplemented]",
+
+	"ClusterNetworkConnect ValidatingAdmissionPolicy should reject CREATE with managed annotations pre-set": "[Disabled:Unimplemented]",
+
+	"ClusterNetworkConnect ValidatingAdmissionPolicy should reject modifying or removing connect-router-tunnel-key once set": "[Disabled:Unimplemented]",
+
+	"ClusterNetworkConnect ValidatingAdmissionPolicy should reject regular admin adding network-connect-subnet annotation": "[Disabled:Unimplemented]",
+
+	"ClusterNetworkConnect ValidatingAdmissionPolicy should reject regular user modifying or removing network-connect-subnet annotation": "[Disabled:Unimplemented]",
+
 	"ClusterNetworkConnect: API validations api-server should accept valid ClusterNetworkConnect CRs Valid ClusterNetworkConnect configurations": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect: API validations api-server should reject invalid ClusterNetworkConnect CRs Invalid network selector types": "[Disabled:Unimplemented]",
@@ -1286,6 +1296,8 @@ var AppendedAnnotations = map[string]string{
 	"Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network": "[Disabled:Unimplemented]",
 
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller pod connected to ClusterUserDefinedNetwork CR & managed NADs cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should correctly report subsystem error on node subnet allocation": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should create NAD according to spec in each target namespace and report active namespaces": "[Suite:openshift/conformance/parallel]",
 
