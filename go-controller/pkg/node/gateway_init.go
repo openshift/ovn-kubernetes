@@ -279,6 +279,7 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 			nc.linkManager,
 			nc.networkManager,
 			config.Gateway.Mode,
+			nc.ovsClient,
 		)
 	case config.GatewayModeDisabled:
 		var chassisID string
@@ -487,7 +488,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 	var err error
 
 	gw := nc.Gateway.(*gateway)
-	gw.nodeIPManager = newAddressManager(nc.name, nc.Kube, nil, nc.watchFactory, nil)
+	gw.nodeIPManager = newAddressManager(nc.name, nc.Kube, nil, nc.watchFactory, nil, nc.ovsClient)
 	if config.Gateway.NodeportEnable {
 		if err := initSharedGatewayIPTables(); err != nil {
 			return err
