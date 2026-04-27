@@ -4,10 +4,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
-	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
-	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
-	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
+	ocptest "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/generated"
+	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/infraprovider"
+
+	// import OpenShift-specific EVPN tests to register Ginkgo Describes
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
@@ -118,8 +121,8 @@ func main() {
 		}
 	})
 
-	informingTests := sets.New(test.InformingTests...)
-	blockingTests := sets.New(test.BlockingTests...)
+	informingTests := sets.New(ocptest.InformingTests...)
+	blockingTests := sets.New(ocptest.BlockingTests...)
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
 		for _, label := range getTestExtensionLabels() {

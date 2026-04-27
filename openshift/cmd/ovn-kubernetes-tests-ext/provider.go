@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
+	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/reporters"
