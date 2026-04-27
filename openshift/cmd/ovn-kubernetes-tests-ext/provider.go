@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
+	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg"
 
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
