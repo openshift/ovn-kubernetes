@@ -234,6 +234,73 @@ func GetNodeChassisID() (string, error) {
 	return chassisID, nil
 }
 
+// GetNodeChassisIDWithFallback retrieves the chassis-id for a node.
+// It first checks the node annotation as the source of truth. If found,
+// it validates and ensures OVS has the same value (overwrites OVS if different).
+// If annotation is not set, it falls back to reading from OVS.
+// This ensures annotation persistence across node reprovisioning.
+// See: OCPBUGS-80960
+func GetNodeChassisIDWithFallback(node *corev1.Node) (string, error) {
+	if node == nil {
+		klog.Info("Node object is nil, falling back to OVS for chassis-id")
+		return GetNodeChassisID()
+	}
+
+	nodeName := node.Name
+
+	// Step 1: Try to get chassis-id from node annotation (source of truth)
+	if node.Annotations != nil {
+		if chassisID, ok := node.Annotations[OvnNodeChassisID]; ok && chassisID != "" {
+			klog.Infof("Node %s: found chassis-id in annotation: %s", nodeName, chassisID)
+
+			// Validate chassis-id is a proper UUID to prevent propagating corrupted data
+			if !isValidUUID(chassisID) {
+				return "", fmt.Errorf("node %s has invalid chassis-id format in annotation: %s (expected UUID)", nodeName, chassisID)
+			}
+
+			// Ensure OVS has the same value (overwrite if different)
+			// This is critical during reprovisioning when OVS resets
+			_, stderr, err := RunOVSVsctl("set", "Open_vSwitch", ".",
+				fmt.Sprintf("external_ids:system-id=%s", chassisID))
+			if err != nil {
+				// Log detailed error context for troubleshooting
+				klog.Errorf("Node %s: failed to set chassis-id %s in OVS, stderr: %q, error: %v", nodeName, chassisID, stderr, err)
+				// Return error instead of just warning - OVS sync is critical
+				return "", fmt.Errorf("failed to sync chassis-id to OVS for node %s: %w", nodeName, err)
+			}
+
+			klog.Infof("Node %s: successfully set chassis-id in OVS from annotation: %s", nodeName, chassisID)
+			return chassisID, nil
+		}
+	}
+
+	// Step 2: Annotation not found, fall back to reading from OVS (existing behavior)
+	// This handles fresh node creation where annotation doesn't exist yet
+	klog.Infof("Node %s: no chassis-id in annotation, reading from OVS", nodeName)
+	return GetNodeChassisID()
+}
+
+// isValidUUID checks if a string is a valid UUID (RFC 4122 format)
+func isValidUUID(s string) bool {
+	// UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with hyphens)
+	if len(s) != 36 {
+		return false
+	}
+	// Simple validation: check hyphen positions and hex characters
+	for i, c := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // GetHybridOverlayPortName returns the name of the hybrid overlay switch port
 // for a given node
 func GetHybridOverlayPortName(nodeName string) string {

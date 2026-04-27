@@ -370,7 +370,7 @@ func setupUDPAggregationUplink(ifname string) error {
 	return nil
 }
 
-func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, nodeSubnets, gwIPs []*net.IPNet,
+func gatewayInitInternal(node *corev1.Node, nodeName, gwIntf, egressGatewayIntf string, gwNextHops []net.IP, nodeSubnets, gwIPs []*net.IPNet,
 	advertised bool, nodeAnnotator kube.Annotator) (
 	*bridgeconfig.BridgeConfiguration, *bridgeconfig.BridgeConfiguration, error) {
 	gatewayBridge, err := bridgeconfig.NewBridgeConfiguration(gwIntf, nodeName, types.PhysicalNetworkName, nodeSubnets, gwIPs, advertised)
@@ -385,7 +385,7 @@ func gatewayInitInternal(nodeName, gwIntf, egressGatewayIntf string, gwNextHops 
 		}
 	}
 
-	chassisID, err := util.GetNodeChassisID()
+	chassisID, err := util.GetNodeChassisIDWithFallback(node)
 	if err != nil {
 		return nil, nil, err
 	}
