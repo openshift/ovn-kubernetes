@@ -9,10 +9,6 @@ import (
 	"strings"
 
 	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
-	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
-	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/reporters"
@@ -20,13 +16,15 @@ import (
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	kclientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 // partially copied from https://github.com/openshift/origin/blob/17371a2c6a91e0426045fdd0ab3455c5b457622a/pkg/test/extensions/binary.go
 // and https://github.com/openshift/origin/blob/e0a2fbc82ac1f97dc4fa84a00ed5739c94366926/pkg/clioptions/clusterdiscovery/provider.go
-func initializeTestFramework(provider string) error {
+func initializeTestFramework(provider string, cfg *rest.Config) error {
 	if len(provider) == 0 {
 		provider = "{\"type\":\"skeleton\"}"
 	}
@@ -42,10 +40,9 @@ func initializeTestFramework(provider string) error {
 		return fmt.Errorf("provider must decode into the ClusterConfig object: %v", err)
 	}
 
-	// update testContext with loaded config
-	testContext := &framework.TestContext
-	testContext.Provider = config.ProviderName
-	testContext.CloudConfig = framework.CloudConfig{
+	// update framework.TestContext with loaded config
+	framework.TestContext.Provider = config.ProviderName
+	framework.TestContext.CloudConfig = framework.CloudConfig{
 		ProjectID:   config.ProjectID,
 		Region:      config.Region,
 		Zone:        config.Zone,
@@ -56,41 +53,30 @@ func initializeTestFramework(provider string) error {
 		ConfigFile:  config.ConfigFile,
 		Provider:    framework.NullProvider{},
 	}
-	testContext.AllowedNotReadyNodes = 0
-	testContext.MinStartupPods = -1
-	testContext.MaxNodesToGather = 0
-	testContext.KubeConfig = os.Getenv("KUBECONFIG")
-	gomega.Expect(testContext.KubeConfig).NotTo(gomega.BeEmpty())
-	testContext.DeleteNamespace = os.Getenv("DELETE_NAMESPACE") != "false"
-	testContext.VerifyServiceAccount = false
+	framework.TestContext.AllowedNotReadyNodes = 0
+	framework.TestContext.MinStartupPods = -1
+	framework.TestContext.MaxNodesToGather = 0
+	framework.TestContext.KubeConfig = os.Getenv("KUBECONFIG")
+	gomega.Expect(framework.TestContext.KubeConfig).NotTo(gomega.BeEmpty())
+	framework.TestContext.DeleteNamespace = os.Getenv("DELETE_NAMESPACE") != "false"
+	framework.TestContext.VerifyServiceAccount = true
 	//TODO: do we really need the file systems?
-	testContext.KubectlPath = "oc"
+	framework.TestContext.KubectlPath = "oc"
 	if ad := os.Getenv("ARTIFACT_DIR"); len(strings.TrimSpace(ad)) == 0 {
 		os.Setenv("ARTIFACT_DIR", filepath.Join(os.TempDir(), "artifacts"))
 	}
 	// "debian" is used when not set. At least GlusterFS tests need "custom".
 	// (There is no option for "rhel" or "centos".)
-	testContext.NodeOSDistro = "custom"
-	testContext.MasterOSDistro = "custom"
-	// load and set the host variable for kubectl
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&clientcmd.ClientConfigLoadingRules{ExplicitPath: testContext.KubeConfig}, &clientcmd.ConfigOverrides{})
-	cfg, err := clientConfig.ClientConfig()
-	if err != nil {
-		return fmt.Errorf("failed to get client config: %v", err)
-	}
-	testContext.Host = cfg.Host
-	testContext.CreateTestingNS = func(ctx context.Context, baseName string, c kclientset.Interface, labels map[string]string) (*corev1.Namespace, error) {
+	framework.TestContext.NodeOSDistro = "custom"
+	framework.TestContext.MasterOSDistro = "custom"
+	// set the host variable for kubectl
+	gomega.Expect(cfg).NotTo(gomega.BeNil())
+	framework.TestContext.Host = cfg.Host
+	framework.TestContext.CreateTestingNS = func(ctx context.Context, baseName string, c kclientset.Interface, labels map[string]string) (*corev1.Namespace, error) {
 		return ocphacke2e.CreateTestingNS(ctx, baseName, c, labels, true)
 	}
-	testContext.DumpLogsOnFailure = true
-	testContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
-	ocpInfra, err := ocpinfraprovider.New(cfg)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Expect(ocpInfra).NotTo(gomega.BeNil())
-	infraprovider.Set(ocpInfra)
-	ocpDeployment := ocpdeploymentconfig.New()
-	gomega.Expect(ocpDeployment).NotTo(gomega.BeNil())
-	deploymentconfig.Set(ocpDeployment)
+	framework.TestContext.DumpLogsOnFailure = true
+	framework.TestContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
 	return nil
 }
 
@@ -115,4 +101,17 @@ func writeJUnitReport(report ginkgo.Report, filename string) error {
 	}
 
 	return reporters.GenerateJUnitReportWithConfig(report, filename, config)
+}
+
+func getKubeConfig() (*restclient.Config, error) {
+	kubeConfig := os.Getenv("KUBECONFIG")
+	if kubeConfig == "" {
+		return nil, fmt.Errorf("KUBECONFIG env variable not set")
+	}
+	if _, err := os.Stat(kubeConfig); err != nil {
+		return nil, fmt.Errorf("KUBECONFIG file %q not accessible: %w", kubeConfig, err)
+	}
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeConfig},
+		&clientcmd.ConfigOverrides{})
+	return clientConfig.ClientConfig()
 }
