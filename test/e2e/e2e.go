@@ -2468,3 +2468,19 @@ var _ = ginkgo.Describe("e2e delete databases", func() {
 		singlePodConnectivityTest(f, "after-delete-db-pods")
 	})
 })
+
+// =============================================================================
+// Exported wrappers for openshift/test/evpn.go
+// =============================================================================
+
+// RestartOVNKubeNodePod deletes the ovnkube-node pod on the given node and waits for
+// the replacement to become Running. Exported for use by OpenShift-specific test files.
+func RestartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
+	return restartOVNKubeNodePod(clientset, namespace, nodeName)
+}
+
+// RestartOVNKubeNodePodsInParallel restarts ovnkube-node pods on all given nodes in parallel.
+// Exported for use by OpenShift-specific test files.
+func RestartOVNKubeNodePodsInParallel(clientset kubernetes.Interface, namespace string, nodeNames ...string) error {
+	return restartOVNKubeNodePodsInParallel(clientset, namespace, nodeNames...)
+}

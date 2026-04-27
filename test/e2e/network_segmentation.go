@@ -2446,6 +2446,16 @@ func matchL2SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1
 	return
 }
 
+// MatchL3SubnetsByIPFamilies filters Layer3 subnets to only those matching the given IP families.
+func MatchL3SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1.Layer3Subnet) []udnv1.Layer3Subnet {
+	return matchL3SubnetsByIPFamilies(families, in...)
+}
+
+// MatchL2SubnetsByIPFamilies filters Layer2 CIDR subnets to only those matching the given IP families.
+func MatchL2SubnetsByIPFamilies(families sets.Set[utilnet.IPFamily], in ...udnv1.CIDR) []udnv1.CIDR {
+	return matchL2SubnetsByIPFamilies(families, in...)
+}
+
 func generateCIDRforClusterUDN(cs clientset.Interface, v4, v6 string) string {
 	cidr := `[{cidr: ` + v4 + `}]`
 	if isIPv6Supported(cs) && isIPv4Supported(cs) {
