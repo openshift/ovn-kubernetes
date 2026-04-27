@@ -5,6 +5,7 @@ package api
 type DeploymentConfig interface {
 	OVNKubernetesNamespace() string
 	FRRK8sNamespace() string
+	FRRK8sDaemonSetName() string
 	ExternalBridgeName() string
 	PrimaryInterfaceName() string
 	GetAgnHostContainerImage() string

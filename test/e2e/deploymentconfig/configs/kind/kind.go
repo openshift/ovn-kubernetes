@@ -23,6 +23,10 @@ func (k kind) FRRK8sNamespace() string {
 	return "frr-k8s-system"
 }
 
+func (k kind) FRRK8sDaemonSetName() string {
+	return "frr-k8s-daemon"
+}
+
 func (k kind) ExternalBridgeName() string {
 	return "breth0"
 }
