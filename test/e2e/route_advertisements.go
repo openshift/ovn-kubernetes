@@ -2657,25 +2657,24 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				// Shared FRRConfiguration: name/label must match RouteAdvertisements (network: testName).
 				evpnFRRConfigName = testName
 			}
-			gomega.Expect(
-				runEVPNNetworkAndServers(
-					f,
-					ictx,
-					evpnFRRConfigName,
-					ipFamilySet,
-					networkSpec,
-					bgpAlloc,
-					bgpASN,
-					bridgeName,
-					vxlanName,
-					vtepName,
-					&macVRFContainer,
-					macVRFNetworkName,
-					&ipVRFContainer,
-					ipVRFNetworkName,
-					networkType == cudnAdvertisedEVPNOverlappingCIDRSharedVTEP,
-				),
-			).To(gomega.Succeed())
+			_, err := runEVPNNetworkAndServers(
+				f,
+				ictx,
+				evpnFRRConfigName,
+				ipFamilySet,
+				networkSpec,
+				bgpAlloc,
+				bgpASN,
+				bridgeName,
+				vxlanName,
+				vtepName,
+				&macVRFContainer,
+				macVRFNetworkName,
+				&ipVRFContainer,
+				ipVRFNetworkName,
+				networkType == cudnAdvertisedEVPNOverlappingCIDRSharedVTEP,
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if networkSpec.EVPN.MACVRF != nil {
 				servers = append(servers, macVRFContainer.Name)
 			}

@@ -1790,7 +1790,7 @@ write_files:
 				}
 
 				By("Setting up EVPN infrastructure and external containers")
-				Expect(runEVPNNetworkAndServers(
+				_, err := runEVPNNetworkAndServers(
 					fr,
 					providerCtx,
 					shortName,
@@ -1806,7 +1806,8 @@ write_files:
 					&externalContainer,
 					externalContainer.Name,
 					false,
-				)).To(Succeed())
+				)
+				Expect(err).NotTo(HaveOccurred())
 				// Register namespace deletion on the infra context so it runs
 				// before VTEP poll in LIFO cleanup order. VTEP has a finalizer
 				// that blocks until no CUDN references it, and CUDN can't remove
