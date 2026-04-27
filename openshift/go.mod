@@ -11,6 +11,7 @@ require (
 	github.com/openshift/api v0.0.0-20260311143357-f6ee4c095675
 	github.com/openshift/client-go v0.0.0-20260306160707-3935d929fc7d
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
+	// Placeholder pseudo-version; the real module path is wired via replace ../test/e2e below.
 	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.10.0
 	k8s.io/api v0.35.1
@@ -18,6 +19,7 @@ require (
 	k8s.io/client-go v0.35.1
 	k8s.io/component-base v0.35.1
 	k8s.io/kubernetes v1.35.1
+	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
 )
 
 require (
@@ -207,7 +209,6 @@ require (
 	k8s.io/kubelet v0.35.1 // indirect
 	k8s.io/mount-utils v0.34.1 // indirect
 	k8s.io/pod-security-admission v0.35.1 // indirect
-	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect
 	kubevirt.io/api v1.4.0 // indirect
 	kubevirt.io/containerized-data-importer-api v1.57.0-alpha1 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
@@ -221,6 +222,10 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
+// k8s.io/* versions in the require block above are nominal constraints. The
+// replace directives below point k8s.io/api, k8s.io/apimachinery,
+// k8s.io/client-go, k8s.io/component-base, and the other listed staging modules
+// at openshift/kubernetes forks — those pins are authoritative for OpenShift builds.
 replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/docker/docker => github.com/docker/docker v26.1.5+incompatible

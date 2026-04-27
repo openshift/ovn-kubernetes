@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/annotate"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/annotate"
 )
 
 func main() {
