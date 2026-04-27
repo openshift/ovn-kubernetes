@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovnwebhook
 
 import (
@@ -36,6 +39,9 @@ var interconnectPodAnnotations = map[string]checkPodAnnot{
 
 		podAnnot, err := util.UnmarshalPodAnnotation(map[string]string{util.OvnPodAnnotationName: v.value}, types.DefaultNetworkName)
 		if err != nil {
+			if util.IsAnnotationNotSetError(err) {
+				return nil
+			}
 			return err
 		}
 		node, err := nodeLister.Get(nodeName)

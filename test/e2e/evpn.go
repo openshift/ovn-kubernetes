@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package e2e
 
 import (
@@ -1125,7 +1128,7 @@ func randomVTEPSubnets() (ipv4, ipv6 string) {
 // =============================================================================
 
 func getExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
-	kindNetwork, err := infraprovider.Get().GetNetwork("kind")
+	kindNetwork, err := infraprovider.Get().PrimaryNetwork()
 	if err != nil {
 		return "", err
 	}

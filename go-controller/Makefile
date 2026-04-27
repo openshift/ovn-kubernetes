@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 OUT_DIR = _output
 export OUT_DIR
 PREFIX ?= ${DESTDIR}/usr
