@@ -221,17 +221,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
 		})
-		if setNodeIP {
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-encap-ip=192.168.1.10",
-			})
-			fexec.AddFakeCmdsNoOutputNoError([]string{
-				"ovn-appctl --timeout=5 -t ovn-controller exit --restart",
-			})
-		}
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
 			Output: "0",
@@ -258,7 +247,16 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		// syncServices()
 
-		err := util.SetExec(fexec)
+		if setNodeIP {
+			// addressManager.sync() will call updateOVNEncapIPAndReconnect,
+			// which writes ovn-encap-ip via libovsdb (asserted after Init)
+			// and asks ovn-controller to reconnect.
+			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+				Cmd: "ovn-appctl --timeout=5 -t ovn-controller exit --restart",
+			})
+		}
+
+		err = util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = config.InitConfig(ctx, fexec, nil)
@@ -382,6 +380,8 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
 			sharedGw, err := newGateway(
 				nodeName,
 				ovntest.MustParseIPNets(nodeSubnet),
@@ -397,6 +397,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeShared,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.initFunc()
@@ -410,6 +411,15 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
 			//sharedGw.Start()
 			sharedGw.nodeIPManager.sync()
+			if setNodeIP {
+				// updateOVNEncapIPAndReconnect should have written the
+				// node primary IP into Open_vSwitch.external_ids.
+				expectedAddr, perr := netlink.ParseAddr(eth0CIDR)
+				Expect(perr).NotTo(HaveOccurred())
+				ovs, gerr := ovsops.GetOpenvSwitch(ovsClient)
+				Expect(gerr).NotTo(HaveOccurred())
+				Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-encap-ip", expectedAddr.IP.String()))
+			}
 			// we cannot start openflow manager directly because it spawns a go routine
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
 			sharedGw.openflowManager.syncFlows()
@@ -571,6 +581,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 	brphys, hostMAC, hostCIDR, dpuIP string) {
 	const mtu string = "1400"
 	const clusterCIDR string = "10.1.0.0/16"
+	// addressManager.sync() short-circuits when Mode == DPU, so the
+	// encap-update path never fires here. Keep the field empty to avoid
+	// polluting later tests.
 	app.Action = func(ctx *cli.Context) error {
 		const (
 			nodeName   string = "node1"
@@ -783,6 +796,8 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
 			sharedGw, err := newGateway(
 				nodeName,
 				ovntest.MustParseIPNets(nodeSubnet),
@@ -798,6 +813,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeShared,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.initFunc()
@@ -1136,11 +1152,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 			Output: "7",
 		})
-		// IP already configured, do not try to set it or restart ovn-controller
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
-			Output: "192.168.1.10",
-		})
+		// Encap IP reconciliation moved to libovsdb; addressManager.sync()
+		// is gated off via config.Default.EncapIP for this test.
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ip route replace table 7 172.16.1.0/24 via 10.1.1.1 dev ovn-k8s-mp0",
 			Output: "0",
@@ -1177,6 +1190,13 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Output: ovsOFOutput,
 		})
 		// syncServices()
+
+		// addressManager.sync() will call updateOVNEncapIPAndReconnect,
+		// which writes ovn-encap-ip via libovsdb (asserted after Init) and
+		// asks ovn-controller to reconnect.
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovn-appctl --timeout=5 -t ovn-controller exit --restart",
+		})
 
 		err := util.SetExec(fexec)
 		Expect(err).NotTo(HaveOccurred())
@@ -1287,6 +1307,8 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
+			ovsClient, ovsCleanup := newTestOVSClient()
+			defer ovsCleanup.Cleanup()
 			localGw, err := newGateway(
 				nodeName,
 				ovntest.MustParseIPNets(nodeSubnet),
@@ -1302,6 +1324,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeLocal,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.initFunc()
@@ -1316,6 +1339,11 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			// Start does two things, starts nodeIPManager which spawns a go routine and also starts openflow manager by spawning a go routine
 			// localGw.Start()
 			localGw.nodeIPManager.sync()
+			// updateOVNEncapIPAndReconnect should have written the node
+			// primary IP into Open_vSwitch.external_ids.
+			localOVS, lerr := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(lerr).NotTo(HaveOccurred())
+			Expect(localOVS.ExternalIDs).To(HaveKeyWithValue("ovn-encap-ip", expectedAddr.IP.String()))
 			// we cannot start openflow manager directly because it spawns a go routine
 			// FIXME: extract openflow manager func from the spawning of a go routine so it can be called directly below.
 			localGw.openflowManager.syncFlows()
