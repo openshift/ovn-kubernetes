@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package clustermanager
 
 import (
@@ -901,7 +904,6 @@ func initConfig(ctx *cli.Context, ovkConfig config.OVNKubernetesFeatureConfig) e
 	if err != nil {
 		return err
 	}
-	config.Kubernetes.HostNetworkNamespace = ""
 	config.OVNKubernetesFeature = ovkConfig
 	return nil
 }

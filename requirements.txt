@@ -7,6 +7,7 @@ Markdown
 MarkupSafe
 mkdocs
 mkdocs-awesome-pages-plugin
+mkdocs-glightbox
 mkdocs-macros-plugin
 mkdocs-material
 mkdocs-material-extensions
@@ -18,3 +19,4 @@ pymdown-extensions
 PyYAML
 six
 tornado
+mkdocs-meta-descriptions-plugin==4.1.0

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 docker run --pid host --network host --user=0 --name ovn -dit --cap-add=SYS_NICE -v /var/run/dbus:/var/run/dbus:ro -v \
  /var/log/openvswitch:/var/log/openvswitch -v /var/log/openvswitch:/var/log/ovn -v  \
  /var/run/openvswitch:/var/run/openvswitch -v /var/run/openvswitch:/var/run/ovn -v $K8S_CACERT:$K8S_CACERT -v \
