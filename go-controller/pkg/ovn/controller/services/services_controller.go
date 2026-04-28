@@ -6,6 +6,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,9 +56,55 @@ const (
 
 	controllerName     = "ovn-lb-controller"
 	nodeControllerName = "node-tracker-controller"
+
+	scopedServiceQueueKeySeparator = "|"
 )
 
 var ErrMissingServiceLabel = fmt.Errorf("endpointSlice missing the service name label")
+
+func parseScopedServiceQueueKey(key string) (networkName, serviceKey string) {
+	networkName, serviceKey, found := strings.Cut(key, scopedServiceQueueKeySeparator)
+	if !found {
+		return "", key
+	}
+	return networkName, serviceKey
+}
+
+type networkState struct {
+	netInfo util.NetInfo
+
+	// Per node information and template variables. The latter expand to each
+	// chassis' node IP (v4 and v6).
+	// Must be accessed only with the nodeInfo mutex taken.
+	nodeInfos         []nodeInfo
+	nodeIPv4Templates *NodeIPsTemplates
+	nodeIPv6Templates *NodeIPsTemplates
+	nodeInfoRWLock    sync.RWMutex
+
+	// alreadyApplied is a map of service key -> already applied configuration, so we can short-circuit
+	// if a service's config hasn't changed.
+	alreadyApplied       map[string][]LB
+	alreadyAppliedRWLock sync.RWMutex
+
+	// Lock order considerations: if both nodeInfoRWLock and alreadyAppliedRWLock
+	// need to be taken for some reason then the order in which they're taken is
+	// always: first nodeInfoRWLock and then alreadyAppliedRWLock.
+
+	// 'true' if Load_Balancer_Group is supported.
+	useLBGroups bool
+
+	// 'true' if Chassis_Template_Var is supported.
+	useTemplates bool
+}
+
+func newNetworkState(netInfo util.NetInfo) *networkState {
+	return &networkState{
+		netInfo:           netInfo,
+		alreadyApplied:    map[string][]LB{},
+		nodeIPv4Templates: NewNodeIPsTemplates(corev1.IPv4Protocol),
+		nodeIPv6Templates: NewNodeIPsTemplates(corev1.IPv6Protocol),
+	}
+}
 
 // NewController returns a new *Controller.
 func NewController(client clientset.Interface,
@@ -78,9 +125,6 @@ func NewController(client clientset.Interface,
 			workqueue.TypedRateLimitingQueueConfig[string]{Name: controllerName},
 		),
 		workerLoopPeriod:      time.Second,
-		alreadyApplied:        map[string][]LB{},
-		nodeIPv4Templates:     NewNodeIPsTemplates(corev1.IPv4Protocol),
-		nodeIPv6Templates:     NewNodeIPsTemplates(corev1.IPv6Protocol),
 		serviceInformer:       serviceInformer,
 		serviceLister:         serviceInformer.Lister(),
 		endpointSliceInformer: endpointSliceInformer,
@@ -91,7 +135,7 @@ func NewController(client clientset.Interface,
 		repair:        newRepair(serviceInformer.Lister(), nbClient),
 		nodeInformer:  nodeInformer,
 		nodesSynced:   nodeInformer.Informer().HasSynced,
-		netInfo:       netInfo,
+		state:         newNetworkState(netInfo),
 	}
 	zone, err := libovsdbutil.GetNBZone(c.nbClient)
 	if err != nil {
@@ -145,31 +189,10 @@ type Controller struct {
 	startupDone     bool
 	startupDoneLock sync.RWMutex
 
-	// Per node information and template variables.  The latter expand to each
-	// chassis' node IP (v4 and v6).
-	// Must be accessed only with the nodeInfo mutex taken.
-	// These are written in RequestFullSync().
-	nodeInfos         []nodeInfo
-	nodeIPv4Templates *NodeIPsTemplates
-	nodeIPv6Templates *NodeIPsTemplates
-	nodeInfoRWLock    sync.RWMutex
-
-	// alreadyApplied is a map of service key -> already applied configuration, so we can short-circuit
-	// if a service's config hasn't changed
-	alreadyApplied       map[string][]LB
-	alreadyAppliedRWLock sync.RWMutex
-
-	// Lock order considerations: if both nodeInfoRWLock and alreadyAppliedRWLock
-	// need to be taken for some reason then the order in which they're taken is
-	// always: first nodeInfoRWLock and then alreadyAppliedRWLock.
-
-	// 'true' if Load_Balancer_Group is supported.
-	useLBGroups bool
-
-	// 'true' if Chassis_Template_Var is supported.
-	useTemplates bool
-
-	netInfo util.NetInfo
+	// state is the default network state owned by this controller. It is kept
+	// alongside networkStates for legacy single-network call sites and Run()
+	// initialization.
+	state *networkState
 
 	// handlers stored for shutdown
 	nodeHandler     cache.ResourceEventHandlerRegistration
@@ -190,9 +213,9 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 		c.Cleanup()
 	}()
 
-	c.useLBGroups = useLBGroups
-	c.useTemplates = useTemplates
-	klog.Infof("Starting controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
+	c.state.useLBGroups = useLBGroups
+	c.state.useTemplates = useTemplates
+	klog.Infof("Starting controller %s for network=%s", controllerName, c.state.netInfo.GetNetworkName())
 
 	var err error
 	c.nodeHandler, err = c.nodeTracker.Start(c.nodeInformer)
@@ -200,7 +223,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 		return err
 	}
 	// We need the node tracker to be synced first, as we rely on it to properly reprogram initial per node load balancers
-	klog.Infof("Waiting for node tracker handler to sync for network=%s", c.netInfo.GetNetworkName())
+	klog.Infof("Waiting for node tracker handler to sync for network=%s", c.state.netInfo.GetNetworkName())
 	c.startupDoneLock.Lock()
 	c.startupDone = false
 	c.startupDoneLock.Unlock()
@@ -208,7 +231,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 		return fmt.Errorf("error syncing node tracker handler")
 	}
 
-	klog.Infof("Setting up event handlers for services for network=%s", c.netInfo.GetNetworkName())
+	klog.Infof("Setting up event handlers for services for network=%s", c.state.netInfo.GetNetworkName())
 	c.svcHandler, err = c.serviceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onServiceAdd,
 		UpdateFunc: c.onServiceUpdate,
@@ -218,7 +241,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 		return err
 	}
 
-	klog.Infof("Setting up event handlers for endpoint slices for network=%s", c.netInfo.GetNetworkName())
+	klog.Infof("Setting up event handlers for endpoint slices for network=%s", c.state.netInfo.GetNetworkName())
 	c.endpointHandler, err = c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
 		// Filter out endpointslices that don't belong to this network (i.e. keep only kube-generated endpointslices if
 		// on default network, keep only mirrored endpointslices for this network if on UDN)
@@ -228,12 +251,12 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 				UpdateFunc: c.onEndpointSliceUpdate,
 				DeleteFunc: c.onEndpointSliceDelete,
 			},
-			c.netInfo)))
+			c.state.netInfo)))
 	if err != nil {
 		return err
 	}
 
-	klog.Infof("Waiting for service and endpoint handlers to sync for network=%s", c.netInfo.GetNetworkName())
+	klog.Infof("Waiting for service and endpoint handlers to sync for network=%s", c.state.netInfo.GetNetworkName())
 	if !util.WaitForHandlerSyncWithTimeout(controllerName, stopCh, types.HandlerSyncTimeout, c.svcHandler.HasSynced, c.endpointHandler.HasSynced) {
 		return fmt.Errorf("error syncing service and endpoint handlers")
 	}
@@ -242,7 +265,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 		// Run the repair controller only once
 		// it keeps in sync Kubernetes and OVN
 		// and handles removal of stale data on upgrades
-		c.repair.runBeforeSync(c.useTemplates, c.netInfo, c.nodeTracker.nodes)
+		c.repair.runBeforeSync(c.state.useTemplates, c.state.netInfo, c.nodeTracker.nodes)
 	}
 
 	if err := c.initTopLevelCache(); err != nil {
@@ -254,7 +277,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 	c.startupDoneLock.Unlock()
 
 	// Start the workers after the repair loop to avoid races
-	klog.Infof("Starting workers for network=%s", c.netInfo.GetNetworkName())
+	klog.Infof("Starting workers for network=%s", c.state.netInfo.GetNetworkName())
 	for i := 0; i < workers; i++ {
 		go wait.Until(c.worker, c.workerLoopPeriod, stopCh)
 	}
@@ -263,22 +286,22 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 }
 
 func (c *Controller) Cleanup() {
-	klog.Infof("Shutting down controller %s for network=%s", controllerName, c.netInfo.GetNetworkName())
+	klog.Infof("Shutting down controller %s for network=%s", controllerName, c.state.netInfo.GetNetworkName())
 	c.queue.ShutDown()
 
 	if c.nodeHandler != nil {
 		if err := c.nodeInformer.Informer().RemoveEventHandler(c.nodeHandler); err != nil {
-			klog.Errorf("Failed to remove node handler for network %s: %v", c.netInfo.GetNetworkName(), err)
+			klog.Errorf("Failed to remove node handler for network %s: %v", c.state.netInfo.GetNetworkName(), err)
 		}
 	}
 	if c.svcHandler != nil {
 		if err := c.serviceInformer.Informer().RemoveEventHandler(c.svcHandler); err != nil {
-			klog.Errorf("Failed to remove service handler for network %s: %v", c.netInfo.GetNetworkName(), err)
+			klog.Errorf("Failed to remove service handler for network %s: %v", c.state.netInfo.GetNetworkName(), err)
 		}
 	}
 	if c.endpointHandler != nil {
 		if err := c.endpointSliceInformer.Informer().RemoveEventHandler(c.endpointHandler); err != nil {
-			klog.Errorf("Failed to remove endpoint handler for network %s: %v", c.netInfo.GetNetworkName(), err)
+			klog.Errorf("Failed to remove endpoint handler for network %s: %v", c.state.netInfo.GetNetworkName(), err)
 		}
 	}
 }
@@ -306,7 +329,8 @@ func (c *Controller) processNextWorkItem() bool {
 }
 
 func (c *Controller) handleErr(err error, key string) {
-	ns, name, keyErr := cache.SplitMetaNamespaceKey(key)
+	_, serviceKey := parseScopedServiceQueueKey(key)
+	ns, name, keyErr := cache.SplitMetaNamespaceKey(serviceKey)
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
 	}
@@ -324,7 +348,7 @@ func (c *Controller) handleErr(err error, key string) {
 		return
 	}
 
-	klog.Warningf("Dropping service %q out of the queue for network=%s: %v", key, c.netInfo.GetNetworkName(), err)
+	klog.Warningf("Dropping service %q out of the queue for network=%s: %v", key, c.state.netInfo.GetNetworkName(), err)
 	recorders.GetConfigDurationRecorder().End("service", ns, name)
 	c.queue.Forget(key)
 	utilruntime.HandleError(err)
@@ -335,15 +359,19 @@ func (c *Controller) handleErr(err error, key string) {
 // That is because such work will be performed in syncService, so all that is needed here is the ability
 // to distinguish what is present in ovn database and this 'dirty' initial value.
 func (c *Controller) initTopLevelCache() error {
+	return c.initTopLevelCacheForNetwork(c.state)
+}
+
+func (c *Controller) initTopLevelCacheForNetwork(state *networkState) error {
 	var err error
 
-	c.alreadyAppliedRWLock.Lock()
-	defer c.alreadyAppliedRWLock.Unlock()
+	state.alreadyAppliedRWLock.Lock()
+	defer state.alreadyAppliedRWLock.Unlock()
 
 	// First list all the templates.
 	allTemplates := TemplateMap{}
 
-	if c.useTemplates {
+	if state.useTemplates {
 		allTemplates, err = listSvcTemplates(c.nbClient)
 		if err != nil {
 			return fmt.Errorf("failed to load templates: %w", err)
@@ -351,20 +379,20 @@ func (c *Controller) initTopLevelCache() error {
 	}
 
 	// Then list all load balancers and their respective services.
-	services, lbs, err := getServiceLBsForNetwork(c.nbClient, allTemplates, c.netInfo)
+	services, lbs, err := getServiceLBsForNetwork(c.nbClient, allTemplates, state.netInfo)
 	if err != nil {
 		return fmt.Errorf("failed to load balancers: %w", err)
 	}
 
-	c.alreadyApplied = make(map[string][]LB, len(services))
+	state.alreadyApplied = make(map[string][]LB, len(services))
 
 	for _, lb := range lbs {
 		service := lb.ExternalIDs[types.LoadBalancerOwnerExternalID]
-		c.alreadyApplied[service] = append(c.alreadyApplied[service], *lb)
+		state.alreadyApplied[service] = append(state.alreadyApplied[service], *lb)
 	}
 
 	klog.Infof("Controller cache of %d load balancers initialized for %d services for network=%s",
-		len(lbs), len(c.alreadyApplied), c.netInfo.GetNetworkName())
+		len(lbs), len(state.alreadyApplied), state.netInfo.GetNetworkName())
 
 	return nil
 }
@@ -376,23 +404,31 @@ func (c *Controller) initTopLevelCache() error {
 //
 // All Load_Balancer objects are tagged with their owner, so it's easy to find stale objects.
 func (c *Controller) syncService(key string) error {
+	networkName, serviceKey := parseScopedServiceQueueKey(key)
+	if networkName != "" && networkName != c.state.netInfo.GetNetworkName() {
+		return fmt.Errorf("service sync requested for network %q on controller for network %q", networkName, c.state.netInfo.GetNetworkName())
+	}
+	return c.syncServiceForNetwork(c.state, serviceKey)
+}
+
+func (c *Controller) syncServiceForNetwork(state *networkState, key string) error {
 	startTime := time.Now()
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		return err
 	}
-	klog.V(5).Infof("Processing sync for service %s/%s for network=%s", namespace, name, c.netInfo.GetNetworkName())
+	klog.V(5).Infof("Processing sync for service %s/%s for network=%s", namespace, name, state.netInfo.GetNetworkName())
 	metrics.MetricSyncServiceCount.Inc()
 
 	defer func() {
-		klog.V(5).Infof("Finished syncing service %s on namespace %s for network=%s : %v", name, namespace, c.netInfo.GetNetworkName(), time.Since(startTime))
+		klog.V(5).Infof("Finished syncing service %s on namespace %s for network=%s : %v", name, namespace, state.netInfo.GetNetworkName(), time.Since(startTime))
 		metrics.MetricSyncServiceLatency.Observe(time.Since(startTime).Seconds())
 	}()
 
-	// Shared node information (c.nodeInfos, c.nodeIPv4Template, c.nodeIPv6Template)
+	// Shared node information (state.nodeInfos, state.nodeIPv4Template, state.nodeIPv6Template)
 	// needs to be accessed with the nodeInfoRWLock taken for read.
-	c.nodeInfoRWLock.RLock()
-	defer c.nodeInfoRWLock.RUnlock()
+	state.nodeInfoRWLock.RLock()
+	defer state.nodeInfoRWLock.RUnlock()
 
 	// Get current Service from the cache
 	service, err := c.serviceLister.Services(namespace).Get(name)
@@ -403,14 +439,14 @@ func (c *Controller) syncService(key string) error {
 	}
 
 	// Handle default network services enabled for UDN in shared gateway mode
-	if c.netInfo.IsPrimaryNetwork() &&
+	if state.netInfo.IsPrimaryNetwork() &&
 		util.IsUDNEnabledService(key) {
 
 		if service == nil {
-			return c.cleanupUDNEnabledServiceRoute(key)
+			return c.cleanupUDNEnabledServiceRoute(state, key)
 		}
 
-		err = c.configureUDNEnabledServiceRoute(service)
+		err = c.configureUDNEnabledServiceRoute(state, service)
 		if err != nil {
 			return fmt.Errorf("failed to configure the UDN enabled service route: %v", err)
 		}
@@ -428,14 +464,14 @@ func (c *Controller) syncService(key string) error {
 			},
 		}
 
-		c.alreadyAppliedRWLock.RLock()
-		alreadyAppliedLbs, alreadyAppliedKeyExists := c.alreadyApplied[key]
+		state.alreadyAppliedRWLock.RLock()
+		alreadyAppliedLbs, alreadyAppliedKeyExists := state.alreadyApplied[key]
 		var existingLBs []LB
 		if alreadyAppliedKeyExists {
 			existingLBs = make([]LB, len(alreadyAppliedLbs))
 			copy(existingLBs, alreadyAppliedLbs)
 		}
-		c.alreadyAppliedRWLock.RUnlock()
+		state.alreadyAppliedRWLock.RUnlock()
 
 		if alreadyAppliedKeyExists {
 			//
@@ -444,14 +480,14 @@ func (c *Controller) syncService(key string) error {
 			// worker will be operating at a given service. That is why it is safe to have changes to this cache
 			// from multiple workers, because the `key` is always uniquely hashed to the same worker thread.
 
-			if err := EnsureLBs(c.nbClient, service, existingLBs, nil, c.netInfo); err != nil {
+			if err := EnsureLBs(c.nbClient, service, existingLBs, nil, state.netInfo); err != nil {
 				return fmt.Errorf("failed to delete load balancers for service %s/%s: %w",
 					namespace, name, err)
 			}
 
-			c.alreadyAppliedRWLock.Lock()
-			delete(c.alreadyApplied, key)
-			c.alreadyAppliedRWLock.Unlock()
+			state.alreadyAppliedRWLock.Lock()
+			delete(state.alreadyApplied, key)
+			state.alreadyAppliedRWLock.Unlock()
 		}
 
 		c.repair.serviceSynced(key)
@@ -459,57 +495,57 @@ func (c *Controller) syncService(key string) error {
 	}
 
 	// The Service exists in the cache: update it in OVN
-	klog.V(5).Infof("Service %s/%s retrieved from lister for network=%s: %v", service.Namespace, service.Name, c.netInfo.GetNetworkName(), service)
+	klog.V(5).Infof("Service %s/%s retrieved from lister for network=%s: %v", service.Namespace, service.Name, state.netInfo.GetNetworkName(), service)
 
-	endpointSlices, err := util.GetServiceEndpointSlices(namespace, service.Name, c.netInfo.GetNetworkName(), c.endpointSliceLister)
+	endpointSlices, err := util.GetServiceEndpointSlices(namespace, service.Name, state.netInfo.GetNetworkName(), c.endpointSliceLister)
 	if err != nil {
-		return fmt.Errorf("service %s/%s for network=%s, %w", service.Namespace, service.Name, c.netInfo.GetNetworkName(), err)
+		return fmt.Errorf("service %s/%s for network=%s, %w", service.Namespace, service.Name, state.netInfo.GetNetworkName(), err)
 	}
 
 	// Build the abstract LB configs for this service
-	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, c.nodeInfos, c.useLBGroups, c.useTemplates, c.netInfo)
-	klog.V(5).Infof("Built service %s LB cluster-wide configs for network=%s: %#v", key, c.netInfo.GetNetworkName(), clusterConfigs)
-	klog.V(5).Infof("Built service %s LB per-node configs for network=%s:  %#v", key, c.netInfo.GetNetworkName(), perNodeConfigs)
-	klog.V(5).Infof("Built service %s LB template configs for network=%s: %#v", key, c.netInfo.GetNetworkName(), templateConfigs)
+	perNodeConfigs, templateConfigs, clusterConfigs := buildServiceLBConfigs(service, endpointSlices, state.nodeInfos, state.useLBGroups, state.useTemplates, state.netInfo)
+	klog.V(5).Infof("Built service %s LB cluster-wide configs for network=%s: %#v", key, state.netInfo.GetNetworkName(), clusterConfigs)
+	klog.V(5).Infof("Built service %s LB per-node configs for network=%s:  %#v", key, state.netInfo.GetNetworkName(), perNodeConfigs)
+	klog.V(5).Infof("Built service %s LB template configs for network=%s: %#v", key, state.netInfo.GetNetworkName(), templateConfigs)
 
 	// Convert the LB configs in to load-balancer objects
-	clusterLBs := buildClusterLBs(service, clusterConfigs, c.nodeInfos, c.useLBGroups, c.netInfo)
-	templateLBs := buildTemplateLBs(service, templateConfigs, c.nodeInfos, c.nodeIPv4Templates, c.nodeIPv6Templates, c.netInfo)
-	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, c.nodeInfos, c.netInfo)
-	klog.V(5).Infof("Built service %s cluster-wide LB for network=%s: %#v", key, c.netInfo.GetNetworkName(), clusterLBs)
-	klog.V(5).Infof("Built service %s per-node LB for network=%s: %#v", key, c.netInfo.GetNetworkName(), perNodeLBs)
-	klog.V(5).Infof("Built service %s template LB for network=%s:  %#v", key, c.netInfo.GetNetworkName(), templateLBs)
+	clusterLBs := buildClusterLBs(service, clusterConfigs, state.nodeInfos, state.useLBGroups, state.netInfo)
+	templateLBs := buildTemplateLBs(service, templateConfigs, state.nodeInfos, state.nodeIPv4Templates, state.nodeIPv6Templates, state.netInfo)
+	perNodeLBs := buildPerNodeLBs(service, perNodeConfigs, state.nodeInfos, state.netInfo)
+	klog.V(5).Infof("Built service %s cluster-wide LB for network=%s: %#v", key, state.netInfo.GetNetworkName(), clusterLBs)
+	klog.V(5).Infof("Built service %s per-node LB for network=%s: %#v", key, state.netInfo.GetNetworkName(), perNodeLBs)
+	klog.V(5).Infof("Built service %s template LB for network=%s:  %#v", key, state.netInfo.GetNetworkName(), templateLBs)
 	klog.V(5).Infof("Service %s for network=%s has %d cluster-wide, %d per-node configs, %d template configs, making %d (cluster) %d (per node) and %d (template) load balancers",
-		key, c.netInfo.GetNetworkName(), len(clusterConfigs), len(perNodeConfigs), len(templateConfigs),
+		key, state.netInfo.GetNetworkName(), len(clusterConfigs), len(perNodeConfigs), len(templateConfigs),
 		len(clusterLBs), len(perNodeLBs), len(templateLBs))
 	lbs := append(clusterLBs, templateLBs...)
 	lbs = append(lbs, perNodeLBs...)
 
 	// Short-circuit if nothing has changed
-	c.alreadyAppliedRWLock.RLock()
-	alreadyAppliedLbs, alreadyAppliedKeyExists := c.alreadyApplied[key]
+	state.alreadyAppliedRWLock.RLock()
+	alreadyAppliedLbs, alreadyAppliedKeyExists := state.alreadyApplied[key]
 	var existingLBs []LB
 	if alreadyAppliedKeyExists {
 		existingLBs = make([]LB, len(alreadyAppliedLbs))
 		copy(existingLBs, alreadyAppliedLbs)
 	}
-	c.alreadyAppliedRWLock.RUnlock()
+	state.alreadyAppliedRWLock.RUnlock()
 
 	if alreadyAppliedKeyExists && LoadBalancersEqualNoUUID(existingLBs, lbs) {
-		klog.V(5).Infof("Skipping no-op change for service %s for network=%s", key, c.netInfo.GetNetworkName())
+		klog.V(5).Infof("Skipping no-op change for service %s for network=%s", key, state.netInfo.GetNetworkName())
 	} else {
-		klog.V(5).Infof("Services do not match for network=%s, existing lbs: %#v, built lbs: %#v", c.netInfo.GetNetworkName(), existingLBs, lbs)
+		klog.V(5).Infof("Services do not match for network=%s, existing lbs: %#v, built lbs: %#v", state.netInfo.GetNetworkName(), existingLBs, lbs)
 		// Actually apply load-balancers to OVN.
 		//
 		// Note: this may fail if a node was deleted between listing nodes and applying.
 		// If so, this will fail and we will resync.
-		if err := EnsureLBs(c.nbClient, service, existingLBs, lbs, c.netInfo); err != nil {
-			return fmt.Errorf("failed to ensure service %s load balancers for network=%s: %w", key, c.netInfo.GetNetworkName(), err)
+		if err := EnsureLBs(c.nbClient, service, existingLBs, lbs, state.netInfo); err != nil {
+			return fmt.Errorf("failed to ensure service %s load balancers for network=%s: %w", key, state.netInfo.GetNetworkName(), err)
 		}
 
-		c.alreadyAppliedRWLock.Lock()
-		c.alreadyApplied[key] = lbs
-		c.alreadyAppliedRWLock.Unlock()
+		state.alreadyAppliedRWLock.Lock()
+		state.alreadyApplied[key] = lbs
+		state.alreadyAppliedRWLock.Unlock()
 	}
 
 	c.repair.serviceSynced(key)
@@ -517,19 +553,23 @@ func (c *Controller) syncService(key string) error {
 }
 
 func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
-	c.nodeInfoRWLock.Lock()
-	defer c.nodeInfoRWLock.Unlock()
+	c.syncNodeInfosForNetwork(c.state, nodeInfos)
+}
 
-	c.nodeInfos = nodeInfos
-	if !c.useTemplates {
+func (c *Controller) syncNodeInfosForNetwork(state *networkState, nodeInfos []nodeInfo) {
+	state.nodeInfoRWLock.Lock()
+	defer state.nodeInfoRWLock.Unlock()
+
+	state.nodeInfos = nodeInfos
+	if !state.useTemplates {
 		return
 	}
 
 	// Compute the nodeIP template values.
-	c.nodeIPv4Templates = NewNodeIPsTemplates(corev1.IPv4Protocol)
-	c.nodeIPv6Templates = NewNodeIPsTemplates(corev1.IPv6Protocol)
+	state.nodeIPv4Templates = NewNodeIPsTemplates(corev1.IPv4Protocol)
+	state.nodeIPv6Templates = NewNodeIPsTemplates(corev1.IPv6Protocol)
 
-	for _, nodeInfo := range c.nodeInfos {
+	for _, nodeInfo := range state.nodeInfos {
 		if nodeInfo.chassisID == "" {
 			continue
 		}
@@ -538,12 +578,12 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 			ips, err := util.MatchIPFamily(false, nodeInfo.hostAddresses)
 			if err != nil {
 				klog.Warningf("Error while searching for IPv4 host addresses in %v for node[%s] for network=%s: %v",
-					nodeInfo.hostAddresses, nodeInfo.name, c.netInfo.GetNetworkName(), err)
+					nodeInfo.hostAddresses, nodeInfo.name, state.netInfo.GetNetworkName(), err)
 				continue
 			}
 
 			for _, ip := range ips {
-				c.nodeIPv4Templates.AddIP(nodeInfo.chassisID, ip)
+				state.nodeIPv4Templates.AddIP(nodeInfo.chassisID, ip)
 			}
 		}
 
@@ -551,30 +591,30 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 			ips, err := util.MatchIPFamily(true, nodeInfo.hostAddresses)
 			if err != nil {
 				klog.Warningf("Error while searching for IPv6 host addresses in %v for node[%s] for network=%s: %v",
-					nodeInfo.hostAddresses, nodeInfo.name, c.netInfo.GetNetworkName(), err)
+					nodeInfo.hostAddresses, nodeInfo.name, state.netInfo.GetNetworkName(), err)
 				continue
 			}
 
 			for _, ip := range ips {
-				c.nodeIPv6Templates.AddIP(nodeInfo.chassisID, ip)
+				state.nodeIPv6Templates.AddIP(nodeInfo.chassisID, ip)
 			}
 		}
 	}
 
 	// Sync the nodeIP template values to the DB.
 	nodeIPTemplates := []TemplateMap{
-		c.nodeIPv4Templates.AsTemplateMap(),
-		c.nodeIPv6Templates.AsTemplateMap(),
+		state.nodeIPv4Templates.AsTemplateMap(),
+		state.nodeIPv6Templates.AsTemplateMap(),
 	}
 	if err := svcCreateOrUpdateTemplateVar(c.nbClient, nodeIPTemplates); err != nil {
-		klog.Errorf("Could not sync node IP templates for network=%s", c.netInfo.GetNetworkName())
+		klog.Errorf("Could not sync node IP templates for network=%s", state.netInfo.GetNetworkName())
 		return
 	}
 }
 
 // RequestFullSync re-syncs every service that currently exists
 func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
-	klog.Infof("Full service sync requested for network=%s", c.netInfo.GetNetworkName())
+	klog.Infof("Full service sync requested for network=%s", c.state.netInfo.GetNetworkName())
 
 	// Resync node infos and node IP templates.
 	c.syncNodeInfos(nodeInfos)
@@ -587,7 +627,7 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 	if c.startupDone {
 		services, err := c.serviceLister.List(labels.Everything())
 		if err != nil {
-			klog.Errorf("Cached lister failed (network=%s)!? %v", c.netInfo.GetNetworkName(), err)
+			klog.Errorf("Cached lister failed (network=%s)!? %v", c.state.netInfo.GetNetworkName(), err)
 			return
 		}
 
@@ -602,6 +642,10 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 // skipService is used when UDN is enabled to know which services are to be skipped because they don't
 // belong to the network that this service controller is responsible for.
 func (c *Controller) skipService(name, namespace string) bool {
+	return c.skipServiceForNetwork(c.state, name, namespace)
+}
+
+func (c *Controller) skipServiceForNetwork(state *networkState, name, namespace string) bool {
 	if util.IsNetworkSegmentationSupportEnabled() {
 		serviceNAD, err := c.networkManager.GetPrimaryNADForNamespace(namespace)
 		if err != nil {
@@ -627,13 +671,13 @@ func (c *Controller) skipService(name, namespace string) bool {
 
 		// Do not skip default network services enabled for UDN
 		if isDefaultNetwork &&
-			c.netInfo.IsPrimaryNetwork() &&
+			state.netInfo.IsPrimaryNetwork() &&
 			globalconfig.Gateway.Mode == globalconfig.GatewayModeShared &&
 			util.IsUDNEnabledService(ktypes.NamespacedName{Namespace: namespace, Name: name}.String()) {
 			return false
 		}
 
-		if serviceNetworkName != c.netInfo.GetNetworkName() {
+		if serviceNetworkName != state.netInfo.GetNetworkName() {
 			return true
 		}
 	}
@@ -645,7 +689,7 @@ func (c *Controller) skipService(name, namespace string) bool {
 func (c *Controller) onServiceAdd(obj interface{}) {
 	key, err := cache.MetaNamespaceKeyFunc(obj)
 	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v for network=%s: %v", obj, c.netInfo.GetNetworkName(), err))
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v for network=%s: %v", obj, c.state.netInfo.GetNetworkName(), err))
 		return
 	}
 
@@ -654,7 +698,7 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 		return
 	}
 	recorders.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
-	klog.V(5).Infof("Adding service %s for network=%s", key, c.netInfo.GetNetworkName())
+	klog.V(5).Infof("Adding service %s for network=%s", key, c.state.netInfo.GetNetworkName())
 	c.queue.Add(key)
 }
 
@@ -693,7 +737,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		return
 	}
 
-	klog.V(4).Infof("Deleting service %s for network=%s", key, c.netInfo.GetNetworkName())
+	klog.V(4).Infof("Deleting service %s for network=%s", key, c.state.netInfo.GetNetworkName())
 
 	recorders.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
 	c.queue.Add(key)
@@ -754,9 +798,9 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		// Once the service label is eventually added, we will get this event
 		// and re-process.
 		if errors.Is(err, ErrMissingServiceLabel) {
-			klog.V(5).Infof("network=%s, error=%s", c.netInfo.GetNetworkName(), err.Error())
+			klog.V(5).Infof("network=%s, error=%s", c.state.netInfo.GetNetworkName(), err.Error())
 		} else {
-			utilruntime.HandleError(fmt.Errorf("network=%s, couldn't get key for EndpointSlice %+v: %v", c.netInfo.GetNetworkName(), endpointSlice, err))
+			utilruntime.HandleError(fmt.Errorf("network=%s, couldn't get key for EndpointSlice %+v: %v", c.state.netInfo.GetNetworkName(), endpointSlice, err))
 		}
 		return
 	}
@@ -780,31 +824,35 @@ func GetServiceKeyFromEndpointSliceForDefaultNetwork(endpointSlice *discovery.En
 }
 
 func (c *Controller) getServiceNamespacedNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
-	if c.netInfo.IsDefault() {
+	return c.getServiceNamespacedNameFromEndpointSliceForNetwork(c.state, endpointSlice)
+}
+
+func (c *Controller) getServiceNamespacedNameFromEndpointSliceForNetwork(state *networkState, endpointSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
+	if state.netInfo.IsDefault() {
 		return _getServiceNameFromEndpointSlice(endpointSlice, true)
 	} else {
 		return _getServiceNameFromEndpointSlice(endpointSlice, false)
 	}
 }
 
-func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
-	klog.Infof("Removing UDN enabled service route for service %s in network: %s", key, c.netInfo.GetNetworkName())
+func (c *Controller) cleanupUDNEnabledServiceRoute(state *networkState, key string) error {
+	klog.Infof("Removing UDN enabled service route for service %s in network: %s", key, state.netInfo.GetNetworkName())
 	delPredicate := func(route *nbdb.LogicalRouterStaticRoute) bool {
-		return route.ExternalIDs[types.NetworkExternalID] == c.netInfo.GetNetworkName() &&
-			route.ExternalIDs[types.TopologyExternalID] == c.netInfo.TopologyType() &&
+		return route.ExternalIDs[types.NetworkExternalID] == state.netInfo.GetNetworkName() &&
+			route.ExternalIDs[types.TopologyExternalID] == state.netInfo.TopologyType() &&
 			route.ExternalIDs[types.UDNEnabledServiceExternalID] == key
 	}
 
 	var ops []ovsdb.Operation
 	var err error
-	if c.netInfo.TopologyType() == types.Layer2Topology && !globalconfig.Layer2UsesTransitRouter {
-		for _, node := range c.nodeInfos {
-			if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, c.netInfo.GetNetworkScopedGWRouterName(node.name), delPredicate); err != nil {
+	if state.netInfo.TopologyType() == types.Layer2Topology && !globalconfig.Layer2UsesTransitRouter {
+		for _, node := range state.nodeInfos {
+			if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, state.netInfo.GetNetworkScopedGWRouterName(node.name), delPredicate); err != nil {
 				return err
 			}
 		}
 	} else {
-		if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, c.netInfo.GetNetworkScopedClusterRouterName(), delPredicate); err != nil {
+		if ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, state.netInfo.GetNetworkScopedClusterRouterName(), delPredicate); err != nil {
 			return err
 		}
 	}
@@ -812,12 +860,12 @@ func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
 	return err
 }
 
-func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) error {
-	klog.Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, c.netInfo.GetNetworkName())
+func (c *Controller) configureUDNEnabledServiceRoute(state *networkState, service *corev1.Service) error {
+	klog.Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, state.netInfo.GetNetworkName())
 
 	extIDs := map[string]string{
-		types.NetworkExternalID:           c.netInfo.GetNetworkName(),
-		types.TopologyExternalID:          c.netInfo.TopologyType(),
+		types.NetworkExternalID:           state.netInfo.GetNetworkName(),
+		types.TopologyExternalID:          state.netInfo.TopologyType(),
 		types.UDNEnabledServiceExternalID: ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String(),
 	}
 	routesEqual := func(a, b *nbdb.LogicalRouterStaticRoute) bool {
@@ -830,7 +878,7 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 
 	}
 	var ops []ovsdb.Operation
-	for _, nodeInfo := range c.nodeInfos {
+	for _, nodeInfo := range state.nodeInfos {
 		mgmtIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6String(service.Spec.ClusterIP), nodeInfo.mgmtIPs)
 		if err != nil {
 			return err
@@ -841,8 +889,8 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 			Nexthop:     mgmtIP.String(),
 			ExternalIDs: extIDs,
 		}
-		routerName := c.netInfo.GetNetworkScopedClusterRouterName()
-		if c.netInfo.TopologyType() == types.Layer2Topology && !globalconfig.Layer2UsesTransitRouter {
+		routerName := state.netInfo.GetNetworkScopedClusterRouterName()
+		if state.netInfo.TopologyType() == types.Layer2Topology && !globalconfig.Layer2UsesTransitRouter {
 			routerName = nodeInfo.gatewayRouterName
 		}
 		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, nil, routerName, &staticRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {

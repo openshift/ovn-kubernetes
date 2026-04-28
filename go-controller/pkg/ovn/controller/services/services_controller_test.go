@@ -112,8 +112,8 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 	if err = controller.initTopLevelCache(); err != nil {
 		return nil, err
 	}
-	controller.useLBGroups = true
-	controller.useTemplates = true
+	controller.state.useLBGroups = true
+	controller.state.useTemplates = true
 
 	// When testing services on UDN, add a NAD in the same namespace associated to the service
 	if !netInfo.IsDefault() {
