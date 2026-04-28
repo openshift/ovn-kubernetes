@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -27,6 +28,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/egressip"
@@ -1666,45 +1668,51 @@ func newNodePortWatcher(
 	return npw, nil
 }
 
-func cleanupSharedGateway() error {
-	// NicToBridge() may be created before-hand, only delete the patch port here
-	stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",
-		"external_ids:ovn-localnet-port!=_")
-	if err != nil {
-		return fmt.Errorf("failed to get ovn-localnet-port port stderr:%s (%v)", stderr, err)
-	}
-	ports := strings.Fields(strings.Trim(stdout, "\""))
-	for _, port := range ports {
-		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-port", strings.Trim(port, "\""))
+func cleanupSharedGateway(ovsClient libovsdbclient.Client) error {
+	if ovsClient != nil {
+		// NicToBridge() may be created before-hand, only delete the patch port here
+		stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",
+			"external_ids:ovn-localnet-port!=_")
 		if err != nil {
-			return fmt.Errorf("failed to delete port %s stderr:%s (%v)", port, stderr, err)
+			return fmt.Errorf("failed to get ovn-localnet-port port stderr:%s (%v)", stderr, err)
 		}
-	}
-
-	// Get the OVS bridge name from ovn-bridge-mappings
-	stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-		"external_ids:ovn-bridge-mappings")
-	if err != nil {
-		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
-	}
-
-	// skip the existing mapping setting for the specified physicalNetworkName
-	bridgeName := ""
-	bridgeMappings := strings.Split(stdout, ",")
-	for _, bridgeMapping := range bridgeMappings {
-		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network == types.PhysicalNetworkName {
-			bridgeName = m[1]
-			break
+		ports := strings.Fields(strings.Trim(stdout, "\""))
+		for _, port := range ports {
+			_, stderr, err := util.RunOVSVsctl("--if-exists", "del-port", strings.Trim(port, "\""))
+			if err != nil {
+				return fmt.Errorf("failed to delete port %s stderr:%s (%v)", port, stderr, err)
+			}
 		}
-	}
-	if len(bridgeName) == 0 {
-		return nil
-	}
 
-	_, stderr, err = util.AddOFFlowWithSpecificAction(bridgeName, util.NormalAction)
-	if err != nil {
-		return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
+		// Get the OVS bridge name from ovn-bridge-mappings
+		ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+		if err != nil {
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				return nil
+			}
+			return fmt.Errorf("failed to get Open_vSwitch row: %w", err)
+		}
+		mappings := ovs.ExternalIDs["ovn-bridge-mappings"]
+		if mappings == "" {
+			return nil
+		}
+
+		bridgeName := ""
+		for _, bridgeMapping := range strings.Split(mappings, ",") {
+			m := strings.Split(bridgeMapping, ":")
+			if network := m[0]; network == types.PhysicalNetworkName {
+				bridgeName = m[1]
+				break
+			}
+		}
+		if len(bridgeName) == 0 {
+			return nil
+		}
+
+		_, stderr, err = util.AddOFFlowWithSpecificAction(bridgeName, util.NormalAction)
+		if err != nil {
+			return fmt.Errorf("failed to replace-flows on bridge %q stderr:%s (%v)", bridgeName, stderr, err)
+		}
 	}
 
 	cleanupSharedGatewayIPTChains()
