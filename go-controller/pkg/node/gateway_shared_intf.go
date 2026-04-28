@@ -5,6 +5,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -31,6 +32,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/egressip"
@@ -1893,8 +1895,8 @@ func newNodePortWatcher(
 	return npw, nil
 }
 
-func cleanupSharedGateway() error {
-	if config.IsModeDPU() || config.IsModeFull() {
+func cleanupSharedGateway(ovsClient libovsdbclient.Client) error {
+	if (config.IsModeDPU() || config.IsModeFull()) && ovsClient != nil {
 		// NicToBridge() may be created before-hand, only delete the patch port here
 		stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",
 			"external_ids:ovn-localnet-port!=_")
@@ -1910,16 +1912,20 @@ func cleanupSharedGateway() error {
 		}
 
 		// Get the OVS bridge name from ovn-bridge-mappings
-		stdout, stderr, err = util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-			"external_ids:ovn-bridge-mappings")
+		ovs, err := ovsops.GetOpenvSwitch(ovsClient)
 		if err != nil {
-			return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				return nil
+			}
+			return fmt.Errorf("failed to get Open_vSwitch row: %w", err)
+		}
+		mappings := ovs.ExternalIDs["ovn-bridge-mappings"]
+		if mappings == "" {
+			return nil
 		}
 
-		// skip the existing mapping setting for the specified physicalNetworkName
 		bridgeName := ""
-		bridgeMappings := strings.Split(stdout, ",")
-		for _, bridgeMapping := range bridgeMappings {
+		for _, bridgeMapping := range strings.Split(mappings, ",") {
 			m := strings.Split(bridgeMapping, ":")
 			if network := m[0]; network == types.PhysicalNetworkName {
 				bridgeName = m[1]
