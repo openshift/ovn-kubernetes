@@ -37,6 +37,7 @@ import (
 	udnfakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
@@ -402,6 +403,9 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			err = sharedGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
@@ -833,6 +837,9 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":"+brphys))
 			err = sharedGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			err = sharedGw.Init(stop, wg)
@@ -1342,6 +1349,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			err = localGw.initFunc()
 			Expect(err).NotTo(HaveOccurred())
 			err = localGw.Init(stop, wg)

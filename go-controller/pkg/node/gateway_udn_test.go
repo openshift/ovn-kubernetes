@@ -35,6 +35,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	kubemocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
@@ -690,6 +691,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			err = localGw.initFunc()
@@ -923,6 +927,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			err = localGw.initFunc()
@@ -1123,6 +1130,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			Expect(localGw.initFunc()).To(Succeed())
@@ -1363,6 +1373,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			err = localGw.initFunc()
