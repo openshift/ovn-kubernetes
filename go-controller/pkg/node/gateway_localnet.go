@@ -4,6 +4,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -11,7 +12,12 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -79,23 +85,31 @@ func getLocalAddrs() (map[string]net.IPNet, error) {
 	return localAddrSet, nil
 }
 
-func cleanupLocalnetGateway(physnet string) error {
-	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-		"external_ids:ovn-bridge-mappings")
-	if err != nil {
-		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+func cleanupLocalnetGateway(ovsClient libovsdbclient.Client, physnet string) error {
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return nil
 	}
-	bridgeMappings := strings.Split(stdout, ",")
-	for _, bridgeMapping := range bridgeMappings {
+	ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+	if err != nil {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			// Nothing configured yet — nothing to clean up.
+			return nil
+		}
+		return fmt.Errorf("failed to get Open_vSwitch row: %w", err)
+	}
+	mappings := ovs.ExternalIDs["ovn-bridge-mappings"]
+	if mappings == "" {
+		return nil
+	}
+	for _, bridgeMapping := range strings.Split(mappings, ",") {
 		m := strings.Split(bridgeMapping, ":")
 		if physnet == m[0] {
 			bridgeName := m[1]
-			_, stderr, err = util.RunOVSVsctl("--", "--if-exists", "del-br", bridgeName)
-			if err != nil {
+			if _, stderr, err := util.RunOVSVsctl("--", "--if-exists", "del-br", bridgeName); err != nil {
 				return fmt.Errorf("failed to ovs-vsctl del-br %s stderr:%s (%v)", bridgeName, stderr, err)
 			}
 			break
 		}
 	}
-	return err
+	return nil
 }
