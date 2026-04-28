@@ -41,7 +41,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 # - ovn-vtep
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
-	libpcap iproute iproute-tc strace \
+	libpcap strace \
 	tcpdump iputils \
 	libreswan \
 	ethtool conntrack-tools \
