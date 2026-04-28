@@ -55,6 +55,13 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-observ /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/openshift/bin/ovn-kubernetes-tests-ext.gz /usr/bin/
 
+# Create RHEL version-specific CNI directories with hard links so the
+# CNO's ovnkube-node container startup script can find the right binary.
+# RHEL 10 uses the same RHEL 9 binaries until a separate build is needed.
+RUN mkdir -p /usr/libexec/cni/rhel9 /usr/libexec/cni/rhel10 && \
+	ln /usr/libexec/cni/ovn-k8s-cni-overlay /usr/libexec/cni/rhel9/ovn-k8s-cni-overlay && \
+	ln /usr/libexec/cni/ovn-k8s-cni-overlay /usr/libexec/cni/rhel10/ovn-k8s-cni-overlay
+
 RUN stat /usr/bin/oc
 
 LABEL io.k8s.display-name="ovn kubernetes" \
