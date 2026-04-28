@@ -164,13 +164,8 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 			Output: "net.ipv4.conf.breth0.forwarding = 1",
 		})
 	}
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-bridge-mappings",
-		Output: "",
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0",
-	})
+	// ovn-bridge-mappings get/set are now handled via libovsdb in
+	// bridgeconfig.bridgedGatewayNodeSetup; no fexec entries needed.
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
 		Output: "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
