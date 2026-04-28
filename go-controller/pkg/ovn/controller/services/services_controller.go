@@ -6,6 +6,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics/recorders"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	syncmap "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -62,6 +64,10 @@ const (
 
 var ErrMissingServiceLabel = fmt.Errorf("endpointSlice missing the service name label")
 
+func scopedServiceQueueKey(networkName, serviceKey string) string {
+	return networkName + scopedServiceQueueKeySeparator + serviceKey
+}
+
 func parseScopedServiceQueueKey(key string) (networkName, serviceKey string) {
 	networkName, serviceKey, found := strings.Cut(key, scopedServiceQueueKeySeparator)
 	if !found {
@@ -70,8 +76,25 @@ func parseScopedServiceQueueKey(key string) (networkName, serviceKey string) {
 	return networkName, serviceKey
 }
 
+// NetworkOptions configures per-network services controller behavior at registration time.
+// These options preserve the existing Run(..., runRepair, useLBGroups, useTemplates)
+// knobs while the controller moves toward shared multi-network ownership.
+// TODO: some of these options may be consolidated/removed in the future
+type NetworkOptions struct {
+	// RunRepair controls whether registration performs stale OVN service cleanup before syncing.
+	RunRepair bool
+	// UseLBGroups reflects whether the registering network controller created LB groups.
+	UseLBGroups bool
+	// UseTemplates is per-network: default network may use templates, while UDNs currently disable
+	// them because of https://issues.redhat.com/browse/FDP-988.
+	UseTemplates bool
+}
+
 type networkState struct {
 	netInfo util.NetInfo
+
+	// repair contains per-network service repair bookkeeping.
+	repair *repair
 
 	// Per node information and template variables. The latter expand to each
 	// chassis' node IP (v4 and v6).
@@ -97,9 +120,10 @@ type networkState struct {
 	useTemplates bool
 }
 
-func newNetworkState(netInfo util.NetInfo) *networkState {
+func newNetworkState(netInfo util.NetInfo, serviceLister corelisters.ServiceLister, nbClient libovsdbclient.Client) *networkState {
 	return &networkState{
 		netInfo:           netInfo,
+		repair:            newRepair(serviceLister, nbClient),
 		alreadyApplied:    map[string][]LB{},
 		nodeIPv4Templates: NewNodeIPsTemplates(corev1.IPv4Protocol),
 		nodeIPv6Templates: NewNodeIPsTemplates(corev1.IPv6Protocol),
@@ -117,6 +141,7 @@ func NewController(client clientset.Interface,
 	netInfo util.NetInfo,
 ) (*Controller, error) {
 	klog.V(4).Infof("Creating services controller for network=%s", netInfo.GetNetworkName())
+	state := newNetworkState(netInfo, serviceInformer.Lister(), nbClient)
 	c := &Controller{
 		client:   client,
 		nbClient: nbClient,
@@ -132,15 +157,17 @@ func NewController(client clientset.Interface,
 		networkManager:        networkManager,
 
 		eventRecorder: recorder,
-		repair:        newRepair(serviceInformer.Lister(), nbClient),
 		nodeInformer:  nodeInformer,
 		nodesSynced:   nodeInformer.Informer().HasSynced,
-		state:         newNetworkState(netInfo),
+		state:         state,
+		networkStates: syncmap.NewSyncMap[*networkState](),
 	}
+	c.networkStates.Store(netInfo.GetNetworkName(), state)
 	zone, err := libovsdbutil.GetNBZone(c.nbClient)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get the NB Zone : err - %w", err)
 	}
+	c.zone = zone
 	// load balancers need to be applied to nodes, so
 	// we need to watch Node objects for changes.
 	// Need to re-sync all services when a node gains its switch or GWR
@@ -177,9 +204,6 @@ type Controller struct {
 	// workerLoopPeriod is the time between worker runs. The workers process the queue of service and pod changes.
 	workerLoopPeriod time.Duration
 
-	// repair contains a controller that keeps in sync OVN and Kubernetes services
-	repair *repair
-
 	nodeInformer coreinformers.NodeInformer
 	// nodeTracker
 	nodeTracker *nodeTracker
@@ -193,6 +217,9 @@ type Controller struct {
 	// alongside networkStates for legacy single-network call sites and Run()
 	// initialization.
 	state *networkState
+	// networkStates maps each registered network to its mutable service-controller state.
+	networkStates *syncmap.SyncMap[*networkState]
+	zone          string
 
 	// handlers stored for shutdown
 	nodeHandler     cache.ResourceEventHandlerRegistration
@@ -265,7 +292,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 		// Run the repair controller only once
 		// it keeps in sync Kubernetes and OVN
 		// and handles removal of stale data on upgrades
-		c.repair.runBeforeSync(c.state.useTemplates, c.state.netInfo, c.nodeTracker.nodes)
+		c.state.repair.runBeforeSync(c.state.useTemplates, c.state.netInfo, c.nodeTracker.nodes)
 	}
 
 	if err := c.initTopLevelCache(); err != nil {
@@ -306,6 +333,197 @@ func (c *Controller) Cleanup() {
 	}
 }
 
+func (c *Controller) RegisterNetwork(netInfo util.NetInfo, opts NetworkOptions) error {
+	if netInfo == nil {
+		return fmt.Errorf("cannot register nil network with services controller")
+	}
+	networkName := netInfo.GetNetworkName()
+	klog.Infof("Registering network=%s with services controller", networkName)
+	return c.networkStates.DoWithLock(networkName, func(key string) error {
+		if _, ok := c.networkStates.Load(key); ok {
+			return fmt.Errorf("network %q is already registered with services controller", key)
+		}
+
+		state := newNetworkState(netInfo, c.serviceLister, c.nbClient)
+		state.useLBGroups = opts.UseLBGroups
+		state.useTemplates = opts.UseTemplates
+
+		if err := c.bootstrapNetworkState(state, opts.RunRepair); err != nil {
+			return fmt.Errorf("failed to bootstrap services controller for network %s: %w", key, err)
+		}
+
+		c.networkStates.Store(key, state)
+		c.queueAllServicesForNetwork(state)
+		return nil
+	})
+}
+
+func (c *Controller) DeregisterNetwork(networkName string) {
+	klog.Infof("Deregistering network=%s from services controller", networkName)
+	_ = c.networkStates.DoWithLock(networkName, func(key string) error {
+		c.networkStates.Delete(key)
+		return nil
+	})
+}
+
+func (c *Controller) getNetworkNames() []string {
+	networkNames := c.networkStates.GetKeys()
+	sort.Strings(networkNames)
+	return networkNames
+}
+
+func (c *Controller) bootstrapNetworkState(state *networkState, runRepair bool) error {
+	nodeInfos, nodes, err := c.nodeInfosForNetwork(state.netInfo)
+	if err != nil {
+		return err
+	}
+	c.syncNodeInfosForNetwork(state, nodeInfos)
+
+	if runRepair {
+		state.repair.runBeforeSync(state.useTemplates, state.netInfo, nodes)
+	}
+
+	if err := c.initTopLevelCacheForNetwork(state); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Controller) nodeInfosForNetwork(netInfo util.NetInfo) ([]nodeInfo, map[string]nodeInfo, error) {
+	nodes, err := c.nodeInformer.Lister().List(labels.Everything())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tracker := newNodeTracker(c.zone, func([]nodeInfo) {}, netInfo)
+	for _, node := range nodes {
+		tracker.updateNode(node)
+	}
+
+	tracker.Lock()
+	defer tracker.Unlock()
+
+	nodeInfos := tracker.getZoneNodes()
+	nodeMap := make(map[string]nodeInfo, len(tracker.nodes))
+	for nodeName, nodeInfo := range tracker.nodes {
+		nodeMap[nodeName] = nodeInfo
+	}
+	return nodeInfos, nodeMap, nil
+}
+
+func (c *Controller) networkNamesForServiceKey(key string) ([]string, error) {
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	networkNames := []string{}
+	for _, networkName := range c.getNetworkNames() {
+		err := c.networkStates.DoWithLock(networkName, func(key string) error {
+			state, ok := c.networkStates.Load(key)
+			if !ok || c.skipServiceForNetwork(state, name, namespace) {
+				return nil
+			}
+			networkNames = append(networkNames, key)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return networkNames, nil
+}
+
+func (c *Controller) queueAllServicesForNetwork(state *networkState) {
+	c.startupDoneLock.RLock()
+	defer c.startupDoneLock.RUnlock()
+	if !c.startupDone {
+		return
+	}
+
+	services, err := c.servicesForNetwork(state)
+	if err != nil {
+		klog.Errorf("Cached lister failed (network=%s)!? %v", state.netInfo.GetNetworkName(), err)
+		return
+	}
+
+	for _, service := range services {
+		c.queueServiceForNetwork(state, service)
+	}
+}
+
+func (c *Controller) servicesForNetwork(state *networkState) ([]*corev1.Service, error) {
+	if !util.IsNetworkSegmentationSupportEnabled() || !state.netInfo.IsPrimaryNetwork() {
+		return c.serviceLister.List(labels.Everything())
+	}
+
+	namespaces := state.netInfo.GetNADNamespaces()
+	services := make([]*corev1.Service, 0)
+	seen := map[string]struct{}{}
+	addService := func(service *corev1.Service) {
+		key := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String()
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		services = append(services, service)
+	}
+	for _, namespace := range namespaces {
+		namespaceServices, err := c.serviceLister.Services(namespace).List(labels.Everything())
+		if err != nil {
+			return nil, fmt.Errorf("failed to list services in namespace %s: %w", namespace, err)
+		}
+		for _, service := range namespaceServices {
+			addService(service)
+		}
+	}
+
+	if globalconfig.Gateway.Mode == globalconfig.GatewayModeShared {
+		for _, serviceKey := range globalconfig.Default.UDNAllowedDefaultServices {
+			namespace, name, err := cache.SplitMetaNamespaceKey(serviceKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to split UDN enabled service key %s: %w", serviceKey, err)
+			}
+			service, err := c.serviceLister.Services(namespace).Get(name)
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to get UDN enabled service %s: %w", serviceKey, err)
+			}
+			addService(service)
+		}
+	}
+	return services, nil
+}
+
+func (c *Controller) queueServiceForNetwork(state *networkState, service *corev1.Service) {
+	key, err := cache.MetaNamespaceKeyFunc(service)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v for network=%s: %v", service, state.netInfo.GetNetworkName(), err))
+		return
+	}
+	c.queueServiceKeyForNetwork(state, key, true)
+}
+
+func (c *Controller) queueServiceKeyForNetwork(state *networkState, key string, recordDuration bool) {
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't split service key %s for network=%s: %v", key, state.netInfo.GetNetworkName(), err))
+		return
+	}
+	if c.skipServiceForNetwork(state, name, namespace) {
+		return
+	}
+
+	if recordDuration {
+		recorders.GetConfigDurationRecorder().Start("service", namespace, name)
+	}
+	klog.V(5).Infof("Queueing service %s for network=%s", key, state.netInfo.GetNetworkName())
+	c.queue.Add(scopedServiceQueueKey(state.netInfo.GetNetworkName(), key))
+}
+
 // worker runs a worker thread that just dequeues items, processes them, and
 // marks them done. You may run as many of these in parallel as you wish; the
 // workqueue guarantees that they will not end up processing the same service
@@ -329,7 +547,10 @@ func (c *Controller) processNextWorkItem() bool {
 }
 
 func (c *Controller) handleErr(err error, key string) {
-	_, serviceKey := parseScopedServiceQueueKey(key)
+	networkName, serviceKey := parseScopedServiceQueueKey(key)
+	if networkName == "" {
+		networkName = c.state.netInfo.GetNetworkName()
+	}
 	ns, name, keyErr := cache.SplitMetaNamespaceKey(serviceKey)
 	if keyErr != nil {
 		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
@@ -348,7 +569,7 @@ func (c *Controller) handleErr(err error, key string) {
 		return
 	}
 
-	klog.Warningf("Dropping service %q out of the queue for network=%s: %v", key, c.state.netInfo.GetNetworkName(), err)
+	klog.Warningf("Dropping service %q out of the queue for network=%s: %v", serviceKey, networkName, err)
 	recorders.GetConfigDurationRecorder().End("service", ns, name)
 	c.queue.Forget(key)
 	utilruntime.HandleError(err)
@@ -405,10 +626,49 @@ func (c *Controller) initTopLevelCacheForNetwork(state *networkState) error {
 // All Load_Balancer objects are tagged with their owner, so it's easy to find stale objects.
 func (c *Controller) syncService(key string) error {
 	networkName, serviceKey := parseScopedServiceQueueKey(key)
-	if networkName != "" && networkName != c.state.netInfo.GetNetworkName() {
-		return fmt.Errorf("service sync requested for network %q on controller for network %q", networkName, c.state.netInfo.GetNetworkName())
+	if networkName != "" {
+		return c.networkStates.DoWithLock(networkName, func(key string) error {
+			state, ok := c.networkStates.Load(key)
+			if !ok {
+				klog.V(4).Infof("Skipping service %s sync for deregistered network=%s", serviceKey, key)
+				return nil
+			}
+			return c.syncServiceForNetwork(state, serviceKey)
+		})
 	}
-	return c.syncServiceForNetwork(c.state, serviceKey)
+
+	registeredNetworks := c.getNetworkNames()
+	if len(registeredNetworks) == 1 {
+		// Compatibility path for the current single-network controller shape. Existing callers
+		// and tests can still call syncService with an unscoped "namespace/name" key, and
+		// historically syncService assumed event-time filtering had already selected the network.
+		// Once shared service handlers only enqueue scoped keys, this shortcut should go away.
+		return c.syncService(scopedServiceQueueKey(registeredNetworks[0], serviceKey))
+	}
+
+	networkNames, err := c.networkNamesForServiceKey(serviceKey)
+	if err != nil {
+		return err
+	}
+	switch len(networkNames) {
+	case 0:
+		// No registered network currently owns this service. This can happen while a UDN is
+		// being created/deleted or while namespace primary-NAD state is temporarily unknown.
+		// A later network/NAD/service event is expected to enqueue the service again.
+		klog.V(5).Infof("Skipping service %s sync because no registered network owns it", serviceKey)
+		return nil
+	case 1:
+		return c.syncService(scopedServiceQueueKey(networkNames[0], serviceKey))
+	default:
+		// Normal services should resolve to one primary network. Multiple matches are expected
+		// for UDN-enabled default services in shared gateway mode: the default service event
+		// needs to fan out so each primary UDN can reconcile its auxiliary static route.
+		// Also, CNC could take this path in the future for multiple networks needing the same service reconciled.
+		for _, networkName := range networkNames {
+			c.queue.Add(scopedServiceQueueKey(networkName, serviceKey))
+		}
+		return nil
+	}
 }
 
 func (c *Controller) syncServiceForNetwork(state *networkState, key string) error {
@@ -490,7 +750,7 @@ func (c *Controller) syncServiceForNetwork(state *networkState, key string) erro
 			state.alreadyAppliedRWLock.Unlock()
 		}
 
-		c.repair.serviceSynced(key)
+		state.repair.serviceSynced(key)
 		return nil
 	}
 
@@ -548,12 +808,8 @@ func (c *Controller) syncServiceForNetwork(state *networkState, key string) erro
 		state.alreadyAppliedRWLock.Unlock()
 	}
 
-	c.repair.serviceSynced(key)
+	state.repair.serviceSynced(key)
 	return nil
-}
-
-func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
-	c.syncNodeInfosForNetwork(c.state, nodeInfos)
 }
 
 func (c *Controller) syncNodeInfosForNetwork(state *networkState, nodeInfos []nodeInfo) {
@@ -614,36 +870,22 @@ func (c *Controller) syncNodeInfosForNetwork(state *networkState, nodeInfos []no
 
 // RequestFullSync re-syncs every service that currently exists
 func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
-	klog.Infof("Full service sync requested for network=%s", c.state.netInfo.GetNetworkName())
+	c.requestFullSyncForNetwork(c.state, nodeInfos)
+}
+
+func (c *Controller) requestFullSyncForNetwork(state *networkState, nodeInfos []nodeInfo) {
+	klog.Infof("Full service sync requested for network=%s", state.netInfo.GetNetworkName())
 
 	// Resync node infos and node IP templates.
-	c.syncNodeInfos(nodeInfos)
+	c.syncNodeInfosForNetwork(state, nodeInfos)
 
 	// Resync all services unless we're processing the initial node tracker sync (in which case
 	// the service add will happen at the next step in the services controller Run() and workers
 	// aren't up yet anyway: no need to do it during node tracker startup then)
-	c.startupDoneLock.RLock()
-	defer c.startupDoneLock.RUnlock()
-	if c.startupDone {
-		services, err := c.serviceLister.List(labels.Everything())
-		if err != nil {
-			klog.Errorf("Cached lister failed (network=%s)!? %v", c.state.netInfo.GetNetworkName(), err)
-			return
-		}
-
-		for _, service := range services {
-			c.onServiceAdd(service)
-		}
-	}
+	c.queueAllServicesForNetwork(state)
 }
 
 // handlers
-
-// skipService is used when UDN is enabled to know which services are to be skipped because they don't
-// belong to the network that this service controller is responsible for.
-func (c *Controller) skipService(name, namespace string) bool {
-	return c.skipServiceForNetwork(c.state, name, namespace)
-}
 
 func (c *Controller) skipServiceForNetwork(state *networkState, name, namespace string) bool {
 	if util.IsNetworkSegmentationSupportEnabled() {
@@ -687,19 +929,8 @@ func (c *Controller) skipServiceForNetwork(state *networkState, name, namespace 
 
 // onServiceAdd queues the Service for processing.
 func (c *Controller) onServiceAdd(obj interface{}) {
-	key, err := cache.MetaNamespaceKeyFunc(obj)
-	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v for network=%s: %v", obj, c.state.netInfo.GetNetworkName(), err))
-		return
-	}
-
 	service := obj.(*corev1.Service)
-	if c.skipService(service.Name, service.Namespace) {
-		return
-	}
-	recorders.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
-	klog.V(5).Infof("Adding service %s for network=%s", key, c.state.netInfo.GetNetworkName())
-	c.queue.Add(key)
+	c.queueServiceForNetwork(c.state, service)
 }
 
 // onServiceUpdate updates the Service Selector in the cache and queues the Service for processing.
@@ -715,12 +946,7 @@ func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
 
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		if c.skipService(newService.Name, newService.Namespace) {
-			return
-		}
-
-		recorders.GetConfigDurationRecorder().Start("service", newService.Namespace, newService.Name)
-		c.queue.Add(key)
+		c.queueServiceKeyForNetwork(c.state, key, true)
 	}
 }
 
@@ -731,16 +957,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	service := obj.(*corev1.Service)
-
-	if c.skipService(service.Name, service.Namespace) {
-		return
-	}
-
-	klog.V(4).Infof("Deleting service %s for network=%s", key, c.state.netInfo.GetNetworkName())
-
-	recorders.GetConfigDurationRecorder().Start("service", service.Namespace, service.Name)
-	c.queue.Add(key)
+	c.queueServiceKeyForNetwork(c.state, key, true)
 }
 
 // onEndpointSliceAdd queues a sync for the relevant Service for a sync
@@ -805,10 +1022,7 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		return
 	}
 
-	if c.skipService(serviceNamespacedName.Name, serviceNamespacedName.Namespace) {
-		return
-	}
-	c.queue.Add(serviceNamespacedName.String())
+	c.queueServiceKeyForNetwork(c.state, serviceNamespacedName.String(), false)
 }
 
 // GetServiceKeyFromEndpointSliceForDefaultNetwork returns a controller key for a Service but derived from

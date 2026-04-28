@@ -162,7 +162,12 @@ func getSampleUDNNetInfo(namespace string, topology string) (util.NetInfo, error
 		NetConf:    cnitypes.NetConf{Name: fmt.Sprintf("net_%s", topology), Type: "ovn-k8s-cni-overlay"},
 		JoinSubnet: "100.66.0.0/16",
 	})
-	return netInfo, err
+	if err != nil {
+		return nil, err
+	}
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.AddNADs(util.GetNADName(namespace, "nad1"))
+	return mutableNetInfo, nil
 }
 
 func addSampleNAD(client *util.OVNKubeControllerClientset, namespace string, netInfo util.NetInfo) error {
