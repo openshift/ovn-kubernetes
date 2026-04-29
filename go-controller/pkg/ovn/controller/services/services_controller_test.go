@@ -144,6 +144,26 @@ func (c *serviceController) testNodeInfos(nodeInfos ...*nodeInfo) []nodeInfo {
 	return zoneNodeInfos(c.zone, nodeInfoByName)
 }
 
+func setServiceControllerStartupDone(c *Controller, done bool) {
+	c.startupDoneLock.Lock()
+	defer c.startupDoneLock.Unlock()
+	c.startupDone = done
+}
+
+func drainServiceQueue(c *Controller) []string {
+	keys := []string{}
+	for c.queue.Len() > 0 {
+		key, shutdown := c.queue.Get()
+		if shutdown {
+			break
+		}
+		keys = append(keys, key)
+		c.queue.Done(key)
+		c.queue.Forget(key)
+	}
+	return keys
+}
+
 func getSampleUDNNetInfo(namespace string, topology string) (util.NetInfo, error) {
 	// Build subnets based on IPv4/IPv6 mode configuration
 	// IPv6 subnet 2001:db8::/32 contains the UDN IPv6 endpoints (2001:db8::2, 2001:db8::3)
@@ -186,6 +206,92 @@ func addSampleNAD(client *util.OVNKubeControllerClientset, namespace string, net
 		kubetest.GenerateNAD(netInfo.GetNetworkName(), netInfo.GetNetworkName(), namespace, netInfo.TopologyType(), netInfo.Subnets()[0].String(), types.NetworkRolePrimary),
 		metav1.CreateOptions{})
 	return err
+}
+
+func TestSharedServiceControllerNetworkRegistration(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	oldIPv4Mode := config.IPv4Mode
+	oldIPv6Mode := config.IPv6Mode
+	config.IPv4Mode = true
+	config.IPv6Mode = false
+	t.Cleanup(func() {
+		config.IPv4Mode = oldIPv4Mode
+		config.IPv6Mode = oldIPv6Mode
+	})
+
+	const (
+		namespace = "shared-services-test"
+		name      = "svc"
+		nadName   = "nad1"
+	)
+	serviceKey := namespacedServiceName(namespace, name)
+	udn, err := getSampleUDNNetInfo(namespace, types.Layer3Topology)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	controller, err := newControllerWithDBSetupForNetwork(libovsdbtest.TestSetup{}, &util.DefaultNetInfo{}, namespace)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	defer controller.close()
+
+	controller.networkManager = (&networkmanager.FakeNetworkManager{
+		PrimaryNetworks: map[string]util.NetInfo{
+			namespace: udn,
+		},
+		NADNetworks: map[string]util.NetInfo{
+			util.GetNADName(namespace, nadName): udn,
+		},
+	}).Interface()
+
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:       corev1.ServiceTypeClusterIP,
+			ClusterIP:  "10.96.0.10",
+			ClusterIPs: []string{"10.96.0.10"},
+			Ports: []corev1.ServicePort{{
+				Protocol:   corev1.ProtocolTCP,
+				Port:       80,
+				TargetPort: intstr.FromInt32(8080),
+			}},
+		},
+	}
+	g.Expect(controller.serviceStore.Add(service)).To(gomega.Succeed())
+
+	// A UDN can register while the shared controller is still waiting for its
+	// initial informer sync. The startup sweep must still pick up that network.
+	setServiceControllerStartupDone(controller.Controller, false)
+	g.Expect(controller.RegisterNetwork(udn, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  true,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+	g.Expect(controller.queue.Len()).To(gomega.Equal(0))
+
+	setServiceControllerStartupDone(controller.Controller, true)
+	g.Expect(controller.forEachNetworkState(func(_ string, state *networkState) error {
+		controller.queueAllServicesForNetwork(state)
+		return nil
+	})).To(gomega.Succeed())
+	g.Expect(drainServiceQueue(controller.Controller)).To(gomega.ConsistOf(
+		scopedServiceQueueKey(udn.GetNetworkName(), serviceKey),
+	))
+
+	g.Expect(controller.ReconcileNetwork(udn, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  false,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+
+	state, ok := controller.networkStates.Load(udn.GetNetworkName())
+	g.Expect(ok).To(gomega.BeTrue())
+	g.Expect(state.useLBGroups).To(gomega.BeFalse())
+	g.Expect(state.useTemplates).To(gomega.BeFalse())
+	g.Expect(drainServiceQueue(controller.Controller)).To(gomega.ConsistOf(
+		scopedServiceQueueKey(udn.GetNetworkName(), serviceKey),
+	))
 }
 
 // TestSyncServices - an end-to-end test for the services controller.
