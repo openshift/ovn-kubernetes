@@ -133,6 +133,17 @@ func (c *serviceController) close() {
 	c.libovsdbCleanup.Cleanup()
 }
 
+func (c *serviceController) testNodeInfos(nodeInfos ...*nodeInfo) []nodeInfo {
+	nodeInfoByName := map[string]nodeInfo{}
+	for _, nodeInfo := range nodeInfos {
+		if nodeInfo == nil {
+			continue
+		}
+		nodeInfoByName[nodeInfo.name] = *nodeInfo
+	}
+	return zoneNodeInfos(c.zone, nodeInfoByName)
+}
+
 func getSampleUDNNetInfo(namespace string, topology string) (util.NetInfo, error) {
 	// Build subnets based on IPv4/IPv6 mode configuration
 	// IPv6 subnet 2001:db8::/32 contains the UDN IPv6 endpoints (2001:db8::2, 2001:db8::3)
@@ -1526,14 +1537,7 @@ func TestSyncServices(t *testing.T) {
 				err = controller.serviceStore.Add(tt.service)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// Setup node tracker
-				controller.nodeTracker.nodes = map[string]nodeInfo{}
-				if tt.nodeAInfo != nil {
-					controller.nodeTracker.nodes[nodeA] = *tt.nodeAInfo
-				}
-				if tt.nodeBInfo != nil {
-					controller.nodeTracker.nodes[nodeB] = *tt.nodeBInfo
-				}
+				nodeInfos := controller.testNodeInfos(tt.nodeAInfo, tt.nodeBInfo)
 
 				// Add mirrored endpoint slices when the controller runs on a UDN
 				// Transform endpoint IPs from default cluster subnet to UDN subnet
@@ -1559,7 +1563,7 @@ func TestSyncServices(t *testing.T) {
 				}
 
 				// Trigger services controller
-				controller.RequestFullSync(controller.nodeTracker.getZoneNodes())
+				controller.RequestFullSync(nodeInfos)
 
 				err = controller.syncService(namespacedServiceName(ns, serviceName))
 				if err != nil {
@@ -1569,10 +1573,10 @@ func TestSyncServices(t *testing.T) {
 				// Check OVN DB
 				g.Expect(controller.nbClient).To(libovsdbtest.HaveData(expectedDb))
 
-				// If the test requires a node to be deleted, remove it from the node tracker,
-				// sync the service controller and check the OVN DB
+				// If the test requires a node to be deleted, drive the shared node handler,
+				// sync the service controller and check the OVN DB.
 				if tt.nodeToDelete != "" {
-					controller.nodeTracker.removeNode(tt.nodeToDelete)
+					controller.onNodeDelete(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: tt.nodeToDelete}})
 
 					g.Expect(controller.syncService(namespacedServiceName(ns, serviceName))).To(gomega.Succeed())
 
