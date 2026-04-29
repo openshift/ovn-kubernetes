@@ -379,11 +379,15 @@ func (c *Controller) registerNetworkLocked(key string, netInfo util.NetInfo, opt
 	state.useLBGroups = opts.UseLBGroups
 	state.useTemplates = opts.UseTemplates
 
+	// Store the state before bootstrap while the network key is locked. This lets
+	// concurrent shared node/service handlers discover the registering network and
+	// then block on the same key until bootstrap finishes, instead of missing it.
+	c.networkStates.Store(key, state)
 	if err := c.bootstrapNetworkState(state, opts.RunRepair); err != nil {
+		c.networkStates.Delete(key)
 		return fmt.Errorf("failed to bootstrap services controller for network %s: %w", key, err)
 	}
 
-	c.networkStates.Store(key, state)
 	c.queueAllServicesForNetwork(state)
 	return nil
 }
