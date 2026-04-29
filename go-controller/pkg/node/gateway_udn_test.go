@@ -619,7 +619,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", rm, netInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeAnnotatorMock := &kubemocks.Annotator{}
@@ -855,7 +855,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", rm, netInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeAnnotatorMock := &kubemocks.Annotator{}
@@ -1063,7 +1063,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", rm, netInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeAnnotatorMock := &kubemocks.Annotator{}
@@ -1301,7 +1301,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", rm, mutableNetInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", rm, mutableNetInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeAnnotatorMock := &kubemocks.Annotator{}
