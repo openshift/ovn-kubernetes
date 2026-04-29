@@ -195,7 +195,7 @@ type Layer3UserDefinedNetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
-	// Controller in charge of services
+	// Shared controller in charge of services. Nil for cleanup-only controllers.
 	svcController *svccontroller.Controller
 
 	// EgressIP controller utilized only to initialize a network with OVN polices to support EgressIP functionality.
@@ -212,6 +212,7 @@ func NewLayer3UserDefinedNetworkController(
 	portCache *PortCache,
 	addressSetManager *addresssetmanager.AddressSetManager,
 	nodeReconciler *nodecontroller.NodeController,
+	serviceController *svccontroller.Controller,
 ) (*Layer3UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
@@ -271,19 +272,7 @@ func NewLayer3UserDefinedNetworkController(
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
-		var err error
-		oc.svcController, err = svccontroller.NewController(
-			cnci.client, cnci.nbClient,
-			cnci.watchFactory.ServiceCoreInformer(),
-			cnci.watchFactory.EndpointSliceCoreInformer(),
-			cnci.watchFactory.NodeCoreInformer(),
-			networkManager,
-			cnci.recorder,
-			oc.GetNetInfo(),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
-		}
+		oc.svcController = serviceController
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -357,6 +346,7 @@ func (oc *Layer3UserDefinedNetworkController) Start(_ context.Context) error {
 		return err
 	}
 	if err := oc.run(); err != nil {
+		oc.DeregisterServiceNetwork()
 		oc.DeregisterNodeHandler()
 		return err
 	}
@@ -370,6 +360,7 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 		return
 	}
 	klog.Infof("Stop %s UDN controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	oc.DeregisterServiceNetwork()
 	oc.DeregisterNodeHandler()
 	close(oc.stopChan)
 	oc.stopChan = nil
@@ -521,8 +512,8 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 
 	if oc.svcController != nil {
 		startSvc := time.Now()
-		// Services should be started after nodes to prevent LB churn
-		err := oc.StartServiceController(oc.wg, true)
+		// Services should be registered after nodes to prevent LB churn.
+		err := oc.RegisterServiceNetwork(true)
 		endSvc := time.Since(startSvc)
 
 		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service_" + oc.GetNetworkName()).Set(endSvc.Seconds())
@@ -597,13 +588,16 @@ func (oc *Layer3UserDefinedNetworkController) waitForLocalZoneNodeLogicalSwitche
 }
 
 func (oc *Layer3UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) error {
-	return oc.BaseNetworkController.reconcile(
+	if err := oc.BaseNetworkController.reconcile(
 		netInfo,
 		func(node string) {
 			oc.addNodeFailed.Store(node, true)
 			oc.gatewaysFailed.Store(node, true)
 		},
-	)
+	); err != nil {
+		return err
+	}
+	return oc.ReconcileServiceNetwork()
 }
 
 func (oc *Layer3UserDefinedNetworkController) RegisterNodeHandler() error {
@@ -1240,15 +1234,39 @@ func (oc *Layer3UserDefinedNetworkController) gatewayManagerForNode(nodeName str
 	}
 }
 
-func (oc *Layer3UserDefinedNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-	// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
-	// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
-	err := oc.svcController.Run(5, oc.stopChan, wg, runRepair, useLBGroups, false)
+func (oc *Layer3UserDefinedNetworkController) RegisterServiceNetwork(runRepair bool) error {
+	err := oc.svcController.RegisterNetwork(oc.GetNetInfo(), oc.serviceNetworkOptions(runRepair))
 	if err != nil {
-		return fmt.Errorf("error running OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+		return fmt.Errorf("error registering OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 	}
 	return nil
+}
+
+func (oc *Layer3UserDefinedNetworkController) ReconcileServiceNetwork() error {
+	if oc.svcController == nil {
+		return nil
+	}
+	if err := oc.svcController.ReconcileNetwork(oc.GetNetInfo(), oc.serviceNetworkOptions(false)); err != nil {
+		return fmt.Errorf("error reconciling OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+	}
+	return nil
+}
+
+func (oc *Layer3UserDefinedNetworkController) serviceNetworkOptions(runRepair bool) svccontroller.NetworkOptions {
+	// Do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988.
+	return svccontroller.NetworkOptions{
+		RunRepair:    runRepair,
+		UseLBGroups:  oc.clusterLoadBalancerGroupUUID != "",
+		UseTemplates: false,
+	}
+}
+
+func (oc *Layer3UserDefinedNetworkController) DeregisterServiceNetwork() {
+	if oc.svcController != nil {
+		if err := oc.svcController.DeregisterNetwork(oc.GetNetworkName()); err != nil {
+			klog.Errorf("Error deregistering OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+		}
+	}
 }
 
 // HandleNetworkRefChange marks the node for interconnect sync so a queued update does not skip it.
