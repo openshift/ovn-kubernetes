@@ -530,6 +530,40 @@ func (c *addressManager) refreshGatewayIfIndex() {
 	c.gatewayIfIndex = link.Attrs().Index
 }
 
+// scanInterfaceAddresses scans all network interfaces and returns a set of valid IP addresses.
+// This is a helper function used by sync() to perform double-scan verification.
+func (c *addressManager) scanInterfaceAddresses() (sets.Set[string], error) {
+	var addrs []netlink.Addr
+
+	if c.useNetlink {
+		links, err := netlink.LinkList()
+		if err != nil {
+			klog.Errorf("Failed to list links: %v", err)
+			return nil, err
+		}
+		for _, link := range links {
+			foundAddrs, err := util.GetNetLinkOps().AddrList(link, getSupportedIPFamily())
+			if err != nil {
+				klog.Errorf("Failed to list addresses for %q: %v", link.Attrs().Name, err)
+				continue
+			}
+			addrs = append(addrs, foundAddrs...)
+		}
+	}
+
+	addresses := sets.New[string]()
+	for _, addr := range addrs {
+		if !c.isValidNodeIP(addr.IP, addr.LinkIndex) {
+			klog.V(5).Infof("Skipping non-useable IP address for host: %s", addr.String())
+			continue
+		}
+		netAddr := net.IPNet{IP: addr.IP, Mask: addr.Mask}
+		addresses.Insert(netAddr.String())
+	}
+
+	return addresses, nil
+}
+
 func (c *addressManager) sync() {
 	if config.OvnKubeNode.Mode == types.NodeModeDPU {
 		return
@@ -539,32 +573,27 @@ func (c *addressManager) sync() {
 		return
 	}
 
-	var addrs []netlink.Addr
+	// Fix: Perform two scans with a delay to catch IPv6 addresses
+	// that might be completing Duplicate Address Detection (DAD)
+	scan1, err1 := c.scanInterfaceAddresses()
+	time.Sleep(100 * time.Millisecond)
+	scan2, err2 := c.scanInterfaceAddresses()
 
-	if c.useNetlink {
-		links, err := netlink.LinkList()
-		if err != nil {
-			klog.Errorf("Failed sync due to being unable to list links: %v", err)
-			return
-		}
-		for _, link := range links {
-			foundAddrs, err := util.GetNetLinkOps().AddrList(link, getSupportedIPFamily())
-			if err != nil {
-				klog.Errorf("Failed sync due to being unable to list addresses for %q: %v", link.Attrs().Name, err)
-				return
-			}
-			addrs = append(addrs, foundAddrs...)
-		}
-	}
-
-	currAddresses := sets.New[string]()
-	for _, addr := range addrs {
-		if !c.isValidNodeIP(addr.IP, addr.LinkIndex) {
-			klog.V(5).Infof("Skipping non-useable IP address for host: %s", addr.String())
-			continue
-		}
-		netAddr := net.IPNet{IP: addr.IP, Mask: addr.Mask}
-		currAddresses.Insert(netAddr.String())
+	// Use union to include addresses from both scans.
+	// This catches IPv6 that appears during the 100ms delay.
+	// If both scans fail, abort to prevent clearing host-cidrs annotation.
+	var currAddresses sets.Set[string]
+	switch {
+	case err1 == nil && err2 == nil:
+		currAddresses = scan1.Union(scan2)
+	case err1 == nil:
+		currAddresses = scan1
+	case err2 == nil:
+		currAddresses = scan2
+	default:
+		klog.Errorf("Failed to scan interface addresses in both passes: %v / %v", err1, err2)
+		c.reconcileMasqueradeResources()
+		return
 	}
 
 	addrChanged := c.assignCIDRs(currAddresses)
