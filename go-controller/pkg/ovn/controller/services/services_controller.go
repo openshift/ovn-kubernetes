@@ -122,10 +122,10 @@ type networkState struct {
 	useTemplates bool
 }
 
-func newNetworkState(netInfo util.NetInfo, serviceLister corelisters.ServiceLister, nbClient libovsdbclient.Client) *networkState {
+func newNetworkState(netInfo util.NetInfo, svcRepair *repair) *networkState {
 	return &networkState{
 		netInfo:           netInfo,
-		repair:            newRepair(serviceLister, nbClient),
+		repair:            svcRepair,
 		alreadyApplied:    map[string][]LB{},
 		nodeInfosByName:   map[string]nodeInfo{},
 		nodeIPv4Templates: NewNodeIPsTemplates(corev1.IPv4Protocol),
@@ -144,7 +144,7 @@ func NewController(client clientset.Interface,
 	netInfo util.NetInfo,
 ) (*Controller, error) {
 	klog.V(4).Infof("Creating services controller for network=%s", netInfo.GetNetworkName())
-	state := newNetworkState(netInfo, serviceInformer.Lister(), nbClient)
+	state := newNetworkState(netInfo, newRepair(serviceInformer.Lister(), nbClient))
 	c := &Controller{
 		client:   client,
 		nbClient: nbClient,
@@ -298,6 +298,12 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 	c.startupDoneLock.Lock()
 	c.startupDone = true
 	c.startupDoneLock.Unlock()
+	if err := c.forEachNetworkState(func(_ string, state *networkState) error {
+		c.queueAllServicesForNetwork(state)
+		return nil
+	}); err != nil {
+		return err
+	}
 
 	// Start the workers after the repair loop to avoid races
 	klog.Infof("Starting workers for network=%s", c.state.netInfo.GetNetworkName())
@@ -329,6 +335,8 @@ func (c *Controller) Cleanup() {
 	}
 }
 
+// RegisterNetwork adds a network to the shared services controller and bootstraps
+// its per-network state.
 func (c *Controller) RegisterNetwork(netInfo util.NetInfo, opts NetworkOptions) error {
 	if netInfo == nil {
 		return fmt.Errorf("cannot register nil network with services controller")
@@ -340,23 +348,50 @@ func (c *Controller) RegisterNetwork(netInfo util.NetInfo, opts NetworkOptions) 
 			return fmt.Errorf("network %q is already registered with services controller", key)
 		}
 
-		state := newNetworkState(netInfo, c.serviceLister, c.nbClient)
+		return c.registerNetworkLocked(key, netInfo, opts)
+	})
+}
+
+// ReconcileNetwork updates the registered network view and requeues existing services.
+// This is used for level-driven network/NAD changes where Service objects themselves
+// may not receive an event.
+func (c *Controller) ReconcileNetwork(netInfo util.NetInfo, opts NetworkOptions) error {
+	if netInfo == nil {
+		return fmt.Errorf("cannot reconcile nil network with services controller")
+	}
+	networkName := netInfo.GetNetworkName()
+	return c.networkStates.DoWithLock(networkName, func(key string) error {
+		state, ok := c.networkStates.Load(key)
+		if !ok {
+			klog.V(4).Infof("Skipping services controller network reconcile for unregistered network=%s", key)
+			return nil
+		}
+		state.netInfo = netInfo
 		state.useLBGroups = opts.UseLBGroups
 		state.useTemplates = opts.UseTemplates
-
-		if err := c.bootstrapNetworkState(state, opts.RunRepair); err != nil {
-			return fmt.Errorf("failed to bootstrap services controller for network %s: %w", key, err)
-		}
-
-		c.networkStates.Store(key, state)
 		c.queueAllServicesForNetwork(state)
 		return nil
 	})
 }
 
-func (c *Controller) DeregisterNetwork(networkName string) {
+func (c *Controller) registerNetworkLocked(key string, netInfo util.NetInfo, opts NetworkOptions) error {
+	state := newNetworkState(netInfo, newRepair(c.serviceLister, c.nbClient))
+	state.useLBGroups = opts.UseLBGroups
+	state.useTemplates = opts.UseTemplates
+
+	if err := c.bootstrapNetworkState(state, opts.RunRepair); err != nil {
+		return fmt.Errorf("failed to bootstrap services controller for network %s: %w", key, err)
+	}
+
+	c.networkStates.Store(key, state)
+	c.queueAllServicesForNetwork(state)
+	return nil
+}
+
+// DeregisterNetwork removes a network from the shared services controller.
+func (c *Controller) DeregisterNetwork(networkName string) error {
 	klog.Infof("Deregistering network=%s from services controller", networkName)
-	_ = c.networkStates.DoWithLock(networkName, func(key string) error {
+	return c.networkStates.DoWithLock(networkName, func(key string) error {
 		c.networkStates.Delete(key)
 		return nil
 	})

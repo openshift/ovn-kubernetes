@@ -1588,6 +1588,28 @@ func TestSyncServices(t *testing.T) {
 	}
 }
 
+func TestReconcileNetworkSkipsUnregisteredNetwork(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	const namespace = "service-reconcile-unregistered-test"
+	udn, err := getSampleUDNNetInfo(namespace, types.Layer3Topology)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	controller, err := newControllerWithDBSetupForNetwork(libovsdbtest.TestSetup{}, &util.DefaultNetInfo{}, namespace)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	defer controller.close()
+
+	setServiceControllerStartupDone(controller.Controller, true)
+	g.Expect(controller.ReconcileNetwork(udn, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  true,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+
+	_, ok := controller.networkStates.Load(udn.GetNetworkName())
+	g.Expect(ok).To(gomega.BeFalse())
+}
+
 func nodeLogicalSwitch(nodeName string, lbGroups []string, namespacedServiceNames ...string) *nbdb.LogicalSwitch {
 	return nodeLogicalSwitchForNetwork(nodeName, lbGroups, &util.DefaultNetInfo{}, namespacedServiceNames...)
 }
