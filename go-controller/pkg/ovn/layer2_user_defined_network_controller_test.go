@@ -679,7 +679,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			// Wait for netpols to appear
 			controllerName := l2Controller.controllerName
 			peer := netpol.Spec.Ingress[0].From[0]
-			dbIDs := addresssetmanager.GetPodSelectorAddrSetDbIDs(peer.PodSelector, nil, nil, ns, controllerName)
+			dbIDs := addresssetmanager.GetPodSelectorAddrSetDbIDs(peer.PodSelector, nil, nil, ns, controllerName, false)
 			v4Hash, _ := addressset.GetHashNamesForAS(dbIDs)
 			Eventually(func(g Gomega) {
 				acls, err := libovsdbops.FindACLsWithPredicate(fakeOvn.nbClient, func(acl *nbdb.ACL) bool {
@@ -926,7 +926,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			config.OVNKubernetesFeature.EnableInterconnect = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-			config.Default.Zone = testICZone
+			config.Default.Zone = nodeName
 			config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
 
 			// Basic UDN setup
@@ -934,6 +934,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			n := newUDNNamespace(ns)
 			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netInfo.netconf())
 			Expect(err).NotTo(HaveOccurred())
+			nad.OwnerReferences = []metav1.OwnerReference{makeCUDNOwnerRef("dynamic-cudn")}
 
 			// Local node and remote node with NAD
 			localNode, err := newNodeWithUserDefinedNetworks(nodeName, "192.168.126.202/24", netInfo)
@@ -1079,7 +1080,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			config.OVNKubernetesFeature.EnableInterconnect = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-			config.Default.Zone = testICZone
+			config.Default.Zone = nodeName
 
 			netInfo := dummyLayer2PrimaryUserDefinedNetwork("100.200.0.0/16")
 			nsA := "namespace-a"
@@ -1421,6 +1422,9 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 		*netInfo.netconf(),
 	)
 	Expect(err).NotTo(HaveOccurred())
+	if netInfo.isPrimary && config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
+		nad.OwnerReferences = []metav1.OwnerReference{makeCUDNOwnerRef("dynamic-cudn")}
+	}
 
 	n := testing.NewNamespace(ns)
 	if netInfo.isPrimary {
@@ -1446,24 +1450,20 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 
 	objects = append(objects, extraObjects...)
 
+	if !config.OVNKubernetesFeature.EnableInterconnect {
+		// In non-IC unit tests, seed the default-network pod annotation before
+		// starting the informers to avoid a race where the UDN controller's
+		// WatchPods reads the pod from the informer cache before the cache
+		// reflects a post-startup Update, causing it to clobber the "default"
+		// annotation. IC tests set their own annotations on the pod directly.
+		defaultNetworkPodInfo := podInfo
+		defaultNetworkPodInfo.udnPodInfos = map[string]*udnPodInfo{}
+		setPodAnnotations(pod, defaultNetworkPodInfo)
+	}
+
 	fakeOvn.startWithDBSetup(initialDB, objects...)
 	podInfo.populateLogicalSwitchCache(fakeOvn)
 
-	// on IC, the test itself spits out the pod with the
-	// annotations set, since on production it would be the
-	// clustermanager to annotate the pod.
-	if !config.OVNKubernetesFeature.EnableInterconnect {
-		By("asserting the pod originally does *not* feature the OVN pod networks annotation")
-		// pod exists, networks annotations don't
-		pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		_, ok := pod.Annotations[util.OvnPodAnnotationName]
-		if ok {
-			return fmt.Errorf("expected pod annotation %q", util.OvnPodAnnotationName)
-		}
-	}
 	if err = fakeOvn.networkManager.Start(); err != nil {
 		return err
 	}
@@ -1475,23 +1475,6 @@ func setupFakeOvnForLayer2Topology(fakeOvn *FakeOVN, initialDB libovsdbtest.Test
 	err = fullL2UDNController.init()
 	if err != nil {
 		return fmt.Errorf("failed to initialize %s controller: %w", userDefinedNetworkName, err)
-	}
-
-	if !config.OVNKubernetesFeature.EnableInterconnect {
-		// In non-IC unit tests, seed the default-network pod annotation directly.
-		// This helper only validates UDN topology in NBDB, so starting the default
-		// controller path here would add unrelated default-network objects. IC tests
-		// do not assert the full default annotation in this setup path.
-		pod, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(podInfo.namespace).Get(context.Background(), podInfo.podName, metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-		defaultNetworkPodInfo := podInfo
-		defaultNetworkPodInfo.udnPodInfos = map[string]*udnPodInfo{}
-		setPodAnnotations(pod, defaultNetworkPodInfo)
-		if _, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(pod.Namespace).Update(context.Background(), pod, metav1.UpdateOptions{}); err != nil {
-			return err
-		}
 	}
 	By("asserting the pod (once reconciled) *features* the OVN pod networks annotation")
 	userDefinedNetController, doesControllerExist := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
@@ -1528,7 +1511,7 @@ func setupConfig(netInfo userDefinedNetInfo, testConfig testConfiguration, gatew
 		config.IPv4Mode = false
 	}
 	if config.OVNKubernetesFeature.EnableInterconnect {
-		config.Default.Zone = testICZone
+		config.Default.Zone = nodeName
 	}
 }
 
