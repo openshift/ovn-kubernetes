@@ -1672,7 +1672,8 @@ func TestSyncServices(t *testing.T) {
 				// Trigger services controller
 				controller.RequestFullSync(nodeInfos)
 
-				err = controller.syncService(namespacedServiceName(ns, serviceName))
+				serviceKey := scopedServiceQueueKey(netInfo.GetNetworkName(), namespacedServiceName(ns, serviceName))
+				err = controller.syncService(serviceKey)
 				if err != nil {
 					t.Fatalf("syncServices error: %v", err)
 				}
@@ -1685,7 +1686,7 @@ func TestSyncServices(t *testing.T) {
 				if tt.nodeToDelete != "" {
 					controller.onNodeDelete(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: tt.nodeToDelete}})
 
-					g.Expect(controller.syncService(namespacedServiceName(ns, serviceName))).To(gomega.Succeed())
+					g.Expect(controller.syncService(serviceKey)).To(gomega.Succeed())
 
 					g.Expect(controller.nbClient).To(libovsdbtest.HaveData(dbStateAfterDeleting))
 				}

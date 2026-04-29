@@ -480,26 +480,6 @@ func zoneNodeInfos(zone string, nodeInfoByName map[string]nodeInfo) []nodeInfo {
 	return out
 }
 
-func (c *Controller) networkNamesForServiceKey(key string) ([]string, error) {
-	namespace, name, err := cache.SplitMetaNamespaceKey(key)
-	if err != nil {
-		return nil, err
-	}
-
-	networkNames := []string{}
-	err = c.forEachNetworkState(func(networkName string, state *networkState) error {
-		if c.skipServiceForNetwork(state, name, namespace) {
-			return nil
-		}
-		networkNames = append(networkNames, networkName)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return networkNames, nil
-}
-
 func (c *Controller) queueAllServicesForNetwork(state *networkState) {
 	c.startupDoneLock.RLock()
 	defer c.startupDoneLock.RUnlock()
@@ -713,49 +693,17 @@ func (c *Controller) initTopLevelCacheForNetwork(state *networkState) error {
 // All Load_Balancer objects are tagged with their owner, so it's easy to find stale objects.
 func (c *Controller) syncService(key string) error {
 	networkName, serviceKey := parseScopedServiceQueueKey(key)
-	if networkName != "" {
-		return c.networkStates.DoWithLock(networkName, func(key string) error {
-			state, ok := c.networkStates.Load(key)
-			if !ok {
-				klog.V(4).Infof("Skipping service %s sync for deregistered network=%s", serviceKey, key)
-				return nil
-			}
-			return c.syncServiceForNetwork(state, serviceKey)
-		})
+	if networkName == "" {
+		return fmt.Errorf("service sync key %q is missing network scope", key)
 	}
-
-	registeredNetworks := c.getNetworkNames()
-	if len(registeredNetworks) == 1 {
-		// Compatibility path for the current single-network controller shape. Existing callers
-		// and tests can still call syncService with an unscoped "namespace/name" key, and
-		// historically syncService assumed event-time filtering had already selected the network.
-		// Once shared service handlers only enqueue scoped keys, this shortcut should go away.
-		return c.syncService(scopedServiceQueueKey(registeredNetworks[0], serviceKey))
-	}
-
-	networkNames, err := c.networkNamesForServiceKey(serviceKey)
-	if err != nil {
-		return err
-	}
-	switch len(networkNames) {
-	case 0:
-		// No registered network currently owns this service. This can happen while a UDN is
-		// being created/deleted or while namespace primary-NAD state is temporarily unknown.
-		// A later network/NAD/service event is expected to enqueue the service again.
-		klog.V(5).Infof("Skipping service %s sync because no registered network owns it", serviceKey)
-		return nil
-	case 1:
-		return c.syncService(scopedServiceQueueKey(networkNames[0], serviceKey))
-	default:
-		// Normal services should resolve to one primary network. Multiple matches are expected
-		// for UDN-enabled default services in shared gateway mode: the default service event
-		// needs to fan out so each primary UDN can reconcile its auxiliary static route.
-		// Also, CNC could take this path in the future for multiple networks needing the same service reconciled.
-		for _, networkName := range networkNames {
-			c.queue.Add(scopedServiceQueueKey(networkName, serviceKey))
+	return c.networkStates.DoWithLock(networkName, func(key string) error {
+		state, ok := c.networkStates.Load(key)
+		if !ok {
+			klog.V(4).Infof("Skipping service %s sync for deregistered network=%s", serviceKey, key)
+			return nil
 		}
-		return nil
-	}
+		return c.syncServiceForNetwork(state, serviceKey)
+	})
 }
 
 func (c *Controller) syncServiceForNetwork(state *networkState, key string) error {
