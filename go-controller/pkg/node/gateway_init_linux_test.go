@@ -284,6 +284,9 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 		nft := nodenft.SetFakeNFTablesHelper()
 
+		ovsClient, ovsCleanup := newTestOVSClient()
+		defer ovsCleanup.Cleanup()
+
 		// Make Management port
 		hostSubnets := ovntest.MustParseIPNets(nodeSubnet)
 		rm := routemanager.NewController()
@@ -291,7 +294,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
 		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))
-		mp, err := managementport.NewManagementPortController(&existingNode, hostSubnets, "", "", rm, netInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, &existingNode, hostSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
@@ -383,8 +386,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
-			ovsClient, ovsCleanup := newTestOVSClient()
-			defer ovsCleanup.Cleanup()
 			sharedGw, err := newGateway(
 				nodeName,
 				ovntest.MustParseIPNets(nodeSubnet),
@@ -1252,6 +1253,9 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 
 		nft := nodenft.SetFakeNFTablesHelper()
 
+		ovsClient, ovsCleanup := newTestOVSClient()
+		defer ovsCleanup.Cleanup()
+
 		// Make Management port
 		hostSubnets := ovntest.MustParseIPNets(nodeSubnet)
 		rm := routemanager.NewController()
@@ -1259,7 +1263,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
 		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))
-		mp, err := managementport.NewManagementPortController(&existingNode, hostSubnets, "", "", rm, netInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, &existingNode, hostSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		if util.IsNetworkSegmentationSupportEnabled() {
@@ -1329,8 +1333,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
-			ovsClient, ovsCleanup := newTestOVSClient()
-			defer ovsCleanup.Cleanup()
 			localGw, err := newGateway(
 				nodeName,
 				ovntest.MustParseIPNets(nodeSubnet),

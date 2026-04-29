@@ -692,6 +692,7 @@ func getMgmtPortAndRepName(node *corev1.Node) (string, string, error) {
 }
 
 func createNodeManagementPortController(
+	ovsClient client.Client,
 	node *corev1.Node,
 	subnets []*net.IPNet,
 	nodeAnnotator kube.Annotator,
@@ -713,7 +714,7 @@ func createNodeManagementPortController(
 			return nil, err
 		}
 	}
-	return managementport.NewManagementPortController(node, subnets, netdevName, rep, routeManager, netInfo)
+	return managementport.NewManagementPortController(ovsClient, node, subnets, netdevName, rep, routeManager, netInfo)
 }
 
 // getOVNSBZone returns the zone name stored in the Southbound db.
@@ -875,6 +876,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	// Setup management ports
 	nc.mgmtPortController, err = createNodeManagementPortController(
+		nc.ovsClient,
 		node,
 		subnets,
 		nodeAnnotator,
