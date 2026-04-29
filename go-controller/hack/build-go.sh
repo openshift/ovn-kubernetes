@@ -37,7 +37,7 @@ build_binaries() {
                 -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildUser=${BUILD_USER} \
                 -X ${OVN_KUBE_GO_PACKAGE}/pkg/config.BuildDate=${BUILD_DATE} \
                 -X k8s.io/client-go/pkg/version.gitVersion=${K8S_CLIENT_VERSION} \
-		`if [ "$binbase" != "ovnkube" ]; then echo ${LDFLAGS}; fi`" \
+		${LDFLAGS}" \
             -o "${OVN_KUBE_OUTPUT_BINPATH}/${binbase}"\
             "./${bin}"
     done
@@ -57,7 +57,7 @@ build_windows_binaries() {
             -mod vendor \
             -gcflags "${GCFLAGS}" \
             -ldflags "-B ${BUILDID} \
-		`if [ "$binbase" != "ovnkube" ]; then echo ${LDFLAGS}; fi`" \
+		${LDFLAGS}" \
             -o "${OVN_KUBE_OUTPUT_BINPATH_WINDOWS}/${binbase}.exe"\
             "./${bin}"
     done
