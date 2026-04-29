@@ -295,6 +295,90 @@ func TestSharedServiceControllerNetworkRegistration(t *testing.T) {
 	))
 }
 
+func TestReconcileNetworkRefreshesNodeProjection(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	oldIPv4Mode := config.IPv4Mode
+	oldIPv6Mode := config.IPv6Mode
+	config.IPv4Mode = true
+	config.IPv6Mode = false
+	t.Cleanup(func() {
+		config.IPv4Mode = oldIPv4Mode
+		config.IPv6Mode = oldIPv6Mode
+	})
+
+	const (
+		namespace   = "service-reconcile-test"
+		nadName     = "nad1"
+		networkName = "net_l2_reconcile"
+	)
+	netConf := func(subnets string) util.NetInfo {
+		netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
+			Topology:   types.Layer2Topology,
+			NADName:    util.GetNADName(namespace, nadName),
+			MTU:        1400,
+			Role:       types.NetworkRolePrimary,
+			Subnets:    subnets,
+			NetConf:    cnitypes.NetConf{Name: networkName, Type: "ovn-k8s-cni-overlay"},
+			JoinSubnet: "100.66.0.0/16",
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		return netInfo
+	}
+	initialNetInfo := netConf("192.168.200.0/24")
+	updatedNetInfo := netConf("192.168.210.0/24")
+
+	controller, err := newControllerWithDBSetupForNetwork(libovsdbtest.TestSetup{}, &util.DefaultNetInfo{}, namespace)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	defer controller.close()
+
+	controller.networkManager = (&networkmanager.FakeNetworkManager{
+		PrimaryNetworks: map[string]util.NetInfo{
+			namespace: initialNetInfo,
+		},
+		NADNetworks: map[string]util.NetInfo{
+			util.GetNADName(namespace, nadName): initialNetInfo,
+		},
+	}).Interface()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeA,
+			Annotations: map[string]string{
+				util.OvnNodeZoneName:  nodeA,
+				util.OVNNodeHostCIDRs: `["10.0.0.1/24"]`,
+			},
+		},
+	}
+	controller.zone = nodeA
+	g.Expect(controller.nodeInformer.Informer().GetStore().Add(node)).To(gomega.Succeed())
+
+	g.Expect(controller.RegisterNetwork(initialNetInfo, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  true,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+	nodePodSubnet := func(state *networkState) string {
+		state.nodeInfoRWLock.RLock()
+		defer state.nodeInfoRWLock.RUnlock()
+		g.Expect(state.nodeInfosByName[nodeA].podSubnets).To(gomega.HaveLen(1))
+		return state.nodeInfosByName[nodeA].podSubnets[0].String()
+	}
+
+	state, ok := controller.networkStates.Load(initialNetInfo.GetNetworkName())
+	g.Expect(ok).To(gomega.BeTrue())
+	g.Expect(nodePodSubnet(state)).To(gomega.Equal("192.168.200.0/24"))
+
+	g.Expect(controller.ReconcileNetwork(updatedNetInfo, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  true,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+
+	state, ok = controller.networkStates.Load(updatedNetInfo.GetNetworkName())
+	g.Expect(ok).To(gomega.BeTrue())
+	g.Expect(nodePodSubnet(state)).To(gomega.Equal("192.168.210.0/24"))
+}
+
 // TestSyncServices - an end-to-end test for the services controller.
 func TestSyncServices(t *testing.T) {
 	// setup gomega parameters
