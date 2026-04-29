@@ -366,9 +366,14 @@ func (c *Controller) ReconcileNetwork(netInfo util.NetInfo, opts NetworkOptions)
 			klog.V(4).Infof("Skipping services controller network reconcile for unregistered network=%s", key)
 			return nil
 		}
+		nodeInfos, _, err := c.nodeInfosForNetwork(netInfo)
+		if err != nil {
+			return err
+		}
 		state.netInfo = netInfo
 		state.useLBGroups = opts.UseLBGroups
 		state.useTemplates = opts.UseTemplates
+		c.syncNodeInfosForNetwork(state, nodeInfos)
 		c.queueAllServicesForNetwork(state)
 		return nil
 	})
