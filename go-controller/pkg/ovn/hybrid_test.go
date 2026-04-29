@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
@@ -232,7 +235,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			err = clusterManager.Start(c)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
-			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+			startDefaultNodeController(clusterController)
 
 			// Windows node should be allocated a subnet
 			gomega.Eventually(func() (map[string]string, error) {
@@ -408,7 +411,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			defer clusterManager.Stop()
 
 			// Let the real code run and ensure OVN database sync
-			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+			startDefaultNodeController(clusterController)
 
 			gomega.Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
@@ -716,7 +719,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
 
-			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+			startDefaultNodeController(clusterController)
 
 			gomega.Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
@@ -893,7 +896,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
 
-			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+			startDefaultNodeController(clusterController)
 
 			gomega.Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
@@ -1185,7 +1188,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
 
-			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+			startDefaultNodeController(clusterController)
 
 			// switch the node to a HO node
 			testNode2.Labels = map[string]string{corev1.LabelOSStable: "windows"}
@@ -1394,7 +1397,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			defer clusterManager.Stop()
 
-			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+			startDefaultNodeController(clusterController)
 
 			gomega.Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
@@ -1615,7 +1618,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			//assuming all the pods have finished processing
 			atomic.StoreUint32(&clusterController.allInitialPodsProcessed, 1)
 			// Let the real code run and ensure OVN database sync
-			gomega.Expect(clusterController.WatchNodes()).To(gomega.Succeed())
+			startDefaultNodeController(clusterController)
 
 			gomega.Eventually(func() (map[string]string, error) {
 				updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})

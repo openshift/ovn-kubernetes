@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 /*
 Modified from k8s.io/component-base/metrics/prometheus/workqueue/metrics.go
 

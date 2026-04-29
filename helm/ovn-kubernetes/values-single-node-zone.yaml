@@ -25,8 +25,6 @@ mtu: 1400
 skipCallToK8s: false
 
 global:
-  # -- The net device to be used for management port, will be renamed to ovn-k8s-mp0 and used to allow host network services and pods to access k8s pod and service networks
-  nodeMgmtPortNetdev: ""
   # -- The interface on nodes that will be used for external gateway network traffic
   extGatewayNetworkInterface: ""
   # -- GENEVE UDP port (default 6081)
@@ -77,6 +75,8 @@ global:
   enableMultiNetwork: false
   # -- Configure to use user defined networks (UDN) feature with ovn-kubernetes
   enableNetworkSegmentation: false
+  # -- Configure to enable cluster network connect feature with ovn-kubernetes
+  enableNetworkConnect: false
   # -- Configure to use route advertisements feature with ovn-kubernetes
   enableRouteAdvertisements: false
   # -- Configure to use EVPN feature with ovn-kubernetes
