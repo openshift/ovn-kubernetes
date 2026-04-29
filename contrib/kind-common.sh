@@ -1,9 +1,10 @@
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 if [ "${BASH_SOURCE[0]}" -ef "$0" ]
 then
-    >&2 echo 'This file contains bash helper functions that are common to'
-    >&2 echo 'kind.sh and kind-helm.sh scripts and is meant to be sourced'
-    >&2 echo 'by them upon invocation. In other words, it is not useful'
-    >&2 echo 'when executed as a standalone script.'
+    >&2 echo 'This file contains bash helper functions used by kind-helm.sh'
+    >&2 echo 'and is meant to be sourced upon invocation.'
     >&2 echo 'Please source this script, do not execute it!'
     exit 1
 fi
@@ -35,6 +36,35 @@ if_error_exit() {
     fi
 }
 
+replace_in_file_or_exit() {
+  local file="$1"
+  local needle="$2"
+  local replacement="$3"
+  local escaped_needle escaped_replacement
+
+  escaped_needle=$(escape_sed_replacement "$needle")
+  escaped_replacement=$(escape_sed_replacement "$replacement")
+
+  if ! grep -Fq -- "$needle" "$file"; then
+    echo "Expected to replace pattern in ${file}, but it was not found: ${needle}" >&2
+    exit 1
+  fi
+
+  if ! sed -i "s|${escaped_needle}|${escaped_replacement}|g" "$file"; then
+    echo "Failed to update ${file}" >&2
+    exit 1
+  fi
+
+  if grep -Fq -- "$needle" "$file"; then
+    echo "Pattern still present in ${file} after replacement: ${needle}" >&2
+    exit 1
+  fi
+}
+
+escape_sed_replacement() {
+  printf '%s' "$1" | sed 's/[\\|&]/\\&/g'
+}
+
 set_common_default_params() {
   # KIND/cluster params
   KIND_CREATE=${KIND_CREATE:-true}
@@ -44,6 +74,8 @@ set_common_default_params() {
   KIND_SETTLE_DURATION=${KIND_SETTLE_DURATION:-30}
   KIND_CONFIG=${KIND_CONFIG:-${DIR}/kind.yaml.j2}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
+  KIND_LOCAL_REGISTRY_NAME=${KIND_LOCAL_REGISTRY_NAME:-kind-registry}
+  KIND_LOCAL_REGISTRY_PORT=${KIND_LOCAL_REGISTRY_PORT:-5000}
   KIND_INSTALL_INGRESS=${KIND_INSTALL_INGRESS:-false}
   KIND_INSTALL_METALLB=${KIND_INSTALL_METALLB:-false}
   KIND_INSTALL_PLUGINS=${KIND_INSTALL_PLUGINS:-false}
@@ -93,6 +125,11 @@ set_common_default_params() {
   OVN_HYBRID_OVERLAY_ENABLE=${OVN_HYBRID_OVERLAY_ENABLE:-false}
   OVN_MULTICAST_ENABLE=${OVN_MULTICAST_ENABLE:-false}
   OVN_HA=${OVN_HA:-false}
+  OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
+  OVN_SECOND_BRIDGE=${OVN_SECOND_BRIDGE:-false}
+  OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
+  OVN_DISABLE_FORWARDING=${OVN_DISABLE_FORWARDING:-false}
+  OVN_UNPRIVILEGED_MODE=${OVN_UNPRIVILEGED_MODE:-false}
   ADVERTISE_DEFAULT_NETWORK=${ADVERTISE_DEFAULT_NETWORK:-false}
   ADVERTISED_UDN_ISOLATION_MODE=${ADVERTISED_UDN_ISOLATION_MODE:-strict}
   BGP_SERVER_NET_SUBNET_IPV4=${BGP_SERVER_NET_SUBNET_IPV4:-172.26.0.0/16}
@@ -105,8 +142,46 @@ set_common_default_params() {
   METRICS_IP=${METRICS_IP:-""}
   OVN_ALLOW_ICMP_NETPOL=${OVN_ALLOW_ICMP_NETPOL:-false}
   OVN_COMPACT_MODE=${OVN_COMPACT_MODE:-false}
+  OVN_ENCAP_PORT=${OVN_ENCAP_PORT:-""}
+  OVN_DISABLE_PKT_MTU_CHECK=${OVN_DISABLE_PKT_MTU_CHECK:-false}
+  ENABLE_IPSEC=${ENABLE_IPSEC:-false}
+  OVN_METRICS_SCALE_ENABLE=${OVN_METRICS_SCALE_ENABLE:-false}
+  OVN_EGRESSIP_HEALTHCHECK_PORT=${OVN_EGRESSIP_HEALTHCHECK_PORT:-""}
+  OVN_NETFLOW_TARGETS=${OVN_NETFLOW_TARGETS:-""}
+  OVN_SFLOW_TARGETS=${OVN_SFLOW_TARGETS:-""}
+  OVN_IPFIX_TARGETS=${OVN_IPFIX_TARGETS:-""}
+  OVN_IPFIX_SAMPLING=${OVN_IPFIX_SAMPLING:-""}
+  OVN_IPFIX_CACHE_MAX_FLOWS=${OVN_IPFIX_CACHE_MAX_FLOWS:-""}
+  OVN_IPFIX_CACHE_ACTIVE_TIMEOUT=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT:-""}
+  LIBOVSDB_CLIENT_LOGFILE=${LIBOVSDB_CLIENT_LOGFILE:-""}
+  OVN_ISOLATED=${OVN_ISOLATED:-false}
+  KIND_ADD_NODES=${KIND_ADD_NODES:-false}
+  # Log levels
+  MASTER_LOG_LEVEL=${MASTER_LOG_LEVEL:-4}
+  NODE_LOG_LEVEL=${NODE_LOG_LEVEL:-4}
+  DBCHECKER_LOG_LEVEL=${DBCHECKER_LOG_LEVEL:-4}
+  OVN_LOG_LEVEL_NB=${OVN_LOG_LEVEL_NB:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_SB=${OVN_LOG_LEVEL_SB:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_NORTHD=${OVN_LOG_LEVEL_NORTHD:-"-vconsole:info -vfile:info"}
+  OVN_LOG_LEVEL_CONTROLLER=${OVN_LOG_LEVEL_CONTROLLER:-"-vconsole:info"}
+  # Cluster config
+  KIND_DNS_DOMAIN=${KIND_DNS_DOMAIN:-cluster.local}
+  KIND_NUM_INFRA=${KIND_NUM_INFRA:-0}
+  OVN_HOST_NETWORK_NAMESPACE=${OVN_HOST_NETWORK_NAMESPACE:-ovn-host-network}
+  # Script behavior
+  KIND_INSTALL_PROMETHEUS=${KIND_INSTALL_PROMETHEUS:-false}
+  KIND_ALLOW_SYSTEM_WRITES=${KIND_ALLOW_SYSTEM_WRITES:-false}
+  RUN_IN_CONTAINER=${RUN_IN_CONTAINER:-false}
   if [ "$OVN_COMPACT_MODE" == true ]; then
     KIND_NUM_WORKER=0
+  fi
+  OVN_DUMMY_GATEWAY_BRIDGE=${OVN_DUMMY_GATEWAY_BRIDGE:-false}
+  OVN_GATEWAY_OPTS=${OVN_GATEWAY_OPTS:-""}
+  if [ "$OVN_ISOLATED" == true ]; then
+    OVN_GATEWAY_OPTS="--gateway-interface=eth0"
+  fi
+  if [ "$OVN_DUMMY_GATEWAY_BRIDGE" == true ]; then
+    OVN_GATEWAY_OPTS="--allow-no-uplink --gateway-interface=br-ex"
   fi
 
   KIND_NUM_MASTER=1
@@ -219,6 +294,45 @@ set_ovn_image() {
   else
     OVN_IMAGE="localhost/ovn-daemonset-fedora:dev"
   fi
+}
+
+create_local_registry() {
+    # create registry container unless it already exists
+    if [ "$($OCI_BIN inspect -f '{{.State.Running}}' "${KIND_LOCAL_REGISTRY_NAME}" 2>/dev/null || true)" != 'true' ]; then
+      $OCI_BIN run \
+        -d --restart=always -p "127.0.0.1:${KIND_LOCAL_REGISTRY_PORT}:5000" --name "${KIND_LOCAL_REGISTRY_NAME}" \
+        registry:2
+    fi
+}
+
+connect_local_registry() {
+    # connect the registry to the cluster network if not already connected
+    if [ "$($OCI_BIN inspect -f='{{json .NetworkSettings.Networks.kind}}' "${KIND_LOCAL_REGISTRY_NAME}")" = 'null' ]; then
+      $OCI_BIN network connect "kind" "${KIND_LOCAL_REGISTRY_NAME}"
+    fi
+
+    # Reference docs for local registry:
+    # - https://kind.sigs.k8s.io/docs/user/local-registry/
+    # - https://github.com/kubernetes/enhancements/tree/master/keps/sig-cluster-lifecycle/generic/1755-communicating-a-local-registry
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-registry-hosting
+  namespace: kube-public
+data:
+  localRegistryHosting.v1: |
+    host: "localhost:${KIND_LOCAL_REGISTRY_PORT}"
+    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+EOF
+
+    # Configure containerd hosts.toml for the local registry (containerd 2.x)
+    local registry_dir="/etc/containerd/certs.d/localhost:${KIND_LOCAL_REGISTRY_PORT}"
+    for node in $(kind get nodes --name "${KIND_CLUSTER_NAME}"); do
+        $OCI_BIN exec "${node}" mkdir -p "${registry_dir}"
+        $OCI_BIN exec "${node}" sh -c \
+            "printf '[host.\"http://${KIND_LOCAL_REGISTRY_NAME}:${KIND_LOCAL_REGISTRY_PORT}\"]\n' > ${registry_dir}/hosts.toml"
+    done
 }
 
 build_ovn_image() {
@@ -341,6 +455,84 @@ docker_disable_ipv6() {
   done
 }
 
+docker_create_second_interface() {
+  echo "adding second interfaces to nodes"
+
+  # Create the network as dual stack, regardless of the type of the deployment. Ignore if already exists.
+  "$OCI_BIN" network create --ipv6 --driver=bridge xgw --subnet=172.19.0.0/16 --subnet=fc00:f853:ccd:e798::/64 || true
+
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    "$OCI_BIN" network connect xgw "$n"
+  done
+}
+
+check_ipv6() {
+  if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+    # Collect additional IPv6 data on test environment
+    ERROR_FOUND=false
+    TMPVAR=$(sysctl net.ipv6.conf.all.forwarding | awk '{print $3}')
+    echo "net.ipv6.conf.all.forwarding is equal to $TMPVAR"
+    if [ "$TMPVAR" != 1 ]; then
+      if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
+	sudo sysctl -w net.ipv6.conf.all.forwarding=1
+      else
+	echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.forwarding=1' to use IPv6."
+	ERROR_FOUND=true
+      fi
+    fi
+    TMPVAR=$(sysctl net.ipv6.conf.all.disable_ipv6 | awk '{print $3}')
+    echo "net.ipv6.conf.all.disable_ipv6 is equal to $TMPVAR"
+    if [ "$TMPVAR" != 0 ]; then
+      if [ "$KIND_ALLOW_SYSTEM_WRITES" == true ]; then
+	sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
+      else
+	echo "RUN: 'sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0' to use IPv6."
+	ERROR_FOUND=true
+      fi
+    fi
+    if [ -f /proc/net/if_inet6 ]; then
+      echo "/proc/net/if_inet6 exists so IPv6 supported in kernel."
+    else
+      echo "/proc/net/if_inet6 does not exists so no IPv6 support found! Compile the kernel!!"
+      ERROR_FOUND=true
+    fi
+    if "$ERROR_FOUND"; then
+      exit 2
+    fi
+  fi
+}
+
+set_cluster_cidr_ip_families() {
+# kind only allows single subnet for pod network, while ovn-kubernetes supports multiple subnets.
+# So we pick the first subnet from the provided list for kind configuration and store it in KIND_CIDR.
+# remove host subnet mask info for kind configuration (when the subnet is set as 10.0.0.0/16/14)
+  KIND_CIDR_IPV4=$(echo "${NET_CIDR_IPV4}"| cut -d',' -f1 | cut -d'/' -f1,2 )
+  KIND_CIDR_IPV6=$(echo "${NET_CIDR_IPV6}"| cut -d',' -f1 | cut -d'/' -f1,2 )
+  if [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == false ]; then
+    IP_FAMILY=""
+    KIND_CIDR=$KIND_CIDR_IPV4
+    NET_CIDR=$NET_CIDR_IPV4
+    SVC_CIDR=$SVC_CIDR_IPV4
+    echo "IPv4 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+  elif [ "$PLATFORM_IPV4_SUPPORT" == false ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+    IP_FAMILY="ipv6"
+    KIND_CIDR=$KIND_CIDR_IPV6
+    NET_CIDR=$NET_CIDR_IPV6
+    SVC_CIDR=$SVC_CIDR_IPV6
+    echo "IPv6 Only Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+  elif [ "$PLATFORM_IPV4_SUPPORT" == true ] && [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+    IP_FAMILY="dual"
+    KIND_CIDR=$KIND_CIDR_IPV4,$KIND_CIDR_IPV6
+    NET_CIDR=$NET_CIDR_IPV4,$NET_CIDR_IPV6
+    SVC_CIDR=$SVC_CIDR_IPV4,$SVC_CIDR_IPV6
+    echo "Dual Stack Support: --net-cidr=$NET_CIDR --svc-cidr=$SVC_CIDR"
+  else
+    echo "Invalid setup. PLATFORM_IPV4_SUPPORT and/or PLATFORM_IPV6_SUPPORT must be true."
+    exit 1
+  fi
+}
+
 coredns_patch() {
   dns_server="8.8.8.8"
   # No need for ipv6 nameserver for dual stack, it will ask for 
@@ -381,13 +573,42 @@ install_ingress() {
 }
 
 METALLB_DIR="/tmp/metallb"
+
+align_metallb_pool_with_ip_family() {
+  # In single-stack jobs, dev-env can provide dual-stack addresses, which
+  # causes withdraw/announce churn and flaky connectivity checks.
+  if [ "$PLATFORM_IPV4_SUPPORT" == "$PLATFORM_IPV6_SUPPORT" ]; then
+    return
+  fi
+
+  local pool_json filtered_addresses_json matched_count
+  pool_json=$(kubectl -n metallb-system get ipaddresspool dev-env-bgp -o json 2>/dev/null || true)
+  if [ -z "${pool_json}" ]; then
+    echo "Failed to read dev-env-bgp pool"
+    kubectl -n metallb-system get ipaddresspool dev-env-bgp -o yaml || true
+    exit 1
+  fi
+
+  filtered_addresses_json=$(echo "${pool_json}" | jq -c \
+    --arg ipv4 "${PLATFORM_IPV4_SUPPORT}" \
+    --arg ipv6 "${PLATFORM_IPV6_SUPPORT}" '
+    .spec.addresses
+    | if $ipv6 == "true" and $ipv4 != "true" then map(select(test(":")))
+      elif $ipv4 == "true" and $ipv6 != "true" then map(select(test(":") | not))
+      else .
+      end
+  ')
+  matched_count=$(echo "${filtered_addresses_json}" | jq 'length')
+  if [ "${matched_count}" -eq 0 ]; then
+    echo "Failed to derive family-matching addresses from dev-env-bgp pool: $(echo "${pool_json}" | jq -c '.spec.addresses')"
+    exit 1
+  fi
+  kubectl -n metallb-system patch ipaddresspool dev-env-bgp --type='merge' \
+    -p "{\"spec\":{\"addresses\":${filtered_addresses_json}}}"
+}
+
 install_metallb() {
-  # Using latest v0.14.9 as the commit we were using would not build and this
-  # version is the one having least issues for dual stack. However tests might
-  # have to workaround these two outstanding issue until fixed
-  # https://github.com/metallb/metallb/issues/2723
-  # https://github.com/metallb/metallb/issues/2724
-  local metallb_version=v0.14.9
+  local metallb_version=v0.15.3
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
@@ -401,18 +622,10 @@ install_metallb() {
   # when using 'kind load' command however metallb builds and uses older
   # incompatible kind version patch it so that it uses our own kind install
   # instead of their build
-  patch tasks.py << 'EOF'
-@@ -29,7 +29,7 @@ extra_network = "network2"
--controller_gen_version = "v0.16.3"
-+controller_gen_version = "v0.19.0"
- build_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
- kubectl_path = os.path.join(build_path, "kubectl")
--kind_path = os.path.join(build_path, "kind")
-+kind_path = "kind"
- ginkgo_path = os.path.join(build_path, "bin", "ginkgo")
- controller_gen_path = os.path.join(build_path, "bin", "controller-gen")
- kubectl_version = "v1.31.0"
-EOF
+  replace_in_file_or_exit \
+    tasks.py \
+    'kind_path = os.path.join(build_path, "kind")' \
+    'kind_path = "kind"'
 
   pip install -r dev-env/requirements.txt
 
@@ -429,6 +642,8 @@ EOF
   fi
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
   GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
+
+  align_metallb_pool_with_ip_family
 
   $OCI_BIN network rm -f clientnet
   $OCI_BIN network create --subnet="${METALLB_CLIENT_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge clientnet
@@ -550,7 +765,18 @@ kubectl_wait_pods() {
   for ds in ovnkube-node ovs-node; do
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
-    kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+    # `kubectl rollout status` errors on DaemonSets with updateStrategy=OnDelete
+    # (upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
+    # OVS out from under still-running ovnkube-node pods). For OnDelete DSes
+    # we can't observe rollout progress; just wait for pods to be Ready.
+    strategy=$(kubectl -n ovn-kubernetes get daemonset ${ds} \
+      -o=jsonpath='{.spec.updateStrategy.type}' 2>/dev/null)
+    if [ "${strategy}" = "OnDelete" ]; then
+      kubectl wait -n ovn-kubernetes --for=condition=ready pods \
+        -l app=${ds} --timeout=${timeout}s
+    else
+      kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+    fi
   done
 
   pods=""
@@ -949,6 +1175,12 @@ get_kubevirt_release_url() {
 }
 
 readonly FRR_K8S_VERSION=v0.0.21
+readonly FRR_K8S_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.1
+readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.5.3
+# Override to test newer FRR builds in the in-cluster frr-k8s daemonset
+# without changing the pinned frr-k8s release.
+FRR_K8S_FRR_IMAGE=${FRR_K8S_FRR_IMAGE:-${FRR_DEPLOYED_IMAGE}}
+readonly FRR_EXTERNAL_DEMO_IMAGE=${FRR_DEPLOYED_IMAGE}
 readonly FRR_TMP_DIR=$(mktemp -d -u)
 
 clone_frr() {
@@ -971,11 +1203,17 @@ clone_frr() {
     # https://github.com/FRRouting/frr/pull/15714).
     #
     # Bump to 10.4.1 for upstream demo was posted here: https://github.com/metallb/frr-k8s/pull/404
-    # We bump further to 10.4.3 to include additional fixes for EVPN:
+    # We bump further to 10.5.3 to include additional fixes for EVPN and coredumps:
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3907335193
     # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3898408592
     # https://github.com/FRRouting/frr/pull/20496
-    sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' hack/demo/demo.sh
+    #
+    # Note: 10.5.3 is aligned with current metallb trunk:
+    # https://github.com/metallb/metallb/pull/2993
+    replace_in_file_or_exit \
+      hack/demo/demo.sh \
+      "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+      "${FRR_EXTERNAL_DEMO_IMAGE}"
 
     popd
 
@@ -1156,10 +1394,10 @@ install_frr_k8s() {
   clone_frr
 
   # apply frr-k8s
+
   # The all-in-one manifest is only consumed here (deploy_frr_external_container
   # uses CRDs and the demo scripts, not this manifest), so the fix lives here
-  # rather than in clone_frr. This covers both kind.sh and kind-helm.sh since
-  # both call install_frr_k8s.
+  # rather than in clone_frr.
   #
   # gcr.io/kubebuilder/kube-rbac-proxy is unavailable after Google's Container
   # Registry shutdown (https://cloud.google.com/container-registry/docs/deprecations/container-registry-deprecation).
@@ -1168,10 +1406,12 @@ install_frr_k8s() {
   # REVERT ME: when https://github.com/metallb/metallb/issues/2619 is fixed
   sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
-  # Bump frr in frr-k8s to 10.4.3 to consume the following fix
-  # https://github.com/FRRouting/frr/pull/20496
-  sed -i 's|quay.io/frrouting/frr:[0-9.]*|quay.io/frrouting/frr:10.4.3|g' \
-    "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+
+  replace_in_file_or_exit \
+    "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml \
+    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${FRR_K8S_FRR_IMAGE}"
+
   if [ "${bgp_port}" -ne 0 ]; then
     local frr_yaml="${FRR_TMP_DIR}/frr-k8s/config/all-in-one/frr-k8s.yaml"
     grep -q 'bgpd_options=.*-p 0' "$frr_yaml" || {
@@ -1591,5 +1831,166 @@ label_ovn_ha() {
   # to choose the nodes where ovn master components will be placed
   for n in $MASTER_NODES; do
     kubectl label node "$n" k8s.ovn.org/ovnkube-db=true node-role.kubernetes.io/control-plane="" --overwrite
+  done
+}
+
+label_ovn_single_node_zones() {
+  KIND_NODES=$(kind_get_nodes)
+  for n in $KIND_NODES; do
+    kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
+  done
+}
+
+label_ovn_multiple_nodes_zones() {
+  KIND_NODES=$(kind_get_nodes | sort)
+  zone_idx=1
+  n=1
+  for node in $KIND_NODES; do
+    zone="zone-${zone_idx}"
+    kubectl label node "${node}" k8s.ovn.org/zone-name=${zone} --overwrite
+    if [ "${n}" == "1" ]; then
+      # Mark 1st node of each zone as zone control plane
+      kubectl label node "${node}" node-role.kubernetes.io/zone-controller="" --overwrite
+    fi
+
+    if [ "${n}" == "${KIND_NUM_NODES_PER_ZONE}" ]; then
+      n=1
+      zone_idx=$((zone_idx+1))
+    else
+      n=$((n+1))
+    fi
+  done
+}
+
+OPENSSL=""
+set_openssl_binary() {
+  for s in openssl openssl3; do
+      if ! command_exists "${s}" ; then
+          continue
+      fi
+      if [ "$(${s} version | awk -F '[ |.]' '{print $2}')" == "3" ]; then
+          OPENSSL="${s}"
+          echo "Found OpenSSL version 3 in binary ${OPENSSL}"
+          break
+      fi
+  done
+  if [ "${OPENSSL}" == "" ] ; then
+    echo "Dependency not met: Cannot find openssl version 3 (searched for openssl and openssl3)"
+    exit 1
+  fi
+}
+
+scale_kind_cluster() {
+  echo "Scaling cluster to ${KIND_NUM_WORKER} workers..."
+  rm -rf /tmp/kindscaler
+  # change this to https://github.com/lobuhi/kindscaler once PR https://github.com/lobuhi/kindscaler/pull/1 is accepted
+  git clone https://github.com/trozet/kindscaler /tmp/kindscaler
+  /tmp/kindscaler/kindscaler.sh ${KIND_CLUSTER_NAME} -r worker -c ${KIND_NUM_WORKER}
+  if [ "$OVN_ENABLE_INTERCONNECT" == true ]; then
+      if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
+       label_ovn_single_node_zones
+      else
+        label_ovn_multiple_nodes_zones
+      fi
+  fi
+  if [ "$OVN_IMAGE" == local ]; then
+    set_ovn_image
+  fi
+  install_ovn_image
+  if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
+    set_dnsnameresolver_images
+    install_dnsnameresolver_images
+  fi
+}
+
+# install_ipsec sets up IPsec once the ovn-ipsec DaemonSet is deployed by the helm chart
+# (tags.ovn-ipsec=true). It creates a CA, publishes it as the ovn-kubernetes/signer-ca
+# ConfigMap, and signs any pending CSRs with that CA until the DaemonSet rolls out.
+# Make sure to run this at the very end of the setup process.
+install_ipsec() {
+  # Create the CA (stored inside the signer-ca ConfigMap) that the IPsec pods use to sign their certificates
+  ca_dir=$(mktemp -d)
+  pushd "${ca_dir}"
+  ${OPENSSL} genrsa -out ca-bundle.key 4096
+  ${OPENSSL} req -x509 -new -nodes -key ca-bundle.key -sha256 -days 10240 -out ca-bundle.crt \
+      -subj "/C=CA/ST=Arctica/L=Northpole/O=Acme Inc/OU=DevOps/CN=www.example.com/emailAddress=dev@www.example.com"
+  kubectl create configmap -n ovn-kubernetes signer-ca --from-file ca-bundle.crt \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+  # For ca. 5 minutes max (60 * 5 seconds + overhead) ...
+  success=false
+  for i in {1..60}; do
+    # ... try to get all CSRs and sign them
+    csrs=$(kubectl get csr -o go-template='{{range .items}}{{if not .status}}{{.metadata.name}}{{"\n"}}{{end}}{{end}}')
+    for csr in ${csrs}; do
+      kubectl get csr "${csr}" -o jsonpath='{.spec.request}' | base64 --decode | \
+          sed -n '/BEGIN CERTIFICATE REQUEST/,$p' > "${csr}"
+      ${OPENSSL} x509 -req -in ${csr} -CA ca-bundle.crt -CAkey ca-bundle.key -CAcreateserial -out "${csr}.crt" -days 3650  \
+          -sha256 -extensions v3_req -copy_extensions copy
+      kubectl get csr "${csr}" -o json | \
+          jq '.status.certificate = "'$(base64 "${csr}.crt" | tr -d '\n')'"' | \
+          kubectl replace --raw /apis/certificates.k8s.io/v1/certificatesigningrequests/${csr}/status -f -
+    done
+
+    # ... and then check if the ovn-ipsec DaemonSet rolled out completely (wait for 5 seconds)
+    if kubectl rollout status daemonset -n ovn-kubernetes ovn-ipsec --timeout 5s; then
+        echo "All IPsec pods rolled out successfully"
+        success=true
+        break
+    fi
+    echo "IPsec pods did not roll out successfully yet"
+  done
+  popd
+  rm -Rf "${ca_dir}"
+
+  if ! ${success}; then
+      echo "IPsec pods did not roll out successfully"
+      exit 1
+  fi
+}
+
+# run_script_in_container should be used when the script is run nested in a container
+# and makes sure the control-plane node is reachable by substituting 127.0.0.1
+# with the control-plane container's IP.
+run_script_in_container() {
+  local master_ip
+  if [ "$PLATFORM_IPV4_SUPPORT" == true ]; then
+    master_ip=$("$OCI_BIN" inspect -f '{{ (index .NetworkSettings.Networks "kind").IPAddress }}' "${KIND_CLUSTER_NAME}-control-plane")
+    sed -i -- "s/server: .*/server: https:\/\/$master_ip:6443/g" "$KUBECONFIG"
+  else
+    master_ip=$("$OCI_BIN" inspect -f '{{ (index .NetworkSettings.Networks "kind").GlobalIPv6Address }}' "${KIND_CLUSTER_NAME}-control-plane")
+    sed -i -- "s/server: .*/server: https:\/\/[$master_ip]:6443/g" "$KUBECONFIG"
+  fi
+  chmod a+r "$KUBECONFIG"
+}
+
+# fixup_kubeconfig_names ensures kind clusters are named based off provided
+# values by removing the 'kind-' prefix from context/user/cluster names.
+fixup_kubeconfig_names() {
+  sed -i -- "s/user: kind-.*/user: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
+  sed -i -- "s/name: kind-.*/name: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
+  sed -i -- "s/cluster: kind-.*/cluster: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
+  sed -i -- "s/current-context: .*/current-context: ${KIND_CLUSTER_NAME}/g" $KUBECONFIG
+}
+
+remove_default_route() {
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    "$OCI_BIN" exec "$n" ip route delete default
+  done
+}
+
+add_dns_hostnames() {
+  local entries=""
+  KIND_NODES=$(kind get nodes --name "${KIND_CLUSTER_NAME}")
+  for n in $KIND_NODES; do
+    local v4 v6
+    v4=$("$OCI_BIN" container inspect -f '{{ .NetworkSettings.Networks.kind.IPAddress }}' "$n")
+    v6=$("$OCI_BIN" container inspect -f '{{ .NetworkSettings.Networks.kind.GlobalIPv6Address }}' "$n")
+    [ -n "$v4" ] && entries+=$(printf '%s %s\n' "$v4" "$n")$'\n'
+    [ -n "$v6" ] && entries+=$(printf '%s %s\n' "$v6" "$n")$'\n'
+  done
+  for n in $KIND_NODES; do
+    printf '%s' "$entries" | "$OCI_BIN" exec -i "$n" bash -c 'cat >> /etc/hosts'
   done
 }

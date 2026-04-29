@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package util
 
 import (
@@ -246,6 +249,141 @@ func TestNodeSubnetAnnotationChanged(t *testing.T) {
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
 			result := NodeSubnetAnnotationChanged(tc.oldNode, tc.newNode)
+			assert.Equal(t, tc.result, result)
+		})
+	}
+}
+
+func TestNodeSubnetAnnotationChangedForNetwork(t *testing.T) {
+	tests := []struct {
+		desc    string
+		oldNode *corev1.Node
+		newNode *corev1.Node
+		netName string
+		result  bool
+	}{
+		{
+			desc: "true: annotation added (old missing)",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "testNode",
+					Annotations: map[string]string{},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": `{"default":["10.244.0.0/24"]}`,
+					},
+				},
+			},
+			netName: "default",
+			result:  true,
+		},
+		{
+			desc: "true: annotation removed (new missing)",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": `{"default":["10.244.0.0/24"]}`,
+					},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "testNode",
+					Annotations: map[string]string{},
+				},
+			},
+			netName: "default",
+			result:  true,
+		},
+		{
+			desc: "false: both missing",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "testNode",
+					Annotations: map[string]string{},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "testNode",
+					Annotations: map[string]string{},
+				},
+			},
+			netName: "default",
+			result:  false,
+		},
+		{
+			desc: "true: default network subnet changed",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": `{"default":["10.244.0.0/24"]}`,
+					},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": `{"default":["10.244.2.0/24"]}`,
+					},
+				},
+			},
+			netName: "default",
+			result:  true,
+		},
+		{
+			desc: "false: default network subnet unchanged, other network changed",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": `{"default":["10.244.0.0/24"],"other":["10.245.0.0/24"]}`,
+					},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": `{"default":["10.244.0.0/24"],"other":["10.245.2.0/24"]}`,
+					},
+				},
+			},
+			netName: "default",
+			result:  false,
+		},
+		{
+			desc: "false: identical annotations",
+			oldNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": `{"default":["10.244.0.0/24"]}`,
+					},
+				},
+			},
+			newNode: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": `{"default":["10.244.0.0/24"]}`,
+					},
+				},
+			},
+			netName: "default",
+			result:  false,
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			result := NodeSubnetAnnotationChangedForNetwork(tc.oldNode, tc.newNode, tc.netName)
 			assert.Equal(t, tc.result, result)
 		})
 	}

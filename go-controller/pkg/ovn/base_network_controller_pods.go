@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
@@ -873,8 +876,18 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 
 		if bnc.doesNetworkRequireIPAM() {
 			if zoneContainsPodSubnet {
-				// ensure we have reserved the IPs in the annotation
-				if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+				// ensure we have reserved the IPs in the annotation.
+				// For live migratable pods, the IPs may belong to a different
+				// node's subnet (the source node) during migration. In that case
+				// skip allocation here.
+				if kubevirt.IsPodLiveMigratable(pod) {
+					if sn, ok := bnc.lsManager.GetSubnetName(podIfAddrs); !ok || sn != switchName {
+						klog.V(5).Infof("Skipping IP allocation for live migratable pod %s: IPs %s belong to switch %s, not %s",
+							podDesc, util.JoinIPNetIPs(podIfAddrs, " "), sn, switchName)
+						return podAnnotation, false, nil
+					}
+				}
+				if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && !ipallocator.IsErrAllocated(err) {
 					return nil, false, fmt.Errorf("unable to ensure IPs allocated for already annotated pod: %s, IPs: %s, error: %v",
 						podDesc, util.JoinIPNetIPs(podIfAddrs, " "), err)
 				}
@@ -905,7 +918,7 @@ func (bnc *BaseNetworkController) allocatePodAnnotation(pod *corev1.Pod, existin
 	if len(podIfAddrs) == 0 {
 		needsNewMacOrIPAllocation = true
 	} else if bnc.doesNetworkRequireIPAM() {
-		if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && err != ipallocator.ErrAllocated {
+		if err = bnc.lsManager.AllocateIPs(switchName, podIfAddrs); err != nil && !ipallocator.IsErrAllocated(err) {
 			klog.Warningf("Unable to allocate IPs %s found on existing OVN port: %s, for pod %s on switch: %s"+
 				" error: %v", util.JoinIPNetIPs(podIfAddrs, " "), bnc.GetLogicalPortName(pod, nadKey), podDesc, switchName, err)
 

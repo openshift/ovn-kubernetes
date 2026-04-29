@@ -87,7 +87,6 @@ jobs:
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
       KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
-      USE_HELM: "${{ matrix.target == 'control-plane-helm' || matrix.target == 'multi-homing-helm' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
       OVN_NETWORK_QOS_ENABLE: "${{ matrix.target == 'control-plane' || matrix.target == 'control-plane-helm' }}"
       TRAFFIC_FLOW_TESTS: "${{ matrix.traffic-flow-tests }}"
@@ -107,7 +106,7 @@ jobs:
       METRICS_IP: "127.0.0.1"
       GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     # Debug session for the performance test
     #- name: Setup tmate session
@@ -127,7 +126,7 @@ jobs:
         echo "sha=$PR_SHA" >> $GITHUB_OUTPUT
 
     - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         ref: ${{ github.event_name == 'issue_comment' && steps.pr_info.outputs.sha || github.sha }}
 
@@ -136,7 +135,7 @@ jobs:
       uses: ./.github/actions/diagnostics
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         cache: false
@@ -234,7 +233,7 @@ jobs:
         sudo systemctl restart docker
 
     - name: Download test-image-pr
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         name: test-image-pr
 
@@ -315,7 +314,7 @@ jobs:
     
     - name: Upload Prometheus installation logs
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: prometheus-install-logs-${{ matrix.perf-test }}-${{ github.run_id }}
         path: prometheus-install.log
@@ -373,21 +372,21 @@ jobs:
 
     - name: Upload performance report
       if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.perf-test }}-performance-report-${{ github.run_id }}
         path: /tmp/${{ matrix.perf-test }}/performance_report.md
 
     - name: Upload pprof data
       if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.perf-test }}-pprof-${{ github.run_id }}
         path: /tmp/${{ matrix.perf-test }}/pprof-data
 
     - name: Upload performance test data
       if: ${{ matrix.perf-test == 'kubelet-density-cni' || matrix.perf-test == 'udn-density-l2-noPods' || matrix.perf-test == 'cudn-density-l2-noPods' || matrix.perf-test == 'udn-density-l2-pods' || matrix.perf-test == 'cudn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l2-pods-netpol' || matrix.perf-test == 'udn-density-l3-pods-netpol' }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.perf-test }}-performance-test-data-${{ github.run_id }}
         path: /tmp/${{ matrix.perf-test }} 
@@ -400,7 +399,7 @@ jobs:
 
     - name: Upload kind logs
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.perf-test }}-kind-logs-${{ github.run_id }}
         path: /tmp/${{ matrix.perf-test }}/logs
@@ -458,13 +457,13 @@ jobs:
 
     - name: Check out code into the Go module directory
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         ref: ${{ github.event_name == 'issue_comment' && steps.pr_info.outputs.sha || github.sha }}
 
     - name: Set up Go
       if: steps.is_pr_image_build_needed.outputs.PR_IMAGE_RESTORED != 'true' && success()
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version-file: 'go-controller/go.mod'
         cache: false
@@ -509,7 +508,7 @@ jobs:
         cp ${CI_DIST_IMAGES_OUTPUT}/${CI_IMAGE_PR_TAR} ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
         gzip ${CI_IMAGE_CACHE}/${CI_IMAGE_PR_TAR}
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: test-image-pr
         path: ${{ env.CI_DIST_IMAGES_OUTPUT }}/${{ env.CI_IMAGE_PR_TAR }}

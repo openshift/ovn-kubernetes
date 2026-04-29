@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
@@ -903,8 +906,11 @@ func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Op
 		return ops, fmt.Errorf("failed to get ops to delete port groups owned by controller %s", controllerName)
 	}
 
+	// Skip PodSelector address sets - those are owned by the shared AddressSetManager
+	// and cleaned up via AddressSetManager.CleanupForController in the controller's cleanup().
 	asPredicate := func(item *nbdb.AddressSet) bool {
-		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName
+		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName &&
+			item.ExternalIDs[libovsdbops.OwnerTypeKey.String()] != libovsdbops.PodSelectorOwnerType
 	}
 	ops, err = libovsdbops.DeleteAddressSetsWithPredicateOps(nbClient, ops, asPredicate)
 	if err != nil {
