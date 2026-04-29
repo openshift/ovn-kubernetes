@@ -263,6 +263,11 @@ func (r *RetryFramework) increaseFailedAttemptsCounter(entry *retryObjEntry) {
 	if entry.failedAttempts < 255 {
 		entry.failedAttempts++
 	}
+	if entry.failedAttempts == 1 {
+		klog.Infof("%s: %s first retry failure queued, backoff will start at %s", r.name, r.ResourceHandler.ObjType, initialBackoff)
+	} else if entry.failedAttempts%5 == 0 {
+		klog.Warningf("%s: %s has now failed %d times, current backoff %s", r.name, r.ResourceHandler.ObjType, entry.failedAttempts, entry.backoff)
+	}
 }
 
 // RequestRetryFramework allows a caller to immediately request to iterate through all objects that
@@ -356,7 +361,7 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			initObj = entry.oldObj
 		}
 
-		klog.Infof("%s: retry object setup: %s %s", r.name, r.ResourceHandler.ObjType, objKey)
+		klog.Infof("%s: retry object setup: %s %s (attempt %d, backoff %s)", r.name, r.ResourceHandler.ObjType, objKey, entry.failedAttempts, entry.backoff)
 
 		if entry.newObj != nil {
 			// get the latest version of the object from the informer;
@@ -464,6 +469,7 @@ func (r *RetryFramework) iterateRetryResources() {
 	now := time.Now()
 	wg := &sync.WaitGroup{}
 
+	klog.Infof("%s: retry cache has %d %s entries pending retry", r.name, len(entriesKeys), r.ResourceHandler.ObjType)
 	// Process the above list of objects that need retry by holding the lock for each one of them.
 	klog.V(5).Infof("%s: going to retry %v resource setup for %d objects: %s", r.name, r.ResourceHandler.ObjType, len(entriesKeys), entriesKeys)
 
@@ -476,7 +482,9 @@ func (r *RetryFramework) iterateRetryResources() {
 	}
 	klog.V(5).Infof("%s: waiting for all the %s retry setup to complete in iterateRetryResources", r.name, r.ResourceHandler.ObjType)
 	wg.Wait()
-	klog.V(5).Infof("%s: function iterateRetryResources for %s ended (in %v)", r.name, r.ResourceHandler.ObjType, time.Since(now))
+	elapsed := time.Since(now)
+	remainingKeys := r.retryEntries.GetKeys()
+	klog.Infof("%s: retry sweep for %s completed in %v, %d entries remaining in cache", r.name, r.ResourceHandler.ObjType, elapsed, len(remainingKeys))
 }
 
 // periodicallyRetryResources tracks RetryFramework and checks if any object needs to be retried for add or delete every

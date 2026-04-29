@@ -639,12 +639,12 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				EnableOVNControllerMetrics: true,
 				EnableOVNNorthdMetrics:     true,
 				EnableOVNDBMetrics:         true,
+				EnablePprof:                config.Metrics.EnablePprof,
 			}
 
 			if combineMetricsEndpoints(runMode) {
 				// Reuse the default registry (and its gatherer) so ovnkube-node metrics and OVN metrics share one endpoint.
 				opts.Registerer = prometheus.DefaultRegisterer
-				opts.EnablePprof = config.Metrics.EnablePprof
 			}
 
 			if !config.OVNKubernetesFeature.EnableInterconnect {
