@@ -6,6 +6,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -99,6 +100,7 @@ type networkState struct {
 	// Per node information and template variables. The latter expand to each
 	// chassis' node IP (v4 and v6).
 	// Must be accessed only with the nodeInfo mutex taken.
+	nodeInfosByName   map[string]nodeInfo
 	nodeInfos         []nodeInfo
 	nodeIPv4Templates *NodeIPsTemplates
 	nodeIPv6Templates *NodeIPsTemplates
@@ -125,6 +127,7 @@ func newNetworkState(netInfo util.NetInfo, serviceLister corelisters.ServiceList
 		netInfo:           netInfo,
 		repair:            newRepair(serviceLister, nbClient),
 		alreadyApplied:    map[string][]LB{},
+		nodeInfosByName:   map[string]nodeInfo{},
 		nodeIPv4Templates: NewNodeIPsTemplates(corev1.IPv4Protocol),
 		nodeIPv6Templates: NewNodeIPsTemplates(corev1.IPv6Protocol),
 	}
@@ -168,10 +171,6 @@ func NewController(client clientset.Interface,
 		return nil, fmt.Errorf("unable to get the NB Zone : err - %w", err)
 	}
 	c.zone = zone
-	// load balancers need to be applied to nodes, so
-	// we need to watch Node objects for changes.
-	// Need to re-sync all services when a node gains its switch or GWR
-	c.nodeTracker = newNodeTracker(zone, c.RequestFullSync, netInfo)
 	return c, nil
 }
 
@@ -205,10 +204,8 @@ type Controller struct {
 	workerLoopPeriod time.Duration
 
 	nodeInformer coreinformers.NodeInformer
-	// nodeTracker
-	nodeTracker *nodeTracker
 
-	// startupDone is false up until the node tracker, service and endpointslice initial sync
+	// startupDone is false up until the node, service and endpointslice initial sync
 	// in Run() is completed
 	startupDone     bool
 	startupDoneLock sync.RWMutex
@@ -245,17 +242,21 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 	klog.Infof("Starting controller %s for network=%s", controllerName, c.state.netInfo.GetNetworkName())
 
 	var err error
-	c.nodeHandler, err = c.nodeTracker.Start(c.nodeInformer)
+	c.nodeHandler, err = c.nodeInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.onNodeAdd,
+		UpdateFunc: c.onNodeUpdate,
+		DeleteFunc: c.onNodeDelete,
+	}))
 	if err != nil {
 		return err
 	}
-	// We need the node tracker to be synced first, as we rely on it to properly reprogram initial per node load balancers
-	klog.Infof("Waiting for node tracker handler to sync for network=%s", c.state.netInfo.GetNetworkName())
+	// We need node events to be synced first, as we rely on node information to properly reprogram initial per-node load balancers.
+	klog.Infof("Waiting for node handler to sync for network=%s", c.state.netInfo.GetNetworkName())
 	c.startupDoneLock.Lock()
 	c.startupDone = false
 	c.startupDoneLock.Unlock()
 	if !util.WaitForHandlerSyncWithTimeout(nodeControllerName, stopCh, types.HandlerSyncTimeout, c.nodeHandler.HasSynced) {
-		return fmt.Errorf("error syncing node tracker handler")
+		return fmt.Errorf("error syncing node handler")
 	}
 
 	klog.Infof("Setting up event handlers for services for network=%s", c.state.netInfo.GetNetworkName())
@@ -269,16 +270,11 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 	}
 
 	klog.Infof("Setting up event handlers for endpoint slices for network=%s", c.state.netInfo.GetNetworkName())
-	c.endpointHandler, err = c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(
-		// Filter out endpointslices that don't belong to this network (i.e. keep only kube-generated endpointslices if
-		// on default network, keep only mirrored endpointslices for this network if on UDN)
-		util.GetEndpointSlicesEventHandlerForNetwork(
-			cache.ResourceEventHandlerFuncs{
-				AddFunc:    c.onEndpointSliceAdd,
-				UpdateFunc: c.onEndpointSliceUpdate,
-				DeleteFunc: c.onEndpointSliceDelete,
-			},
-			c.state.netInfo)))
+	c.endpointHandler, err = c.endpointSliceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+		AddFunc:    c.onEndpointSliceAdd,
+		UpdateFunc: c.onEndpointSliceUpdate,
+		DeleteFunc: c.onEndpointSliceDelete,
+	}))
 	if err != nil {
 		return err
 	}
@@ -292,7 +288,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 		// Run the repair controller only once
 		// it keeps in sync Kubernetes and OVN
 		// and handles removal of stale data on upgrades
-		c.state.repair.runBeforeSync(c.state.useTemplates, c.state.netInfo, c.nodeTracker.nodes)
+		c.state.repair.runBeforeSync(c.state.useTemplates, c.state.netInfo, c.nodeInfoMapForNetwork(c.state))
 	}
 
 	if err := c.initTopLevelCache(); err != nil {
@@ -372,6 +368,21 @@ func (c *Controller) getNetworkNames() []string {
 	return networkNames
 }
 
+func (c *Controller) forEachNetworkState(f func(networkName string, state *networkState) error) error {
+	for _, networkName := range c.getNetworkNames() {
+		if err := c.networkStates.DoWithLock(networkName, func(key string) error {
+			state, ok := c.networkStates.Load(key)
+			if !ok {
+				return nil
+			}
+			return f(key, state)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Controller) bootstrapNetworkState(state *networkState, runRepair bool) error {
 	nodeInfos, nodes, err := c.nodeInfosForNetwork(state.netInfo)
 	if err != nil {
@@ -396,20 +407,38 @@ func (c *Controller) nodeInfosForNetwork(netInfo util.NetInfo) ([]nodeInfo, map[
 		return nil, nil, err
 	}
 
-	tracker := newNodeTracker(c.zone, func([]nodeInfo) {}, netInfo)
+	nodeMap := make(map[string]nodeInfo, len(nodes))
 	for _, node := range nodes {
-		tracker.updateNode(node)
+		ni, err := nodeInfoForNetwork(node, netInfo)
+		if err != nil || ni == nil {
+			continue
+		}
+		nodeMap[node.Name] = *ni
 	}
 
-	tracker.Lock()
-	defer tracker.Unlock()
+	return zoneNodeInfos(c.zone, nodeMap), nodeMap, nil
+}
 
-	nodeInfos := tracker.getZoneNodes()
-	nodeMap := make(map[string]nodeInfo, len(tracker.nodes))
-	for nodeName, nodeInfo := range tracker.nodes {
-		nodeMap[nodeName] = nodeInfo
+func (c *Controller) nodeInfoMapForNetwork(state *networkState) map[string]nodeInfo {
+	state.nodeInfoRWLock.RLock()
+	defer state.nodeInfoRWLock.RUnlock()
+
+	nodeInfoByName := make(map[string]nodeInfo, len(state.nodeInfosByName))
+	for nodeName, nodeInfo := range state.nodeInfosByName {
+		nodeInfoByName[nodeName] = nodeInfo
 	}
-	return nodeInfos, nodeMap, nil
+	return nodeInfoByName
+}
+
+func zoneNodeInfos(zone string, nodeInfoByName map[string]nodeInfo) []nodeInfo {
+	out := make([]nodeInfo, 0, len(nodeInfoByName))
+	for _, node := range nodeInfoByName {
+		if node.zone == zone {
+			out = append(out, node)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
 }
 
 func (c *Controller) networkNamesForServiceKey(key string) ([]string, error) {
@@ -419,18 +448,15 @@ func (c *Controller) networkNamesForServiceKey(key string) ([]string, error) {
 	}
 
 	networkNames := []string{}
-	for _, networkName := range c.getNetworkNames() {
-		err := c.networkStates.DoWithLock(networkName, func(key string) error {
-			state, ok := c.networkStates.Load(key)
-			if !ok || c.skipServiceForNetwork(state, name, namespace) {
-				return nil
-			}
-			networkNames = append(networkNames, key)
+	err = c.forEachNetworkState(func(networkName string, state *networkState) error {
+		if c.skipServiceForNetwork(state, name, namespace) {
 			return nil
-		})
-		if err != nil {
-			return nil, err
 		}
+		networkNames = append(networkNames, networkName)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return networkNames, nil
 }
@@ -522,6 +548,28 @@ func (c *Controller) queueServiceKeyForNetwork(state *networkState, key string, 
 	}
 	klog.V(5).Infof("Queueing service %s for network=%s", key, state.netInfo.GetNetworkName())
 	c.queue.Add(scopedServiceQueueKey(state.netInfo.GetNetworkName(), key))
+}
+
+func (c *Controller) queueServiceKeyForNetworks(key string, recordDuration bool) {
+	if err := c.forEachNetworkState(func(_ string, state *networkState) error {
+		c.queueServiceKeyForNetwork(state, key, recordDuration)
+		return nil
+	}); err != nil {
+		utilruntime.HandleError(err)
+	}
+}
+
+func (c *Controller) queueServiceKeyForNetworkName(networkName, key string, recordDuration bool) {
+	if err := c.networkStates.DoWithLock(networkName, func(lockedNetworkName string) error {
+		state, ok := c.networkStates.Load(lockedNetworkName)
+		if !ok {
+			return nil
+		}
+		c.queueServiceKeyForNetwork(state, key, recordDuration)
+		return nil
+	}); err != nil {
+		utilruntime.HandleError(err)
+	}
 }
 
 // worker runs a worker thread that just dequeues items, processes them, and
@@ -813,10 +861,23 @@ func (c *Controller) syncServiceForNetwork(state *networkState, key string) erro
 }
 
 func (c *Controller) syncNodeInfosForNetwork(state *networkState, nodeInfos []nodeInfo) {
+	nodeInfoByName := make(map[string]nodeInfo, len(nodeInfos))
+	for _, nodeInfo := range nodeInfos {
+		nodeInfoByName[nodeInfo.name] = nodeInfo
+	}
+	c.syncNodeInfoMapForNetwork(state, nodeInfoByName)
+}
+
+func (c *Controller) syncNodeInfoMapForNetwork(state *networkState, nodeInfoByName map[string]nodeInfo) {
 	state.nodeInfoRWLock.Lock()
 	defer state.nodeInfoRWLock.Unlock()
 
-	state.nodeInfos = nodeInfos
+	state.nodeInfosByName = make(map[string]nodeInfo, len(nodeInfoByName))
+	for nodeName, nodeInfo := range nodeInfoByName {
+		state.nodeInfosByName[nodeName] = nodeInfo
+	}
+
+	state.nodeInfos = zoneNodeInfos(c.zone, state.nodeInfosByName)
 	if !state.useTemplates {
 		return
 	}
@@ -879,13 +940,133 @@ func (c *Controller) requestFullSyncForNetwork(state *networkState, nodeInfos []
 	// Resync node infos and node IP templates.
 	c.syncNodeInfosForNetwork(state, nodeInfos)
 
-	// Resync all services unless we're processing the initial node tracker sync (in which case
+	// Resync all services unless we're processing the initial node sync (in which case
 	// the service add will happen at the next step in the services controller Run() and workers
-	// aren't up yet anyway: no need to do it during node tracker startup then)
+	// aren't up yet anyway: no need to do it during node startup then)
 	c.queueAllServicesForNetwork(state)
 }
 
 // handlers
+
+func (c *Controller) onNodeAdd(obj interface{}) {
+	node, ok := obj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	if err := c.forEachNetworkState(func(_ string, state *networkState) error {
+		c.updateNodeForNetwork(state, node)
+		return nil
+	}); err != nil {
+		utilruntime.HandleError(err)
+	}
+}
+
+func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
+	oldNode, ok := oldObj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	newNode, ok := newObj.(*corev1.Node)
+	if !ok {
+		return
+	}
+	if oldNode.GetResourceVersion() == newNode.GetResourceVersion() || !newNode.GetDeletionTimestamp().IsZero() {
+		return
+	}
+
+	if err := c.forEachNetworkState(func(_ string, state *networkState) error {
+		if !nodeChangedForNetwork(oldNode, newNode, state.netInfo) {
+			return nil
+		}
+		c.updateNodeForNetwork(state, newNode)
+		return nil
+	}); err != nil {
+		utilruntime.HandleError(err)
+	}
+}
+
+func (c *Controller) onNodeDelete(obj interface{}) {
+	node, ok := obj.(*corev1.Node)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			klog.Errorf("Couldn't understand non-tombstone object")
+			return
+		}
+		node, ok = tombstone.Obj.(*corev1.Node)
+		if !ok {
+			klog.Errorf("Couldn't understand tombstone object")
+			return
+		}
+	}
+
+	if err := c.forEachNetworkState(func(_ string, state *networkState) error {
+		c.removeNodeForNetwork(state, node.Name)
+		return nil
+	}); err != nil {
+		utilruntime.HandleError(err)
+	}
+}
+
+func nodeChangedForNetwork(oldNode, newNode *corev1.Node, netInfo util.NetInfo) bool {
+	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, newNode, netInfo.GetNetworkName()) ||
+		util.NodeL3GatewayAnnotationChanged(oldNode, newNode) ||
+		oldNode.Name != newNode.Name ||
+		util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
+		util.NodeZoneAnnotationChanged(oldNode, newNode) ||
+		util.NoHostSubnet(oldNode) != util.NoHostSubnet(newNode)
+}
+
+func (c *Controller) updateNodeForNetwork(state *networkState, node *corev1.Node) {
+	ni, err := nodeInfoForNetwork(node, state.netInfo)
+	if err != nil || ni == nil {
+		klog.Infof("Node %s has invalid / no HostSubnet annotations for network=%s (probably waiting on initialization), or it's a hybrid overlay node: %v",
+			node.Name, state.netInfo.GetNetworkName(), err)
+		c.removeNodeForNetwork(state, node.Name)
+		return
+	}
+
+	nodeInfoByName, changed := c.updatedNodeInfoMapForNetwork(state, node.Name, ni)
+	if !changed {
+		return
+	}
+	klog.Infof("Node %s switch + router changed, syncing services in network %q", node.Name, state.netInfo.GetNetworkName())
+	c.syncNodeInfoMapForNetwork(state, nodeInfoByName)
+	c.queueAllServicesForNetwork(state)
+}
+
+func (c *Controller) removeNodeForNetwork(state *networkState, nodeName string) {
+	nodeInfoByName, changed := c.updatedNodeInfoMapForNetwork(state, nodeName, nil)
+	if !changed {
+		return
+	}
+	c.syncNodeInfoMapForNetwork(state, nodeInfoByName)
+	c.queueAllServicesForNetwork(state)
+}
+
+func (c *Controller) updatedNodeInfoMapForNetwork(state *networkState, nodeName string, newNodeInfo *nodeInfo) (map[string]nodeInfo, bool) {
+	state.nodeInfoRWLock.RLock()
+	defer state.nodeInfoRWLock.RUnlock()
+
+	existing, ok := state.nodeInfosByName[nodeName]
+	if newNodeInfo != nil && ok && reflect.DeepEqual(existing, *newNodeInfo) {
+		return nil, false
+	}
+	if newNodeInfo == nil && !ok {
+		return nil, false
+	}
+
+	nodeInfoByName := make(map[string]nodeInfo, len(state.nodeInfosByName)+1)
+	for existingNodeName, existingNodeInfo := range state.nodeInfosByName {
+		nodeInfoByName[existingNodeName] = existingNodeInfo
+	}
+	if newNodeInfo == nil {
+		delete(nodeInfoByName, nodeName)
+	} else {
+		nodeInfoByName[nodeName] = *newNodeInfo
+	}
+	return nodeInfoByName, true
+}
 
 func (c *Controller) skipServiceForNetwork(state *networkState, name, namespace string) bool {
 	if util.IsNetworkSegmentationSupportEnabled() {
@@ -929,8 +1110,12 @@ func (c *Controller) skipServiceForNetwork(state *networkState, name, namespace 
 
 // onServiceAdd queues the Service for processing.
 func (c *Controller) onServiceAdd(obj interface{}) {
-	service := obj.(*corev1.Service)
-	c.queueServiceForNetwork(c.state, service)
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
+		return
+	}
+	c.queueServiceKeyForNetworks(key, true)
 }
 
 // onServiceUpdate updates the Service Selector in the cache and queues the Service for processing.
@@ -946,7 +1131,7 @@ func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
 
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		c.queueServiceKeyForNetwork(c.state, key, true)
+		c.queueServiceKeyForNetworks(key, true)
 	}
 }
 
@@ -957,7 +1142,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	c.queueServiceKeyForNetwork(c.state, key, true)
+	c.queueServiceKeyForNetworks(key, true)
 }
 
 // onEndpointSliceAdd queues a sync for the relevant Service for a sync
@@ -1009,20 +1194,40 @@ func (c *Controller) onEndpointSliceDelete(obj interface{}) {
 // queueServiceForEndpointSlice attempts to queue the corresponding Service for
 // the provided EndpointSlice.
 func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.EndpointSlice) {
-	serviceNamespacedName, err := c.getServiceNamespacedNameFromEndpointSlice(endpointSlice)
-	if err != nil {
-		// Do not log endpointsSlices missing service labels as errors.
-		// Once the service label is eventually added, we will get this event
-		// and re-process.
-		if errors.Is(err, ErrMissingServiceLabel) {
-			klog.V(5).Infof("network=%s, error=%s", c.state.netInfo.GetNetworkName(), err.Error())
-		} else {
-			utilruntime.HandleError(fmt.Errorf("network=%s, couldn't get key for EndpointSlice %+v: %v", c.state.netInfo.GetNetworkName(), endpointSlice, err))
+	if util.IsDefaultEndpointSlice(endpointSlice) {
+		serviceNamespacedName, err := _getServiceNameFromEndpointSlice(endpointSlice, true)
+		if err != nil {
+			c.handleEndpointSliceServiceNameError(endpointSlice, types.DefaultNetworkName, err)
+			return
 		}
+		c.queueServiceKeyForNetworkName(types.DefaultNetworkName, serviceNamespacedName.String(), false)
 		return
 	}
 
-	c.queueServiceKeyForNetwork(c.state, serviceNamespacedName.String(), false)
+	networkName := endpointSlice.Annotations[types.UserDefinedNetworkEndpointSliceAnnotation]
+	if networkName == "" {
+		klog.V(5).Infof("Skipping EndpointSlice %s/%s because it is neither default nor mirrored for a network", endpointSlice.Namespace, endpointSlice.Name)
+		return
+	}
+
+	serviceNamespacedName, err := _getServiceNameFromEndpointSlice(endpointSlice, false)
+	if err != nil {
+		c.handleEndpointSliceServiceNameError(endpointSlice, networkName, err)
+		return
+	}
+
+	c.queueServiceKeyForNetworkName(networkName, serviceNamespacedName.String(), false)
+}
+
+func (c *Controller) handleEndpointSliceServiceNameError(endpointSlice *discovery.EndpointSlice, networkName string, err error) {
+	// Do not log endpointsSlices missing service labels as errors.
+	// Once the service label is eventually added, we will get this event
+	// and re-process.
+	if errors.Is(err, ErrMissingServiceLabel) {
+		klog.V(5).Infof("network=%s, error=%s", networkName, err.Error())
+	} else {
+		utilruntime.HandleError(fmt.Errorf("network=%s, couldn't get key for EndpointSlice %+v: %v", networkName, endpointSlice, err))
+	}
 }
 
 // GetServiceKeyFromEndpointSliceForDefaultNetwork returns a controller key for a Service but derived from
@@ -1035,18 +1240,6 @@ func GetServiceKeyFromEndpointSliceForDefaultNetwork(endpointSlice *discovery.En
 		key = nsn.String()
 	}
 	return key, err
-}
-
-func (c *Controller) getServiceNamespacedNameFromEndpointSlice(endpointSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
-	return c.getServiceNamespacedNameFromEndpointSliceForNetwork(c.state, endpointSlice)
-}
-
-func (c *Controller) getServiceNamespacedNameFromEndpointSliceForNetwork(state *networkState, endpointSlice *discovery.EndpointSlice) (ktypes.NamespacedName, error) {
-	if state.netInfo.IsDefault() {
-		return _getServiceNameFromEndpointSlice(endpointSlice, true)
-	} else {
-		return _getServiceNameFromEndpointSlice(endpointSlice, false)
-	}
 }
 
 func (c *Controller) cleanupUDNEnabledServiceRoute(state *networkState, key string) error {
