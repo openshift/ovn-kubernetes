@@ -736,14 +736,6 @@ func (bsnc *BaseUserDefinedNetworkController) AddNamespaceForUserDefinedNetwork(
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 	nsUnlock()
-	// Enqueue the UDN namespace into network policy controller if it needs to be
-	// processed by network policy peer namespace handlers.
-	if bsnc.IsPrimaryNetwork() {
-		err = bsnc.requeuePeerNamespace(ns)
-		if err != nil {
-			return fmt.Errorf("failed to requeue peer namespace %s: %v", ns.Name, err)
-		}
-	}
 	return nil
 }
 
@@ -751,7 +743,7 @@ func (bsnc *BaseUserDefinedNetworkController) AddNamespaceForUserDefinedNetwork(
 // and returns it with its mutex locked.
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
 func (bsnc *BaseUserDefinedNetworkController) ensureNamespaceLockedForUserDefinedNetwork(ns string, readOnly bool, namespace *corev1.Namespace) (*namespaceInfo, func(), error) {
-	return bsnc.ensureNamespaceLockedCommon(ns, readOnly, namespace, bsnc.getAllNamespacePodAddresses, bsnc.configureNamespaceCommon)
+	return bsnc.ensureNamespaceLockedCommon(ns, readOnly, namespace, bsnc.configureNamespaceCommon)
 }
 
 func (bsnc *BaseUserDefinedNetworkController) updateNamespaceForUserDefinedNetwork(old, newer *corev1.Namespace) error {
