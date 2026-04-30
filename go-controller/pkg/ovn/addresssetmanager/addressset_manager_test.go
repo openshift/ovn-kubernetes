@@ -6,6 +6,7 @@ package addresssetmanager
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -16,6 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -50,6 +52,17 @@ func eventuallyExpectEmptyAddressSetsExist(nbClient libovsdbclient.Client, peer 
 	}
 }
 
+// this is a test wrapper to count db transactions
+type countingClient struct {
+	libovsdbclient.Client
+	transactCount atomic.Int64
+}
+
+func (c *countingClient) Transact(ctx context.Context, ops ...ovsdb.Operation) ([]ovsdb.OperationResult, error) {
+	c.transactCount.Add(1)
+	return c.Client.Transact(ctx, ops...)
+}
+
 var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 	const (
 		namespaceName1 = "namespace1"
@@ -72,6 +85,7 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		initialDB         libovsdbtest.TestSetup
 		libovsdbCleanup   *libovsdbtest.Context
 		libovsdbNBClient  libovsdbclient.Client
+		countingNBClient  *countingClient
 	)
 
 	ginkgo.BeforeEach(func() {
@@ -107,7 +121,9 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		gomega.Expect(wf.Start()).To(gomega.Succeed())
 		libovsdbNBClient, _, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		addressSetManager = NewAddressSetManager(wf.PodCoreInformer(), wf.NamespaceInformer(), wf.NodeCoreInformer(), libovsdbNBClient,
+		// this is only used for "saves db transactions when IPs don't change" test
+		countingNBClient = &countingClient{Client: libovsdbNBClient}
+		addressSetManager = NewAddressSetManager(wf.PodCoreInformer(), wf.NamespaceInformer(), wf.NodeCoreInformer(), countingNBClient,
 			func(_ string) string { return "" })
 		err = addressSetManager.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -507,6 +523,30 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		// IP should be deleted from the address set on delete event, since the new pod with the same ip
 		// should not be present in given address set
 		eventuallyExpectEmptyAddressSetsExist(addressSetManager.nbClient, peer, namespace1.Name)
+	})
+	ginkgo.It("saves db transactions when IPs don't change", func() {
+		namespace1 := *testing.NewNamespace(namespaceName1)
+		ns1pod1 := testing.NewPod(namespace1.Name, "ns1pod1", nodeName, ip1)
+
+		startAddrSetManager(initialDB, []corev1.Namespace{namespace1}, []corev1.Pod{*ns1pod1})
+
+		_, _, _, err := addressSetManager.EnsureAddressSet(
+			&metav1.LabelSelector{}, nil, nil, namespace1.Name, "backRef", controllerName, &util.DefaultNetInfo{}, false)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		dbIDs := GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, nil, nil, namespace1.Name, controllerName, false)
+		expectedAS, _ := addressset.GetTestDbAddrSets(dbIDs, []string{ip1})
+		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{expectedAS}))
+		// expect 2 transactions: 1 to create addr set and 1 to set IPs
+		gomega.Expect(countingNBClient.transactCount.Load()).To(gomega.Equal(int64(2)))
+
+		// Now update pod labels, which will cause the address set reconciliation
+		ns1pod1.Labels["newLabel"] = "newValue"
+		_, err = clientSet.KubeClient.CoreV1().Pods(namespace1.Name).Update(context.TODO(), ns1pod1, metav1.UpdateOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Consistently(addressSetManager.nbClient, 200*time.Millisecond, 50*time.Millisecond).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{expectedAS}))
+		// no new transactions should happen since IPs don't change
+		gomega.Expect(countingNBClient.transactCount.Load()).To(gomega.Equal(int64(2)))
 	})
 
 	ginkgo.It("CleanupForController removes controller entries", func() {
