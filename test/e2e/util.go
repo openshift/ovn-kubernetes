@@ -1694,6 +1694,12 @@ func getFirstIPStringOfFamily(family utilnet.IPFamily, ips []string) string {
 	return ""
 }
 
+// GetFirstIPStringOfFamily returns the first IP string from ips that matches the
+// given IP family, or an empty string if none match.
+func GetFirstIPStringOfFamily(family utilnet.IPFamily, ips []string) string {
+	return getFirstIPStringOfFamily(family, ips)
+}
+
 // This is a replacement for e2epod.DeletePodWithWait(), which does not handle pods that
 // may be automatically restarted (https://issues.k8s.io/126785)
 func deletePodWithWait(ctx context.Context, c kubernetes.Interface, pod *v1.Pod) error {
@@ -2066,4 +2072,38 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		}
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
+}
+
+// =============================================================================
+// Exported wrappers for openshift/test/evpn.go
+// =============================================================================
+
+// GetSupportedIPFamiliesSlice returns the IP families (IPv4, IPv6) supported by the cluster.
+func GetSupportedIPFamiliesSlice(cs kubernetes.Interface) []utilnet.IPFamily {
+	return getSupportedIPFamiliesSlice(cs)
+}
+
+// IsControlPlaneNode returns true if the given node has a control-plane role label.
+func IsControlPlaneNode(node v1.Node) bool {
+	return isControlPlaneNode(node)
+}
+
+// IsLocalGWModeEnabled returns true when OVN-K is configured with local gateway mode.
+func IsLocalGWModeEnabled() bool {
+	return isLocalGWModeEnabled()
+}
+
+// WaitForNodeReadyState polls until the node reaches the desired Ready state.
+func WaitForNodeReadyState(f *framework.Framework, nodeName string, timeout time.Duration, desiredReady bool) {
+	waitForNodeReadyState(f, nodeName, timeout, desiredReady)
+}
+
+// NewTestFramework creates a wrapped test framework (with OVN-specific cleanup) for the given basename.
+func NewTestFramework(basename string) *framework.Framework {
+	return wrappedTestFramework(basename)
+}
+
+// DeletePodWithWaitByName deletes the named pod in the given namespace and waits for it to disappear.
+func DeletePodWithWaitByName(ctx context.Context, c kubernetes.Interface, podName, namespace string) error {
+	return deletePodWithWaitByName(ctx, c, podName, namespace)
 }

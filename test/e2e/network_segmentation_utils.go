@@ -23,3 +23,9 @@ func getPodAnnotationIPsForPrimaryNetworkByIPFamily(k8sClient kubernetes.Interfa
 	}
 	return ipnet.IP.String(), nil
 }
+
+// GetPodAnnotationIPsForPrimaryNetworkByIPFamily returns the v4 or v6 IP for a pod
+// on a primary user-defined network, extracted from the pod's network annotations.
+func GetPodAnnotationIPsForPrimaryNetworkByIPFamily(k8sClient kubernetes.Interface, podNamespace, podName, networkName string, family net.IPFamily) (string, error) {
+	return getPodAnnotationIPsForPrimaryNetworkByIPFamily(k8sClient, podNamespace, podName, networkName, family)
+}

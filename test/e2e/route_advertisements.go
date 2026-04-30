@@ -1944,7 +1944,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				),
 			).To(gomega.Succeed())
 			servers = append(servers, agnhostName)
-		case cudnAdvertisedEVPN, cudnAdvertisedEVPNRandomVTEP:
+		case cudnAdvertisedEVPN, cudnAdvertisedEVPNRandomVTEP, cudnAdvertisedEVPNShared:
 			ginkgo.By("Running a EVPN network with an agnhost server")
 			ipVRFAgnhostIPv4, ipVRFAgnhostIPv6 := randomIPVRFAgnhostSubnets()
 			ipVRFAgnhostSubnets := []string{ipVRFAgnhostIPv4, ipVRFAgnhostIPv6}
@@ -1954,7 +1954,9 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			if networkType == cudnAdvertisedEVPNRandomVTEP {
 				// Random VTEP subnets: IPs are added to loopback by the test
 				// and discovered by the node-side EVPN controller automatically
-				vtepV4, _ := randomVTEPSubnets()
+				vtepV4, vtepV6 := randomVTEPSubnets()
+				gomega.Expect(vtepV4).NotTo(gomega.BeEmpty())
+				gomega.Expect(vtepV6).NotTo(gomega.BeEmpty())
 				vtepSubnets = []string{vtepV4}
 			} else {
 				// KIND network subnet: node InternalIPs fall within this range,
@@ -1971,8 +1973,10 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			macVRFNetworkName := macVRFAgnhostName
 			ipVRFAgnhostName := networkName + "-ipvrf-agnhost"
 			ipVRFNetworkName := ipVRFAgnhostName
-			gomega.Expect(
-				runEVPNNetworkAndServers(
+			var err error
+			if networkType == cudnAdvertisedEVPNShared {
+				// Shared FRRConfiguration: name/label must match RouteAdvertisements (network: testName).
+				_, err = runEVPNNetworkAndServers(
 					f,
 					ictx,
 					networkName,
@@ -1985,8 +1989,25 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 					macVRFNetworkName,
 					ipVRFAgnhostName,
 					ipVRFNetworkName,
-				),
-			).To(gomega.Succeed())
+					testName,
+				)
+			} else {
+				_, err = runEVPNNetworkAndServers(
+					f,
+					ictx,
+					networkName,
+					ipFamilySet,
+					networkSpec,
+					ipVRFAgnhostSubnets,
+					vtepSubnets,
+					bgpASN,
+					macVRFAgnhostName,
+					macVRFNetworkName,
+					ipVRFAgnhostName,
+					ipVRFNetworkName,
+				)
+			}
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if networkSpec.EVPN.MACVRF != nil {
 				servers = append(servers, macVRFAgnhostName)
 			}
@@ -2722,6 +2743,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		},
 		networksToTest,
 	)
+
 })
 
 // routeAdvertisementsReadyFunc returns a function that checks for the
@@ -3001,6 +3023,7 @@ const (
 	cudnAdvertisedVRFLite        networkType = "CUDN_ADVERTISED_VRFLITE"
 	cudnAdvertisedEVPN           networkType = "CUDN_ADVERTISED_EVPN"
 	cudnAdvertisedEVPNRandomVTEP networkType = "CUDN_ADVERTISED_EVPN_RANDOM_VTEP"
+	cudnAdvertisedEVPNShared     networkType = "CUDN_ADVERTISED_EVPN_SHARED"
 )
 
 // createNamespaceWithPrimaryNetworkOfType helper function configures a
@@ -3027,6 +3050,10 @@ func createNamespaceWithPrimaryNetworkOfType(
 		targetVRF = networkName
 		networkLabels = map[string]string{"advertise": networkName}
 		frrConfigurationLabels = map[string]string{"network": networkName}
+	case cudnAdvertisedEVPNShared:
+		targetVRF = networkName
+		networkLabels = map[string]string{"advertise": networkName}
+		frrConfigurationLabels = map[string]string{"network": testName}
 	}
 
 	nsLabels := map[string]string{

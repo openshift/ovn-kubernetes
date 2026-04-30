@@ -30,10 +30,17 @@ type ClusterProvider interface {
 	// tests utilizing conflicting ports. It also allows infra provider implementations to set Nodes
 	// allowed port range and therefore comply with cloud provider firewall rules.
 	GetK8HostPort() uint16 // supported K8 host ports
-	// ShutdownNode shuts down the specified node
+	// ShutdownNode shuts down (powers off) the specified node.
+	// The node stays off until StartNode is called.
+	// Use this when the test needs to keep the node powered off for a period (e.g. to test
+	// behaviour while the node is absent). Use RebootNode for a simple node restart.
 	ShutdownNode(nodeName string) error
-	// StartNode starts the specified node
+	// StartNode powers on a node previously shut down by ShutdownNode.
 	StartNode(nodeName string) error
+	// RebootNode restarts the specified node. The node will automatically come back
+	// without requiring a separate StartNode call. The implementation may use
+	// docker restart (KinD) or systemctl reboot (OpenShift).
+	RebootNode(nodeName string) error
 	// PreloadImages pulls the given images and loads them into the cluster
 	// so that they are available to pods without a runtime pull. Providers
 	// that do not support preloading may implement this as a no-op.

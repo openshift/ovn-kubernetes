@@ -164,6 +164,25 @@ func (o *OpenshiftInfraProvider) StartNode(nodeName string) error {
 	panic("not implemented")
 }
 
+// RebootNode restarts the OpenShift node via `oc debug node/<name> -- chroot /host systemctl reboot`.
+// The node will go NotReady while rebooting and come back Ready automatically —
+// no separate StartNode call is needed.
+//
+// Fail fast if the node cannot be reached (bad name, auth, or oc debug). The
+// actual reboot is fire-and-forget: the session may be killed before clean exit,
+// so non-zero exit from systemctl reboot is logged but not returned.
+func (o *OpenshiftInfraProvider) RebootNode(nodeName string) error {
+	if _, err := o.ExecK8NodeCommand(nodeName, []string{"true"}); err != nil {
+		return fmt.Errorf("failed to validate access to node %q before reboot: %w", nodeName, err)
+	}
+	go func() {
+		if _, err := o.ExecK8NodeCommand(nodeName, []string{"systemctl", "reboot"}); err != nil {
+			framework.Logf("reboot command for node %q returned: %v", nodeName, err)
+		}
+	}()
+	return nil
+}
+
 func (o *OpenshiftInfraProvider) GetDefaultTimeoutContext() *framework.TimeoutContext {
 	timeouts := framework.NewTimeoutContext()
 	timeouts.PodStart = 10 * time.Minute
