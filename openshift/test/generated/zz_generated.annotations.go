@@ -811,7 +811,7 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect OVN-Kubernetes Controller Pod to pod connectivity validation should manage cross-network connectivity through CNC lifecycle": "[Disabled:Unimplemented]",
 
-	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation pod and service connectivity through CNC connectivity types toggling [Feature:NetworkConnect]": "[Disabled:Unimplemented]",
+	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation pod and service connectivity through CNC connectivity types toggling": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation should maintain cross-network service connectivity after service protocol update": "[Disabled:Unimplemented]",
 
