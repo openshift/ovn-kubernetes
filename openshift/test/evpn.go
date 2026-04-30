@@ -189,28 +189,41 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			).To(gomega.Succeed())
 
 			// Each network needs its own VTEP subnet to avoid CIDROverlap.
-			// RandomVTEPSubnets returns (IPv4, IPv6) CIDR strings — validate the family we use.
-			l3VtepV4, _ := e2e.RandomVTEPSubnets()
-			gomega.Expect(l3VtepV4).NotTo(gomega.BeEmpty(), "RandomVTEPSubnets IPv4 for L3 IP-VRF network")
-			l2VtepV4, _ := e2e.RandomVTEPSubnets()
-			gomega.Expect(l2VtepV4).NotTo(gomega.BeEmpty(), "RandomVTEPSubnets IPv4 for L2 MAC-VRF network")
-			l2l3VtepV4, _ := e2e.RandomVTEPSubnets()
-			gomega.Expect(l2l3VtepV4).NotTo(gomega.BeEmpty(), "RandomVTEPSubnets IPv4 for L2+L3 network")
+			// RandomVTEPSubnets returns (IPv4 /24, IPv6 /112). On dual-stack clusters both must be
+			// passed through so the VTEP CR and per-node loopbacks include IPv6; otherwise after a
+			// node reboot EnsureVTEPLoopbackIPs only restores IPv4 and IPv6 EVPN checks time out.
+			l3VtepV4, l3VtepV6 := e2e.RandomVTEPSubnets()
+			l2VtepV4, l2VtepV6 := e2e.RandomVTEPSubnets()
+			l2l3VtepV4, l2l3VtepV6 := e2e.RandomVTEPSubnets()
+
+			vtepSubnetsForCluster := func(v4, v6 string) []string {
+				var s []string
+				if ipFamilySet.Has(utilnet.IPv4) {
+					gomega.Expect(v4).NotTo(gomega.BeEmpty())
+					s = append(s, v4)
+				}
+				if ipFamilySet.Has(utilnet.IPv6) {
+					gomega.Expect(v6).NotTo(gomega.BeEmpty())
+					s = append(s, v6)
+				}
+				gomega.Expect(s).NotTo(gomega.BeEmpty(), "cluster must report at least one supported IP family")
+				return s
+			}
 
 			// --- Network 1: L3 IP-VRF ---
 			l3Name := testBaseName + "l3"
 			l3Spec := e2e.NewL3IPVRFNetworkSpec(ipFamilySet)
-			l3State := setupNetwork(ictx, l3Name, l3Spec, []string{l3VtepV4}, frrVTEPIP)
+			l3State := setupNetwork(ictx, l3Name, l3Spec, vtepSubnetsForCluster(l3VtepV4, l3VtepV6), frrVTEPIP)
 
 			// --- Network 2: L2 MAC-VRF ---
 			l2Name := testBaseName + "l2"
 			l2Spec := e2e.NewL2MACVRFNetworkSpec(ipFamilySet)
-			l2State := setupNetwork(ictx, l2Name, l2Spec, []string{l2VtepV4}, frrVTEPIP)
+			l2State := setupNetwork(ictx, l2Name, l2Spec, vtepSubnetsForCluster(l2VtepV4, l2VtepV6), frrVTEPIP)
 
 			// --- Network 3: L2 MAC-VRF + IP-VRF ---
 			l2l3Name := testBaseName + "ml"
 			l2l3Spec := e2e.NewL2MACVRFIPVRFNetworkSpec(ipFamilySet)
-			l2l3State := setupNetwork(ictx, l2l3Name, l2l3Spec, []string{l2l3VtepV4}, frrVTEPIP)
+			l2l3State := setupNetwork(ictx, l2l3Name, l2l3Spec, vtepSubnetsForCluster(l2l3VtepV4, l2l3VtepV6), frrVTEPIP)
 
 			vpnStates = []vpnTestState{l3State, l2State, l2l3State}
 		})
