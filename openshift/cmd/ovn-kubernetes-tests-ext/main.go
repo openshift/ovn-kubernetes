@@ -43,7 +43,7 @@ const (
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
-// and test labels.
+// and test labels. When ocpInfra is nil (no cluster access), all tests are included.
 func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// Disable specs that are not explicitly assigned a lifecycle
 	if spec.Lifecycle == "" {
@@ -52,6 +52,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// Exclude explicitly disabled tests
 	if strings.Contains(spec.Name, "[Disabled:") {
 		return false
+	}
+
+	// Without cluster access, include all eligible tests
+	if ocpInfra == nil {
+		return true
 	}
 
 	// EVPN tests: only include if EVPN is enabled in the cluster
@@ -97,22 +102,31 @@ func main() {
 		panic(err)
 	}
 
-	// Initialize ocpInfra first so that it can be used by shouldIncludeTest for filtering.
+	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
+	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
-	cfg, err := getKubeConfig()
-	if err != nil {
-		panic(err)
+	cfg, cfgErr := getKubeConfig()
+	var infraErr error
+	if cfgErr == nil {
+		infra, err := ocpinfraprovider.New(cfg)
+		if err != nil {
+			infraErr = err
+		} else {
+			ocpInfra = infra
+			infraprovider.Set(ocpInfra)
+			deploymentconfig.Set(ocpdeploymentconfig.New())
+		}
 	}
-	ocpInfra, err = ocpinfraprovider.New(cfg)
-	if err != nil {
-		panic(err)
-	}
-	infraprovider.Set(ocpInfra)
-	deploymentconfig.Set(ocpdeploymentconfig.New())
 
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
 	specs.AddBeforeAll(func() {
+		if cfgErr != nil {
+			panic(cfgErr)
+		}
+		if infraErr != nil {
+			panic(infraErr)
+		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
 		}
