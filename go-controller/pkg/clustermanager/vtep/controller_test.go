@@ -6,6 +6,7 @@ package vtep
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/record"
 
@@ -85,19 +87,22 @@ func getVTEPFinalizers(client *vtepfake.Clientset, vtepName string) ([]string, e
 // newNodeWithVTEPAnnotation creates a node with the k8s.ovn.org/vteps annotation.
 // vtepIPs is a map of VTEP name to list of IPs discovered on this node.
 func newNodeWithVTEPAnnotation(name string, vtepIPs map[string][]string) *corev1.Node {
-	vteps := make(map[string]util.VTEPNodeAnnotation, len(vtepIPs))
-	for vtepName, ips := range vtepIPs {
-		vteps[vtepName] = util.VTEPNodeAnnotation{IPs: ips}
-	}
-	annotation, _ := json.Marshal(vteps)
-	return &corev1.Node{
+	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
-			Annotations: map[string]string{
-				util.OVNNodeVTEPs: string(annotation),
-			},
 		},
 	}
+	if len(vtepIPs) > 0 {
+		vteps := make(map[string]util.VTEPNodeAnnotation, len(vtepIPs))
+		for vtepName, ips := range vtepIPs {
+			vteps[vtepName] = util.VTEPNodeAnnotation{IPs: ips}
+		}
+		annotation, _ := json.Marshal(vteps)
+		node.Annotations = map[string]string{
+			util.OVNNodeVTEPs: string(annotation),
+		}
+	}
+	return node
 }
 
 func getVTEPCondition(client *vtepfake.Clientset, vtepName, conditionType string) (*metav1.Condition, error) {
@@ -167,153 +172,264 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 		}
 	})
 
-	ginkgo.Context("Managed mode gate", func() {
-		ginkgo.It("sets Accepted=False for a VTEP with mode Managed", func() {
+	ginkgo.Context("Managed mode", func() {
+		ginkgo.It("allocates IPs and writes annotations for all nodes", func() {
 			vtep := newVTEP("managed-vtep", vtepv1.VTEPModeManaged, "100.64.0.0/24")
-			start(vtep)
+			node1 := newNodeWithVTEPAnnotation("node-1", nil)
+			node2 := newNodeWithVTEPAnnotation("node-2", nil)
+			start(vtep, node1, node2)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
 				return getVTEPCondition(fakeVTEP, "managed-vtep", conditionTypeAccepted)
 			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
-				gomega.HaveField("Status", metav1.ConditionFalse),
-				gomega.HaveField("Reason", gomega.Equal("ManagedModeNotSupported")),
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal("Allocated")),
 			))
 
-			gomega.Eventually(fakeRecorder.Events).Should(gomega.Receive(
-				gomega.ContainSubstring("ManagedModeNotSupported"),
-			))
+			for _, nodeName := range []string{"node-1", "node-2"} {
+				name := nodeName
+				gomega.Eventually(func() (map[string]util.VTEPNodeAnnotation, error) {
+					n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), name, metav1.GetOptions{})
+					if err != nil {
+						return nil, err
+					}
+					return util.ParseNodeVTEPs(n)
+				}).WithTimeout(5 * time.Second).Should(gomega.HaveKey("managed-vtep"))
+			}
 		})
 
-		ginkgo.It("sets Accepted=True for a VTEP with mode Unmanaged", func() {
-			vtep := newVTEP("unmanaged-vtep", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
+		ginkgo.It("sets Accepted=True with no nodes", func() {
+			vtep := newVTEP("managed-no-nodes", vtepv1.VTEPModeManaged, "100.64.0.0/24")
 			start(vtep)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "unmanaged-vtep", conditionTypeAccepted)
+				return getVTEPCondition(fakeVTEP, "managed-no-nodes", conditionTypeAccepted)
 			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
 				gomega.HaveField("Status", metav1.ConditionTrue),
 				gomega.HaveField("Reason", gomega.Equal("Allocated")),
 			))
 		})
 
-		ginkgo.It("sets Accepted=False when mode changes from Unmanaged to Managed", func() {
-			vtep := newVTEP("mode-change-vtep", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
-			start(vtep)
+		ginkgo.It("allocates IPs from multiple CIDRs", func() {
+			// /30 gives 4 IPs; 5 nodes exhaust the first /30 and one node must
+			// overflow into the second /30. We can't predict which node gets
+			// which IP (allocation order is not guaranteed), so we verify that
+			// at least one node's IP comes from the second CIDR.
+			node1 := newNodeWithVTEPAnnotation("node-1", nil)
+			node2 := newNodeWithVTEPAnnotation("node-2", nil)
+			node3 := newNodeWithVTEPAnnotation("node-3", nil)
+			node4 := newNodeWithVTEPAnnotation("node-4", nil)
+			node5 := newNodeWithVTEPAnnotation("node-5", nil)
+			vtep := newVTEP("managed-multi-cidr", vtepv1.VTEPModeManaged, "10.0.0.0/30", "10.0.1.0/30")
+			start(vtep, node1, node2, node3, node4, node5)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "mode-change-vtep", conditionTypeAccepted)
+				return getVTEPCondition(fakeVTEP, "managed-multi-cidr", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			// All 5 nodes must have an annotation entry.
+			for _, nodeName := range []string{"node-1", "node-2", "node-3", "node-4", "node-5"} {
+				name := nodeName
+				gomega.Eventually(func() (map[string]util.VTEPNodeAnnotation, error) {
+					n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), name, metav1.GetOptions{})
+					if err != nil {
+						return nil, err
+					}
+					return util.ParseNodeVTEPs(n)
+				}).WithTimeout(5 * time.Second).Should(gomega.HaveKey("managed-multi-cidr"))
+			}
+
+			// At least one node must have an IP from the second CIDR (10.0.1.x),
+			// proving overflow into the second range occurred.
+			gomega.Eventually(func() bool {
+				for _, nodeName := range []string{"node-1", "node-2", "node-3", "node-4", "node-5"} {
+					n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+					if err != nil {
+						continue
+					}
+					vteps, err := util.ParseNodeVTEPs(n)
+					if err != nil || len(vteps["managed-multi-cidr"].IPs) == 0 {
+						continue
+					}
+					if strings.HasPrefix(vteps["managed-multi-cidr"].IPs[0], "10.0.1.") {
+						return true
+					}
+				}
+				return false
+			}).WithTimeout(5 * time.Second).Should(gomega.BeTrue())
+		})
+
+		ginkgo.It("allocates independent IPs to nodes across multiple managed VTEPs", func() {
+			// Two managed VTEPs with non-overlapping CIDRs; both should allocate
+			// to the same set of nodes independently.
+			vtepA := newVTEP("mvtep-a", vtepv1.VTEPModeManaged, "10.0.0.0/24")
+			vtepB := newVTEP("mvtep-b", vtepv1.VTEPModeManaged, "10.1.0.0/24")
+			node1 := newNodeWithVTEPAnnotation("node-1", nil)
+			node2 := newNodeWithVTEPAnnotation("node-2", nil)
+			start(vtepA, vtepB, node1, node2)
+
+			for _, vtepName := range []string{"mvtep-a", "mvtep-b"} {
+				name := vtepName
+				gomega.Eventually(func() (*metav1.Condition, error) {
+					return getVTEPCondition(fakeVTEP, name, conditionTypeAccepted)
+				}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+					gomega.HaveField("Status", metav1.ConditionTrue),
+					gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+				))
+			}
+
+			// Every node must have annotation entries for both VTEPs, with IPs
+			// from their respective CIDRs.
+			for _, nodeName := range []string{"node-1", "node-2"} {
+				nName := nodeName
+				gomega.Eventually(func() (map[string]util.VTEPNodeAnnotation, error) {
+					n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nName, metav1.GetOptions{})
+					if err != nil {
+						return nil, err
+					}
+					return util.ParseNodeVTEPs(n)
+				}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+					gomega.HaveKey("mvtep-a"),
+					gomega.HaveKey("mvtep-b"),
+				))
+			}
+
+			// Verify IPs are from the correct CIDRs and distinct across nodes.
+			ips := map[string]map[string]string{} // vtepName -> nodeName -> IP
+			for _, nodeName := range []string{"node-1", "node-2"} {
+				nName := nodeName
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nName, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				vteps, err := util.ParseNodeVTEPs(n)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				for _, vtepName := range []string{"mvtep-a", "mvtep-b"} {
+					if ips[vtepName] == nil {
+						ips[vtepName] = map[string]string{}
+					}
+					ips[vtepName][nName] = vteps[vtepName].IPs[0]
+				}
+			}
+			gomega.Expect(ips["mvtep-a"]["node-1"]).To(gomega.HavePrefix("10.0.0."))
+			gomega.Expect(ips["mvtep-a"]["node-2"]).To(gomega.HavePrefix("10.0.0."))
+			gomega.Expect(ips["mvtep-b"]["node-1"]).To(gomega.HavePrefix("10.1.0."))
+			gomega.Expect(ips["mvtep-b"]["node-2"]).To(gomega.HavePrefix("10.1.0."))
+			gomega.Expect(ips["mvtep-a"]["node-1"]).NotTo(gomega.Equal(ips["mvtep-a"]["node-2"]))
+			gomega.Expect(ips["mvtep-b"]["node-1"]).NotTo(gomega.Equal(ips["mvtep-b"]["node-2"]))
+		})
+
+		ginkgo.It("allocates an IP for a node that joins after startup", func() {
+			vtep := newVTEP("managed-late-node", vtepv1.VTEPModeManaged, "100.64.0.0/24")
+			node1 := newNodeWithVTEPAnnotation("node-1", nil)
+			start(vtep, node1)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "managed-late-node", conditionTypeAccepted)
 			}).WithTimeout(5 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
 
-			vtep, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "mode-change-vtep", metav1.GetOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			vtep.Spec.Mode = vtepv1.VTEPModeManaged
-			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), vtep, metav1.UpdateOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "mode-change-vtep", conditionTypeAccepted)
-			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
-				gomega.HaveField("Status", metav1.ConditionFalse),
-				gomega.HaveField("Reason", gomega.Equal("ManagedModeNotSupported")),
-			))
-
-			gomega.Eventually(fakeRecorder.Events).Should(gomega.Receive(
-				gomega.ContainSubstring("ManagedModeNotSupported"),
-			))
-		})
-
-		ginkgo.It("sets Accepted=True when mode changes from Managed to Unmanaged", func() {
-			vtep := newVTEP("mode-recover-vtep", vtepv1.VTEPModeManaged, "100.64.0.0/24")
-			start(vtep)
-
-			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "mode-recover-vtep", conditionTypeAccepted)
-			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
-				gomega.HaveField("Status", metav1.ConditionFalse),
-				gomega.HaveField("Reason", gomega.Equal("ManagedModeNotSupported")),
-			))
-
-			vtep, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "mode-recover-vtep", metav1.GetOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			vtep.Spec.Mode = vtepv1.VTEPModeUnmanaged
-			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), vtep, metav1.UpdateOptions{})
+			// A new node joins after the controller is already running.
+			node2 := newNodeWithVTEPAnnotation("node-2", nil)
+			_, err := fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node2, metav1.CreateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "mode-recover-vtep", conditionTypeAccepted)
-			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
-				gomega.HaveField("Status", metav1.ConditionTrue),
-				gomega.HaveField("Reason", gomega.Equal("Allocated")),
-			))
+			gomega.Eventually(func() (map[string]util.VTEPNodeAnnotation, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-2", metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return util.ParseNodeVTEPs(n)
+			}).WithTimeout(5 * time.Second).Should(gomega.HaveKey("managed-late-node"))
 		})
 	})
 
 	ginkgo.Context("Finalizer management", func() {
-		ginkgo.It("adds finalizer to a new VTEP", func() {
-			vtep := newVTEP("finalize-vtep", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
-			start(vtep)
+		ginkgo.DescribeTable("adds finalizer to a new VTEP",
+			func(mode vtepv1.VTEPMode) {
+				vtep := newVTEP("finalize-vtep", mode, "100.64.0.0/24")
+				start(vtep)
+				gomega.Eventually(func() ([]string, error) {
+					return getVTEPFinalizers(fakeVTEP, "finalize-vtep")
+				}).WithTimeout(5 * time.Second).Should(gomega.ContainElement(finalizerVTEP))
+			},
+			ginkgo.Entry("unmanaged", vtepv1.VTEPModeUnmanaged),
+			ginkgo.Entry("managed", vtepv1.VTEPModeManaged),
+		)
 
-			gomega.Eventually(func() ([]string, error) {
-				return getVTEPFinalizers(fakeVTEP, "finalize-vtep")
-			}).WithTimeout(5 * time.Second).Should(gomega.ContainElement(finalizerVTEP))
-		})
+		ginkgo.DescribeTable("removes finalizer and allows deletion when no CUDNs reference the VTEP",
+			func(mode vtepv1.VTEPMode, node *corev1.Node) {
+				vtep := newVTEP("delete-vtep", mode, "100.64.0.0/24")
+				if node != nil {
+					start(vtep, node)
+				} else {
+					start(vtep)
+				}
 
-		ginkgo.It("removes finalizer and allows deletion when no CUDNs reference the VTEP", func() {
-			vtep := newVTEP("delete-vtep", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
-			start(vtep)
+				gomega.Eventually(func() ([]string, error) {
+					return getVTEPFinalizers(fakeVTEP, "delete-vtep")
+				}).WithTimeout(5 * time.Second).Should(gomega.ContainElement(finalizerVTEP))
 
-			gomega.Eventually(func() ([]string, error) {
-				return getVTEPFinalizers(fakeVTEP, "delete-vtep")
-			}).WithTimeout(5 * time.Second).Should(gomega.ContainElement(finalizerVTEP))
+				v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "delete-vtep", metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				now := metav1.Now()
+				v.DeletionTimestamp = &now
+				_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "delete-vtep", metav1.GetOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			now := metav1.Now()
-			v.DeletionTimestamp = &now
-			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(func() ([]string, error) {
+					return getVTEPFinalizers(fakeVTEP, "delete-vtep")
+				}).WithTimeout(5 * time.Second).ShouldNot(gomega.ContainElement(finalizerVTEP))
+			},
+			ginkgo.Entry("unmanaged", vtepv1.VTEPModeUnmanaged, (*corev1.Node)(nil)),
+			// managed needs a node so the allocator can initialise before deletion
+			ginkgo.Entry("managed", vtepv1.VTEPModeManaged, newNodeWithVTEPAnnotation("node-1", nil)),
+		)
 
-			gomega.Eventually(func() ([]string, error) {
-				return getVTEPFinalizers(fakeVTEP, "delete-vtep")
-			}).WithTimeout(5 * time.Second).ShouldNot(gomega.ContainElement(finalizerVTEP))
-		})
+		ginkgo.DescribeTable("blocks deletion when a CUDN references the VTEP",
+			func(mode vtepv1.VTEPMode, node *corev1.Node) {
+				cudn := newCUDNWithEVPN("test-cudn", "blocked-vtep")
+				vtep := newVTEP("blocked-vtep", mode, "100.64.0.0/24")
+				if node != nil {
+					start(vtep, cudn, node)
+				} else {
+					start(vtep, cudn)
+				}
 
-		ginkgo.It("blocks deletion when a CUDN references the VTEP", func() {
-			cudn := newCUDNWithEVPN("test-cudn", "blocked-vtep")
-			vtep := newVTEP("blocked-vtep", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
-			start(vtep, cudn)
+				gomega.Eventually(func() ([]string, error) {
+					return getVTEPFinalizers(fakeVTEP, "blocked-vtep")
+				}).WithTimeout(5 * time.Second).Should(gomega.ContainElement(finalizerVTEP))
 
-			gomega.Eventually(func() ([]string, error) {
-				return getVTEPFinalizers(fakeVTEP, "blocked-vtep")
-			}).WithTimeout(5 * time.Second).Should(gomega.ContainElement(finalizerVTEP))
+				v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "blocked-vtep", metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				now := metav1.Now()
+				v.DeletionTimestamp = &now
+				_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "blocked-vtep", metav1.GetOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			now := metav1.Now()
-			v.DeletionTimestamp = &now
-			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Consistently(func() ([]string, error) {
+					return getVTEPFinalizers(fakeVTEP, "blocked-vtep")
+				}).WithTimeout(3 * time.Second).Should(gomega.ContainElement(finalizerVTEP))
 
-			gomega.Consistently(func() ([]string, error) {
-				return getVTEPFinalizers(fakeVTEP, "blocked-vtep")
-			}).WithTimeout(3 * time.Second).Should(gomega.ContainElement(finalizerVTEP))
+				// Delete the CUDN — the VTEP should now be garbage-collected
+				err = fakeClientset.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Delete(
+					context.Background(), "test-cudn", metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// Delete the CUDN — the VTEP should now be garbage-collected
-			err = fakeClientset.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Delete(
-				context.Background(), "test-cudn", metav1.DeleteOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			gomega.Eventually(func() bool {
-				_, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "blocked-vtep", metav1.GetOptions{})
-				return apierrors.IsNotFound(err)
-			}).WithTimeout(5 * time.Second).Should(gomega.BeTrue())
-		})
+				gomega.Eventually(func() bool {
+					_, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "blocked-vtep", metav1.GetOptions{})
+					return apierrors.IsNotFound(err)
+				}).WithTimeout(5 * time.Second).Should(gomega.BeTrue())
+			},
+			ginkgo.Entry("unmanaged", vtepv1.VTEPModeUnmanaged, (*corev1.Node)(nil)),
+			ginkgo.Entry("managed", vtepv1.VTEPModeManaged, newNodeWithVTEPAnnotation("node-1", nil)),
+		)
 	})
 
 	ginkgo.Context("Cross-VTEP CIDR overlap validation", func() {
 		ginkgo.It("sets Accepted=True when VTEPs have non-overlapping CIDRs", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/24")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.1.0.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.1.0.0/24")
 			start(vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -327,7 +443,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("sets Accepted=False on both VTEPs when CIDRs overlap", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/16")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.0.1.0/24")
 			start(vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -349,7 +465,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("converges without infinite re-queue loop when VTEPs overlap", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/16")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.0.1.0/24")
 			start(vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -373,7 +489,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("emits a CIDROverlap warning event when VTEPs overlap", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/16")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.0.1.0/24")
 			start(vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -387,7 +503,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("sets Accepted=False on all three VTEPs when CIDRs overlap", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/8")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.1.0.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.1.0.0/24")
 			vtepC := newVTEP("vtep-c", vtepv1.VTEPModeUnmanaged, "10.2.0.0/24")
 			start(vtepA, vtepB, vtepC)
 
@@ -402,8 +518,8 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 		})
 
 		ginkgo.It("updates conflict message when a new overlapping VTEP joins an existing conflict", func() {
-			// vtep-b and vtep-c overlap via vtep-b's /8
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.0.0/8")
+			// vtep-b (managed) and vtep-c overlap via vtep-b's /8
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.0.0.0/8")
 			vtepC := newVTEP("vtep-c", vtepv1.VTEPModeUnmanaged, "10.2.0.0/24")
 			start(vtepB, vtepC)
 
@@ -417,7 +533,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 				gomega.HaveField("Message", gomega.Not(gomega.ContainSubstring("vtep-a"))),
 			))
 
-			// Create vtep-a which also overlaps with vtep-b
+			// Create vtep-a (unmanaged) which also overlaps with vtep-b
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.1.0.0/24")
 			_, err := fakeVTEP.K8sV1().VTEPs().Create(context.Background(), vtepA, metav1.CreateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -446,8 +562,8 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
 			}).WithTimeout(5 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
 
-			// Create an overlapping VTEP
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
+			// Create an overlapping managed VTEP
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.0.1.0/24")
 			_, err := fakeVTEP.K8sV1().VTEPs().Create(context.Background(), vtepB, metav1.CreateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -463,7 +579,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("sets Accepted=False on both when a mask expansion causes overlap", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/24")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.0.1.0/24")
 			start(vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -493,7 +609,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("sets Accepted=False on both when a newly appended CIDR causes overlap", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/24")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.1.0.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.1.0.0/24")
 			start(vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -523,7 +639,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("clears Accepted=False when overlapping CIDR is removed from the list", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/24", "10.1.0.0/16")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.1.0.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.1.0.0/24")
 			start(vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -558,7 +674,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("clears Accepted=False when user edits CIDRs to remove overlap", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/16")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.0.1.0/24")
 			start(vtepA, vtepB)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -593,7 +709,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 		ginkgo.It("clears Accepted=False only when all conflicts are resolved", func() {
 			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/8")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.1.0.0/24")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeManaged, "10.1.0.0/24")
 			vtepC := newVTEP("vtep-c", vtepv1.VTEPModeUnmanaged, "10.2.0.0/24")
 			start(vtepA, vtepB, vtepC)
 
@@ -637,7 +753,19 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 		})
 	})
 
-	ginkgo.Context("Node VTEP IP validation", func() {
+	ginkgo.Context("Unmanaged mode", func() {
+		ginkgo.It("sets Accepted=True with no nodes", func() {
+			vtep := newVTEP("unmanaged-no-nodes", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
+			start(vtep)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "unmanaged-no-nodes", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+
 		ginkgo.It("sets Accepted=True when a node has a VTEP IP in the annotation", func() {
 			node := newNodeWithVTEPAnnotation("node-1", map[string][]string{"vtep-discover": {"100.64.0.5"}})
 			vtep := newVTEP("vtep-discover", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
@@ -699,96 +827,6 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			gomega.Eventually(fakeRecorder.Events).Should(gomega.Receive(
 				gomega.ContainSubstring(reasonAllocationFailed),
 			))
-		})
-
-		ginkgo.It("does not fire duplicate events when failure state is unchanged", func() {
-			// Test both AllocationFailed and CIDROverlap dedup in a single scenario:
-			// vtep-a and vtep-b overlap, and vtep-a also has a missing node annotation.
-			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-b": {"10.0.0.1"}})
-			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/16")
-			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
-			start(vtepA, vtepB, node)
-
-			// vtep-a should be Accepted=False due to CIDR overlap (checked before node validation)
-			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
-			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
-				gomega.HaveField("Status", metav1.ConditionFalse),
-				gomega.HaveField("Reason", gomega.Equal(reasonCIDROverlap)),
-			))
-
-			// vtep-b should also be Accepted=False due to CIDR overlap
-			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "vtep-b", conditionTypeAccepted)
-			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
-				gomega.HaveField("Status", metav1.ConditionFalse),
-				gomega.HaveField("Reason", gomega.Equal(reasonCIDROverlap)),
-			))
-
-			// Drain all events from initial convergence. We expect one
-			// CIDROverlap event per VTEP (2 total), but a 3rd is possible:
-			//  1. vtep-a reconciles first → overlap → event #1 → patches status
-			//  2. vtep-b reconciles → overlap → event #2 → patches status.
-			//     If the informer cache hasn't synced vtep-a's status yet,
-			//     validateCIDRsAcrossVTEPs re-queues vtep-a.
-			//  3. vtep-a re-reconciles → lister.Get still returns the stale
-			//     object (no conditions) → dedup guard sees existingCond==nil
-			//     → fires event #3 (duplicate).
-			// This is a benign race between the worker and the async informer
-			// cache sync. In steady state the guard works correctly.
-			gomega.Eventually(func() bool {
-				select {
-				case <-fakeRecorder.Events:
-					return false
-				default:
-					return true
-				}
-			}).WithTimeout(3 * time.Second).Should(gomega.BeTrue())
-
-			// Re-reconcile both — no new events since the lister is now in sync
-			controller.vtepController.Reconcile("vtep-a")
-			controller.vtepController.Reconcile("vtep-b")
-			gomega.Consistently(fakeRecorder.Events).WithTimeout(2 * time.Second).ShouldNot(gomega.Receive())
-
-			// Resolve the overlap by changing vtep-a's CIDRs to non-overlapping
-			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "vtep-a", metav1.GetOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			v.Spec.CIDRs = []vtepv1.CIDR{"192.168.0.0/16"}
-			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			// vtep-b should recover to Accepted=True now that the overlap is gone
-			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "vtep-b", conditionTypeAccepted)
-			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
-				gomega.HaveField("Status", metav1.ConditionTrue),
-				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
-			))
-
-			// vtep-a should now fail with AllocationFailed (node has no entry for it)
-			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
-			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
-				gomega.HaveField("Status", metav1.ConditionFalse),
-				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
-			))
-
-			// Drain AllocationFailed events. We expect 1, but a 2nd is
-			// possible: vtep-b's re-queue (from the else-if conflict-resolved
-			// path) may re-queue vtep-a while the lister still shows the old
-			// CIDROverlap condition, causing the dedup guard to miss the match.
-			gomega.Eventually(func() bool {
-				select {
-				case <-fakeRecorder.Events:
-					return false
-				default:
-					return true
-				}
-			}).WithTimeout(3 * time.Second).Should(gomega.BeTrue())
-
-			// Re-reconcile vtep-a — no new event since AllocationFailed state is unchanged
-			controller.vtepController.Reconcile("vtep-a")
-			gomega.Consistently(fakeRecorder.Events).WithTimeout(2 * time.Second).ShouldNot(gomega.Receive())
 		})
 
 		ginkgo.It("sets Accepted=True when multiple nodes have VTEP IPs", func() {
@@ -879,15 +917,97 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 		})
 	})
 
-	ginkgo.Context("IPv6 CIDR rejection for EVPN VTEPs", func() {
-		ginkgo.It("sets Accepted=False when an EVPN CUDN references a VTEP with IPv6 CIDRs", func() {
-			vtep := newVTEP("vtep-v6", vtepv1.VTEPModeUnmanaged, "fd00::/64")
-			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6": {"fd00::1"}})
-			cudn := newCUDNWithEVPN("cudn-evpn-v6", "vtep-v6")
+	ginkgo.Context("Event deduplication", func() {
+		ginkgo.It("does not fire duplicate CIDROverlap or AllocationFailed events when failure state is unchanged", func() {
+			// vtep-a and vtep-b overlap; vtep-a also has a missing node annotation.
+			// Tests dedup across both CIDROverlap and AllocationFailed reasons.
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-b": {"10.0.0.1"}})
+			vtepA := newVTEP("vtep-a", vtepv1.VTEPModeUnmanaged, "10.0.0.0/16")
+			vtepB := newVTEP("vtep-b", vtepv1.VTEPModeUnmanaged, "10.0.1.0/24")
+			start(vtepA, vtepB, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonCIDROverlap)),
+			))
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-b", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonCIDROverlap)),
+			))
+
+			// Drain all events from initial convergence. We expect one
+			// CIDROverlap event per VTEP (2 total), but a 3rd is possible:
+			//  1. vtep-a reconciles first → overlap → event #1 → patches status
+			//  2. vtep-b reconciles → overlap → event #2 → patches status.
+			//     If the informer cache hasn't synced vtep-a's status yet,
+			//     validateCIDRsAcrossVTEPs re-queues vtep-a.
+			//  3. vtep-a re-reconciles → lister.Get still returns the stale
+			//     object (no conditions) → dedup guard sees existingCond==nil
+			//     → fires event #3 (duplicate).
+			// This is a benign race between the worker and the async informer
+			// cache sync. In steady state the guard works correctly.
+			gomega.Eventually(func() bool {
+				select {
+				case <-fakeRecorder.Events:
+					return false
+				default:
+					return true
+				}
+			}).WithTimeout(3 * time.Second).Should(gomega.BeTrue())
+
+			// Re-reconcile both — no new events since the lister is now in sync
+			controller.vtepController.Reconcile("vtep-a")
+			controller.vtepController.Reconcile("vtep-b")
+			gomega.Consistently(fakeRecorder.Events).WithTimeout(2 * time.Second).ShouldNot(gomega.Receive())
+
+			// Resolve the overlap by changing vtep-a's CIDRs to non-overlapping
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "vtep-a", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.CIDRs = []vtepv1.CIDR{"192.168.0.0/16"}
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// vtep-b recovers, vtep-a now fails with AllocationFailed
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-b", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-a", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+			))
+
+			// Drain AllocationFailed events. We expect 1, but a 2nd is
+			// possible: vtep-b's re-queue (from the else-if conflict-resolved
+			// path) may re-queue vtep-a while the lister still shows the old
+			// CIDROverlap condition, causing the dedup guard to miss the match.
+			gomega.Eventually(func() bool {
+				select {
+				case <-fakeRecorder.Events:
+					return false
+				default:
+					return true
+				}
+			}).WithTimeout(3 * time.Second).Should(gomega.BeTrue())
+
+			// Re-reconcile vtep-a — no new event since AllocationFailed state is unchanged
+			controller.vtepController.Reconcile("vtep-a")
+			gomega.Consistently(fakeRecorder.Events).WithTimeout(2 * time.Second).ShouldNot(gomega.Receive())
+		})
+
+		ginkgo.It("does not fire duplicate IPv6NotSupported events when failure state is unchanged", func() {
+			vtep := newVTEP("vtep-v6-dedup", vtepv1.VTEPModeUnmanaged, "fd00::/64")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6-dedup": {"fd00::1"}})
+			cudn := newCUDNWithEVPN("cudn-evpn-v6-dedup", "vtep-v6-dedup")
 			start(vtep, node, cudn)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
-				return getVTEPCondition(fakeVTEP, "vtep-v6", conditionTypeAccepted)
+				return getVTEPCondition(fakeVTEP, "vtep-v6-dedup", conditionTypeAccepted)
 			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
 				gomega.HaveField("Status", metav1.ConditionFalse),
 				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
@@ -907,13 +1027,45 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 				}
 			}).WithTimeout(3 * time.Second).Should(gomega.BeTrue())
 
-			controller.vtepController.Reconcile("vtep-v6")
+			controller.vtepController.Reconcile("vtep-v6-dedup")
 			gomega.Consistently(fakeRecorder.Events).WithTimeout(2 * time.Second).ShouldNot(gomega.Receive())
 		})
+	})
 
-		ginkgo.It("sets Accepted=True when a VTEP has only IPv4 CIDRs and is referenced by an EVPN CUDN", func() {
-			vtep := newVTEP("vtep-v4", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
-			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v4": {"100.64.0.1"}})
+	ginkgo.Context("IPv6 CIDR rejection for EVPN VTEPs", func() {
+		ginkgo.It("sets Accepted=False when an EVPN CUDN references an unmanaged VTEP with IPv6 CIDRs", func() {
+			vtep := newVTEP("vtep-v6", vtepv1.VTEPModeUnmanaged, "fd00::/64")
+			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6": {"fd00::1"}})
+			cudn := newCUDNWithEVPN("cudn-evpn-v6", "vtep-v6")
+			start(vtep, node, cudn)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v6", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
+			))
+		})
+
+		ginkgo.It("sets Accepted=False when an EVPN CUDN references a managed VTEP with IPv6 CIDRs", func() {
+			// IPv6 is rejected regardless of mode; CM still won't allocate.
+			vtep := newVTEP("vtep-v6-managed", vtepv1.VTEPModeManaged, "fd00::/120")
+			node := newNodeWithVTEPAnnotation("node1", nil)
+			cudn := newCUDNWithEVPN("cudn-evpn-v6-managed", "vtep-v6-managed")
+			start(vtep, node, cudn)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-v6-managed", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonEVPNIPv6NotSupported)),
+			))
+		})
+
+		// managed: IPv4-only VTEP with an EVPN CUDN is accepted
+		ginkgo.It("sets Accepted=True when a managed VTEP has only IPv4 CIDRs and is referenced by an EVPN CUDN", func() {
+			vtep := newVTEP("vtep-v4", vtepv1.VTEPModeManaged, "100.64.0.0/24")
+			node := newNodeWithVTEPAnnotation("node1", nil)
 			cudn := newCUDNWithEVPN("cudn-evpn-v4", "vtep-v4")
 			start(vtep, node, cudn)
 
@@ -925,7 +1077,8 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			))
 		})
 
-		ginkgo.It("allows IPv6 CIDRs on VTEPs not referenced by any EVPN CUDN", func() {
+		// unmanaged: IPv6 CIDR without an EVPN CUDN is accepted
+		ginkgo.It("allows IPv6 CIDRs on an unmanaged VTEP not referenced by any EVPN CUDN", func() {
 			vtep := newVTEP("vtep-v6-no-evpn", vtepv1.VTEPModeUnmanaged, "fd00::/64")
 			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6-no-evpn": {"fd00::1"}})
 			start(vtep, node)
@@ -938,9 +1091,10 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			))
 		})
 
-		ginkgo.It("rejects when VTEP has dual-stack CIDRs and is referenced by an EVPN CUDN", func() {
-			vtep := newVTEP("vtep-ds", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24", "fd00::/64")
-			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-ds": {"100.64.0.1", "fd00::1"}})
+		// managed: dual-stack VTEP with an EVPN CUDN is rejected
+		ginkgo.It("rejects when a managed VTEP has dual-stack CIDRs and is referenced by an EVPN CUDN", func() {
+			vtep := newVTEP("vtep-ds", vtepv1.VTEPModeManaged, "100.64.0.0/24", "fd00::/120")
+			node := newNodeWithVTEPAnnotation("node1", nil)
 			cudn := newCUDNWithEVPN("cudn-evpn-ds", "vtep-ds")
 			start(vtep, node, cudn)
 
@@ -952,7 +1106,8 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			))
 		})
 
-		ginkgo.It("transitions to IPv6NotSupported when an EVPN CUDN is created referencing a VTEP with IPv6 CIDRs", func() {
+		// unmanaged: EVPN CUDN added after startup triggers rejection
+		ginkgo.It("transitions to IPv6NotSupported when an EVPN CUDN is created referencing an unmanaged VTEP with IPv6 CIDRs", func() {
 			vtep := newVTEP("vtep-v6-late", vtepv1.VTEPModeUnmanaged, "fd00::/64")
 			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6-late": {"fd00::1"}})
 			start(vtep, node)
@@ -977,9 +1132,10 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			))
 		})
 
-		ginkgo.It("transitions to IPv6NotSupported when an IPv6 CIDR is appended to a VTEP referenced by an EVPN CUDN", func() {
-			vtep := newVTEP("vtep-v4-append", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
-			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v4-append": {"100.64.0.1"}})
+		// managed: appending an IPv6 CIDR to a managed VTEP with an EVPN CUDN triggers rejection
+		ginkgo.It("transitions to IPv6NotSupported when an IPv6 CIDR is appended to a managed VTEP referenced by an EVPN CUDN", func() {
+			vtep := newVTEP("vtep-v4-append", vtepv1.VTEPModeManaged, "100.64.0.0/24")
+			node := newNodeWithVTEPAnnotation("node1", nil)
 			cudn := newCUDNWithEVPN("cudn-evpn-append", "vtep-v4-append")
 			start(vtep, node, cudn)
 
@@ -992,7 +1148,7 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 
 			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "vtep-v4-append", metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			v.Spec.CIDRs = []vtepv1.CIDR{"100.64.0.0/24", "fd00::/64"}
+			v.Spec.CIDRs = []vtepv1.CIDR{"100.64.0.0/24", "fd00::/120"}
 			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1004,7 +1160,8 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			))
 		})
 
-		ginkgo.It("recovers from IPv6NotSupported when the IPv6 CIDR is removed from the VTEP", func() {
+		// unmanaged: removing the IPv6 CIDR from a dual-stack VTEP recovers it
+		ginkgo.It("recovers from IPv6NotSupported when the IPv6 CIDR is removed from an unmanaged VTEP", func() {
 			vtep := newVTEP("vtep-ds-remove", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24", "fd00::/64")
 			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-ds-remove": {"100.64.0.1", "fd00::1"}})
 			cudn := newCUDNWithEVPN("cudn-evpn-remove", "vtep-ds-remove")
@@ -1031,9 +1188,10 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			))
 		})
 
-		ginkgo.It("recovers from IPv6NotSupported when the EVPN CUDN is deleted", func() {
-			vtep := newVTEP("vtep-v6-recover", vtepv1.VTEPModeUnmanaged, "fd00::/64")
-			node := newNodeWithVTEPAnnotation("node1", map[string][]string{"vtep-v6-recover": {"fd00::1"}})
+		// managed: deleting the EVPN CUDN recovers the VTEP
+		ginkgo.It("recovers from IPv6NotSupported when the EVPN CUDN is deleted from a managed VTEP", func() {
+			vtep := newVTEP("vtep-v6-recover", vtepv1.VTEPModeManaged, "fd00::/120")
+			node := newNodeWithVTEPAnnotation("node1", nil)
 			cudn := newCUDNWithEVPN("cudn-evpn-recover", "vtep-v6-recover")
 			start(vtep, node, cudn)
 
@@ -1391,8 +1549,11 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 		})
 
 		ginkgo.It("does not issue any VTEP API update when vteps annotation change is unrelated", func() {
-			node := newNodeWithVTEPAnnotation("node-stable", map[string][]string{"vtep-stable": {"100.64.0.1"}})
-			vtep := newVTEP("vtep-stable", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
+			// Use managed mode: CM writes the annotation itself, so once settled
+			// an unrelated annotation change on the node should not re-trigger
+			// any VTEP status API calls.
+			node := newNodeWithVTEPAnnotation("node-stable", nil)
+			vtep := newVTEP("vtep-stable", vtepv1.VTEPModeManaged, "100.64.0.0/24")
 			start(vtep, node)
 
 			gomega.Eventually(func() (*metav1.Condition, error) {
@@ -1402,6 +1563,21 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
 			))
 
+			// Wait for CM to write the annotation, then record the allocated IP.
+			var allocatedIP string
+			gomega.Eventually(func() (string, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-stable", metav1.GetOptions{})
+				if err != nil {
+					return "", err
+				}
+				vteps, err := util.ParseNodeVTEPs(n)
+				if err != nil || len(vteps["vtep-stable"].IPs) == 0 {
+					return "", err
+				}
+				allocatedIP = vteps["vtep-stable"].IPs[0]
+				return allocatedIP, nil
+			}).WithTimeout(5 * time.Second).ShouldNot(gomega.BeEmpty())
+
 			// Controller is idle after initial reconcile settled; safe to add reactor.
 			var patchCount atomic.Int32
 			fakeVTEP.PrependReactor("patch", "vteps", func(_ ktesting.Action) (bool, runtime.Object, error) {
@@ -1409,11 +1585,11 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 				return false, nil, nil
 			})
 
-			// Update node: add a different VTEP entry (vtep-stable unchanged)
+			// Update node: add an entry for a different VTEP (vtep-stable unchanged).
 			n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-stable", metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			vtepAnnotation, _ := json.Marshal(map[string]util.VTEPNodeAnnotation{
-				"vtep-stable":  {IPs: []string{"100.64.0.1"}},
+				"vtep-stable":  {IPs: []string{allocatedIP}},
 				"vtep-another": {IPs: []string{"10.0.0.50"}},
 			})
 			n.Annotations[util.OVNNodeVTEPs] = string(vtepAnnotation)
@@ -1426,13 +1602,54 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			}).WithTimeout(3 * time.Second).Should(gomega.Equal(int32(0)))
 		})
 
+		ginkgo.It("does not issue node update when managed VTEP annotation already matches", func() {
+			node := newNodeWithVTEPAnnotation("node-noop", nil)
+			vtep := newVTEP("vtep-noop", vtepv1.VTEPModeManaged, "100.64.0.0/24")
+			start(vtep, node)
+
+			// Wait for the CM to allocate an IP and write the annotation.
+			gomega.Eventually(func() (string, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-noop", metav1.GetOptions{})
+				if err != nil {
+					return "", err
+				}
+				vteps, err := util.ParseNodeVTEPs(n)
+				if err != nil || len(vteps["vtep-noop"].IPs) == 0 {
+					return "", err
+				}
+				return vteps["vtep-noop"].IPs[0], nil
+			}).WithTimeout(5 * time.Second).ShouldNot(gomega.BeEmpty())
+
+			// Record node update count after initial allocation settles.
+			var nodeUpdateCount atomic.Int32
+			fakeClientset.KubeClient.(*fake.Clientset).PrependReactor("update", "nodes", func(_ ktesting.Action) (bool, runtime.Object, error) {
+				nodeUpdateCount.Add(1)
+				return false, nil, nil
+			})
+
+			// Force a re-reconcile of the VTEP by touching its spec (no-op label).
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "vtep-noop", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			if v.Labels == nil {
+				v.Labels = map[string]string{}
+			}
+			v.Labels["trigger"] = "re-reconcile"
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// The ipsEqual guard must prevent any node annotation writes.
+			gomega.Consistently(func() int32 {
+				return nodeUpdateCount.Load()
+			}).WithTimeout(3 * time.Second).Should(gomega.Equal(int32(0)))
+		})
+
 		ginkgo.It("reconciles multiple VTEPs when a single node's vteps annotation changes", func() {
+			// vtep-a is unmanaged (node supplies the IP), vtep-b is managed (CM allocates).
 			node := newNodeWithVTEPAnnotation("node-shared", map[string][]string{
 				"vtep-a-multi": {"100.64.0.1"},
-				"vtep-b-multi": {"200.10.0.1"},
 			})
 			vtepA := newVTEP("vtep-a-multi", vtepv1.VTEPModeUnmanaged, "100.64.0.0/16")
-			vtepB := newVTEP("vtep-b-multi", vtepv1.VTEPModeUnmanaged, "200.10.0.0/16")
+			vtepB := newVTEP("vtep-b-multi", vtepv1.VTEPModeManaged, "200.10.0.0/24")
 			start(vtepA, vtepB, node)
 
 			for _, name := range []string{"vtep-a-multi", "vtep-b-multi"} {
@@ -1444,12 +1661,15 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 				))
 			}
 
-			// Change the node IPs for both VTEPs
+			// Change the unmanaged VTEP's IP on the node; CM-managed entry
+			// should be preserved as-is.
 			n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-shared", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			existing, err := util.ParseNodeVTEPs(n)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			vtepAnnotation, _ := json.Marshal(map[string]util.VTEPNodeAnnotation{
 				"vtep-a-multi": {IPs: []string{"100.64.0.99"}},
-				"vtep-b-multi": {IPs: []string{"200.10.0.99"}},
+				"vtep-b-multi": existing["vtep-b-multi"], // keep CM-written entry unchanged
 			})
 			n.Annotations[util.OVNNodeVTEPs] = string(vtepAnnotation)
 			_, err = fakeClientset.KubeClient.CoreV1().Nodes().Update(context.Background(), n, metav1.UpdateOptions{})
@@ -1518,6 +1738,61 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 				gomega.HaveField("Status", metav1.ConditionTrue),
 				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
 			))
+		})
+
+		ginkgo.It("restores correct IP when node annotation is overwritten with a bogus value", func() {
+			// CM allocates an IP for the node. Something (e.g. a misbehaving
+			// controller) then overwrites the annotation with a wrong IP.
+			// The annotation change triggers a node-watch reconcile;
+			// allocateAndAnnotateNode detects the mismatch (allocator still
+			// holds the original IP for this node) and rewrites the correct one.
+			vtep := newVTEP("vtep-restore", vtepv1.VTEPModeManaged, "100.64.0.0/24")
+			node := newNodeWithVTEPAnnotation("node-restore", nil)
+			start(vtep, node)
+
+			// Wait for CM to write the initial allocation.
+			var allocatedIP string
+			gomega.Eventually(func() (string, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-restore", metav1.GetOptions{})
+				if err != nil {
+					return "", err
+				}
+				vteps, err := util.ParseNodeVTEPs(n)
+				if util.IsAnnotationNotSetError(err) || len(vteps["vtep-restore"].IPs) == 0 {
+					return "", nil
+				}
+				if err != nil {
+					return "", err
+				}
+				allocatedIP = vteps["vtep-restore"].IPs[0]
+				return allocatedIP, nil
+			}).WithTimeout(5 * time.Second).ShouldNot(gomega.BeEmpty())
+
+			// Overwrite with a bogus IP outside the CIDR.
+			n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-restore", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			bogus, _ := json.Marshal(map[string]util.VTEPNodeAnnotation{
+				"vtep-restore": {IPs: []string{"1.2.3.4"}},
+			})
+			n.Annotations[util.OVNNodeVTEPs] = string(bogus)
+			_, err = fakeClientset.KubeClient.CoreV1().Nodes().Update(context.Background(), n, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// CM must restore the original IP.
+			gomega.Eventually(func() (string, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-restore", metav1.GetOptions{})
+				if err != nil {
+					return "", err
+				}
+				vteps, err := util.ParseNodeVTEPs(n)
+				if util.IsAnnotationNotSetError(err) || len(vteps["vtep-restore"].IPs) == 0 {
+					return "", nil
+				}
+				if err != nil {
+					return "", err
+				}
+				return vteps["vtep-restore"].IPs[0], nil
+			}).WithTimeout(5 * time.Second).Should(gomega.Equal(allocatedIP))
 		})
 	})
 })

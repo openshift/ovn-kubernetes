@@ -35,6 +35,7 @@ import (
 	vtepscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/scheme"
 	vteplisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/listers/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -48,10 +49,19 @@ type Controller struct {
 	vtepLister     vteplisters.VTEPLister
 	cudnLister     udnlisters.ClusterUserDefinedNetworkLister
 	nodeLister     corelisters.NodeLister
+	kube           kube.Interface
 	vtepController controllerutil.Controller
 	cudnController controllerutil.Controller
 	nodeController controllerutil.Controller
 	eventRecorder  record.EventRecorder
+
+	// allocators holds per-VTEP IP allocators for managed-mode VTEPs.
+	// Keyed by VTEP name. Created on first reconcile, updated on CIDR
+	// changes, removed on VTEP deletion. Currently only accessed from
+	// vtepController (Threadiness=1), but protected by a mutex for
+	// safety if threadiness changes or cross-controller access is added.
+	allocatorsMu sync.Mutex
+	allocators   map[string]*vtepIPAllocator
 
 	// cudnVTEPIndex tracks which VTEP each EVPN-enabled CUDN references
 	// (cudnName → vtepName). Populated on CUDN create, consulted on CUDN
@@ -77,7 +87,9 @@ func NewController(
 		vtepLister:    vtepLister,
 		cudnLister:    wf.ClusterUserDefinedNetworkInformer().Lister(),
 		nodeLister:    wf.NodeCoreInformer().Lister(),
+		kube:          &kube.Kube{KClient: ovnClient.KubeClient},
 		eventRecorder: recorder,
+		allocators:    make(map[string]*vtepIPAllocator),
 		cudnVTEPIndex: make(map[string]string),
 	}
 
@@ -165,10 +177,6 @@ func (c *Controller) reconcileVTEP(key string) error {
 		return err
 	}
 
-	if vtep.Spec.Mode == vtepv1.VTEPModeManaged {
-		return c.handleManagedModeNotSupported(vtep)
-	}
-
 	if err := c.validateCIDRsAcrossVTEPs(vtep); err != nil {
 		existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
 		if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonCIDROverlap || existingCond.Message != err.Error() {
@@ -195,19 +203,23 @@ func (c *Controller) reconcileVTEP(key string) error {
 			reasonEVPNIPv6NotSupported, err.Error())
 	}
 
-	if err := c.validateNodeVTEPIPs(vtep); err != nil {
+	var allocationErr error
+	if vtep.Spec.Mode == vtepv1.VTEPModeManaged {
+		allocationErr = c.handleManagedMode(vtep)
+	} else {
+		allocationErr = c.validateNodeVTEPIPs(vtep)
+	}
+	if allocationErr != nil {
 		existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
-		if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonAllocationFailed || existingCond.Message != err.Error() {
+		if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonAllocationFailed || existingCond.Message != allocationErr.Error() {
 			vtepRef, refErr := reference.GetReference(vtepscheme.Scheme, vtep)
 			if refErr != nil {
 				return fmt.Errorf("failed to get object reference for VTEP %s: %w", vtep.Name, refErr)
 			}
-			c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonAllocationFailed, err.Error())
+			c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonAllocationFailed, allocationErr.Error())
 		}
-		// Don't retry: the node controller watches for k8s.ovn.org/vteps
-		// annotation changes and re-queues all VTEPs when annotations appear.
 		return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
-			reasonAllocationFailed, err.Error())
+			reasonAllocationFailed, allocationErr.Error())
 	}
 
 	return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionTrue,
@@ -246,9 +258,21 @@ func (c *Controller) handleVTEPDeletion(vtep *vtepv1.VTEP) error {
 	}
 
 	if len(referencingCUDNs) > 0 {
-		// we don't retry here since when a CUDN is deleted, this controller will be notified and will re-queue the VTEP
 		klog.Infof("VTEP %s is still referenced by CUDNs [%s], blocking deletion", vtep.Name, strings.Join(referencingCUDNs, ", "))
 		return nil
+	}
+
+	c.allocatorsMu.Lock()
+	_, wasManaged := c.allocators[vtep.Name]
+	c.allocatorsMu.Unlock()
+
+	if wasManaged || vtep.Spec.Mode == vtepv1.VTEPModeManaged {
+		if err := c.cleanupManagedVTEPAnnotations(vtep.Name); err != nil {
+			return fmt.Errorf("failed to clean up managed VTEP annotations for %s: %w", vtep.Name, err)
+		}
+		c.allocatorsMu.Lock()
+		delete(c.allocators, vtep.Name)
+		c.allocatorsMu.Unlock()
 	}
 
 	_, err = c.vtepClient.K8sV1().VTEPs().Apply(
@@ -261,6 +285,23 @@ func (c *Controller) handleVTEPDeletion(vtep *vtepv1.VTEP) error {
 	}
 	klog.Infof("Removed finalizer from VTEP %s, deletion unblocked", vtep.Name)
 	return nil
+}
+
+// cleanupManagedVTEPAnnotations removes the VTEP entry from the
+// k8s.ovn.org/vteps annotation on all nodes.
+func (c *Controller) cleanupManagedVTEPAnnotations(vtepName string) error {
+	nodes, err := c.nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	var errs []error
+	for _, node := range nodes {
+		if err := util.RemoveNodeVTEPEntry(node.Name, vtepName, c.nodeLister.Get, c.kube.UpdateNodeStatus); err != nil {
+			errs = append(errs, fmt.Errorf("node %s: %w", node.Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // getCUDNsReferencingVTEP returns the names of CUDNs that reference the given VTEP.
@@ -452,20 +493,89 @@ func (c *Controller) validateNodeVTEPIPs(vtep *vtepv1.VTEP) error {
 	return errors.Join(errs...)
 }
 
-func (c *Controller) handleManagedModeNotSupported(vtep *vtepv1.VTEP) error {
-	existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
-	if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonManagedModeNotSupported {
-		vtepRef, err := reference.GetReference(vtepscheme.Scheme, vtep)
-		if err != nil {
-			return fmt.Errorf("failed to get object reference for VTEP %s: %w", vtep.Name, err)
-		}
-		c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonManagedModeNotSupported,
-			"Managed VTEP mode is not yet implemented; only Unmanaged mode is currently supported")
+// handleManagedMode ensures every node has an allocated VTEP IP and the
+// annotation is up to date. It creates the allocator lazily on first call
+// and allocates IPs for all current nodes.
+func (c *Controller) handleManagedMode(vtep *vtepv1.VTEP) error {
+	allocator, err := c.getOrCreateAllocator(vtep)
+	if err != nil {
+		return fmt.Errorf("failed to create allocator for VTEP %s: %w", vtep.Name, err)
 	}
 
-	return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
-		reasonManagedModeNotSupported,
-		"Managed VTEP mode is not yet implemented; only Unmanaged mode is currently supported")
+	nodes, err := c.nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	var errs []error
+	for _, node := range nodes {
+		if err := c.allocateAndAnnotateNode(vtep.Name, node.Name, allocator); err != nil {
+			errs = append(errs, fmt.Errorf("node %s: %w", node.Name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// getOrCreateAllocator returns the existing allocator for this VTEP or creates
+// a new one from the VTEP's CIDRs.
+func (c *Controller) getOrCreateAllocator(vtep *vtepv1.VTEP) (*vtepIPAllocator, error) {
+	c.allocatorsMu.Lock()
+	defer c.allocatorsMu.Unlock()
+	if a, ok := c.allocators[vtep.Name]; ok {
+		return a, nil
+	}
+	a, err := newVTEPIPAllocator(vtep.Spec.CIDRs)
+	if err != nil {
+		return nil, err
+	}
+	c.allocators[vtep.Name] = a
+	return a, nil
+}
+
+// allocateAndAnnotateNode allocates a VTEP IP for the node and writes the
+// k8s.ovn.org/vteps annotation using retry-on-conflict to avoid races with
+// the node-side controller that writes entries for unmanaged VTEPs into the
+// same annotation.
+func (c *Controller) allocateAndAnnotateNode(vtepName, nodeName string, allocator *vtepIPAllocator) error {
+	allocated, err := allocator.allocateForNode(nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to allocate IP: %w", err)
+	}
+
+	ips := make([]string, 0, len(allocated))
+	for _, ipNet := range allocated {
+		ips = append(ips, ipNet.IP.String())
+	}
+
+	node, err := c.nodeLister.Get(nodeName)
+	if err != nil {
+		return fmt.Errorf("failed to get node %s: %w", nodeName, err)
+	}
+	// Writing the annotation triggers the node watcher which re-queues all
+	// VTEPs. Skip the write if the annotation already matches so we don't
+	// produce an infinite reconcile loop.
+	vteps, err := util.ParseNodeVTEPs(node)
+	if err == nil {
+		if existing, ok := vteps[vtepName]; ok && ipsEqual(existing.IPs, ips) {
+			return nil
+		}
+	}
+
+	return util.SetNodeVTEPEntry(nodeName, vtepName, ips, c.nodeLister.Get, c.kube.UpdateNodeStatus)
+}
+
+// ipsEqual returns true if two string slices contain the same IPs
+// (order-sensitive, matching the allocator's deterministic output).
+func ipsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // reconcileCUDN handles CUDN create and delete events relevant to VTEP
@@ -538,18 +648,26 @@ func (c *Controller) reconcileNode(_ string) error {
 	return nil
 }
 
-// nodeNeedsUpdate triggers VTEP reconciliation only when the k8s.ovn.org/vteps
-// annotation changes. Creates (oldObj==nil) are ignored because a fresh node
-// won't have the VTEP annotation yet; the annotation-change event will handle
-// it once set. On restart, the informer fires synthetic creates for all
-// existing nodes (which may already carry the annotation), but the VTEP
-// informer also fires creates for all VTEPs, and each VTEP reconciliation
-// reads node annotations via the lister, so skipping node creates is safe.
+// nodeNeedsUpdate triggers VTEP reconciliation on node creates and when the
+// k8s.ovn.org/vteps annotation changes.
+//
+// Creates (oldObj==nil) are accepted because managed-mode VTEPs need the
+// cluster-manager to allocate IPs for newly joined nodes. Without this, a
+// node joining a running cluster would not get a VTEP IP until an unrelated
+// event (e.g. a VTEP spec change) happened to trigger a VTEP reconcile.
+// For unmanaged mode the extra reconcile from a node create is harmless:
+// validateNodeVTEPIPs will report AllocationFailed until the node-side
+// controller writes the annotation, which then triggers the annotation-
+// change path.
+//
 // Deletes (newObj==nil) bypass ObjNeedsUpdate in the controller framework,
 // so that branch is unreachable here.
 func nodeNeedsUpdate(oldObj, newObj *corev1.Node) bool {
-	if oldObj == nil || newObj == nil {
+	if newObj == nil {
 		return false
+	}
+	if oldObj == nil {
+		return true
 	}
 	return util.NodeVTEPsAnnotationChanged(oldObj, newObj)
 }
