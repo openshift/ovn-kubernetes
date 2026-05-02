@@ -89,6 +89,10 @@ const (
 	externalFRRContainerName = "frr"
 	// agnhostHTTPPort is the HTTP port for agnhost netexec
 	agnhostHTTPPort = 8080
+	// sharedNodeIPsVTEPName is the name of the shared VTEP CR used across
+	// EVPN tests that reference node IP CIDRs. Created idempotently by the
+	// first test that needs it; never deleted by per-test cleanup.
+	sharedNodeIPsVTEPName = "e2e-evpn-shared-vtep-node-cidr-range-do-not-use-this-name-anywhere-else"
 )
 
 // setupEVPNBridgeOnExternalFRR creates a Linux bridge and VXLAN device on the external FRR
@@ -108,6 +112,12 @@ const (
 // Cleanup is automatically registered via ictx.AddCleanUpFn().
 func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridgeName, vxlanName string) error {
 	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
+
+	// Idempotent: if the bridge already exists, skip creation.
+	if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "show", bridgeName}); err == nil {
+		framework.Logf("EVPN bridge %s already exists on %s, reusing", bridgeName, externalFRRContainerName)
+		return nil
+	}
 
 	// Create bridge with VLAN filtering
 	commands := [][]string{
@@ -175,19 +185,21 @@ func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridg
 	}
 
 	// Register cleanup to remove bridge and VXLAN device.
+	// Idempotent: checks existence before deleting so multiple cleanups are safe
+	// (e.g. when shared bridge is cleaned up by first test, second finds it gone).
 	ictx.AddCleanUpFn(func() error {
 		frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 
-		// Delete VXLAN device first (it's attached to the bridge)
-		_, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", vxlanName})
-		if err != nil {
-			return fmt.Errorf("failed to delete %s: %w", vxlanName, err)
+		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "show", vxlanName}); err == nil {
+			if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", vxlanName}); err != nil {
+				return fmt.Errorf("failed to delete %s: %w", vxlanName, err)
+			}
 		}
 
-		// Delete bridge
-		_, err = infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", bridgeName})
-		if err != nil {
-			return fmt.Errorf("failed to delete %s: %w", bridgeName, err)
+		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "show", bridgeName}); err == nil {
+			if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", bridgeName}); err != nil {
+				return fmt.Errorf("failed to delete %s: %w", bridgeName, err)
+			}
 		}
 
 		framework.Logf("EVPN bridge cleanup complete on %s", externalFRRContainerName)
@@ -844,26 +856,31 @@ func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidr
 	}
 
 	_, err = client.K8sV1().VTEPs().Create(context.Background(), vtep, metav1.CreateOptions{})
-	if err != nil {
+	if apierrors.IsAlreadyExists(err) {
+		framework.Logf("VTEP %s already exists, reusing", name)
+	} else if err != nil {
 		return fmt.Errorf("failed to create VTEP %s: %w", name, err)
+	} else {
+		framework.Logf("VTEP created: %s (CIDRs: %v, Mode: %s)", name, cidrs, mode)
 	}
 
-	// Register cleanup: delete VTEP and wait until it's fully removed
-	ictx.AddCleanUpFn(func() error {
-		err := client.K8sV1().VTEPs().Delete(context.Background(), name, metav1.DeleteOptions{})
-		if err != nil && !apierrors.IsNotFound(err) {
-			return err
-		}
-		return wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-			_, err := client.K8sV1().VTEPs().Get(ctx, name, metav1.GetOptions{})
-			if apierrors.IsNotFound(err) {
-				return true, nil
+	// Skip cleanup for the shared VTEP — it is reused across tests and
+	// never deleted (the cluster is ephemeral).
+	if name != sharedNodeIPsVTEPName {
+		ictx.AddCleanUpFn(func() error {
+			err := client.K8sV1().VTEPs().Delete(context.Background(), name, metav1.DeleteOptions{})
+			if err != nil && !apierrors.IsNotFound(err) {
+				return err
 			}
-			return false, err
+			return wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+				_, err := client.K8sV1().VTEPs().Get(ctx, name, metav1.GetOptions{})
+				if apierrors.IsNotFound(err) {
+					return true, nil
+				}
+				return false, err
+			})
 		})
-	})
-
-	framework.Logf("VTEP created: %s (CIDRs: %v, Mode: %s)", name, cidrs, mode)
+	}
 	return nil
 }
 
@@ -1002,20 +1019,12 @@ func nodeIPsOverlapCIDRs(nodeList *corev1.NodeList, cidrStrings []string) bool {
 	return false
 }
 
-// waitForVTEPAccepted polls the VTEP status until the Accepted condition is
-// True. When node IPs overlap with the VTEP CIDRs (KIND subnet case), parallel
-// tests may cause transient CIDROverlap which is tolerated since it is expected
-// when tests run in parallel specially for the nodeCIDR being the VTEP for unmanaged mode.
-func waitForVTEPAccepted(f *framework.Framework, vtepName string, vtepCIDRs []string) error {
+// waitForVTEPAccepted polls the VTEP status until the Accepted condition is True.
+func waitForVTEPAccepted(f *framework.Framework, vtepName string) error {
 	client, err := vtepclientset.NewForConfig(f.ClientConfig())
 	if err != nil {
 		return fmt.Errorf("failed to create VTEP client: %w", err)
 	}
-	nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list nodes: %w", err)
-	}
-	tolerateCIDROverlap := nodeIPsOverlapCIDRs(nodeList, vtepCIDRs)
 
 	return wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		vtep, err := client.K8sV1().VTEPs().Get(ctx, vtepName, metav1.GetOptions{})
@@ -1028,10 +1037,6 @@ func waitForVTEPAccepted(f *framework.Framework, vtepName string, vtepCIDRs []st
 		}
 		if condition.Status == metav1.ConditionTrue {
 			framework.Logf("VTEP %s is healthy (Accepted=True)", vtepName)
-			return true, nil
-		}
-		if tolerateCIDROverlap && condition.Reason == "CIDROverlap" {
-			framework.Logf("VTEP %s Accepted=%s reason=%s (tolerated): %s", vtepName, condition.Status, condition.Reason, condition.Message)
 			return true, nil
 		}
 		framework.Logf("VTEP %s Accepted=%s reason=%s: %s", vtepName, condition.Status, condition.Reason, condition.Message)
@@ -1293,6 +1298,9 @@ func runEVPNNetworkAndServers(
 	ipVRFAgnhostSubnets []string,
 	vtepSubnets []string,
 	bgpASN int,
+	bridgeName string,
+	vxlanName string,
+	vtepName string,
 	macVRFContainer *infraapi.ExternalContainer,
 	macVRFNetworkName string,
 	ipVRFContainer *infraapi.ExternalContainer,
@@ -1301,12 +1309,6 @@ func runEVPNNetworkAndServers(
 	// Derive what to setup from networkSpec
 	hasMACVRF := networkSpec.EVPN != nil && networkSpec.EVPN.MACVRF != nil
 	hasIPVRF := networkSpec.EVPN != nil && networkSpec.EVPN.IPVRF != nil
-
-	// Derive unique bridge/vxlan names from testBaseName for parallel isolation.
-	// e.g. testBaseName="evpn7a3f" → bridgeName="brevpn7a3f", vxlanName="vxevpn7a3f"
-	// keeping worst-case sviName ("brevpn9999.4094") at exactly 15 chars (Linux limit).
-	bridgeName := "br" + testName
-	vxlanName := "vx" + testName
 
 	ipVRFAgnhostSubnets = matchCIDRStringsByIPFamilySet(ipVRFAgnhostSubnets, ipFamilySet)
 	vtepSubnets = matchCIDRStringsByIPFamilySet(vtepSubnets, ipFamilySet)
@@ -1392,21 +1394,20 @@ func runEVPNNetworkAndServers(
 		return err
 	}
 
-	testVTEPName := testName + "-vtep"
-	framework.Logf("Creating VTEP CR with subnets %v", vtepSubnets)
-	err = createVTEP(f, ictx, testVTEPName, vtepSubnets, vtepv1.VTEPModeUnmanaged)
+	framework.Logf("Creating VTEP CR %s with subnets %v", vtepName, vtepSubnets)
+	err = createVTEP(f, ictx, vtepName, vtepSubnets, vtepv1.VTEPModeUnmanaged)
 	if err != nil {
 		return err
 	}
 
-	framework.Logf("Waiting for VTEP %s to be accepted", testVTEPName)
-	err = waitForVTEPAccepted(f, testVTEPName, vtepSubnets)
+	framework.Logf("Waiting for VTEP %s to be accepted", vtepName)
+	err = waitForVTEPAccepted(f, vtepName)
 	if err != nil {
-		return fmt.Errorf("VTEP %s did not become healthy: %w", testVTEPName, err)
+		return fmt.Errorf("VTEP %s did not become healthy: %w", vtepName, err)
 	}
 
 	// Update VTEP name in network spec
-	networkSpec.EVPN.VTEP = testVTEPName
+	networkSpec.EVPN.VTEP = vtepName
 
 	framework.Logf("Creating FRRConfiguration for EVPN")
 	frrConfigLabels := map[string]string{"network": testName}
