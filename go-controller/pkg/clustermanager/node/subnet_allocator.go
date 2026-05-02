@@ -325,8 +325,8 @@ type subnetAllocatorRange struct {
 
 func newSubnetAllocatorRange(network *net.IPNet, hostSubnetLen int) (*subnetAllocatorRange, error) {
 	clusterCIDRLen, addrLen := network.Mask.Size()
-	if hostSubnetLen >= addrLen {
-		return nil, fmt.Errorf("host capacity cannot be zero")
+	if hostSubnetLen > addrLen {
+		return nil, fmt.Errorf("host subnet length cannot exceed address length")
 	} else if hostSubnetLen < clusterCIDRLen {
 		return nil, fmt.Errorf("subnet capacity cannot be larger than number of networks available")
 	}

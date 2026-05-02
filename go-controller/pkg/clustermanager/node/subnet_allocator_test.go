@@ -324,7 +324,7 @@ func TestAllocateSubnetInvalidHostBitsOrCIDR(t *testing.T) {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
-	_, err = newSubnetAllocator("10.1.0.0/16", 32)
+	_, err = newSubnetAllocator("10.1.0.0/16", 33)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
@@ -334,9 +334,37 @@ func TestAllocateSubnetInvalidHostBitsOrCIDR(t *testing.T) {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
 	}
 
-	_, err = newSubnetAllocator("fd01::/64", 128)
+	_, err = newSubnetAllocator("fd01::/64", 129)
 	if err == nil {
 		t.Fatal("Unexpectedly succeeded in initializing subnet allocator")
+	}
+}
+
+func TestAllocateSubnetSingleIP(t *testing.T) {
+	// IPv4: /24 with hostSubnetLen=32 gives 256 individual /32 allocations
+	sna, err := newSubnetAllocator("10.1.0.0/24", 32)
+	if err != nil {
+		t.Fatal("Failed to initialize subnet allocator: ", err)
+	}
+
+	if err := allocateExpected(sna, 0, "10.1.0.0/32"); err != nil {
+		t.Fatal(err)
+	}
+	if err := allocateExpected(sna, 1, "10.1.0.1/32"); err != nil {
+		t.Fatal(err)
+	}
+
+	// IPv6: /120 with hostSubnetLen=128 gives 256 individual /128 allocations
+	sna, err = newSubnetAllocator("fd01::/120", 128)
+	if err != nil {
+		t.Fatal("Failed to initialize subnet allocator: ", err)
+	}
+
+	if err := allocateExpected(sna, 0, "fd01::/128"); err != nil {
+		t.Fatal(err)
+	}
+	if err := allocateExpected(sna, 1, "fd01::1/128"); err != nil {
+		t.Fatal(err)
 	}
 }
 
