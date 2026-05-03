@@ -6,8 +6,8 @@ package vtep
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -341,6 +341,85 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 				}
 				return util.ParseNodeVTEPs(n)
 			}).WithTimeout(5 * time.Second).Should(gomega.HaveKey("managed-late-node"))
+		})
+	})
+
+	ginkgo.Context("Initial sync", func() {
+		ginkgo.It("preserves existing allocations across restart", func() {
+			node1 := newNodeWithVTEPAnnotation("node-1", map[string][]string{
+				"sync-vtep": {"100.64.0.3"},
+			})
+			node2 := newNodeWithVTEPAnnotation("node-2", map[string][]string{
+				"sync-vtep": {"100.64.0.5"},
+			})
+			node3 := newNodeWithVTEPAnnotation("node-3", nil)
+			vtep := newVTEP("sync-vtep", vtepv1.VTEPModeManaged, "100.64.0.0/29")
+			start(vtep, node1, node2, node3)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "sync-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal("Allocated")),
+			))
+
+			// node-1 and node-2 should keep their existing IPs
+			gomega.Eventually(func() ([]string, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-1", metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				vteps, err := util.ParseNodeVTEPs(n)
+				if err != nil {
+					return nil, err
+				}
+				return vteps["sync-vtep"].IPs, nil
+			}).WithTimeout(5 * time.Second).Should(gomega.Equal([]string{"100.64.0.3"}))
+
+			gomega.Eventually(func() ([]string, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-2", metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				vteps, err := util.ParseNodeVTEPs(n)
+				if err != nil {
+					return nil, err
+				}
+				return vteps["sync-vtep"].IPs, nil
+			}).WithTimeout(5 * time.Second).Should(gomega.Equal([]string{"100.64.0.5"}))
+
+			// node-3 should get an IP that is NOT 100.64.0.3 or 100.64.0.5
+			gomega.Eventually(func() (map[string]util.VTEPNodeAnnotation, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-3", metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return util.ParseNodeVTEPs(n)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveKey("sync-vtep"),
+				gomega.Not(gomega.HaveKeyWithValue("sync-vtep", util.VTEPNodeAnnotation{IPs: []string{"100.64.0.3"}})),
+				gomega.Not(gomega.HaveKeyWithValue("sync-vtep", util.VTEPNodeAnnotation{IPs: []string{"100.64.0.5"}})),
+			))
+		})
+
+		ginkgo.It("skips unmanaged VTEPs during sync", func() {
+			node := newNodeWithVTEPAnnotation("node-1", map[string][]string{
+				"unmanaged-sync": {"100.64.0.1"},
+			})
+			vtep := newVTEP("unmanaged-sync", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "unmanaged-sync", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal("Allocated")),
+			))
+
+			// Verify no allocator was created for the unmanaged VTEP
+			controller.allocatorsMu.Lock()
+			gomega.Expect(controller.allocators).NotTo(gomega.HaveKey("unmanaged-sync"))
+			controller.allocatorsMu.Unlock()
 		})
 	})
 

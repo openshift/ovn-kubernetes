@@ -137,14 +137,86 @@ func NewController(
 	return c
 }
 
-// Start begins the VTEP controller.
+// Start begins the VTEP controller. It uses StartWithInitialSync so that
+// event handlers are registered first (queuing events), then the initial
+// sync restores allocator state from existing node annotations, and finally
+// workers start processing the queue. This ensures IPs allocated before a
+// restart are preserved and not reassigned.
 func (c *Controller) Start() error {
 	defer klog.Infof("Cluster manager VTEP controller started")
-	return controllerutil.Start(
+	return controllerutil.StartWithInitialSync(
+		c.syncManagedAllocators,
 		c.vtepController,
 		c.cudnController,
 		c.nodeController,
 	)
+}
+
+// syncManagedAllocators restores allocator state for all managed VTEPs from
+// existing node annotations. This runs once at startup before the controller
+// workers begin, ensuring that previously allocated IPs are reserved in the
+// allocator and won't be reassigned to different nodes.
+func (c *Controller) syncManagedAllocators() error {
+	vteps, err := c.vtepLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list VTEPs: %w", err)
+	}
+
+	nodes, err := c.nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	var errs []error
+	for _, vtep := range vteps {
+		if vtep.Spec.Mode != vtepv1.VTEPModeManaged {
+			continue
+		}
+		allocator, err := newVTEPIPAllocator(vtep.Spec.CIDRs)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("VTEP %s: failed to create allocator: %w", vtep.Name, err))
+			continue
+		}
+		for _, node := range nodes {
+			nodeVTEPs, err := util.ParseNodeVTEPs(node)
+			if err != nil {
+				if !util.IsAnnotationNotSetError(err) {
+					klog.Warningf("VTEP %s: failed to parse annotation on node %s, skipping: %v", vtep.Name, node.Name, err)
+				}
+				continue
+			}
+			entry, ok := nodeVTEPs[vtep.Name]
+			if !ok || len(entry.IPs) == 0 {
+				klog.Warningf("VTEP %s: no existing allocation found on node %s, skipping", vtep.Name, node.Name)
+				continue
+			}
+			ips := make([]net.IP, 0, len(entry.IPs))
+			for _, ipStr := range entry.IPs {
+				ip := net.ParseIP(ipStr)
+				if ip == nil {
+					errs = append(errs, fmt.Errorf("VTEP %s: invalid IP %q in annotation on node %s", vtep.Name, ipStr, node.Name))
+					continue
+				}
+				ips = append(ips, ip)
+			}
+			if err := allocator.markAllocatedForNode(node.Name, ips); err != nil {
+				// The IPs in the annotation are invalid for managed mode: either
+				// out of the managed CIDRs (stale from unmanaged->managed mode change or CIDR
+				// change) or already owned by another node (conflict). Remove the
+				// stale entry so handleManagedMode can allocate a fresh valid IP
+				// without the node-side controller briefly observing a stale IP.
+				klog.Warningf("VTEP %s: removing invalid IPs %v from node %s annotation: %v", vtep.Name, ips, node.Name, err)
+				if removeErr := util.RemoveNodeVTEPEntry(node.Name, vtep.Name, c.nodeLister.Get, c.kube.UpdateNodeStatus); removeErr != nil {
+					errs = append(errs, fmt.Errorf("VTEP %s: failed to remove stale annotation from node %s: %w", vtep.Name, node.Name, removeErr))
+				}
+			}
+		}
+		c.allocatorsMu.Lock()
+		c.allocators[vtep.Name] = allocator
+		c.allocatorsMu.Unlock()
+		klog.Infof("Synced allocator for managed VTEP %s", vtep.Name)
+	}
+	return errors.Join(errs...)
 }
 
 // Stop shuts down the VTEP controller.
