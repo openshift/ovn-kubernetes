@@ -80,6 +80,25 @@ func (a *vtepIPAllocator) markAllocatedForNode(nodeName string, ips []net.IP) er
 	return a.allocator.MarkAllocatedNetworks(nodeName, ipNets...)
 }
 
+// replaceRange replaces an existing CIDR in the allocator with a wider one.
+// The new CIDR must be a supernet of the old one (guaranteed by CEL validation
+// in managed mode). Existing allocations from the old range are preserved.
+func (a *vtepIPAllocator) replaceRange(oldCIDR, newCIDR vtepv1.CIDR) error {
+	_, oldNet, err := net.ParseCIDR(string(oldCIDR))
+	if err != nil {
+		return fmt.Errorf("invalid old CIDR %q: %w", oldCIDR, err)
+	}
+	_, newNet, err := net.ParseCIDR(string(newCIDR))
+	if err != nil {
+		return fmt.Errorf("invalid new CIDR %q: %w", newCIDR, err)
+	}
+	hostLen := ipv4HostSubnetLen
+	if utilnet.IsIPv6CIDR(newNet) {
+		hostLen = ipv6HostSubnetLen
+	}
+	return a.allocator.ReplaceNetworkRange(oldNet, newNet, hostLen)
+}
+
 // releaseNode frees all allocations for the given node.
 func (a *vtepIPAllocator) releaseNode(nodeName string) {
 	a.allocator.ReleaseAllNetworks(nodeName)
