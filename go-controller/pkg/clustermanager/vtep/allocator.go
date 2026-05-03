@@ -25,6 +25,18 @@ const (
 // natural overflow: the first range is exhausted before the next is used.
 type vtepIPAllocator struct {
 	allocator node.SubnetAllocator
+	// cidrs records the CIDRs the allocator was built with in their original
+	// spec order. It is a slice (not a set) because CEL rules on VTEPSpec
+	// validate CIDRs positionally: existing entries can only be widened
+	// in-place (same index), and new ones can only be appended. This means
+	// cidrs[i] always corresponds to the i-th network range that was added
+	// to the underlying allocator for its IP family. We cannot use
+	// SubnetAllocator.ListAllIPv4/IPv6Networks() as a substitute because
+	// those return ranges grouped by family (all v4, then all v6), which
+	// loses the interleaved ordering of a dual-stack spec (e.g.
+	// [v4, v6, v4]). Without the original ordering we could not map
+	// spec[i] to the correct allocator range for replaceRange.
+	cidrs []vtepv1.CIDR
 }
 
 // newVTEPIPAllocator creates an allocator from the given VTEP CIDRs. Each
@@ -32,6 +44,7 @@ type vtepIPAllocator struct {
 func newVTEPIPAllocator(cidrs []vtepv1.CIDR) (*vtepIPAllocator, error) {
 	a := &vtepIPAllocator{
 		allocator: node.NewSubnetAllocator(),
+		cidrs:     make([]vtepv1.CIDR, 0, len(cidrs)),
 	}
 	for _, cidr := range cidrs {
 		if err := a.addCIDR(cidr); err != nil {
@@ -39,6 +52,20 @@ func newVTEPIPAllocator(cidrs []vtepv1.CIDR) (*vtepIPAllocator, error) {
 		}
 	}
 	return a, nil
+}
+
+// cidrsMatch returns true if the allocator's current CIDRs are identical
+// (same length, same values in order) to the given slice.
+func (a *vtepIPAllocator) cidrsMatch(cidrs []vtepv1.CIDR) bool {
+	if len(a.cidrs) != len(cidrs) {
+		return false
+	}
+	for i := range cidrs {
+		if a.cidrs[i] != cidrs[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *vtepIPAllocator) addCIDR(cidr vtepv1.CIDR) error {
@@ -53,6 +80,7 @@ func (a *vtepIPAllocator) addCIDR(cidr vtepv1.CIDR) error {
 	if err := a.allocator.AddNetworkRange(ipNet, hostLen); err != nil {
 		return fmt.Errorf("failed to add CIDR %q to allocator: %w", cidr, err)
 	}
+	a.cidrs = append(a.cidrs, cidr)
 	return nil
 }
 
@@ -83,7 +111,8 @@ func (a *vtepIPAllocator) markAllocatedForNode(nodeName string, ips []net.IP) er
 // replaceRange replaces an existing CIDR in the allocator with a wider one.
 // The new CIDR must be a supernet of the old one (guaranteed by CEL validation
 // in managed mode). Existing allocations from the old range are preserved.
-func (a *vtepIPAllocator) replaceRange(oldCIDR, newCIDR vtepv1.CIDR) error {
+// The cidrs tracking slice is updated at the same index.
+func (a *vtepIPAllocator) replaceRange(idx int, oldCIDR, newCIDR vtepv1.CIDR) error {
 	_, oldNet, err := net.ParseCIDR(string(oldCIDR))
 	if err != nil {
 		return fmt.Errorf("invalid old CIDR %q: %w", oldCIDR, err)
@@ -96,7 +125,11 @@ func (a *vtepIPAllocator) replaceRange(oldCIDR, newCIDR vtepv1.CIDR) error {
 	if utilnet.IsIPv6CIDR(newNet) {
 		hostLen = ipv6HostSubnetLen
 	}
-	return a.allocator.ReplaceNetworkRange(oldNet, newNet, hostLen)
+	if err := a.allocator.ReplaceNetworkRange(oldNet, newNet, hostLen); err != nil {
+		return err
+	}
+	a.cidrs[idx] = newCIDR
+	return nil
 }
 
 // releaseNode frees all allocations for the given node.

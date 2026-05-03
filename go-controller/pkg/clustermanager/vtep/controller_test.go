@@ -423,6 +423,319 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 		})
 	})
 
+	ginkgo.Context("Mutability", func() {
+		ginkgo.It("appends a new CIDR and allocates IPs from it when the original is exhausted", func() {
+			// /30 gives 4 IPs; fill them all up.
+			node1 := newNodeWithVTEPAnnotation("node-1", nil)
+			node2 := newNodeWithVTEPAnnotation("node-2", nil)
+			node3 := newNodeWithVTEPAnnotation("node-3", nil)
+			node4 := newNodeWithVTEPAnnotation("node-4", nil)
+			vtep := newVTEP("append-vtep", vtepv1.VTEPModeManaged, "10.0.0.0/30")
+			start(vtep, node1, node2, node3, node4)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "append-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			// Add node-5 now -- range is exhausted so VTEP should go AllocationFailed.
+			node5 := newNodeWithVTEPAnnotation("node-5", nil)
+			_, err := fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node5, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "append-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+			))
+
+			// Append a second /30 CIDR -- this should unblock allocation.
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "append-vtep", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.CIDRs = append(v.Spec.CIDRs, "10.0.0.4/30")
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// VTEP should recover to Accepted=True and node-5 gets an IP from the new /30.
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "append-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			gomega.Eventually(func() (map[string]util.VTEPNodeAnnotation, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-5", metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return util.ParseNodeVTEPs(n)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveKey("append-vtep"),
+				gomega.WithTransform(func(m map[string]util.VTEPNodeAnnotation) string {
+					if len(m["append-vtep"].IPs) == 0 {
+						return ""
+					}
+					return m["append-vtep"].IPs[0]
+				}, gomega.HavePrefix("10.0.0.")),
+			))
+		})
+
+		ginkgo.It("widens an existing CIDR and allocates new IPs from the expanded range", func() {
+			// /30 gives 4 IPs; fill them all up.
+			node1 := newNodeWithVTEPAnnotation("node-1", nil)
+			node2 := newNodeWithVTEPAnnotation("node-2", nil)
+			node3 := newNodeWithVTEPAnnotation("node-3", nil)
+			node4 := newNodeWithVTEPAnnotation("node-4", nil)
+			vtep := newVTEP("widen-vtep", vtepv1.VTEPModeManaged, "10.0.1.0/30")
+			start(vtep, node1, node2, node3, node4)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "widen-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
+
+			// Collect existing IPs before widening.
+			getNodeVTEPIP := func(nodeName string) string {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				vteps, err := util.ParseNodeVTEPs(n)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(vteps["widen-vtep"].IPs).NotTo(gomega.BeEmpty())
+				return vteps["widen-vtep"].IPs[0]
+			}
+			ip1 := getNodeVTEPIP("node-1")
+			ip2 := getNodeVTEPIP("node-2")
+
+			// Add node-5 now -- range is exhausted so VTEP should go AllocationFailed.
+			node5 := newNodeWithVTEPAnnotation("node-5", nil)
+			_, err := fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node5, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "widen-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+			))
+
+			// Widen /30 to /28 (16 IPs) -- this should unblock allocation.
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "widen-vtep", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.CIDRs = []vtepv1.CIDR{"10.0.1.0/28"}
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// VTEP should recover and node-5 gets an IP from the expanded range.
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "widen-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			gomega.Eventually(func() (map[string]util.VTEPNodeAnnotation, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-5", metav1.GetOptions{})
+				if err != nil {
+					return nil, err
+				}
+				return util.ParseNodeVTEPs(n)
+			}).WithTimeout(5 * time.Second).Should(gomega.HaveKey("widen-vtep"))
+
+			// Existing nodes must keep their original IPs.
+			gomega.Expect(getNodeVTEPIP("node-1")).To(gomega.Equal(ip1))
+			gomega.Expect(getNodeVTEPIP("node-2")).To(gomega.Equal(ip2))
+		})
+
+		ginkgo.It("preserves existing node IPs when switching from Unmanaged to Managed", func() {
+			// ovnkube-node already wrote IPs for both nodes during Unmanaged phase.
+			// Use non-sequential IPs so the test can't pass accidentally if the
+			// allocator just happens to assign the same first addresses.
+			node1 := newNodeWithVTEPAnnotation("node-1", map[string][]string{"mode-switch-vtep": {"100.64.0.42"}})
+			node2 := newNodeWithVTEPAnnotation("node-2", map[string][]string{"mode-switch-vtep": {"100.64.0.99"}})
+			vtep := newVTEP("mode-switch-vtep", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
+			start(vtep, node1, node2)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "mode-switch-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
+
+			// Switch to Managed mode.
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "mode-switch-vtep", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.Mode = vtepv1.VTEPModeManaged
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "mode-switch-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			// Existing IPs must be preserved.
+			getIP := func(nodeName string) string {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				vteps, err := util.ParseNodeVTEPs(n)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(vteps["mode-switch-vtep"].IPs).NotTo(gomega.BeEmpty())
+				return vteps["mode-switch-vtep"].IPs[0]
+			}
+			gomega.Expect(getIP("node-1")).To(gomega.Equal("100.64.0.42"))
+			gomega.Expect(getIP("node-2")).To(gomega.Equal("100.64.0.99"))
+		})
+
+		ginkgo.It("overwrites stale node IPs when switching Unmanaged to Managed with changed CIDRs", func() {
+			// Nodes have IPs from the old CIDR (192.168.0.x) but the VTEP now uses a different CIDR.
+			node1 := newNodeWithVTEPAnnotation("node-1", map[string][]string{"stale-vtep": {"192.168.0.1"}})
+			node2 := newNodeWithVTEPAnnotation("node-2", map[string][]string{"stale-vtep": {"192.168.0.2"}})
+			vtep := newVTEP("stale-vtep", vtepv1.VTEPModeUnmanaged, "192.168.0.0/24")
+			start(vtep, node1, node2)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "stale-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
+
+			// Switch to Managed with a completely different CIDR.
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "stale-vtep", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.Mode = vtepv1.VTEPModeManaged
+			v.Spec.CIDRs = []vtepv1.CIDR{"10.0.2.0/24"}
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "stale-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			// Stale IPs must be replaced with IPs from the new CIDR.
+			for _, nodeName := range []string{"node-1", "node-2"} {
+				gomega.Eventually(func() (string, error) {
+					n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+					if err != nil {
+						return "", err
+					}
+					vteps, err := util.ParseNodeVTEPs(n)
+					if err != nil {
+						return "", err
+					}
+					if len(vteps["stale-vtep"].IPs) == 0 {
+						return "", nil
+					}
+					return vteps["stale-vtep"].IPs[0], nil
+				}).WithTimeout(5 * time.Second).Should(gomega.HavePrefix("10.0.2."))
+			}
+		})
+
+		ginkgo.It("allocates fresh IPs for nodes whose CIDR was dropped before Unmanaged->Managed switch", func() {
+			// During Unmanaged phase the VTEP had two CIDRs and nodes got IPs from both.
+			// node-1 and node-2 have IPs from the first CIDR (10.0.4.0/29).
+			// node-3 and node-4 have IPs from the second CIDR (10.0.5.0/29) which
+			// will be removed before the mode switch (allowed in Unmanaged mode).
+			node1 := newNodeWithVTEPAnnotation("node-1", map[string][]string{"partial-stale-vtep": {"10.0.4.1"}})
+			node2 := newNodeWithVTEPAnnotation("node-2", map[string][]string{"partial-stale-vtep": {"10.0.4.2"}})
+			node3 := newNodeWithVTEPAnnotation("node-3", map[string][]string{"partial-stale-vtep": {"10.0.5.1"}})
+			node4 := newNodeWithVTEPAnnotation("node-4", map[string][]string{"partial-stale-vtep": {"10.0.5.2"}})
+			vtep := newVTEP("partial-stale-vtep", vtepv1.VTEPModeUnmanaged, "10.0.4.0/29", "10.0.5.0/29")
+			start(vtep, node1, node2, node3, node4)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "partial-stale-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
+
+			// Remove the second CIDR and switch to Managed (both in one update,
+			// as CEL allows free CIDR changes while still Unmanaged).
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "partial-stale-vtep", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.Mode = vtepv1.VTEPModeManaged
+			v.Spec.CIDRs = []vtepv1.CIDR{"10.0.4.0/29"}
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "partial-stale-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+
+			getIP := func(nodeName string) string {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				vteps, err := util.ParseNodeVTEPs(n)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(vteps["partial-stale-vtep"].IPs).NotTo(gomega.BeEmpty())
+				return vteps["partial-stale-vtep"].IPs[0]
+			}
+
+			// node-1 and node-2 must keep their IPs from the surviving CIDR.
+			gomega.Eventually(func() string { return getIP("node-1") }).
+				WithTimeout(5 * time.Second).Should(gomega.Equal("10.0.4.1"))
+			gomega.Eventually(func() string { return getIP("node-2") }).
+				WithTimeout(5 * time.Second).Should(gomega.Equal("10.0.4.2"))
+
+			// node-3 and node-4 had stale IPs from the dropped CIDR; they must
+			// get fresh IPs from 10.0.4.0/29.
+			for _, nodeName := range []string{"node-3", "node-4"} {
+				gomega.Eventually(func() string { return getIP(nodeName) }).
+					WithTimeout(5 * time.Second).Should(gomega.HavePrefix("10.0.4."))
+			}
+		})
+
+		ginkgo.It("cleans up annotations and removes allocator when switching from Managed to Unmanaged", func() {
+			node1 := newNodeWithVTEPAnnotation("node-1", nil)
+			node2 := newNodeWithVTEPAnnotation("node-2", nil)
+			vtep := newVTEP("managed-to-unmanaged", vtepv1.VTEPModeManaged, "100.64.0.0/24")
+			start(vtep, node1, node2)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "managed-to-unmanaged", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
+
+			// Confirm allocator exists.
+			controller.allocatorsMu.Lock()
+			gomega.Expect(controller.allocators).To(gomega.HaveKey("managed-to-unmanaged"))
+			controller.allocatorsMu.Unlock()
+
+			// Switch to Unmanaged.
+			v, err := fakeVTEP.K8sV1().VTEPs().Get(context.Background(), "managed-to-unmanaged", metav1.GetOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			v.Spec.Mode = vtepv1.VTEPModeUnmanaged
+			_, err = fakeVTEP.K8sV1().VTEPs().Update(context.Background(), v, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Allocator must be removed.
+			gomega.Eventually(func() bool {
+				controller.allocatorsMu.Lock()
+				defer controller.allocatorsMu.Unlock()
+				_, exists := controller.allocators["managed-to-unmanaged"]
+				return exists
+			}).WithTimeout(5 * time.Second).Should(gomega.BeFalse())
+
+			// Node annotations for the managed VTEP should be cleaned up.
+			for _, nodeName := range []string{"node-1", "node-2"} {
+				gomega.Eventually(func() (map[string]util.VTEPNodeAnnotation, error) {
+					n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+					if err != nil {
+						return nil, err
+					}
+					vteps, err := util.ParseNodeVTEPs(n)
+					if util.IsAnnotationNotSetError(err) {
+						return map[string]util.VTEPNodeAnnotation{}, nil
+					}
+					return vteps, err
+				}).WithTimeout(5 * time.Second).ShouldNot(gomega.HaveKey("managed-to-unmanaged"))
+			}
+		})
+	})
+
 	ginkgo.Context("Finalizer management", func() {
 		ginkgo.DescribeTable("adds finalizer to a new VTEP",
 			func(mode vtepv1.VTEPMode) {
@@ -1510,6 +1823,65 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 			gomega.Consistently(func() (*metav1.Condition, error) {
 				return getVTEPCondition(fakeVTEP, "vtep-node-change", conditionTypeAccepted)
 			}).WithTimeout(3 * time.Second).Should(gomega.HaveField("Status", metav1.ConditionTrue))
+		})
+
+		ginkgo.It("releases managed VTEP allocation when a node is deleted", func() {
+			// /30 gives exactly 4 IPs (.0-.3); fill the pool with 4 nodes.
+			node1 := newNodeWithVTEPAnnotation("node-1", nil)
+			node2 := newNodeWithVTEPAnnotation("node-2", nil)
+			node3 := newNodeWithVTEPAnnotation("node-3", nil)
+			node4 := newNodeWithVTEPAnnotation("node-4", nil)
+			vtep := newVTEP("release-vtep", vtepv1.VTEPModeManaged, "10.0.3.0/30")
+			start(vtep, node1, node2, node3, node4)
+
+			getNodeVTEPIP := func(nodeName string) (string, error) {
+				n, err := fakeClientset.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+				if err != nil {
+					return "", err
+				}
+				vteps, err := util.ParseNodeVTEPs(n)
+				if util.IsAnnotationNotSetError(err) || len(vteps["release-vtep"].IPs) == 0 {
+					return "", nil
+				}
+				if err != nil {
+					return "", err
+				}
+				return vteps["release-vtep"].IPs[0], nil
+			}
+
+			// Wait for all 4 nodes to be allocated — pool is now full.
+			for _, name := range []string{"node-1", "node-2", "node-3", "node-4"} {
+				n := name
+				gomega.Eventually(func() (string, error) {
+					return getNodeVTEPIP(n)
+				}).WithTimeout(5 * time.Second).ShouldNot(gomega.BeEmpty())
+			}
+
+			// Record node-4's IP before touching anything.
+			releasedIP, err := getNodeVTEPIP("node-4")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(releasedIP).NotTo(gomega.BeEmpty())
+
+			// Create node-5 while the pool is still full — it must fail to allocate.
+			node5 := newNodeWithVTEPAnnotation("node-5", nil)
+			_, err = fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node5, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "release-vtep", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocationFailed)),
+			))
+
+			// Now delete node-4 — its IP is freed.
+			err = fakeClientset.KubeClient.CoreV1().Nodes().Delete(context.Background(), "node-4", metav1.DeleteOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// node-5 must now be allocated and receive exactly the freed IP.
+			gomega.Eventually(func() (string, error) {
+				return getNodeVTEPIP("node-5")
+			}).WithTimeout(5 * time.Second).Should(gomega.Equal(releasedIP))
 		})
 
 		ginkgo.It("re-validates VTEP when a node is deleted", func() {
