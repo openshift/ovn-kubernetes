@@ -8,7 +8,6 @@ tags:
   ovnkube-node-dpu: false
   ovnkube-single-node-zone-dpu: false
   ovnkube-node-dpu-host: false
-  ovnkube-zone-controller: false
 
 # -- Endpoint of Kubernetes api server
 k8sAPIServer: https://172.25.0.2:6443

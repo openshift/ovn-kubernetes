@@ -45,7 +45,6 @@ usage() {
     echo "       [ -n4  | --no-ipv4 ]"
     echo "       [ -i6  | --ipv6 ]"
     echo "       [ -wk  | --num-workers <num> ]"
-    echo "       [ -npz | --node-per-zone ]"
     echo "       [ -ov  | --ovn-image <image> ]"
     echo "       [ -ovr | --ovn-repo <repo> ]"
     echo "       [ -ovg | --ovn-gitref <ref> ]"
@@ -97,7 +96,6 @@ usage() {
     echo "-mtu                                          Define the overlay mtu. DEFAULT: 1400 (1500 for no-overlay mode)"
     echo "--enable-coredumps                            Enable coredump collection on kind nodes. DEFAULT: Disabled"
     echo "-dns | --enable-dnsnameresolver               Enable DNSNameResolver for resolving the DNS names used in the DNS rules of EgressFirewall."
-    echo "-npz | --nodes-per-zone                       Specify number of nodes per zone (Default 1, >1 for multi-node zone). If this value > 1, then (total k8s nodes (workers + 1) / num of nodes per zone) should be zero."
     echo "-mps | --multi-pod-subnet                     Use multiple subnets for the default cluster network"
     echo "--allow-icmp-netpol                           Allows ICMP and ICMPv6 traffic globally, regardless of network policy rules"
     echo "-ecp | --encap-port                           GENEVE UDP tunnel port."
@@ -262,14 +260,6 @@ parse_args() {
             --allow-icmp-netpol )                 OVN_ALLOW_ICMP_NETPOL=true
                                                   ;;
             --disable-ovnkube-identity )          OVN_ENABLE_OVNKUBE_IDENTITY=false
-                                                  ;;
-            -npz | --nodes-per-zone )             shift
-                                                  if ! [[ "$1" =~ ^[1-9][0-9]*$ ]]; then
-                                                      echo "Invalid num-nodes-per-zone: $1"
-                                                      usage
-                                                      exit 1
-                                                  fi
-                                                  KIND_NUM_NODES_PER_ZONE=$1
                                                   ;;
             -mps| --multi-pod-subnet )            MULTI_POD_SUBNET=true
                                                   ;;
@@ -455,11 +445,6 @@ print_params() {
      echo "OVN_LOG_LEVEL_SB = $OVN_LOG_LEVEL_SB"
      echo "OVN_LOG_LEVEL_NORTHD = $OVN_LOG_LEVEL_NORTHD"
      echo "OVN_LOG_LEVEL_CONTROLLER = $OVN_LOG_LEVEL_CONTROLLER"
-     echo "KIND_NUM_NODES_PER_ZONE = $KIND_NUM_NODES_PER_ZONE"
-     if [ "${KIND_NUM_NODES_PER_ZONE}" -gt 1 ] && [ "${OVN_ENABLE_OVNKUBE_IDENTITY}" = "true" ]; then
-       echo "multi_node_zone is not compatible with ovnkube_identity, disabling ovnkube_identity"
-       OVN_ENABLE_OVNKUBE_IDENTITY="false"
-     fi
      echo ""
 }
 
@@ -480,16 +465,8 @@ helm_prereqs() {
 
 create_ovn_kubernetes() {
     cd ${DIR}/../helm/ovn-kubernetes
-    if [[ $KIND_NUM_NODES_PER_ZONE == 1 ]]; then
-      label_ovn_single_node_zones
-      value_file="values-single-node-zone.yaml"
-    elif [[ $KIND_NUM_NODES_PER_ZONE -gt 1 ]]; then
-      label_ovn_multiple_nodes_zones
-      value_file="values-multi-node-zone.yaml"
-    else
-      echo "KIND_NUM_NODES_PER_ZONE must be greater than 0"
-      exit 1
-    fi
+    label_ovn_single_node_zones
+    value_file="values-single-node-zone.yaml"
     echo "value_file=${value_file}"
     # For multi-pod-subnet case, NET_CIDR_IPV4 is a list of CIDRs separated by comma.
     # When Helm encounters a comma within a string value in a --set argument, it attempts to parse the comma as a separator
@@ -564,13 +541,9 @@ helm upgrade --install ovn-kubernetes . -f "${value_file}" \
           --set ovnkube-control-plane.logLevel=${MASTER_LOG_LEVEL} \
           --set ovnkube-node.logLevel=${NODE_LOG_LEVEL} \
           --set ovnkube-single-node-zone.ovnkubeNodeLogLevel=${NODE_LOG_LEVEL} \
-          --set ovnkube-zone-controller.ovnkubeLocalLogLevel=${NODE_LOG_LEVEL} \
           --set-string ovnkube-single-node-zone.nbLogLevel="${OVN_LOG_LEVEL_NB}" \
-          --set-string ovnkube-zone-controller.nbLogLevel="${OVN_LOG_LEVEL_NB}" \
           --set-string ovnkube-single-node-zone.sbLogLevel="${OVN_LOG_LEVEL_SB}" \
-          --set-string ovnkube-zone-controller.sbLogLevel="${OVN_LOG_LEVEL_SB}" \
           --set-string ovnkube-single-node-zone.northdLogLevel="${OVN_LOG_LEVEL_NORTHD}" \
-          --set-string ovnkube-zone-controller.northdLogLevel="${OVN_LOG_LEVEL_NORTHD}" \
           --set-string ovnkube-node.ovnControllerLogLevel="${OVN_LOG_LEVEL_CONTROLLER}" \
           --set-string ovnkube-single-node-zone.ovnControllerLogLevel="${OVN_LOG_LEVEL_CONTROLLER}"
 EOF

@@ -187,18 +187,6 @@ set_common_default_params() {
     KIND_NUM_WORKER=${KIND_NUM_WORKER:-2}
   fi
 
-  KIND_NUM_NODES_PER_ZONE=${KIND_NUM_NODES_PER_ZONE:-1}
-  if [[ ${KIND_NUM_NODES_PER_ZONE} -lt 1 ]]; then
-    echo "KIND_NUM_NODES_PER_ZONE must be at least 1"
-    exit 1
-  fi
-
-  TOTAL_NODES=$((KIND_NUM_WORKER + KIND_NUM_MASTER))
-  if [[ ${KIND_NUM_NODES_PER_ZONE} -gt 1 ]] && [[ $((TOTAL_NODES % KIND_NUM_NODES_PER_ZONE)) -ne 0 ]]; then
-    echo "(Total k8s nodes / number of nodes per zone) should be zero"
-    exit 1
-  fi
-
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   ENABLE_NETWORK_SEGMENTATION=${ENABLE_NETWORK_SEGMENTATION:-false}
   if [ "$ENABLE_NETWORK_SEGMENTATION" == true ] && [ "$ENABLE_MULTI_NET" != true ]; then
@@ -1818,27 +1806,6 @@ label_ovn_single_node_zones() {
   done
 }
 
-label_ovn_multiple_nodes_zones() {
-  KIND_NODES=$(kind_get_nodes | sort)
-  zone_idx=1
-  n=1
-  for node in $KIND_NODES; do
-    zone="zone-${zone_idx}"
-    kubectl label node "${node}" k8s.ovn.org/zone-name=${zone} --overwrite
-    if [ "${n}" == "1" ]; then
-      # Mark 1st node of each zone as zone control plane
-      kubectl label node "${node}" node-role.kubernetes.io/zone-controller="" --overwrite
-    fi
-
-    if [ "${n}" == "${KIND_NUM_NODES_PER_ZONE}" ]; then
-      n=1
-      zone_idx=$((zone_idx+1))
-    else
-      n=$((n+1))
-    fi
-  done
-}
-
 OPENSSL=""
 set_openssl_binary() {
   for s in openssl openssl3; do
@@ -1863,11 +1830,7 @@ scale_kind_cluster() {
   # change this to https://github.com/lobuhi/kindscaler once PR https://github.com/lobuhi/kindscaler/pull/1 is accepted
   git clone https://github.com/trozet/kindscaler /tmp/kindscaler
   /tmp/kindscaler/kindscaler.sh ${KIND_CLUSTER_NAME} -r worker -c ${KIND_NUM_WORKER}
-  if [ "${KIND_NUM_NODES_PER_ZONE}" == "1" ]; then
-    label_ovn_single_node_zones
-  else
-    label_ovn_multiple_nodes_zones
-  fi
+  label_ovn_single_node_zones
   if [ "$OVN_IMAGE" == local ]; then
     set_ovn_image
   fi

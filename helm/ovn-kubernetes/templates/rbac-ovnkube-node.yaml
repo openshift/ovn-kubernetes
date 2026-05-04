@@ -218,8 +218,7 @@ rules:
       verbs: [ "get", "list", "watch" ]
     {{- end }}
 
-# Endpoints are read by ovnkube-node on startup and created by
-# ovnkube-zone-controller/sb-ovsdb startup script in multinode-zone.
+# Endpoints are read by ovnkube-node on startup.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

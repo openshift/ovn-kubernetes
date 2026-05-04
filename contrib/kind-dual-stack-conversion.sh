@@ -37,7 +37,6 @@ convert_cni() {
   # FIXME: kubectl rollout restart deployment leaves the old pod hanging 
   # as workaround we delete the control plane pods directly.
   # Depending on how kind was deployed, the pods have different labels.
-  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-zone-controller ||:
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-control-plane ||:
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-identity ||:
 

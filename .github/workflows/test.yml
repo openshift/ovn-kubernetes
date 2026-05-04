@@ -452,7 +452,7 @@ jobs:
       fail-fast: false
       matrix:
         # Valid options are:
-        # target: ["shard-conformance", "control-plane", "multi-homing", "multi-node-zones", "node-ip-mac-migration",
+        # target: ["shard-conformance", "control-plane", "multi-homing", "node-ip-mac-migration",
         #          "external-gateway", "kv-live-migration", "network-segmentation",
         #          "network-segmentation-dynamic", "bgp", "bgp-no-overlay", "bgp-loose-isolation",
         #          "evpn", "traffic-flow-test-only", "tools", "serial"]
@@ -463,9 +463,8 @@ jobs:
         # ipfamily: ["ipv4", "ipv6", "dualstack"]
         # disable-snat-multiple-gws: ["noSnatGW", "snatGW"]
         # second-bridge: ["2br", "1br"]
-        # ic: ["ic-single-node-zones", "ic-multi-node-zones"]
+        # ic: ["ic-single-node-zones"]
         # num-workers : "<integer value>"
-        # num-nodes-per-zone : "<integer value>"
         # forwarding : ["", "disable-forwarding"]
         # dns-name-resolver : ["", "enable-dns-name-resolver"]
         # network-segmentation : ["", "enable-network-segmentation"]
@@ -486,7 +485,6 @@ jobs:
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "shared",  "ipfamily": "dualstack",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "node-ip-mac-migration", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "multi-homing",      "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "network-segmentation": "enable-network-segmentation"}
-          - {"target": "multi-node-zones",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "SnatGW",   "second-bridge": "1br", "ic": "ic-multi-node-zones", "num-workers": "3", "num-nodes-per-zone": "2"}
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "external-gateway",  "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "2br", "ic": "ic-single-node-zones"}
@@ -530,7 +528,6 @@ jobs:
       KIND_LOCAL_REGISTRY: "${{ matrix.local-kind-registry == 'true' }}"
       KIND_INSTALL_KUBEVIRT: "${{ matrix.target == 'kv-live-migration' }}"
       KIND_NUM_WORKER: "${{ matrix.num-workers }}"
-      KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
       OVN_DISABLE_FORWARDING: "${{ matrix.forwarding == 'disable-forwarding' }}"
       OVN_ENABLE_DNSNAMERESOLVER: "${{ matrix.dns-name-resolver == 'enable-dns-name-resolver' }}"
       OVN_NETWORK_QOS_ENABLE: "${{ matrix.target == 'control-plane' }}"
@@ -700,8 +697,6 @@ jobs:
           make -C test control-plane WHAT="Multi Homing"
         elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
           make -C test control-plane WHAT="Node IP and MAC address migration"
-        elif [ "${{ matrix.target }}" == "multi-node-zones" ]; then
-          make -C test control-plane WHAT="Multi node zones interconnect"
         elif [ "${{ matrix.target }}" == "external-gateway" ]; then
           make -C test control-plane WHAT="External Gateway"
         elif [ "${{ matrix.target }}" == "kv-live-migration" ]; then
@@ -763,8 +758,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {"ha": "noHA", "interconnect": "interconnect-single-node-zones", "num-zones": "3", "num-nodes-per-zone": "1"}
-          # - {"ha": "noHA", "interconnect": "interconnect-multi-node-zones", "num-zones": "2", "num-nodes-per-zone": "2"}
+          - {"ha": "noHA", "interconnect": "interconnect-single-node-zones", "num-zones": "3"}
     needs: [ build-pr ]
     env:
       JOB_NAME: "DualStack-conversion-shared-${{ matrix.ha }}-${{ matrix.interconnect }}"
@@ -776,7 +770,6 @@ jobs:
       OVN_MULTICAST_ENABLE:  "false"
       DUALSTACK_CONVERSION:  "true"
       KIND_NUM_ZONES: "${{ matrix.num-zones }}"
-      KIND_NUM_NODES_PER_ZONE: "${{ matrix.num-nodes-per-zone }}"
     steps:
 
     - name: Check out code into the Go module directory
