@@ -17,7 +17,7 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 		ipBlocks   []*knet.IPBlock
 		lportMatch string
 		l4Match    string
-		expected   string
+		expected   []string
 	}{
 		{
 			desc: "IPv4 only no except",
@@ -28,7 +28,7 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 			},
 			lportMatch: "fake",
 			l4Match:    "input",
-			expected:   "ip4.src == 0.0.0.0/0 && input && fake",
+			expected:   []string{"ip4.src == 0.0.0.0/0 && input && fake"},
 		},
 		{
 			desc: "multiple IPv4 only no except",
@@ -42,7 +42,8 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 			},
 			lportMatch: "fake",
 			l4Match:    "input",
-			expected:   "(ip4.src == 0.0.0.0/0 || ip4.src == 10.1.0.0/16) && input && fake",
+			expected: []string{"ip4.src == 0.0.0.0/0 && input && fake",
+				"ip4.src == 10.1.0.0/16 && input && fake"},
 		},
 		{
 			desc: "IPv6 only no except",
@@ -53,7 +54,7 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 			},
 			lportMatch: "fake",
 			l4Match:    "input",
-			expected:   "ip6.src == fd00:10:244:3::49/32 && input && fake",
+			expected:   []string{"ip6.src == fd00:10:244:3::49/32 && input && fake"},
 		},
 		{
 			desc: "mixed IPv4 and IPv6  no except",
@@ -67,7 +68,8 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 			},
 			lportMatch: "fake",
 			l4Match:    "input",
-			expected:   "(ip6.src == ::/0 || ip4.src == 0.0.0.0/0) && input && fake",
+			expected: []string{"ip6.src == ::/0 && input && fake",
+				"ip4.src == 0.0.0.0/0 && input && fake"},
 		},
 		{
 			desc: "IPv4 only with except",
@@ -79,7 +81,7 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 			},
 			lportMatch: "fake",
 			l4Match:    "input",
-			expected:   "(ip4.src == 0.0.0.0/0 && ip4.src != {10.1.0.0/16}) && input && fake",
+			expected:   []string{"ip4.src == 0.0.0.0/0 && ip4.src != {10.1.0.0/16} && input && fake"},
 		},
 		{
 			desc: "multiple IPv4 with except",
@@ -94,7 +96,8 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 			},
 			lportMatch: "fake",
 			l4Match:    "input",
-			expected:   "((ip4.src == 0.0.0.0/0 && ip4.src != {10.1.0.0/16}) || ip4.src == 10.1.0.0/16) && input && fake",
+			expected: []string{"ip4.src == 0.0.0.0/0 && ip4.src != {10.1.0.0/16} && input && fake",
+				"ip4.src == 10.1.0.0/16 && input && fake"},
 		},
 		{
 			desc: "IPv4 with IPv4 except",
@@ -106,7 +109,7 @@ func TestGetMatchFromIPBlock(t *testing.T) {
 			},
 			lportMatch: "fake",
 			l4Match:    "input",
-			expected:   "(ip4.src == 0.0.0.0/0 && ip4.src != {10.1.0.0/16}) && input && fake",
+			expected:   []string{"ip4.src == 0.0.0.0/0 && ip4.src != {10.1.0.0/16} && input && fake"},
 		},
 	}
 
