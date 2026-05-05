@@ -1361,80 +1361,6 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgo.It("use node retry with updating a node", func() {
-		// This test asserted central-mode behavior: an NBDB outage during a
-		// node-update gateway sync sets gatewaysFailed[node], and a later
-		// ReconcileNetwork drives gateway sync to consistency. Under unconditional
-		// IC, syncZoneIC runs first and fails first under the outage — it sets
-		// syncZoneICFailed[node] and short-circuits the path the test asserts on.
-		// The IC-mode equivalent of "retry recovers from a stuck IC sync" is
-		// already covered by "reconciles a bootstrap local node when only
-		// syncZoneICFailed is marked" below; broader update-event retry under
-		// NBDB outages is covered by pods_test.go and egressfirewall_test.go.
-		// Porting this specific gateway-update flow to IC requires a deeper
-		// reconcile-path rewrite — tracked as follow-up.
-		ginkgo.Skip("TODO: gateway-update retry path superseded by syncZoneIC; needs IC-mode rewrite (covered by sibling bootstrap-recovery test)")
-		app.Action = func(ctx *cli.Context) error {
-			_, err := config.InitConfig(ctx, nil, nil)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			clusterSubnets := startFakeController(oc, wg)
-
-			skipSnat := false
-			subnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			expectedNBDatabaseState = addNodeLogicalFlowsWithServiceController(nil, expectedOVNClusterRouter, expectedNodeSwitch,
-				expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, oc.svcTemplateSupport)
-			expectedNBDatabaseState = generateGatewayInitExpectedNB(expectedNBDatabaseState, expectedOVNClusterRouter,
-				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{subnet}, l3GatewayConfig,
-				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)},
-				skipSnat, node1.NodeMgmtPortIP, "1400")
-			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
-
-			ginkgo.By("Bringing down NBDB")
-			// inject transient problem, nbdb is down
-			oc.nbClient.Close()
-			gomega.Eventually(func() bool {
-				return oc.nbClient.Connected()
-			}).Should(gomega.BeFalse())
-
-			ginkgo.By("modifying the node and triggering an update")
-			// modify the node and trigger an update
-			node1.GatewayRouterNextHop = "172.16.16.111"
-			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
-			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = nodeAnnotator.Run()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			ginkgo.By("waiting for the gateway update retry path to observe the failed update")
-			gomega.Eventually(func() bool {
-				_, failed := oc.gatewaysFailed.Load(node1.Name)
-				return failed
-			}, config.Default.OVSDBTxnTimeout+time.Second).Should(gomega.BeTrue())
-			connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
-			defer cancel()
-			ginkgo.By("bring up NBDB")
-			resetNBClient(connCtx, oc.nbClient)
-			oc.nodeReconciler.ReconcileNetwork(node1.Name, oc.GetNetworkName())
-			for _, data := range expectedNBDatabaseState {
-				if route, ok := data.(*nbdb.LogicalRouterStaticRoute); ok {
-					if route.Nexthop == "172.16.16.1" {
-						route.Nexthop = node1.GatewayRouterNextHop
-					}
-				}
-			}
-			gomega.Eventually(oc.nbClient).Should(libovsdbtest.HaveData(expectedNBDatabaseState))
-
-			return nil
-		}
-
-		err := app.Run([]string{
-			app.Name,
-			"-cluster-subnets=" + clusterCIDR,
-			"--init-gateways",
-			"--nodeport",
-		})
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	})
-
 	ginkgo.It("use node retry with deleting a node", func() {
 		app.Action = func(ctx *cli.Context) error {
 			_, err := config.InitConfig(ctx, nil, nil)
@@ -1797,6 +1723,94 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				})
 				return err
 			}).Should(gomega.Succeed())
+
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"-cluster-subnets=" + clusterCIDR,
+			"--init-gateways",
+			"--nodeport",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	ginkgo.It("retries gateway sync after NBDB outage on node update", func() {
+		// Full failure+recovery path: NBDB outage during a node-update gateway
+		// sync sets gatewaysFailed; once NBDB recovers, ReconcileNetwork drives
+		// gateway sync to consistency and clears the marker.
+		app.Action = func(ctx *cli.Context) error {
+			_, err := config.InitConfig(ctx, nil, nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			ginkgo.By("seeding IC node annotations so syncZoneIC succeeds cleanly")
+			gomega.Expect(nodeAnnotator.Set(util.OVNNodeEncapIPs, []string{node1.NodeIP})).To(gomega.Succeed())
+			gomega.Expect(nodeAnnotator.Set(util.OvnTransitSwitchPortAddr,
+				map[string]string{"ipv4": "100.88.0.2/16"})).To(gomega.Succeed())
+			gomega.Expect(nodeAnnotator.Run()).To(gomega.Succeed())
+
+			startFakeController(oc, wg)
+
+			ginkgo.By("waiting for the initial bootstrap to converge")
+			gomega.Eventually(func() error {
+				_, err := libovsdbops.GetLogicalRouter(nbClient, &nbdb.LogicalRouter{
+					Name: types.GWRouterPrefix + node1.Name,
+				})
+				return err
+			}).Should(gomega.Succeed())
+			gomega.Eventually(func() bool {
+				_, failed := oc.gatewaysFailed.Load(node1.Name)
+				return failed
+			}).Should(gomega.BeFalse())
+
+			ginkgo.By("Bringing down NBDB")
+			oc.nbClient.Close()
+			gomega.Eventually(func() bool {
+				return oc.nbClient.Connected()
+			}).Should(gomega.BeFalse())
+
+			ginkgo.By("modifying the node and triggering an update")
+			node1.GatewayRouterNextHop = "172.16.16.111"
+			l3Config := node1.gatewayConfig(config.GatewayModeShared, uint(vlanID))
+			gomega.Expect(util.SetL3GatewayConfig(nodeAnnotator, l3Config)).To(gomega.Succeed())
+			gomega.Expect(nodeAnnotator.Run()).To(gomega.Succeed())
+
+			ginkgo.By("waiting for the gateway sync to fail and set the marker")
+			gomega.Eventually(func() bool {
+				_, failed := oc.gatewaysFailed.Load(node1.Name)
+				return failed
+			}, config.Default.OVSDBTxnTimeout+time.Second).Should(gomega.BeTrue())
+
+			ginkgo.By("bringing NBDB back up")
+			connCtx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+			defer cancel()
+			resetNBClient(connCtx, oc.nbClient)
+			oc.nodeReconciler.ReconcileNetwork(node1.Name, oc.GetNetworkName())
+
+			ginkgo.By("expecting the gateway-retry path to clear the marker and apply the new next-hop")
+			gomega.Eventually(func() bool {
+				_, failed := oc.gatewaysFailed.Load(node1.Name)
+				return failed
+			}, 10*time.Second).Should(gomega.BeFalse())
+			const oldNextHop = "172.16.16.1"
+			gomega.Eventually(func() (map[string]int, error) {
+				routes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(nbClient,
+					func(r *nbdb.LogicalRouterStaticRoute) bool {
+						return r.Nexthop == node1.GatewayRouterNextHop || r.Nexthop == oldNextHop
+					})
+				if err != nil {
+					return nil, err
+				}
+				counts := map[string]int{}
+				for _, r := range routes {
+					counts[r.Nexthop]++
+				}
+				return counts, nil
+			}, 10*time.Second).Should(gomega.And(
+				gomega.HaveKey(node1.GatewayRouterNextHop),
+				gomega.Not(gomega.HaveKey(oldNextHop)),
+			))
 
 			return nil
 		}
