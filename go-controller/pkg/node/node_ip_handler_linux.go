@@ -624,29 +624,33 @@ func (c *addressManager) getPrimaryHostEgressIPs() (sets.Set[string], error) {
 
 // updateOVNEncapIPAndReconnect updates encap IP to OVS when the node primary IP changed.
 func (c *addressManager) updateOVNEncapIPAndReconnect(newIP net.IP) {
+	alreadyConfigured := false
 	ovs, err := ovsops.GetOpenvSwitch(c.ovsClient)
 	if err != nil {
 		klog.Warningf("Unable to retrieve configured ovn-encap-ip from OVS: %v", err)
 	} else if encapIP := ovs.ExternalIDs["ovn-encap-ip"]; encapIP != "" && newIP.String() == encapIP {
 		klog.V(4).Infof("Will not update encap IP %s - it is already configured", newIP.String())
-		return
+		alreadyConfigured = true
 	}
 
+	if !alreadyConfigured {
+		if err := ovsops.UpdateOpenvSwitchExternalIDs(c.ovsClient, map[string]string{
+			"ovn-encap-ip": newIP.String(),
+		}); err != nil {
+			klog.Errorf("Error setting OVS encap IP %s: %v", newIP.String(), err)
+			return
+		}
+	}
 	config.Default.EffectiveEncapIP = newIP.String()
-	if err := ovsops.UpdateOpenvSwitchExternalIDs(c.ovsClient, map[string]string{
-		"ovn-encap-ip": newIP.String(),
-	}); err != nil {
-		klog.Errorf("Error setting OVS encap IP %s: %v", newIP.String(), err)
-		return
-	}
 
-	// force ovn-controller to reconnect SB with new encap IP immediately.
-	// otherwise there will be a max delay of 200s due to the 100s
-	// ovn-controller inactivity probe.
-	_, stderr, err := util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart")
-	if err != nil {
-		klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
-		return
+	if !alreadyConfigured {
+		// force ovn-controller to reconnect SB with new encap IP immediately.
+		// otherwise there will be a max delay of 200s due to the 100s
+		// ovn-controller inactivity probe. Best-effort: still let the
+		// annotation below converge on failure.
+		if _, stderr, err := util.RunOVNAppctlWithTimeout(5, "-t", "ovn-controller", "exit", "--restart"); err != nil {
+			klog.Errorf("Failed to exit ovn-controller %v %q", err, stderr)
+		}
 	}
 
 	// Update node-encap-ips annotation

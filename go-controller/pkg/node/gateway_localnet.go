@@ -108,7 +108,11 @@ func cleanupLocalnetGateway(ovsClient libovsdbclient.Client, physnet string) err
 		return nil
 	}
 	for _, bridgeMapping := range strings.Split(mappings, ",") {
-		m := strings.Split(bridgeMapping, ":")
+		m := strings.SplitN(bridgeMapping, ":", 2)
+		if len(m) != 2 || m[1] == "" {
+			klog.Warningf("Ignoring malformed ovn-bridge-mappings entry %q", bridgeMapping)
+			continue
+		}
 		if physnet == m[0] {
 			bridgeName := m[1]
 			if _, stderr, err := util.RunOVSVsctl("--", "--if-exists", "del-br", bridgeName); err != nil {

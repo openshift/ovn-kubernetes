@@ -1926,7 +1926,11 @@ func cleanupSharedGateway(ovsClient libovsdbclient.Client) error {
 
 		bridgeName := ""
 		for _, bridgeMapping := range strings.Split(mappings, ",") {
-			m := strings.Split(bridgeMapping, ":")
+			m := strings.SplitN(bridgeMapping, ":", 2)
+			if len(m) != 2 {
+				klog.Warningf("Ignoring malformed ovn-bridge-mappings entry %q", bridgeMapping)
+				continue
+			}
 			if network := m[0]; network == types.PhysicalNetworkName {
 				bridgeName = m[1]
 				break

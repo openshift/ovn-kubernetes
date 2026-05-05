@@ -567,6 +567,9 @@ var _ = Describe("Management Port tests", func() {
 			err := util.SetExec(execMock)
 			Expect(err).NotTo(HaveOccurred())
 			util.SetNetLinkOpMockInst(netlinkOpsMock)
+			// Restore global netlink ops unconditionally — registered here so a
+			// failing assertion in AfterEach cannot leak the mock to other specs.
+			DeferCleanup(func() { util.SetNetLinkOpMockInst(origNetlinkOps) })
 			nodenft.SetFakeNFTablesHelper()
 
 			ovsClient, ovsCleanup, err = libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
@@ -575,13 +578,12 @@ var _ = Describe("Management Port tests", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() { ovsCleanup.Cleanup() })
 		})
 
 		AfterEach(func() {
 			netlinkOpsMock.AssertExpectations(t)
 			Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
-			util.SetNetLinkOpMockInst(origNetlinkOps)
-			ovsCleanup.Cleanup()
 		})
 
 		Context("Syncing netdevice interface", func() {
