@@ -3496,9 +3496,6 @@ var _ = Describe("ClusterNetworkConnect OVN-Kubernetes Controller", feature.Netw
 		   7. Delete CNC-2, verify all services isolated
 		*/
 		It("should maintain non-transitive service connectivity when a network is selected by multiple CNCs", func() {
-			if isDynamicUDNEnabled() {
-				Skip("Service connectivity with dynamic UDN allocation is not yet supported, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5963")
-			}
 			// Same topology as above but with ServiceNetwork enabled:
 			// CNC-1: blue + red, CNC-2: blue + green
 			// Verify service VIPs work cross-network and survive CNC-1 deletion
@@ -3736,9 +3733,6 @@ var _ = Describe("ClusterNetworkConnect OVN-Kubernetes Controller", feature.Netw
 		   7. Delete CNC-2, verify all services isolated
 		*/
 		It("should maintain service connectivity when both CNCs select the exact same networks", func() {
-			if isDynamicUDNEnabled() {
-				Skip("Service connectivity with dynamic UDN allocation is not yet supported, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5963")
-			}
 			// Both CNCs select the same 2 networks with ServiceNetwork
 			// Deleting one CNC should not break the other's service connectivity
 
@@ -4000,9 +3994,6 @@ var _ = Describe("ClusterNetworkConnect OVN-Kubernetes Controller", feature.Netw
 		}
 
 		BeforeEach(func() {
-			if isDynamicUDNEnabled() {
-				Skip("Service connectivity with dynamic UDN allocation is not yet supported, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5963")
-			}
 			// Get 2 schedulable nodes for cross-node testing
 			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
 			Expect(err).NotTo(HaveOccurred())
