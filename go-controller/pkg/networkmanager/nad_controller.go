@@ -409,14 +409,19 @@ func (c *nadController) OnNetworkRefChange(node, nadNamespacedName string, activ
 
 	isLocal := node == c.filterNADsOnNode
 	networkName := nadNetwork.GetNetworkName()
-	c.notifyNetworkRefReconcilers(node, networkName)
+	affectedNetworks := c.getNetworkAndConnectedNetworks(networkName)
+	for _, affectedNetwork := range affectedNetworks {
+		c.notifyNetworkRefReconcilers(node, affectedNetwork)
+	}
 	// Enqueue a network reconcile for remote nodes (non-blocking).
 	if !isLocal {
-		c.networkController.NotifyNetworkRefChange(networkName, node)
+		for _, affectedNetwork := range affectedNetworks {
+			c.networkController.NotifyNetworkRefChange(affectedNetwork, node)
+		}
 	}
 	// Let the NAD controller handle lifecycle/teardown decisions asynchronously for local networks only.
 	if isLocal {
-		c.reconcileNetworkActivity(c.getNetworkAndConnectedNetworks(networkName), active, networkName, nadNamespacedName)
+		c.reconcileNetworkActivity(affectedNetworks, active, networkName, nadNamespacedName)
 	}
 
 }

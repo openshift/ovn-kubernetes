@@ -2356,6 +2356,82 @@ func TestOnNetworkRefChangeNotifiesNetworkRefReconcilers(t *testing.T) {
 	})))
 }
 
+func TestOnNetworkRefChangeNotifiesConnectedNetworkRefReconcilers(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+
+	netConfA := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "net-a",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: types.Layer3Topology,
+		Role:     types.NetworkRolePrimary,
+		NADName:  "ns1/nad-a",
+	}
+	nadA, err := buildNAD("nad-a", "ns1", netConfA)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	nadA.OwnerReferences = []metav1.OwnerReference{{
+		Kind:       "UserDefinedNetwork",
+		Name:       "udn-a",
+		Controller: ptrTo(true),
+	}}
+
+	nadSyncController := controller.NewController(
+		"test-nad-sync-controller-for-connected-network-ref",
+		&controller.ControllerConfig[string]{
+			RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+			Reconcile: func(string) error {
+				return nil
+			},
+			Threadiness: 1,
+		},
+	)
+	g.Expect(controller.Start(nadSyncController)).To(gomega.Succeed())
+	defer controller.Stop(nadSyncController)
+
+	nc := &nadController{
+		controller:            nadSyncController,
+		filterNADsOnNode:      "local-node",
+		networkController:     newNetworkController("", "", "", nil, nil),
+		networkIDAllocator:    id.NewIDAllocator("NetworkIDs", MaxNetworks),
+		nadLister:             &fakeNADLister{nads: map[string]*nettypes.NetworkAttachmentDefinition{nadA.Name: nadA}},
+		networkRefReconcilers: map[uint64]networkRefReconcilerRegistration{},
+		cncConnectedNetworks: map[string]sets.Set[string]{
+			"net-a": sets.New[string]("net-b"),
+			"net-b": sets.New[string]("net-a"),
+		},
+	}
+	g.Expect(nc.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)).To(gomega.Succeed())
+
+	refReconciler := &testNetworkRefReconciler{
+		updates: make(chan struct {
+			node        string
+			networkName string
+		}, 2),
+	}
+	id := nc.RegisterNetworkRefReconciler(refReconciler)
+	g.Expect(id).ToNot(gomega.BeZero())
+
+	nc.OnNetworkRefChange("remote-node", util.GetNADName(nadA.Namespace, nadA.Name), true)
+
+	received := sets.New[string]()
+	g.Eventually(func() []string {
+		for {
+			select {
+			case update := <-refReconciler.updates:
+				g.Expect(update.node).To(gomega.Equal("remote-node"))
+				received.Insert(update.networkName)
+			default:
+				return received.UnsortedList()
+			}
+		}
+	}, time.Second).Should(gomega.ConsistOf("net-a", "net-b"))
+}
+
 func TestOnNetworkRefChangeRendersCNCConnectedNetworksWhenNodeBecomesActive(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
@@ -2828,6 +2904,152 @@ func TestOnNetworkRefChangeNotifiesNetworkController(t *testing.T) {
 			g.Expect(callCount).To(gomega.Equal(1))
 			g.Expect(gotNode).To(gomega.Equal(nodeName))
 			g.Expect(gotActive).To(gomega.Equal(tt.nodeHasNetworkActive))
+		})
+	}
+}
+
+func TestOnNetworkRefChangeNotifiesConnectedRemoteNetworkControllers(t *testing.T) {
+	tests := []struct {
+		name           string
+		notifyActive   bool
+		directRef      bool
+		expectedActive bool
+	}{
+		{
+			name:           "connected networks become active",
+			notifyActive:   true,
+			directRef:      true,
+			expectedActive: true,
+		},
+		{
+			name:           "connected networks become inactive",
+			notifyActive:   false,
+			directRef:      false,
+			expectedActive: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			err := config.PrepareTestConfig()
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+
+			keyA := "ns1/nad-a"
+			keyB := "ns1/nad-b"
+			netConfA := &ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{
+					Name: "net-a",
+					Type: "ovn-k8s-cni-overlay",
+				},
+				Topology: types.Layer3Topology,
+				Role:     types.NetworkRolePrimary,
+				NADName:  keyA,
+			}
+			nadA, err := buildNAD("nad-a", "ns1", netConfA)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			nadA.OwnerReferences = []metav1.OwnerReference{{
+				Kind:       "UserDefinedNetwork",
+				Name:       "udn-a",
+				Controller: ptrTo(true),
+			}}
+			netConfB := &ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{
+					Name: "net-b",
+					Type: "ovn-k8s-cni-overlay",
+				},
+				Topology: types.Layer3Topology,
+				Role:     types.NetworkRoleSecondary,
+				NADName:  keyB,
+			}
+			nadB, err := buildNAD("nad-b", "ns1", netConfB)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			nadB.OwnerReferences = []metav1.OwnerReference{{
+				Kind:       "UserDefinedNetwork",
+				Name:       "udn-b",
+				Controller: ptrTo(true),
+			}}
+
+			podTracker := &PodTrackerController{
+				nodeNADToPodCache: map[string]map[string]map[string]struct{}{},
+			}
+			if tt.directRef {
+				podTracker.nodeNADToPodCache["remote-node"] = map[string]map[string]struct{}{
+					keyA: {"ns1/pod-a": {}},
+				}
+			}
+
+			tcm := &testControllerManager{
+				controllers: map[string]NetworkController{},
+				defaultNetwork: &testNetworkController{
+					ReconcilableNetInfo: &util.DefaultNetInfo{},
+				},
+			}
+			networkController := newNetworkController("", "", "", tcm, nil)
+			nc := &nadController{
+				filterNADsOnNode:   "local-node",
+				podTracker:         podTracker,
+				nads:               map[string]string{keyA: "net-a", keyB: "net-b"},
+				nadsByNetwork:      map[string]sets.Set[string]{"net-a": sets.New[string](keyA), "net-b": sets.New[string](keyB)},
+				dynamicFilterNADs:  map[string]bool{keyA: true, keyB: true},
+				primaryNADs:        map[string]string{},
+				networkController:  networkController,
+				networkIDAllocator: id.NewIDAllocator("NetworkIDs", MaxNetworks),
+				nadLister:          &fakeNADLister{nads: map[string]*nettypes.NetworkAttachmentDefinition{nadA.Name: nadA, nadB.Name: nadB}},
+				cncConnectedNetworks: map[string]sets.Set[string]{
+					"net-a": sets.New[string]("net-b"),
+					"net-b": sets.New[string]("net-a"),
+				},
+			}
+			nc.networkController.nodeHasNetwork = nc.NodeHasNetwork
+			g.Expect(nc.networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)).To(gomega.Succeed())
+
+			nadNetworkA, err := util.ParseNADInfo(nadA)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			mutableNetInfoA := util.NewMutableNetInfo(nadNetworkA)
+			mutableNetInfoA.SetNADs(keyA)
+			nc.networkController.setNetwork("net-a", mutableNetInfoA)
+
+			nadNetworkB, err := util.ParseNADInfo(nadB)
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			mutableNetInfoB := util.NewMutableNetInfo(nadNetworkB)
+			mutableNetInfoB.SetNADs(keyB)
+			nc.networkController.setNetwork("net-b", mutableNetInfoB)
+
+			callCount := map[string]int{}
+			gotNode := map[string]string{}
+			gotActive := map[string]bool{}
+			for _, networkName := range []string{"net-a", "net-b"} {
+				networkName := networkName
+				nadNetwork := nadNetworkA
+				if networkName == "net-b" {
+					nadNetwork = nadNetworkB
+				}
+				nc.networkController.networkControllers[networkName] = &networkControllerState{
+					controller: &testNetworkController{
+						ReconcilableNetInfo: util.NewReconcilableNetInfo(nadNetwork),
+						tcm:                 tcm,
+						handleRefChange: func(node string, active bool) {
+							callCount[networkName]++
+							gotNode[networkName] = node
+							gotActive[networkName] = active
+						},
+					},
+				}
+			}
+
+			nc.OnNetworkRefChange("remote-node", keyA, tt.notifyActive)
+			g.Expect(nc.networkController.syncNetwork("net-a")).To(gomega.Succeed())
+			g.Expect(nc.networkController.syncNetwork("net-b")).To(gomega.Succeed())
+
+			for _, networkName := range []string{"net-a", "net-b"} {
+				g.Expect(callCount[networkName]).To(gomega.Equal(1), "network %s", networkName)
+				g.Expect(gotNode[networkName]).To(gomega.Equal("remote-node"), "network %s", networkName)
+				g.Expect(gotActive[networkName]).To(gomega.Equal(tt.expectedActive), "network %s", networkName)
+			}
 		})
 	}
 }
