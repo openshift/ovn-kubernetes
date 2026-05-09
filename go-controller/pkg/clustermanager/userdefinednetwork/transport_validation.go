@@ -4,10 +4,12 @@
 package userdefinednetwork
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -22,6 +24,9 @@ import (
 const (
 	ConditionTypeTransportAccepted = "TransportAccepted"
 
+	ReasonVTEPNotFound                            = "VTEPNotFound"
+	ReasonVTEPNotAccepted                         = "VTEPNotAccepted"
+	ReasonEVPNConfigError                         = "EVPNConfigError"
 	ReasonEVPNTransportAccepted                   = "EVPNTransportAccepted"
 	ReasonEVPNRouteAdvertisementsIsMissing        = "EVPNRouteAdvertisementsIsMissing"
 	ReasonEVPNRouteAdvertisementsNotAccepted      = "EVPNRouteAdvertisementsNotAccepted"
@@ -35,7 +40,10 @@ const (
 // This function is called during CUDN reconciliation to ensure the transport is properly configured.
 //
 // For empty/default Geneve transport, no status condition is set (status is not updated).
-// For no-overlay and EVPN transports, it validates that a RouteAdvertisements CR exists and is accepted.
+// For EVPN, if evpnErr is non-nil (from the single validateEVPN call in reconcileCUDN),
+// the error is surfaced as a TransportAccepted=False condition (VTEP or config issue).
+// For no-overlay and EVPN transports (when EVPN validation passes), it validates that a
+// RouteAdvertisements CR exists and is accepted.
 //
 // This function only SETS the condition on the provided CUDN object; it does NOT apply status.
 // The actual status update is handled by updateClusterUDNStatus() to ensure a single status update.
@@ -43,7 +51,7 @@ const (
 // Per OKEP, CUDN validation failures should only update status, not emit events.
 //
 // Returns true if the TransportAccepted condition was updated (changed from previous value).
-func (c *Controller) setTransportStatusCondition(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) (bool, error) {
+func (c *Controller) setTransportStatusCondition(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, evpnErr error) (bool, error) {
 	if cudn == nil {
 		return false, nil
 	}
@@ -55,10 +63,27 @@ func (c *Controller) setTransportStatusCondition(cudn *userdefinednetworkv1.Clus
 		return false, nil
 	}
 
-	// Handle NoOverlay and EVPN transports - both require RouteAdvertisements validation
+	// For EVPN, surface any validation error (VTEP or config) from the
+	// single validateEVPN call performed by reconcileCUDN.
+	if evpnErr != nil {
+		var vtepNotFound *vtepNotFoundError
+		var vtepNotAccepted *vtepNotAcceptedError
+		var updated bool
+		if errors.As(evpnErr, &vtepNotFound) {
+			updated = c.setTransportCondition(cudn, metav1.ConditionFalse, ReasonVTEPNotFound,
+				fmt.Sprintf("VTEP %q referenced by EVPN configuration does not exist.", vtepNotFound.vtepName))
+		} else if errors.As(evpnErr, &vtepNotAccepted) {
+			updated = c.setTransportCondition(cudn, metav1.ConditionFalse, ReasonVTEPNotAccepted,
+				fmt.Sprintf("VTEP %q exists but is not accepted.", vtepNotAccepted.vtepName))
+		} else {
+			updated = c.setTransportCondition(cudn, metav1.ConditionFalse, ReasonEVPNConfigError, evpnErr.Error())
+		}
+		return updated, nil
+	}
+
+	// Validate RouteAdvertisements (for both NoOverlay and EVPN)
 	if transport == userdefinednetworkv1.TransportOptionNoOverlay || transport == userdefinednetworkv1.TransportOptionEVPN {
-		updated, err := c.validateTransportWithRouteAdvertisements(cudn, transport)
-		return updated, err
+		return c.validateTransportWithRouteAdvertisements(cudn, transport)
 	}
 
 	// Unknown transport - no validation
@@ -167,6 +192,33 @@ func isRASelectingCUDN(ra *ratypes.RouteAdvertisements, cudn *userdefinednetwork
 		}
 	}
 	return false, nil
+}
+
+// validateVTEP checks that the VTEP referenced by an EVPN CUDN has
+// Accepted=True. Returns a vtepNotFoundError or vtepNotAcceptedError if the
+// VTEP is missing or not accepted.
+// Note: the not-found case only occurs for brand-new CUDNs referencing a
+// VTEP that was never created. Once NADs exist, the VTEP finalizer prevents
+// deletion while CUDNs reference it.
+func (c *Controller) validateVTEP(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) error {
+	if cudn.Spec.Network.EVPN == nil || cudn.Spec.Network.EVPN.VTEP == "" {
+		return nil
+	}
+
+	vtepName := cudn.Spec.Network.EVPN.VTEP
+	vtep, err := c.vtepLister.Get(vtepName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return &vtepNotFoundError{vtepName: vtepName}
+		}
+		return fmt.Errorf("failed to get VTEP %q: %w", vtepName, err)
+	}
+
+	if !notifier.IsVTEPAccepted(vtep.Status.Conditions) {
+		return &vtepNotAcceptedError{vtepName: vtepName}
+	}
+
+	return nil
 }
 
 // setTransportCondition sets the TransportAccepted status condition on a ClusterUserDefinedNetwork.

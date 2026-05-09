@@ -6,6 +6,8 @@ package notifier
 import (
 	"errors"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/workqueue"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
@@ -46,14 +48,23 @@ func NewVTEPNotifier(vtepInformer vtepinformer.VTEPInformer, subscribers ...VTEP
 	return c
 }
 
-// needUpdate returns true when the VTEP has been created or deleted.
-// We notify on create/delete so that CUDNs referencing this VTEP can be re-queued.
-// IMPORTANT: Before adding update notifications, verify that all subscribers
+// needUpdate returns true when the VTEP has been created, deleted, or its
+// Accepted condition has changed. CUDNs referencing this VTEP must be
+// re-queued so that NAD creation is gated on Accepted=True.
+// IMPORTANT: Before adding further update triggers, verify that all subscribers
 // can handle increased event frequency.
 func (c *VTEPNotifier) needUpdate(old, new *vtepv1.VTEP) bool {
-	vtepCreated := old == nil && new != nil
-	vtepDeleted := old != nil && new == nil
-	return vtepCreated || vtepDeleted
+	if old == nil || new == nil {
+		return true
+	}
+
+	return IsVTEPAccepted(old.Status.Conditions) != IsVTEPAccepted(new.Status.Conditions)
+}
+
+// IsVTEPAccepted checks if a VTEP CR has Accepted=True condition.
+func IsVTEPAccepted(conditions []metav1.Condition) bool {
+	condition := meta.FindStatusCondition(conditions, "Accepted")
+	return condition != nil && condition.Status == metav1.ConditionTrue
 }
 
 // reconcile notifies subscribers with the VTEP key following VTEP events.
