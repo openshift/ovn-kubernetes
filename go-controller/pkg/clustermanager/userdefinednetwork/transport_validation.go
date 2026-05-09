@@ -20,7 +20,15 @@ import (
 )
 
 const (
-	conditionTypeTransportAccepted = "TransportAccepted"
+	ConditionTypeTransportAccepted = "TransportAccepted"
+
+	ReasonEVPNTransportAccepted                   = "EVPNTransportAccepted"
+	ReasonEVPNRouteAdvertisementsIsMissing        = "EVPNRouteAdvertisementsIsMissing"
+	ReasonEVPNRouteAdvertisementsNotAccepted      = "EVPNRouteAdvertisementsNotAccepted"
+	ReasonNoOverlayTransportAccepted              = "NoOverlayTransportAccepted"
+	ReasonNoOverlayRouteAdvertisementsIsMissing   = "NoOverlayRouteAdvertisementsIsMissing"
+	ReasonNoOverlayRouteAdvertisementsNotAccepted = "NoOverlayRouteAdvertisementsNotAccepted"
+	ReasonRouteAdvertisementsNotEnabled           = "RouteAdvertisementsNotEnabled"
 )
 
 // setTransportStatusCondition validates the transport configuration for a CUDN and sets its TransportAccepted status condition.
@@ -64,7 +72,7 @@ func (c *Controller) setTransportStatusCondition(cudn *userdefinednetworkv1.Clus
 func (c *Controller) validateTransportWithRouteAdvertisements(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, transport userdefinednetworkv1.TransportOption) (bool, error) {
 	if c.raLister == nil {
 		// RouteAdvertisements feature not enabled
-		updated := c.setTransportCondition(cudn, metav1.ConditionFalse, "RouteAdvertisementsNotEnabled",
+		updated := c.setTransportCondition(cudn, metav1.ConditionFalse, ReasonRouteAdvertisementsNotEnabled,
 			fmt.Sprintf("RouteAdvertisements feature is not enabled but required for %s transport.", transport))
 		return updated, nil
 	}
@@ -113,15 +121,15 @@ func (c *Controller) validateTransportWithRouteAdvertisements(cudn *userdefinedn
 	var acceptedMessage string
 
 	if transport == userdefinednetworkv1.TransportOptionNoOverlay {
-		acceptedReason = "NoOverlayTransportAccepted"
+		acceptedReason = ReasonNoOverlayTransportAccepted
 		acceptedMessage = "Transport has been configured as 'no-overlay'."
-		missingReason = "NoOverlayRouteAdvertisementsIsMissing"
-		notAcceptedReason = "NoOverlayRouteAdvertisementsNotAccepted"
+		missingReason = ReasonNoOverlayRouteAdvertisementsIsMissing
+		notAcceptedReason = ReasonNoOverlayRouteAdvertisementsNotAccepted
 	} else { // EVPN
-		acceptedReason = "EVPNTransportAccepted"
+		acceptedReason = ReasonEVPNTransportAccepted
 		acceptedMessage = "Transport has been configured as 'EVPN'."
-		missingReason = "EVPNRouteAdvertisementsIsMissing"
-		notAcceptedReason = "EVPNRouteAdvertisementsNotAccepted"
+		missingReason = ReasonEVPNRouteAdvertisementsIsMissing
+		notAcceptedReason = ReasonEVPNRouteAdvertisementsNotAccepted
 	}
 
 	// Set status condition based on what we found and track if it changed
@@ -174,7 +182,7 @@ func (c *Controller) setTransportCondition(cudn *userdefinednetworkv1.ClusterUse
 	// This will automatically handle updates vs creates and transition times
 	now := metav1.Now()
 	condition := metav1.Condition{
-		Type:               conditionTypeTransportAccepted,
+		Type:               ConditionTypeTransportAccepted,
 		Status:             status,
 		Reason:             reason,
 		Message:            message,

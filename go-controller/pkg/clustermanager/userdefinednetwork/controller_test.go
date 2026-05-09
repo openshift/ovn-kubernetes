@@ -2403,7 +2403,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				return false
 			}
 			for _, cond := range cudn.Status.Conditions {
-				if cond.Type == "TransportAccepted" && cond.Status == status && cond.Reason == reason {
+				if cond.Type == ConditionTypeTransportAccepted && cond.Status == status && cond.Reason == reason {
 					if message == "" || cond.Message == message {
 						return true
 					}
@@ -2420,7 +2420,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				return false
 			}
 			for _, cond := range cudn.Status.Conditions {
-				if cond.Type == "TransportAccepted" {
+				if cond.Type == ConditionTypeTransportAccepted {
 					return false // Found TransportAccepted condition, fail the check
 				}
 			}
@@ -2449,14 +2449,14 @@ var _ = Describe("User Defined Network Controller", func() {
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "NoOverlayTransportAccepted", "Transport has been configured as 'no-overlay'.")
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonNoOverlayTransportAccepted, "Transport has been configured as 'no-overlay'.")
 		})
 
 		It("should update status to False when no RouteAdvertisements exists", func() {
 			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionNoOverlay)
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionFalse, "NoOverlayRouteAdvertisementsIsMissing", "No RouteAdvertisements CR is advertising the pod networks.")
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonNoOverlayRouteAdvertisementsIsMissing, "No RouteAdvertisements CR is advertising the pod networks.")
 		})
 
 		It("should update status to False when RouteAdvertisements exists but not accepted", func() {
@@ -2464,7 +2464,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			createNotAcceptedRA("test-ra", map[string]string{"app": "test"})
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionFalse, "NoOverlayRouteAdvertisementsNotAccepted", "RouteAdvertisements CR test-ra advertises the pod subnets, but its status is not accepted.")
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonNoOverlayRouteAdvertisementsNotAccepted, "RouteAdvertisements CR test-ra advertises the pod subnets, but its status is not accepted.")
 		})
 
 		It("should update status to True with EVPNTransportAccepted when RA is accepted", func() {
@@ -2472,7 +2472,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "EVPNTransportAccepted", "Transport has been configured as 'EVPN'.")
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonEVPNTransportAccepted, "Transport has been configured as 'EVPN'.")
 		})
 
 		It("should not update status when condition already matches", func() {
@@ -2488,7 +2488,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					return false
 				}
 				for _, cond := range updatedCUDN.Status.Conditions {
-					if cond.Type == "TransportAccepted" && cond.Status == metav1.ConditionTrue {
+					if cond.Type == ConditionTypeTransportAccepted && cond.Status == metav1.ConditionTrue {
 						initialResourceVersion = updatedCUDN.ResourceVersion
 						return true
 					}
@@ -2516,13 +2516,13 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(c.Run()).To(Succeed())
 
 			// Verify initial status is False (no RA exists)
-			expectTransportCondition("test-cudn", metav1.ConditionFalse, "NoOverlayRouteAdvertisementsIsMissing", "No RouteAdvertisements CR is advertising the pod networks.")
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonNoOverlayRouteAdvertisementsIsMissing, "No RouteAdvertisements CR is advertising the pod networks.")
 
 			// Now create the RouteAdvertisements CR
 			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 
 			// Verify status updates to True
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "NoOverlayTransportAccepted", "Transport has been configured as 'no-overlay'.")
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonNoOverlayTransportAccepted, "Transport has been configured as 'no-overlay'.")
 		})
 
 		It("should update status from False to True when RouteAdvertisements is created after CUDN (EVPN)", func() {
@@ -2531,13 +2531,13 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(c.Run()).To(Succeed())
 
 			// Verify initial status is False (no RA exists)
-			expectTransportCondition("test-cudn", metav1.ConditionFalse, "EVPNRouteAdvertisementsIsMissing", "No RouteAdvertisements CR is advertising the pod networks.")
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonEVPNRouteAdvertisementsIsMissing, "No RouteAdvertisements CR is advertising the pod networks.")
 
 			// Now create the RouteAdvertisements CR
 			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 
 			// Verify status updates to True
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "EVPNTransportAccepted", "Transport has been configured as 'EVPN'.")
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonEVPNTransportAccepted, "Transport has been configured as 'EVPN'.")
 		})
 	})
 })
@@ -2626,7 +2626,7 @@ func normalizeConditions(conditions []metav1.Condition) []metav1.Condition {
 func filterTransportConditions(conditions []metav1.Condition) []metav1.Condition {
 	var filtered []metav1.Condition
 	for _, cond := range conditions {
-		if cond.Type != "TransportAccepted" {
+		if cond.Type != ConditionTypeTransportAccepted {
 			filtered = append(filtered, cond)
 		}
 	}
