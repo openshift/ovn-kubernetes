@@ -122,7 +122,7 @@ type networkState struct {
 	useTemplates bool
 }
 
-func newNetworkState(netInfo util.NetInfo, svcRepair *repair) *networkState {
+func newNetworkState(netInfo util.NetInfo, svcRepair *repair, opts NetworkOptions) *networkState {
 	return &networkState{
 		netInfo:           netInfo,
 		repair:            svcRepair,
@@ -130,6 +130,8 @@ func newNetworkState(netInfo util.NetInfo, svcRepair *repair) *networkState {
 		nodeInfosByName:   map[string]nodeInfo{},
 		nodeIPv4Templates: NewNodeIPsTemplates(corev1.IPv4Protocol),
 		nodeIPv6Templates: NewNodeIPsTemplates(corev1.IPv6Protocol),
+		useLBGroups:       opts.UseLBGroups,
+		useTemplates:      opts.UseTemplates,
 	}
 }
 
@@ -144,7 +146,7 @@ func NewController(client clientset.Interface,
 	netInfo util.NetInfo,
 ) (*Controller, error) {
 	klog.V(4).Infof("Creating services controller for network=%s", netInfo.GetNetworkName())
-	state := newNetworkState(netInfo, newRepair(serviceInformer.Lister(), nbClient))
+	state := newNetworkState(netInfo, newRepair(serviceInformer.Lister(), nbClient), NetworkOptions{})
 	c := &Controller{
 		client:   client,
 		nbClient: nbClient,
@@ -380,9 +382,7 @@ func (c *Controller) ReconcileNetwork(netInfo util.NetInfo, opts NetworkOptions)
 }
 
 func (c *Controller) registerNetworkLocked(key string, netInfo util.NetInfo, opts NetworkOptions) error {
-	state := newNetworkState(netInfo, newRepair(c.serviceLister, c.nbClient))
-	state.useLBGroups = opts.UseLBGroups
-	state.useTemplates = opts.UseTemplates
+	state := newNetworkState(netInfo, newRepair(c.serviceLister, c.nbClient), opts)
 
 	// Store the state before bootstrap while the network key is locked. This lets
 	// concurrent shared node/service handlers discover the registering network and
