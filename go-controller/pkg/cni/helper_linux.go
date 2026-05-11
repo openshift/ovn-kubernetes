@@ -512,7 +512,7 @@ func getPfEncapIP(deviceID string) (string, error) {
 
 // ConfigureOVS performs OVS configurations in order to set up Pod networking
 func ConfigureOVS(ctx context.Context, namespace, podName, podIfName, hostIfaceName string,
-	ifInfo *PodInterfaceInfo, sandboxID, deviceID string, getter PodInfoGetter) error {
+	ifInfo *PodInterfaceInfo, sandboxID, deviceID string, isVFIO bool, getter PodInfoGetter) error {
 
 	ifaceID := util.GetIfaceId(namespace, podName)
 	if ifInfo.NetName != types.DefaultNetworkName {
@@ -623,6 +623,10 @@ func ConfigureOVS(ctx context.Context, namespace, podName, podIfName, hostIfaceN
 		// Review this line when upgrade mechanism will be implemented
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:vf-netdev-name=%s", ifInfo.NetdevName))
 	}
+	if isVFIO {
+		// VFIO case
+		ovsArgs = append(ovsArgs, "external_ids:vf-is-vfio=true")
+	}
 
 	if ifInfo.NetName != types.DefaultNetworkName {
 		ovsArgs = append(ovsArgs, fmt.Sprintf("external_ids:%s=%s", types.NetworkExternalID, ifInfo.NetName))
@@ -717,7 +721,7 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter 
 	}
 
 	if !ifInfo.IsDPUHostMode {
-		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, pr.IfName, hostIface.Name, ifInfo, pr.SandboxID, pr.CNIConf.DeviceID, getter)
+		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, pr.IfName, hostIface.Name, ifInfo, pr.SandboxID, pr.CNIConf.DeviceID, pr.IsVFIO, getter)
 		if err != nil {
 			pr.deletePort(hostIface.Name, pr.PodNamespace, pr.PodName)
 			return nil, err
