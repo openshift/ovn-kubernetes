@@ -9,6 +9,8 @@ package node
 import (
 	"fmt"
 	"net"
+	"strings"
+	"testing"
 
 	nadfake "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
 	"github.com/vishvananda/netlink"
@@ -36,6 +38,56 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+func TestHostNetworkServiceOpenFlowsUsesGroupForMultipleHostNetworkTargetPorts(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "namespace1",
+			Name:      "service1",
+		},
+	}
+	npw := &nodePortWatcher{ofportPhys: "eth0"}
+	key := "NodePort_namespace1_service1_tcp_31111"
+
+	flows, groups := npw.hostNetworkServiceOpenFlows(
+		service,
+		key,
+		"0x123",
+		"tcp",
+		"in_port=eth0, tcp, tp_dst=31111",
+		"10.244.0.1",
+		util.LBEndpoints{
+			{Port: 8080, V4IPs: []string{"10.128.0.2"}},    // local OVN-networked endpoint, not a host DNAT target
+			{Port: 9090, V4IPs: []string{"192.168.18.15"}}, // local host-networked endpoint
+			{Port: 10090, V4IPs: []string{"192.168.18.15"}},
+		},
+		[]net.IP{net.ParseIP("192.168.18.15")},
+	)
+
+	groupID := hostNetworkServiceGroupID(key)
+	expectedGroup := fmt.Sprintf("group_id=%d,type=select,"+
+		"bucket=actions=ct(commit,zone=64003,nat(dst=10.244.0.1:9090),table=6),"+
+		"bucket=actions=ct(commit,zone=64003,nat(dst=10.244.0.1:10090),table=6)", groupID)
+	if len(groups) != 1 || groups[0] != expectedGroup {
+		t.Fatalf("unexpected groups: %#v", groups)
+	}
+	if len(flows) != 5 {
+		t.Fatalf("expected 5 flows, got %d: %#v", len(flows), flows)
+	}
+	expectedIngressFlow := fmt.Sprintf("cookie=0x123, priority=110, in_port=eth0, tcp, tp_dst=31111, actions=group:%d", groupID)
+	if flows[0] != expectedIngressFlow {
+		t.Fatalf("unexpected ingress flow: %q", flows[0])
+	}
+	for _, line := range append(flows, groups...) {
+		if strings.Contains(line, "10.244.0.1:8080") || strings.Contains(line, "tp_src=8080") {
+			t.Fatalf("non-host endpoint target port was programmed: %q", line)
+		}
+	}
+}
 
 // Note: Local mocks are used instead of FakeNetworkManager to test specific error conditions
 // (NotFound, InvalidPrimaryNetworkError) from GetActiveNetworkForNamespace. FakeNetworkManager
