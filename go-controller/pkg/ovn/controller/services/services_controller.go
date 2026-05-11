@@ -966,6 +966,10 @@ func (c *Controller) onNodeUpdate(oldObj, newObj interface{}) {
 		return
 	}
 
+	if !nodeChangedForAnyNetwork(oldNode, newNode) {
+		return
+	}
+
 	if err := c.forEachNetworkState(func(_ string, state *networkState) error {
 		if !nodeChangedForNetwork(oldNode, newNode, state.netInfo) {
 			return nil
@@ -1002,7 +1006,16 @@ func (c *Controller) onNodeDelete(obj interface{}) {
 
 func nodeChangedForNetwork(oldNode, newNode *corev1.Node, netInfo util.NetInfo) bool {
 	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, newNode, netInfo.GetNetworkName()) ||
-		util.NodeL3GatewayAnnotationChanged(oldNode, newNode) ||
+		nodeChangedForAllNetworks(oldNode, newNode)
+}
+
+func nodeChangedForAnyNetwork(oldNode, newNode *corev1.Node) bool {
+	return util.NodeSubnetAnnotationChanged(oldNode, newNode) ||
+		nodeChangedForAllNetworks(oldNode, newNode)
+}
+
+func nodeChangedForAllNetworks(oldNode, newNode *corev1.Node) bool {
+	return util.NodeL3GatewayAnnotationChanged(oldNode, newNode) ||
 		oldNode.Name != newNode.Name ||
 		util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) ||
 		util.NodeZoneAnnotationChanged(oldNode, newNode) ||

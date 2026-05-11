@@ -378,6 +378,34 @@ func TestReconcileNetworkRefreshesNodeProjection(t *testing.T) {
 	g.Expect(nodePodSubnet(state)).To(gomega.Equal("192.168.210.0/24"))
 }
 
+func TestNodeChangedPredicates(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	oldNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeA,
+			Annotations: map[string]string{
+				types.NodeSubnetsAnnotation: `{"default":["10.128.0.0/24"]}`,
+				util.OVNNodeHostCIDRs:       `["10.0.0.1/24"]`,
+			},
+		},
+	}
+
+	unrelatedChange := oldNode.DeepCopy()
+	unrelatedChange.Annotations["unrelated"] = "changed"
+	g.Expect(nodeChangedForAnyNetwork(oldNode, unrelatedChange)).To(gomega.BeFalse())
+
+	hostCIDRChange := oldNode.DeepCopy()
+	hostCIDRChange.Annotations[util.OVNNodeHostCIDRs] = `["10.0.0.2/24"]`
+	g.Expect(nodeChangedForAnyNetwork(oldNode, hostCIDRChange)).To(gomega.BeTrue())
+	g.Expect(nodeChangedForNetwork(oldNode, hostCIDRChange, &util.DefaultNetInfo{})).To(gomega.BeTrue())
+
+	otherNetworkSubnetChange := oldNode.DeepCopy()
+	otherNetworkSubnetChange.Annotations[types.NodeSubnetsAnnotation] = `{"default":["10.128.0.0/24"],"other":["10.129.0.0/24"]}`
+	g.Expect(nodeChangedForAnyNetwork(oldNode, otherNetworkSubnetChange)).To(gomega.BeTrue())
+	g.Expect(nodeChangedForNetwork(oldNode, otherNetworkSubnetChange, &util.DefaultNetInfo{})).To(gomega.BeFalse())
+}
+
 // TestSyncServices - an end-to-end test for the services controller.
 func TestSyncServices(t *testing.T) {
 	// setup gomega parameters
