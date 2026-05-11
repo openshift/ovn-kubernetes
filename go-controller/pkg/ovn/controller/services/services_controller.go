@@ -301,7 +301,7 @@ func (c *Controller) Run(workers int, stopCh <-chan struct{}, wg *sync.WaitGroup
 	c.startupDone = true
 	c.startupDoneLock.Unlock()
 	if err := c.forEachNetworkState(func(_ string, state *networkState) error {
-		c.queueAllServicesForNetwork(state)
+		c.enqueueAllServicesForNetwork(state)
 		return nil
 	}); err != nil {
 		return err
@@ -376,7 +376,7 @@ func (c *Controller) ReconcileNetwork(netInfo util.NetInfo, opts NetworkOptions)
 		state.useLBGroups = opts.UseLBGroups
 		state.useTemplates = opts.UseTemplates
 		c.syncNodeInfosForNetwork(state, nodeInfos)
-		c.queueAllServicesForNetwork(state)
+		c.enqueueAllServicesForNetwork(state)
 		return nil
 	})
 }
@@ -393,7 +393,7 @@ func (c *Controller) registerNetworkLocked(key string, netInfo util.NetInfo, opt
 		return fmt.Errorf("failed to bootstrap services controller for network %s: %w", key, err)
 	}
 
-	c.queueAllServicesForNetwork(state)
+	c.enqueueAllServicesForNetwork(state)
 	return nil
 }
 
@@ -485,7 +485,7 @@ func zoneNodeInfos(zone string, nodeInfoByName map[string]nodeInfo) []nodeInfo {
 	return out
 }
 
-func (c *Controller) queueAllServicesForNetwork(state *networkState) {
+func (c *Controller) enqueueAllServicesForNetwork(state *networkState) {
 	c.startupDoneLock.RLock()
 	defer c.startupDoneLock.RUnlock()
 	if !c.startupDone {
@@ -499,7 +499,7 @@ func (c *Controller) queueAllServicesForNetwork(state *networkState) {
 	}
 
 	for _, service := range services {
-		c.queueServiceForNetwork(state, service)
+		c.enqueueServiceForNetwork(state, service)
 	}
 }
 
@@ -548,16 +548,16 @@ func (c *Controller) servicesForNetwork(state *networkState) ([]*corev1.Service,
 	return services, nil
 }
 
-func (c *Controller) queueServiceForNetwork(state *networkState, service *corev1.Service) {
+func (c *Controller) enqueueServiceForNetwork(state *networkState, service *corev1.Service) {
 	key, err := cache.MetaNamespaceKeyFunc(service)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v for network=%s: %v", service, state.netInfo.GetNetworkName(), err))
 		return
 	}
-	c.queueServiceKeyForNetwork(state, key, true)
+	c.enqueueServiceKeyForNetwork(state, key, true)
 }
 
-func (c *Controller) queueServiceKeyForNetwork(state *networkState, key string, recordDuration bool) {
+func (c *Controller) enqueueServiceKeyForNetwork(state *networkState, key string, recordDuration bool) {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't split service key %s for network=%s: %v", key, state.netInfo.GetNetworkName(), err))
@@ -574,22 +574,22 @@ func (c *Controller) queueServiceKeyForNetwork(state *networkState, key string, 
 	c.queue.Add(scopedServiceQueueKey(state.netInfo.GetNetworkName(), key))
 }
 
-func (c *Controller) queueServiceKeyForNetworks(key string, recordDuration bool) {
+func (c *Controller) enqueueServiceKeyForNetworks(key string, recordDuration bool) {
 	if err := c.forEachNetworkState(func(_ string, state *networkState) error {
-		c.queueServiceKeyForNetwork(state, key, recordDuration)
+		c.enqueueServiceKeyForNetwork(state, key, recordDuration)
 		return nil
 	}); err != nil {
 		utilruntime.HandleError(err)
 	}
 }
 
-func (c *Controller) queueServiceKeyForNetworkName(networkName, key string, recordDuration bool) {
+func (c *Controller) enqueueServiceKeyForNetworkName(networkName, key string, recordDuration bool) {
 	if err := c.networkStates.DoWithLock(networkName, func(lockedNetworkName string) error {
 		state, ok := c.networkStates.Load(lockedNetworkName)
 		if !ok {
 			return nil
 		}
-		c.queueServiceKeyForNetwork(state, key, recordDuration)
+		c.enqueueServiceKeyForNetwork(state, key, recordDuration)
 		return nil
 	}); err != nil {
 		utilruntime.HandleError(err)
@@ -935,7 +935,7 @@ func (c *Controller) requestFullSyncForNetwork(state *networkState, nodeInfos []
 	// Resync all services unless we're processing the initial node sync (in which case
 	// the service add will happen at the next step in the services controller Run() and workers
 	// aren't up yet anyway: no need to do it during node startup then)
-	c.queueAllServicesForNetwork(state)
+	c.enqueueAllServicesForNetwork(state)
 }
 
 // handlers
@@ -1024,7 +1024,7 @@ func (c *Controller) updateNodeForNetwork(state *networkState, node *corev1.Node
 	}
 	klog.Infof("Node %s switch + router changed, syncing services in network %q", node.Name, state.netInfo.GetNetworkName())
 	c.syncNodeInfoMapForNetwork(state, nodeInfoByName)
-	c.queueAllServicesForNetwork(state)
+	c.enqueueAllServicesForNetwork(state)
 }
 
 func (c *Controller) removeNodeForNetwork(state *networkState, nodeName string) {
@@ -1033,7 +1033,7 @@ func (c *Controller) removeNodeForNetwork(state *networkState, nodeName string) 
 		return
 	}
 	c.syncNodeInfoMapForNetwork(state, nodeInfoByName)
-	c.queueAllServicesForNetwork(state)
+	c.enqueueAllServicesForNetwork(state)
 }
 
 func (c *Controller) updatedNodeInfoMapForNetwork(state *networkState, nodeName string, newNodeInfo *nodeInfo) (map[string]nodeInfo, bool) {
@@ -1107,7 +1107,7 @@ func (c *Controller) onServiceAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	c.queueServiceKeyForNetworks(key, true)
+	c.enqueueServiceKeyForNetworks(key, true)
 }
 
 // onServiceUpdate updates the Service Selector in the cache and queues the Service for processing.
@@ -1123,7 +1123,7 @@ func (c *Controller) onServiceUpdate(oldObj, newObj interface{}) {
 
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err == nil {
-		c.queueServiceKeyForNetworks(key, true)
+		c.enqueueServiceKeyForNetworks(key, true)
 	}
 }
 
@@ -1134,7 +1134,7 @@ func (c *Controller) onServiceDelete(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
 	}
-	c.queueServiceKeyForNetworks(key, true)
+	c.enqueueServiceKeyForNetworks(key, true)
 }
 
 // onEndpointSliceAdd queues a sync for the relevant Service for a sync
@@ -1144,7 +1144,7 @@ func (c *Controller) onEndpointSliceAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("invalid EndpointSlice provided to onEndpointSliceAdd()"))
 		return
 	}
-	c.queueServiceForEndpointSlice(endpointSlice)
+	c.enqueueServiceForEndpointSlice(endpointSlice)
 }
 
 // onEndpointSliceUpdate queues a sync for the relevant Service for a sync
@@ -1157,7 +1157,7 @@ func (c *Controller) onEndpointSliceUpdate(prevObj, obj interface{}) {
 		!endpointSlice.GetDeletionTimestamp().IsZero() {
 		return
 	}
-	c.queueServiceForEndpointSlice(endpointSlice)
+	c.enqueueServiceForEndpointSlice(endpointSlice)
 }
 
 // onEndpointSliceDelete queues a sync for the relevant Service for a sync if the
@@ -1179,20 +1179,20 @@ func (c *Controller) onEndpointSliceDelete(obj interface{}) {
 	}
 
 	if endpointSlice != nil {
-		c.queueServiceForEndpointSlice(endpointSlice)
+		c.enqueueServiceForEndpointSlice(endpointSlice)
 	}
 }
 
-// queueServiceForEndpointSlice attempts to queue the corresponding Service for
+// enqueueServiceForEndpointSlice attempts to queue the corresponding Service for
 // the provided EndpointSlice.
-func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.EndpointSlice) {
+func (c *Controller) enqueueServiceForEndpointSlice(endpointSlice *discovery.EndpointSlice) {
 	if util.IsDefaultEndpointSlice(endpointSlice) {
 		serviceNamespacedName, err := _getServiceNameFromEndpointSlice(endpointSlice, true)
 		if err != nil {
 			c.handleEndpointSliceServiceNameError(endpointSlice, types.DefaultNetworkName, err)
 			return
 		}
-		c.queueServiceKeyForNetworkName(types.DefaultNetworkName, serviceNamespacedName.String(), false)
+		c.enqueueServiceKeyForNetworkName(types.DefaultNetworkName, serviceNamespacedName.String(), false)
 		return
 	}
 
@@ -1208,7 +1208,7 @@ func (c *Controller) queueServiceForEndpointSlice(endpointSlice *discovery.Endpo
 		return
 	}
 
-	c.queueServiceKeyForNetworkName(networkName, serviceNamespacedName.String(), false)
+	c.enqueueServiceKeyForNetworkName(networkName, serviceNamespacedName.String(), false)
 }
 
 func (c *Controller) handleEndpointSliceServiceNameError(endpointSlice *discovery.EndpointSlice, networkName string, err error) {
