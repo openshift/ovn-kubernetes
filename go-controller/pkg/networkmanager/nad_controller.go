@@ -99,10 +99,11 @@ type nadController struct {
 
 	markedForRemoval map[string]time.Time
 
-	// filterNADsOnNode is used by Dynamic UDN and refers the node name for which we consider that node local to
-	// where OVN-Kubernetes is running.
-	// For node/zone it is the name of the local node.
-	// For cluster-manager it is empty.
+	// filterNADsOnNode is the node identity used for local Dynamic UDN NAD
+	// rendering decisions. When set, this controller only renders a dynamic UDN
+	// NAD if the network is active for this node. Empty means this controller is
+	// cluster-scoped and does not locally filter NAD rendering, even when Dynamic
+	// UDN allocation is enabled.
 	filterNADsOnNode string
 
 	podTracker      *PodTrackerController
@@ -224,6 +225,14 @@ func newController(
 	)
 
 	return c, nil
+}
+
+// usesLocalDynamicFiltering reports whether this controller instance should
+// gate local NAD rendering on Dynamic UDN node activity. Cluster-scoped
+// instances keep all NADs rendered and leave per-node allocation decisions to
+// their network controllers.
+func (c *nadController) usesLocalDynamicFiltering() bool {
+	return c.filterNADsOnNode != ""
 }
 
 func (c *nadController) nodeHasDirectNAD(node, nad string) bool {
@@ -407,7 +416,7 @@ func (c *nadController) OnNetworkRefChange(node, nadNamespacedName string, activ
 		return
 	}
 
-	isLocal := node == c.filterNADsOnNode
+	isLocal := c.usesLocalDynamicFiltering() && node == c.filterNADsOnNode
 	networkName := nadNetwork.GetNetworkName()
 	affectedNetworks := c.getNetworkAndConnectedNetworks(networkName)
 	for _, affectedNetwork := range affectedNetworks {
@@ -453,7 +462,6 @@ func (c *nadController) reconcileNetworkActivity(networkNames []string, changedN
 		return
 	}
 
-	seenNADs := sets.New[string]()
 	for _, networkName := range networkNames {
 		if networkName == "" {
 			continue
@@ -470,7 +478,7 @@ func (c *nadController) reconcileNetworkActivity(networkNames []string, changedN
 		}
 
 		active := false
-		if c.filterNADsOnNode != "" {
+		if c.usesLocalDynamicFiltering() {
 			active = c.NodeHasNetwork(c.filterNADsOnNode, networkName)
 			if !active && changedNADActive && networkName == changedNetworkName {
 				active = true
@@ -478,11 +486,7 @@ func (c *nadController) reconcileNetworkActivity(networkNames []string, changedN
 		}
 
 		for nadKey := range nadKeys {
-			if seenNADs.Has(nadKey) {
-				continue
-			}
-			seenNADs.Insert(nadKey)
-			if c.filterNADsOnNode != "" {
+			if c.usesLocalDynamicFiltering() {
 				c.updateNADState(nadKey, active)
 				continue
 			}
@@ -491,7 +495,7 @@ func (c *nadController) reconcileNetworkActivity(networkNames []string, changedN
 	}
 }
 
-// filter should only be called if cm.filterNADsOnNode is set
+// filter should only be called when this controller uses local Dynamic UDN filtering.
 func (c *nadController) filter(nad *nettypes.NetworkAttachmentDefinition) (bool, error) {
 	if !nadRequiresDynamicFiltering(nad) {
 		return false, nil
@@ -1247,7 +1251,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 	}
 
 	shouldNetworkExist := true
-	if c.filterNADsOnNode != "" {
+	if c.usesLocalDynamicFiltering() {
 		shouldFilter, err := c.filter(nad)
 		if err != nil {
 			return fmt.Errorf("%s: failed filtering NAD %s: %w", c.name, key, err)
