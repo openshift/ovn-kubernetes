@@ -272,7 +272,7 @@ func TestSharedServiceControllerNetworkRegistration(t *testing.T) {
 
 	setServiceControllerStartupDone(controller.Controller, true)
 	g.Expect(controller.forEachNetworkState(func(_ string, state *networkState) error {
-		controller.queueAllServicesForNetwork(state)
+		controller.enqueueAllServicesForNetwork(state)
 		return nil
 	})).To(gomega.Succeed())
 	g.Expect(drainServiceQueue(controller.Controller)).To(gomega.ConsistOf(
