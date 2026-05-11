@@ -481,6 +481,11 @@ func (c *nadController) reconcileNetworkActivity(networkNames []string, changedN
 		if c.usesLocalDynamicFiltering() {
 			active = c.NodeHasNetwork(c.filterNADsOnNode, networkName)
 			if !active && changedNADActive && networkName == changedNetworkName {
+				// NodeHasNetwork is authoritative once nadsByNetwork
+				// includes this NAD. If the tracker event beat syncNAD,
+				// the changed active event is the only current signal for
+				// this network; bootstrap it as active so we do not start a
+				// stale removal timer.
 				active = true
 			}
 		}
@@ -1261,6 +1266,12 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		}
 	}
 	if shouldNetworkExist {
+		if c.usesLocalDynamicFiltering() {
+			// If this sync observes the locally filtered NAD should render,
+			// clear any stale removal timer left by a reordered or missed
+			// activity notification.
+			delete(c.markedForRemoval, key)
+		}
 		// ensure the network is associated with the NAD
 		ensureNetwork.AddNADs(key)
 		// reconcile the network

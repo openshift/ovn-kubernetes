@@ -2290,6 +2290,63 @@ func TestSyncNADNotFilteredWhenCNCConnectedNetworkActive(t *testing.T) {
 	g.Expect(nc.networkController.getNetwork("net-b")).ToNot(gomega.BeNil())
 }
 
+func TestSyncNADClearsStaleRemovalMarkWhenDynamicNetworkActive(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+
+	key := "ns1/nad-a"
+	podTracker := &PodTrackerController{
+		nodeNADToPodCache: map[string]map[string]map[string]struct{}{
+			"node1": {
+				key: {"ns1/pod-a": {}},
+			},
+		},
+	}
+
+	networkIDAllocator := id.NewIDAllocator("NetworkIDs", MaxNetworks)
+	g.Expect(networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)).To(gomega.Succeed())
+
+	nc := &nadController{
+		networkController:    newNetworkController("test-nad", "", "", nil, nil),
+		nads:                 map[string]string{},
+		nadsByNetwork:        map[string]sets.Set[string]{},
+		dynamicFilterNADs:    map[string]bool{},
+		primaryNADs:          map[string]string{},
+		networkIDAllocator:   networkIDAllocator,
+		filterNADsOnNode:     "node1",
+		podTracker:           podTracker,
+		markedForRemoval:     map[string]time.Time{key: time.Now().Add(time.Hour)},
+		cncConnectedNetworks: map[string]sets.Set[string]{},
+	}
+
+	netConf := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "net-a",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: types.Layer3Topology,
+		Role:     types.NetworkRolePrimary,
+		NADName:  key,
+	}
+	nad, err := buildNADWithAnnotations("nad-a", "ns1", netConf, map[string]string{
+		types.OvnNetworkIDAnnotation: "1",
+	})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	nad.OwnerReferences = []metav1.OwnerReference{{
+		Kind:       "UserDefinedNetwork",
+		Name:       "udn-a",
+		Controller: ptrTo(true),
+	}}
+
+	g.Expect(nc.syncNAD(key, nad)).To(gomega.Succeed())
+
+	g.Expect(nc.networkController.getNetwork("net-a")).ToNot(gomega.BeNil())
+	g.Expect(nc.markedForRemoval).ToNot(gomega.HaveKey(key))
+}
+
 func TestOnNetworkRefChangeNotifiesNetworkRefReconcilers(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
