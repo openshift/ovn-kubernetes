@@ -174,18 +174,19 @@ func New(
 	vidAllocator := id.NewIDAllocator("EVPN-VIDs", MaxEVPNVIDs)
 
 	c := &Controller{
-		nadClient:         nadClient,
-		nadLister:         nadInfomer.Lister(),
-		udnClient:         udnClient,
-		udnLister:         udnLister,
-		cudnLister:        cudnLister,
-		renderNadFn:       renderNadFn,
-		podInformer:       podInformer,
-		namespaceInformer: namespaceInformer,
-		networkManager:    networkManager,
-		namespaceTracker:  map[string]sets.Set[string]{},
-		vidAllocator:      vidAllocator,
-		eventRecorder:     eventRecorder,
+		nadClient:                     nadClient,
+		nadLister:                     nadInfomer.Lister(),
+		udnClient:                     udnClient,
+		udnLister:                     udnLister,
+		cudnLister:                    cudnLister,
+		renderNadFn:                   renderNadFn,
+		podInformer:                   podInformer,
+		namespaceInformer:             namespaceInformer,
+		networkManager:                networkManager,
+		namespaceTracker:              map[string]sets.Set[string]{},
+		vidAllocator:                  vidAllocator,
+		eventRecorder:                 eventRecorder,
+		firstReconcileMetricsRecorded: map[string]struct{}{},
 	}
 	udnCfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
@@ -606,6 +607,7 @@ func (c *Controller) UpdateSubsystemCondition(
 	} else {
 		obj, err = c.udnLister.UserDefinedNetworks(udnNamespace).Get(udnName)
 	}
+
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -621,16 +623,27 @@ func (c *Controller) UpdateSubsystemCondition(
 		c.eventRecorder.Event(objRef, event.EventType, event.Reason, event.Note)
 	}
 
+	if condition == nil {
+		return nil
+	}
+
 	// Record network allocation duration when NetworkAllocationSucceeded becomes True for the first time
-	if condition != nil && condition.Type == "NetworkAllocationSucceeded" && condition.Status == metav1.ConditionTrue {
-		wasAlreadyTrue := meta.IsStatusConditionTrue(udn.Status.Conditions, "NetworkAllocationSucceeded")
-		if !wasAlreadyTrue {
-			allocationDuration := condition.LastTransitionTime.Time.Sub(udn.CreationTimestamp.Time)
+	if condition.Type == "NetworkAllocationSucceeded" && condition.Status == metav1.ConditionTrue {
+		udn := obj.(client.Object)
+		var existingConditions []metav1.Condition
+		switch o := obj.(type) {
+		case *userdefinednetworkv1.UserDefinedNetwork:
+			existingConditions = o.Status.Conditions
+		case *userdefinednetworkv1.ClusterUserDefinedNetwork:
+			existingConditions = o.Status.Conditions
+		}
+
+		if !meta.IsStatusConditionTrue(existingConditions, "NetworkAllocationSucceeded") {
+			allocationDuration := condition.LastTransitionTime.Time.Sub(udn.GetCreationTimestamp().Time)
 			metricName := util.GenerateUDNNetworkName(udnNamespace, udnName)
 
 			// Record workflow phase metric for network ready
 			// This is creation → NetworkAllocationSucceeded time (total time until network is ready)
-			// Guard against negative durations from clock skew
 			if allocationDuration > 0 {
 				metrics.RecordUDNWorkflowPhaseDuration(metricName, "network_ready", allocationDuration.Seconds())
 				klog.Infof("Recorded allocation duration for UDN %s: %v", metricName, allocationDuration)
@@ -642,29 +655,20 @@ func (c *Controller) UpdateSubsystemCondition(
 			// async_node_allocation = NetworkCreated.LastTransitionTime → NetworkAllocationSucceeded.LastTransitionTime
 			// This represents the wall-clock time for network cluster controller async operations
 			// including controller init, per-node processing, and waiting for all nodes to complete
-			wasNetworkCreatedBefore := meta.IsStatusConditionTrue(udn.Status.Conditions, conditionTypeNetworkCreated)
-			if wasNetworkCreatedBefore {
-				// NetworkCreated was set during reconciliation, so we can calculate async work
-				// by finding when reconciliation completed (when NetworkCreated was set)
-				networkCreatedCondition := meta.FindStatusCondition(udn.Status.Conditions, conditionTypeNetworkCreated)
-				if networkCreatedCondition != nil {
-					// Async node allocation time = NetworkAllocationSucceeded - NetworkCreated
-					// This is the wall-clock time for network cluster controller to allocate network on all nodes
-					asyncNodeAllocationDuration := condition.LastTransitionTime.Time.Sub(networkCreatedCondition.LastTransitionTime.Time)
-					// Guard against negative durations from clock skew
-					if asyncNodeAllocationDuration > 0 {
-						metrics.RecordUDNWorkflowPhaseDuration(metricName, "async_node_allocation", asyncNodeAllocationDuration.Seconds())
-						klog.V(5).Infof("Recorded async node allocation duration for UDN %s: %v (NetworkCreated→NetworkAllocationSucceeded)", metricName, asyncNodeAllocationDuration)
-					} else {
-						klog.Warningf("Skipping async_node_allocation metric for UDN %s: non-positive duration %v (likely clock skew)", metricName, asyncNodeAllocationDuration)
-					}
+			networkCreatedCondition := meta.FindStatusCondition(existingConditions, conditionTypeNetworkCreated)
+			if networkCreatedCondition != nil && networkCreatedCondition.Status == metav1.ConditionTrue {
+				// Async node allocation time = NetworkAllocationSucceeded - NetworkCreated
+				// This is the wall-clock time for network cluster controller to allocate network on all nodes
+				asyncNodeAllocationDuration := condition.LastTransitionTime.Time.Sub(networkCreatedCondition.LastTransitionTime.Time)
+				// Guard against negative durations from clock skew
+				if asyncNodeAllocationDuration > 0 {
+					metrics.RecordUDNWorkflowPhaseDuration(metricName, "async_node_allocation", asyncNodeAllocationDuration.Seconds())
+					klog.V(5).Infof("Recorded async node allocation duration for UDN %s: %v (NetworkCreated→NetworkAllocationSucceeded)", metricName, asyncNodeAllocationDuration)
+				} else {
+					klog.Warningf("Skipping async_node_allocation metric for UDN %s: non-positive duration %v (likely clock skew)", metricName, asyncNodeAllocationDuration)
 				}
 			}
 		}
-	}
-
-	if condition == nil {
-		return nil
 	}
 
 	applyCondition := &metaapplyv1.ConditionApplyConfiguration{
