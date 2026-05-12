@@ -161,7 +161,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 			}
 		}
 	}
-	if err := kubevirt.SyncVirtualMachines(oc.nbClient, vms); err != nil {
+	if err := kubevirt.SyncVirtualMachines(oc.nbClient, vms, DefaultNetworkControllerName); err != nil {
 		return fmt.Errorf("failed syncing running virtual machines: %v", err)
 	}
 
@@ -381,12 +381,12 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) 
 	_ = oc.logicalPortCache.add(pod, switchName, types.DefaultNetworkName, lsp.UUID, podAnnotation.MAC, podAnnotation.IPs)
 
 	if kubevirt.IsPodLiveMigratable(pod) {
-		if err := kubevirt.EnsureDHCPOptionsForMigratablePod(oc.controllerName, oc.nbClient, oc.watchFactory, pod, podAnnotation.IPs, lsp); err != nil {
-			return err
+		if err := oc.ensureDHCP(pod, podAnnotation, lsp); err != nil {
+			return fmt.Errorf("failed configuring DHCP for default network at pod %s/%s: %w", pod.Namespace, pod.Name, err)
 		}
 	}
 
-	//observe the pod creation latency metric for newly created pods only
+	// observe the pod creation latency metric for newly created pods only
 	if newlyCreatedPort {
 		metrics.RecordPodCreated(pod, oc.GetNetInfo())
 	}
