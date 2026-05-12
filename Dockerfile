@@ -51,6 +51,18 @@ RUN INSTALL_PKGS=" \
 	eval "dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $(cat /more-pkgs)" && \
 	dnf clean all && rm -rf /var/cache/*
 
+COPY ovn25.09-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     ovn25.09-central-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     ovn25.09-central-debuginfo-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     ovn25.09-debuginfo-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     ovn25.09-debugsource-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     ovn25.09-host-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     ovn25.09-host-debuginfo-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     ovn25.09-vtep-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     ovn25.09-vtep-debuginfo-25.09.3-udnscale20260506.29.el9fdp.x86_64.rpm \
+     /root/
+RUN rpm -Uhv --nodeps --force /root/ovn25.09*.rpm && rm -f /root/ovn25.09*.rpm
+
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-identity /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovn-kube-util /usr/bin/
