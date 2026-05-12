@@ -115,9 +115,9 @@ func NewBridgeConfiguration(intfName, nodeName,
 	res.netConfig[types.DefaultNetworkName].Advertised.Store(advertised)
 
 	// temp workaround for https://issues.redhat.com/browse/FDP-1537
-	// we need to ensure we continue dropping GARPs for any new bridge config if the run mode is ovnkube controller + ovnkube node + IC + single zone node
+	// we need to ensure we continue dropping GARPs for any new bridge config if the run mode is ovnkube controller + ovnkube node + single zone node
 	// FIXME: only add if run mode is ovnkube controller + node in single process
-	if config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.IsModeFull() {
+	if config.OVNKubernetesFeature.EnableEgressIP && config.IsModeFull() {
 		// drop by default - set to false later when ovnkube controller has sync'd and changes propagated to OVN southbound database
 		// we should also match on run mode here to ensure ovnkube controller + ovnkube node are running in the same process
 		res.dropGARP = true

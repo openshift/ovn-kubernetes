@@ -484,7 +484,7 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
 		// EIP assigned to the primary interface which selects pods with a role primary user defined network must be excluded.
-		if util.IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableInterconnect && config.Gateway.Mode != config.GatewayModeDisabled {
+		if util.IsNetworkSegmentationSupportEnabled() && config.Gateway.Mode != config.GatewayModeDisabled {
 			// Two methods to lookup EIPs assigned to the gateway bridge. Fast path from a shared cache or slow path from node annotations.
 			// At startup, gateway bridge cache gets sync
 			eipMarkIPs := c.gatewayBridge.GetEIPMarkIPs()
