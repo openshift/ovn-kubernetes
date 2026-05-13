@@ -383,7 +383,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Expect(err).NotTo(HaveOccurred())
 			Expect(r).NotTo(BeNil())
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
@@ -825,7 +825,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 			Expect(err).NotTo(HaveOccurred())
 			ovsClient, ovsCleanup := newTestOVSClient()
 			defer ovsCleanup.Cleanup()
@@ -1340,7 +1340,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Expect(err).NotTo(HaveOccurred())
 
 			Expect(configureGlobalForwarding()).To(Succeed())
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 			Expect(err).NotTo(HaveOccurred())
 			ifAddrs := ovntest.MustParseIPNets(eth0CIDR)
 			localGw, err := newGateway(
@@ -2015,7 +2015,7 @@ var _ = Describe("Gateway unit tests", func() {
 			netlinkMock.On("LinkByName", mock.Anything).Return(lnk, nil)
 			netlinkMock.On("LinkByIndex", mock.Anything).Return(lnk, nil)
 			netlinkMock.On("RouteListFiltered", mock.Anything, mock.Anything, mock.Anything).Return([]netlink.Route{*defaultRoute}, nil)
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(gatewayIntf).To(Equal(lnkAttr.Name))
 			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
@@ -2037,7 +2037,7 @@ var _ = Describe("Gateway unit tests", func() {
 			config.Gateway.Interface = ifName
 			config.Gateway.NextHop = nextHopCfg
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(gatewayIntf).To(Equal(ifName))
 			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
@@ -2062,7 +2062,7 @@ var _ = Describe("Gateway unit tests", func() {
 			config.IPv4Mode = true
 			config.IPv6Mode = true
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(gatewayIntf).To(Equal(ifName))
 			Expect(gatewayNextHops).To(Equal(gwIPs))
@@ -2085,7 +2085,7 @@ var _ = Describe("Gateway unit tests", func() {
 			config.Gateway.Interface = ifName
 			config.Gateway.NextHop = nextHopCfg
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(gatewayIntf).To(Equal(ifName))
 			Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
@@ -2129,7 +2129,7 @@ var _ = Describe("Gateway unit tests", func() {
 				config.Gateway.Mode = config.GatewayModeLocal
 				config.Gateway.AllowNoUplink = true
 
-				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(gatewayIntf).To(Equal(dummyBridgeName))
 				Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
@@ -2162,7 +2162,7 @@ var _ = Describe("Gateway unit tests", func() {
 				config.Gateway.Interface = dummyBridgeName
 				config.Gateway.Mode = config.GatewayModeLocal
 
-				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(gatewayIntf).To(Equal(dummyBridgeName))
 				Expect(gatewayNextHops[0]).To(Equal(gwIPs[0]))
@@ -2203,7 +2203,7 @@ var _ = Describe("Gateway unit tests", func() {
 				config.Gateway.Interface = dummyBridgeName
 				config.Gateway.Mode = config.GatewayModeLocal
 
-				gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+				gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nil)
 				Expect(errors.As(err, new(*GatewayInterfaceMismatchError))).To(BeTrue())
 				Expect(gatewayIntf).To(Equal(""))
 				Expect(gatewayNextHops).To(BeEmpty())
