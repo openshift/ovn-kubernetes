@@ -93,6 +93,9 @@ set_common_default_params() {
   OVN_IMAGE=${OVN_IMAGE:-local}
   OVN_REPO=${OVN_REPO:-""}
   OVN_GITREF=${OVN_GITREF:-""}
+  # Pods to force-delete on --deploy so they respawn with the kind-loaded image.
+  # ovs-node excluded: restarting it under live ovnkube-node pods breaks the cluster.
+  OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-identity ovnkube-control-plane ovnkube-node"}
 
   # Subnet params
   # Input not currently validated. Modify outside script at your own risk.
@@ -1027,6 +1030,14 @@ install_jinjanator_renderer() {
 
 install_ovn_image() {
   install_image "${OVN_IMAGE}"
+}
+
+# Force-respawn OVN pods so their controllers pick up the kind-loaded image
+# on --deploy, where helm sees no spec diff (OVN_IMAGE tag is fixed).
+refresh_ovn_pods() {
+  for pod in ${OVN_DEPLOY_PODS}; do
+    kubectl delete pod -n ovn-kubernetes -l name="${pod}" --ignore-not-found
+  done
 }
 
 # install_image accepts the image name along with the tag as an argument and installs it.
