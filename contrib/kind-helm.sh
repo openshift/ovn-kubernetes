@@ -465,7 +465,6 @@ helm_prereqs() {
 
 create_ovn_kubernetes() {
     cd ${DIR}/../helm/ovn-kubernetes
-    label_ovn_single_node_zones
     value_file="values-single-node-zone.yaml"
     echo "value_file=${value_file}"
     # For multi-pod-subnet case, NET_CIDR_IPV4 is a list of CIDRs separated by comma.
