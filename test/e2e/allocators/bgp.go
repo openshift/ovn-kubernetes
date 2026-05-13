@@ -26,12 +26,15 @@ const (
 
 var (
 	bgpOnce              sync.Once
-	bgpPeerV4, bgpPeerV6 subnetSpec
-	ipvrfV4, ipvrfV6     subnetSpec
-	vtepV4, vtepV6       subnetSpec
+	bgpPeer4, bgpPeer6   subnetSpec
+	bgpIPVRF4, bgpIPVRF6 subnetSpec
+	bgpVTEP4, bgpVTEP6   subnetSpec
+	bgpUDN4, bgpUDN6     subnetSpec
 )
 
 type BGPAllocation struct {
+	UDNSubnet      string
+	UDNSubnet6     string
 	BGPPeerSubnet  string
 	BGPPeerSubnet6 string
 	IPVRFSubnet    string
@@ -44,24 +47,28 @@ type BGPAllocation struct {
 	IPVRFVID       int
 }
 
-// AllocateBGP allocates non-overlapping BGP peering subnets, IP-VRF subnets,
-// VTEP subnets, VNIs and VIDs for parallel test isolation. All resources are
-// derived from a single integer allocated with AllocateInt. Deallocation is
-// registered as a cleanup function.
+// AllocateBGP allocates non-overlapping UDN subnets, BGP peering subnets,
+// IP-VRF subnets, VTEP subnets, VNIs and VIDs for parallel test isolation
+// commonly needed in BGP test cases. All resources are derived from a single
+// integer allocated with AllocateInt. Deallocation is registered as a cleanup
+// function.
 func AllocateBGP(f *framework.Framework, cleanup infraapi.ContextCleanUp) (BGPAllocation, error) {
 	bgpOnce.Do(func() {
-		bgpPeerV4 = newSubnetSpec(bgpPeerSubnets, nil)
-		bgpPeerV6 = newSubnetSpec(bgpPeerSubnets6, nil)
-		ipvrfV4 = newSubnetSpec(ipvrfSubnets, nil)
-		ipvrfV6 = newSubnetSpec(ipvrfSubnets6, nil)
-		vtepV4 = newSubnetSpec(vtepSubnets, nil)
-		vtepV6 = newSubnetSpec(vtepSubnets6, nil)
+		bgpPeer4 = newSubnetSpec(bgpPeerSubnets, nil)
+		bgpPeer6 = newSubnetSpec(bgpPeerSubnets6, nil)
+		bgpIPVRF4 = newSubnetSpec(ipvrfSubnets, nil)
+		bgpIPVRF6 = newSubnetSpec(ipvrfSubnets6, nil)
+		bgpVTEP4 = newSubnetSpec(vtepSubnets, nil)
+		bgpVTEP6 = newSubnetSpec(vtepSubnets6, nil)
+		bgpUDN4 = newSubnetSpec(udnSubnets, nil)
+		bgpUDN6 = newSubnetSpec(udnSubnets6, nil)
 	})
 
 	maxUsable := min(
-		bgpPeerV4.usable(), bgpPeerV6.usable(),
-		ipvrfV4.usable(), ipvrfV6.usable(),
-		vtepV4.usable(), vtepV6.usable(),
+		bgpPeer4.usable(), bgpPeer6.usable(),
+		bgpIPVRF4.usable(), bgpIPVRF6.usable(),
+		bgpVTEP4.usable(), bgpVTEP6.usable(),
+		bgpUDN4.usable(), bgpUDN6.usable(),
 		(vidMax-vidMin+1)/2,
 		(vniMax-vniOffset+1)/2,
 	)
@@ -75,12 +82,14 @@ func AllocateBGP(f *framework.Framework, cleanup infraapi.ContextCleanUp) (BGPAl
 		return DeallocateInt(f, bgpKey, n)
 	})
 
-	bgpV4Idx := bgpPeerV4.nthFree(n)
-	bgpV6Idx := bgpPeerV6.nthFree(n)
-	ipvrfV4Idx := ipvrfV4.nthFree(n)
-	ipvrfV6Idx := ipvrfV6.nthFree(n)
-	vtepV4Idx := vtepV4.nthFree(n)
-	vtepV6Idx := vtepV6.nthFree(n)
+	bgpV4Idx := bgpPeer4.nthFree(n)
+	bgpV6Idx := bgpPeer6.nthFree(n)
+	ipvrfV4Idx := bgpIPVRF4.nthFree(n)
+	ipvrfV6Idx := bgpIPVRF6.nthFree(n)
+	vtepV4Idx := bgpVTEP4.nthFree(n)
+	vtepV6Idx := bgpVTEP6.nthFree(n)
+	udnV4Idx := bgpUDN4.nthFree(n)
+	udnV6Idx := bgpUDN6.nthFree(n)
 
 	// Each allocation consumes two VIDs (MACVRF + IPVRF). MACVRF gets even
 	// VIDs and IPVRF gets odd VIDs so different allocations never collide.
@@ -91,12 +100,14 @@ func AllocateBGP(f *framework.Framework, cleanup infraapi.ContextCleanUp) (BGPAl
 	ipvrfVNI := macvrfVNI + 1
 
 	return BGPAllocation{
-		BGPPeerSubnet:  bgpPeerV4.cidr(bgpV4Idx),
-		BGPPeerSubnet6: bgpPeerV6.cidr(bgpV6Idx),
-		IPVRFSubnet:    ipvrfV4.cidr(ipvrfV4Idx),
-		IPVRFSubnet6:   ipvrfV6.cidr(ipvrfV6Idx),
-		VTEPSubnet:     vtepV4.cidr(vtepV4Idx),
-		VTEPSubnet6:    vtepV6.cidr(vtepV6Idx),
+		UDNSubnet:      bgpUDN4.cidr(udnV4Idx),
+		UDNSubnet6:     bgpUDN6.cidr(udnV6Idx),
+		BGPPeerSubnet:  bgpPeer4.cidr(bgpV4Idx),
+		BGPPeerSubnet6: bgpPeer6.cidr(bgpV6Idx),
+		IPVRFSubnet:    bgpIPVRF4.cidr(ipvrfV4Idx),
+		IPVRFSubnet6:   bgpIPVRF6.cidr(ipvrfV6Idx),
+		VTEPSubnet:     bgpVTEP4.cidr(vtepV4Idx),
+		VTEPSubnet6:    bgpVTEP6.cidr(vtepV6Idx),
 		MACVRFVNI:      macvrfVNI,
 		MACVRFVID:      macvrfVID,
 		IPVRFVNI:       ipvrfVNI,

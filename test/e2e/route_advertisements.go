@@ -2228,13 +2228,9 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			}
 
 			ginkgo.BeforeEach(func() {
-				udnIPv4, udnIPv6, err := allocators.AllocateUDNSubnets(f, ictx)
+				bgpAlloc, err := allocators.AllocateBGP(f, ictx)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				var bgpAlloc allocators.BGPAllocation
-				if testedNetworkType.needsBGP() {
-					bgpAlloc, err = allocators.AllocateBGP(f, ictx)
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				}
+				udnIPv4, udnIPv6 := bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6
 
 				networkSpec := networkSpecGen(udnIPv4, udnIPv6, bgpAlloc)
 				switch {
@@ -2532,13 +2528,9 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 								otherNetworkName = testBaseName + "o"
 								otherNamespaceName := otherNetworkName
 
-								otherUDNIPv4, otherUDNIPv6, err := allocators.AllocateUDNSubnets(f, ictx)
+								otherBGPAlloc, err := allocators.AllocateBGP(f, ictx)
 								gomega.Expect(err).NotTo(gomega.HaveOccurred())
-								var otherBGPAlloc allocators.BGPAllocation
-								if networkType.needsBGP() {
-									otherBGPAlloc, err = allocators.AllocateBGP(f, ictx)
-									gomega.Expect(err).NotTo(gomega.HaveOccurred())
-								}
+								otherUDNIPv4, otherUDNIPv6 := otherBGPAlloc.UDNSubnet, otherBGPAlloc.UDNSubnet6
 
 								otherNetworkSpec := otherNetworkSpecGen(otherUDNIPv4, otherUDNIPv6, otherBGPAlloc)
 								switch {
