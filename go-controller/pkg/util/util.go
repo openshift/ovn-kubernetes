@@ -691,36 +691,54 @@ type IPPort struct {
 	Port int32
 }
 
-// LBEndpoints contains load balancer endpoint information with IPv4 and IPv6 addresses.
+// LBEndpointEntry contains load balancer endpoint information for a single target port
+// with IPv4 and IPv6 addresses.
 // Port is the endpoint port (the one exposed by the pod) and IPs are the IP addresses of the backend pods.
-// e.g. LBEndpoints{Port: 8080, V4IPs: []string{"192.168.1.10", "192.168.1.11"}, V6IPs: []string{"2001:db8::1"}}.
-// TBD: currently, OVNK only supports a single backend port per named port.
-type LBEndpoints struct {
+// e.g. LBEndpointEntry{Port: 8080, V4IPs: []string{"192.168.1.10", "192.168.1.11"}, V6IPs: []string{"2001:db8::1"}}.
+type LBEndpointEntry struct {
 	Port  int32
 	V4IPs []string
 	V6IPs []string
 }
 
-// GetV4Destinations builds IPv4 destination mappings from endpoint addresses to ports.
-// e.g. for V4IPs ["192.168.1.10", "192.168.1.11"] and Port 8080, returns
-// []IPPort{{IP: "192.168.1.10", Port: 8080}, {IP: "192.168.1.11", Port: 8080}}.
+// LBEndpoints holds endpoint entries for one or more target ports.
+// During a rolling update that changes a service's target port, a single service port
+// may temporarily map to multiple target ports (e.g., both 8080 and 9090).
+type LBEndpoints []LBEndpointEntry
+
+// GetV4Destinations builds IPv4 destination mappings from all endpoint entries.
+// e.g. for entries [{Port: 8080, V4IPs: ["10.0.0.1"]}, {Port: 9090, V4IPs: ["10.0.0.2"]}], returns
+// []IPPort{{IP: "10.0.0.1", Port: 8080}, {IP: "10.0.0.2", Port: 9090}}.
 func (le LBEndpoints) GetV4Destinations() []IPPort {
 	destinations := []IPPort{}
-	for _, ip := range le.V4IPs {
-		destinations = append(destinations, IPPort{IP: ip, Port: le.Port})
+	for _, entry := range le {
+		for _, ip := range entry.V4IPs {
+			destinations = append(destinations, IPPort{IP: ip, Port: entry.Port})
+		}
 	}
 	return destinations
 }
 
-// GetV6Destinations builds IPv6 destination mappings from endpoint addresses to ports.
-// e.g. for V6IPs ["2001:db8::1", "2001:db8::2"] and Port 8080, returns
-// []IPPort{{IP: "2001:db8::1", Port: 8080}, {IP: "2001:db8::2", Port: 8080}}.
+// GetV6Destinations builds IPv6 destination mappings from all endpoint entries.
 func (le LBEndpoints) GetV6Destinations() []IPPort {
 	destinations := []IPPort{}
-	for _, ip := range le.V6IPs {
-		destinations = append(destinations, IPPort{IP: ip, Port: le.Port})
+	for _, entry := range le {
+		for _, ip := range entry.V6IPs {
+			destinations = append(destinations, IPPort{IP: ip, Port: entry.Port})
+		}
 	}
 	return destinations
+}
+
+// GetEntryByPort returns the LBEndpointEntry for the given target port number,
+// or an empty entry if not found.
+func (le LBEndpoints) GetEntryByPort(port int32) LBEndpointEntry {
+	for _, entry := range le {
+		if entry.Port == port {
+			return entry
+		}
+	}
+	return LBEndpointEntry{}
 }
 
 // PortToLBEndpoints maps service port keys (protocol + service port name) to load balancer endpoints.
@@ -742,8 +760,10 @@ func (p PortToLBEndpoints) GetLBEndpoints(key string) (LBEndpoints, error) {
 func (p PortToLBEndpoints) GetAddresses() sets.Set[string] {
 	s := sets.New[string]()
 	for _, lbEndpoints := range p {
-		s.Insert(lbEndpoints.V4IPs...)
-		s.Insert(lbEndpoints.V6IPs...)
+		for _, entry := range lbEndpoints {
+			s.Insert(entry.V4IPs...)
+			s.Insert(entry.V6IPs...)
+		}
 	}
 	return s
 }
@@ -803,7 +823,7 @@ func (p PortToNodeToLBEndpoints) GetNode(node string) PortToLBEndpoints {
 // Validation requirements:
 //   - EndpointSlice port names must match Service port names (when service is not nil)
 //   - Only one protocol per port name is supported (Kubernetes requirement).
-//   - Only one target port number per protocol/port combination is supported (OVNKubernetes limitation).
+//   - Multiple target port numbers per protocol/port combination are supported (e.g., during rolling updates).
 func GetEndpointsForService(endpointSlices []*discoveryv1.EndpointSlice, service *corev1.Service,
 	nodes sets.Set[string], needsGlobalEndpoints, needsLocalEndpoints bool) (PortToLBEndpoints, PortToNodeToLBEndpoints, error) {
 
@@ -848,30 +868,32 @@ func GetEndpointsForService(endpointSlices []*discoveryv1.EndpointSlice, service
 				continue
 			}
 
-			// Process the first (and typically only) target port number.
-			// OVN currently does not support multiple target port numbers for the same service name.
+			// Process all target port numbers for this service port key.
+			// During rolling updates, a service port may temporarily map to multiple target ports
+			// (e.g., old pods on port 8080 and new pods on port 9090).
 			portNumbers := maps.Keys(portNumberMap)
 			slices.Sort(portNumbers)
-			if len(portNumbers) > 1 {
-				addValidationError("OVN Kubernetes does not support more than one target port per service port",
-					fmt.Sprintf("servicePortKey %q portNumbers %v",
-						slicePortKey, portNumbers))
-			}
-			targetPortNumber := portNumbers[0]
-			endpointList := portNumberMap[targetPortNumber]
-			// Build global endpoint mapping.
-			if needsGlobalEndpoints {
-				lbe, err := buildLBEndpoints(service, targetPortNumber, endpointList)
-				if err != nil {
-					klog.Warningf("Failed to build global endpoints for port %s: %v", slicePortKey, err)
-					continue
+			for _, targetPortNumber := range portNumbers {
+				endpointList := portNumberMap[targetPortNumber]
+				if needsGlobalEndpoints {
+					entry, err := buildLBEndpointEntry(service, targetPortNumber, endpointList)
+					if err != nil {
+						klog.Warningf("Failed to build global endpoints for port %s/%d: %v", slicePortKey, targetPortNumber, err)
+						continue
+					}
+					globalEndpoints[slicePortKey] = append(globalEndpoints[slicePortKey], entry)
 				}
-				globalEndpoints[slicePortKey] = lbe
-			}
-			// Build per-node endpoint mapping if needed for traffic policies.
-			if needsLocalEndpoints {
-				if lbe, err := buildNodeLBEndpoints(service, targetPortNumber, endpointList, nodes); err == nil {
-					localEndpoints[slicePortKey] = lbe
+				if needsLocalEndpoints {
+					nodeEntries, err := buildNodeLBEndpointEntry(service, targetPortNumber, endpointList, nodes)
+					if err != nil {
+						continue
+					}
+					for node, entry := range nodeEntries {
+						if localEndpoints[slicePortKey] == nil {
+							localEndpoints[slicePortKey] = map[string]LBEndpoints{}
+						}
+						localEndpoints[slicePortKey][node] = append(localEndpoints[slicePortKey][node], entry)
+					}
 				}
 			}
 		}
@@ -930,7 +952,7 @@ func groupEndpointsByNode(endpoints []discoveryv1.Endpoint) map[string][]discove
 	return nodeEndpoints
 }
 
-// buildNodeLBEndpoints creates a per-node mapping of load balancer endpoints.
+// buildNodeLBEndpointEntry creates a per-node mapping of load balancer endpoint entries for a single target port.
 // Only nodes present in the provided node set are included in the result.
 // This is used for services with local traffic policies that require per-node endpoint tracking.
 //
@@ -941,16 +963,16 @@ func groupEndpointsByNode(endpoints []discoveryv1.Endpoint) map[string][]discove
 //   - nodes: Set of valid node names to include
 //
 // Returns:
-//   - map[string]LBEndpoints: Node name to LBEndpoints mapping
-func buildNodeLBEndpoints(service *corev1.Service, portNumber int32, endpoints []discoveryv1.Endpoint, nodes sets.Set[string]) (map[string]LBEndpoints, error) {
-	nodeLBEndpoints := map[string]LBEndpoints{}
+//   - map[string]LBEndpointEntry: Node name to LBEndpointEntry mapping
+func buildNodeLBEndpointEntry(service *corev1.Service, portNumber int32, endpoints []discoveryv1.Endpoint, nodes sets.Set[string]) (map[string]LBEndpointEntry, error) {
+	nodeLBEndpoints := map[string]LBEndpointEntry{}
 
 	nodeEndpoints := groupEndpointsByNode(endpoints)
 	for node, nodeEndpoints := range nodeEndpoints {
 		if !nodes.Has(node) {
 			continue
 		}
-		lbe, err := buildLBEndpoints(service, portNumber, nodeEndpoints)
+		lbe, err := buildLBEndpointEntry(service, portNumber, nodeEndpoints)
 		if err != nil {
 			klog.Warningf("Failed to build node endpoints for node %s port %d: %v", node, portNumber, err)
 			continue
@@ -964,9 +986,9 @@ func buildNodeLBEndpoints(service *corev1.Service, portNumber int32, endpoints [
 	return nodeLBEndpoints, nil
 }
 
-// buildLBEndpoints constructs an LBEndpoints structure from a list of discovery endpoints.
+// buildLBEndpointEntry constructs an LBEndpointEntry from a list of discovery endpoints.
 // It filters endpoints for eligibility, separates IPv4 and IPv6 addresses, and returns
-// an empty LBEndpoints if no valid addresses are found.
+// an empty LBEndpointEntry if no valid addresses are found.
 //
 // Parameters:
 //   - service: The Kubernetes Service object (used for endpoint eligibility filtering)
@@ -975,30 +997,30 @@ func buildNodeLBEndpoints(service *corev1.Service, portNumber int32, endpoints [
 //   - endpoints: List of discovery endpoints to process
 //
 // Returns:
-//   - LBEndpoints: Structure containing IPv4/IPv6 addresses and port number
-func buildLBEndpoints(service *corev1.Service, port int32, endpoints []discoveryv1.Endpoint) (LBEndpoints, error) {
+//   - LBEndpointEntry: Structure containing IPv4/IPv6 addresses and port number
+func buildLBEndpointEntry(service *corev1.Service, port int32, endpoints []discoveryv1.Endpoint) (LBEndpointEntry, error) {
 	addresses := GetEligibleEndpointAddresses(endpoints, service)
 	v4IPs, v4ErrorNoIP := MatchAllIPStringFamily(false, addresses)
 	v6IPs, v6ErrorNoIP := MatchAllIPStringFamily(true, addresses)
 
 	if v4ErrorNoIP != nil && v6ErrorNoIP != nil {
 		if service != nil {
-			return LBEndpoints{}, fmt.Errorf("empty IP address endpoints for service %s/%s", service.Namespace, service.Name)
+			return LBEndpointEntry{}, fmt.Errorf("empty IP address endpoints for service %s/%s", service.Namespace, service.Name)
 		} else {
-			return LBEndpoints{}, fmt.Errorf("empty IP address endpoints")
+			return LBEndpointEntry{}, fmt.Errorf("empty IP address endpoints")
 		}
 	}
 
 	if port <= 0 || port > 65535 {
 		if service != nil {
-			return LBEndpoints{}, fmt.Errorf("invalid endpoint port %d for service %s/%s: port must be between 1-65535",
+			return LBEndpointEntry{}, fmt.Errorf("invalid endpoint port %d for service %s/%s: port must be between 1-65535",
 				port, service.Namespace, service.Name)
 		} else {
-			return LBEndpoints{}, fmt.Errorf("invalid endpoint port %d: port must be between 1-65535", port)
+			return LBEndpointEntry{}, fmt.Errorf("invalid endpoint port %d: port must be between 1-65535", port)
 		}
 	}
 
-	return LBEndpoints{
+	return LBEndpointEntry{
 		V4IPs: v4IPs,
 		V6IPs: v6IPs,
 		Port:  port,

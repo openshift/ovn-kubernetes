@@ -743,6 +743,16 @@ func ReplaceOFFlows(bridgeName string, flows []string) (string, string, error) {
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
+// AddOrModOFGroup creates or modifies an OpenFlow group on the bridge.
+func AddOrModOFGroup(bridgeName, group string) (string, string, error) {
+	return RunOVSOfctl("-O", "OpenFlow13", "--may-create", "mod-group", bridgeName, group)
+}
+
+// DeleteOFGroup deletes an OpenFlow group from the bridge by group ID.
+func DeleteOFGroup(bridgeName, groupID string) (string, string, error) {
+	return RunOVSOfctl("-O", "OpenFlow13", "del-groups", bridgeName, fmt.Sprintf("group_id=%s", groupID))
+}
+
 // GetOFFlows gets all the flows from a bridge
 func GetOFFlows(bridgeName string) ([]string, error) {
 	stdout, stderr, err := RunOVSOfctl("dump-flows", bridgeName)

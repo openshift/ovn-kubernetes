@@ -25,13 +25,18 @@ type openflowManager struct {
 	defaultBridge         *bridgeconfig.BridgeConfiguration
 	externalGatewayBridge *bridgeconfig.BridgeConfiguration
 	// flow cache, use map instead of array for readability when debugging
-	flowCache     map[string][]string
-	flowMutex     sync.Mutex
-	exGWFlowCache map[string][]string
-	exGWFlowMutex sync.Mutex
+	flowCache       map[string][]string
+	flowMutex       sync.Mutex
+	groupCache      map[string][]string
+	groupMutex      sync.Mutex
+	installedGroups map[string]struct{}
+	exGWFlowCache   map[string][]string
+	exGWFlowMutex   sync.Mutex
 	// channel to indicate we need to update flows immediately
 	flowChan chan struct{}
 }
+
+var openFlowGroupIDRegexp = regexp.MustCompile(`(?:^|,)group_id=([^,]+)`)
 
 // UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
 
@@ -89,19 +94,48 @@ func (c *openflowManager) setDefaultBridgeGARPDrop(isDropped bool) {
 func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
 	c.flowMutex.Lock()
 	defer c.flowMutex.Unlock()
+	if c.flowCache == nil {
+		c.flowCache = make(map[string][]string)
+	}
 	c.flowCache[key] = flows
 }
 
 func (c *openflowManager) deleteFlowsByKey(key string) {
 	c.flowMutex.Lock()
-	defer c.flowMutex.Unlock()
 	delete(c.flowCache, key)
+	c.flowMutex.Unlock()
+	c.deleteGroupsByKey(key)
 }
 
 func (c *openflowManager) getFlowsByKey(key string) []string {
 	c.flowMutex.Lock()
 	defer c.flowMutex.Unlock()
 	return c.flowCache[key]
+}
+
+func (c *openflowManager) updateGroupCacheEntry(key string, groups []string) {
+	c.groupMutex.Lock()
+	defer c.groupMutex.Unlock()
+	if len(groups) == 0 {
+		delete(c.groupCache, key)
+		return
+	}
+	if c.groupCache == nil {
+		c.groupCache = make(map[string][]string)
+	}
+	c.groupCache[key] = groups
+}
+
+func (c *openflowManager) deleteGroupsByKey(key string) {
+	c.groupMutex.Lock()
+	defer c.groupMutex.Unlock()
+	delete(c.groupCache, key)
+}
+
+func (c *openflowManager) getGroupsByKey(key string) []string {
+	c.groupMutex.Lock()
+	defer c.groupMutex.Unlock()
+	return c.groupCache[key]
 }
 
 func (c *openflowManager) updateExBridgeFlowCacheEntry(key string, flows []string) {
@@ -120,14 +154,21 @@ func (c *openflowManager) requestFlowSync() {
 }
 
 func (c *openflowManager) syncFlows() {
-	c.flowMutex.Lock()
-	flows := flattenFlowCacheEntries(c.flowCache)
-	c.flowMutex.Unlock()
+	groupsSynced := c.syncGroups()
+	if !groupsSynced {
+		klog.Errorf("Skipping flow sync for bridge %s because OpenFlow group sync failed", c.defaultBridge.GetBridgeName())
+	} else {
+		c.flowMutex.Lock()
+		flows := flattenFlowCacheEntries(c.flowCache)
+		c.flowMutex.Unlock()
 
-	_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.GetBridgeName(), flows)
-	if err != nil {
-		klog.Errorf("Failed to add flows for bridge %s, error: %v, stderr, %s, flow count: %d",
-			c.defaultBridge.GetBridgeName(), err, stderr, len(flows))
+		_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.GetBridgeName(), flows)
+		if err != nil {
+			klog.Errorf("Failed to add flows for bridge %s, error: %v, stderr, %s, flow count: %d",
+				c.defaultBridge.GetBridgeName(), err, stderr, len(flows))
+		} else {
+			c.deleteStaleGroups()
+		}
 	}
 
 	if c.externalGatewayBridge != nil {
@@ -141,6 +182,84 @@ func (c *openflowManager) syncFlows() {
 				c.externalGatewayBridge.GetBridgeName(), err, stderr, len(exGWFlows))
 		}
 	}
+}
+
+func (c *openflowManager) syncGroups() bool {
+	c.groupMutex.Lock()
+	groups := flattenFlowCacheEntries(c.groupCache)
+	c.groupMutex.Unlock()
+
+	success := true
+	successfulGroupIDs := make([]string, 0, len(groups))
+	for _, group := range groups {
+		_, stderr, err := util.AddOrModOFGroup(c.defaultBridge.GetBridgeName(), group)
+		if err != nil {
+			klog.Errorf("Failed to add or modify OpenFlow group for bridge %s, error: %v, stderr: %s, group: %s",
+				c.defaultBridge.GetBridgeName(), err, stderr, group)
+			success = false
+			continue
+		}
+		if groupID, ok := parseOpenFlowGroupID(group); ok {
+			successfulGroupIDs = append(successfulGroupIDs, groupID)
+		}
+	}
+	if len(successfulGroupIDs) > 0 {
+		c.groupMutex.Lock()
+		if c.installedGroups == nil {
+			c.installedGroups = make(map[string]struct{})
+		}
+		for _, groupID := range successfulGroupIDs {
+			c.installedGroups[groupID] = struct{}{}
+		}
+		c.groupMutex.Unlock()
+	}
+	return success
+}
+
+func (c *openflowManager) deleteStaleGroups() {
+	c.groupMutex.Lock()
+	groups := flattenFlowCacheEntries(c.groupCache)
+	desiredGroupIDs := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		if groupID, ok := parseOpenFlowGroupID(group); ok {
+			desiredGroupIDs[groupID] = struct{}{}
+		}
+	}
+	if c.installedGroups == nil {
+		c.installedGroups = make(map[string]struct{})
+	}
+	staleGroupIDs := make([]string, 0, len(c.installedGroups))
+	for groupID := range c.installedGroups {
+		if _, ok := desiredGroupIDs[groupID]; !ok {
+			staleGroupIDs = append(staleGroupIDs, groupID)
+		}
+	}
+	c.groupMutex.Unlock()
+
+	failedGroupIDs := make([]string, 0)
+	for _, groupID := range staleGroupIDs {
+		_, stderr, err := util.DeleteOFGroup(c.defaultBridge.GetBridgeName(), groupID)
+		if err != nil {
+			klog.Errorf("Failed to delete stale OpenFlow group %s for bridge %s, error: %v, stderr: %s",
+				groupID, c.defaultBridge.GetBridgeName(), err, stderr)
+			failedGroupIDs = append(failedGroupIDs, groupID)
+		}
+	}
+
+	c.groupMutex.Lock()
+	c.installedGroups = desiredGroupIDs
+	for _, groupID := range failedGroupIDs {
+		c.installedGroups[groupID] = struct{}{}
+	}
+	c.groupMutex.Unlock()
+}
+
+func parseOpenFlowGroupID(group string) (string, bool) {
+	match := openFlowGroupIDRegexp.FindStringSubmatch(group)
+	if len(match) != 2 {
+		return "", false
+	}
+	return match[1], true
 }
 
 func flattenFlowCacheEntries(flowCache map[string][]string) []string {
@@ -170,6 +289,9 @@ func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeconfig.BridgeConfigur
 		externalGatewayBridge: exGWBridge,
 		flowCache:             make(map[string][]string),
 		flowMutex:             sync.Mutex{},
+		groupCache:            make(map[string][]string),
+		groupMutex:            sync.Mutex{},
+		installedGroups:       make(map[string]struct{}),
 		exGWFlowCache:         make(map[string][]string),
 		exGWFlowMutex:         sync.Mutex{},
 		flowChan:              make(chan struct{}, 1),

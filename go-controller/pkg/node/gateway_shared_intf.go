@@ -316,20 +316,6 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netI
 						errors = append(errors, err)
 						continue
 					}
-					// The return traffic, matches on the flowProtocol + targetPort. That's different from cookie which
-					// uses svcPort.NodePort.
-					targetPort := lbe.Port
-					targetPortCookie, err := svcToCookie(service.Namespace, service.Name, flowProtocol, targetPort)
-					if err != nil {
-						klog.Warningf("Unable to generate target port cookie for svc: %s, %s, %d, error: %v",
-							service.Namespace, service.Name, targetPort, err)
-						targetPortCookie = "0"
-					}
-
-					// case1 (see function description for details)
-					var nodeportFlows []string
-					klog.V(5).Infof("Adding flows on breth0 for Nodeport Service %s with targetPort %d in "+
-						"Namespace: %s since ExternalTrafficPolicy=local", service.Name, targetPort, service.Namespace)
 					// table 0, This rule matches on all traffic with dst port == NodePort, DNAT's the nodePort to the svc targetPort
 					// If IPv6 make sure to choose the IPv6 node address for rule, otherwise send to the IPv4 node address.
 					gatewayAddress := npw.gatewayIPv4
@@ -345,26 +331,18 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netI
 						continue
 					}
 
-					nodeportFlows = append(nodeportFlows,
-						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, tp_dst=%d, "+
-							"actions=ct(commit,zone=%d,nat(dst=%s:%d),table=6)",
-							cookie, npw.ofportPhys, flowProtocol, svcPort.NodePort,
-							config.Default.HostNodePortConntrackZone, gatewayAddress, targetPort))
-
-					nodeportFlows = append(nodeportFlows,
-						// table 6, Sends the packet to the host. Note that the constant etp svc cookie is used since this flow would be
-						// same for all such services.
-						fmt.Sprintf("cookie=%s, priority=110, table=6, actions=output:LOCAL",
-							etpSvcOpenFlowCookie),
-						// table 0, Matches on return traffic, i.e traffic coming from the host networked pod's port, and unDNATs
-						// Use targetPortCookie, as the flow will be the same if the target port + protocol are the same.
-						fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%d, actions=ct(zone=%d nat,table=7)",
-							targetPortCookie, flowProtocol, targetPort, config.Default.HostNodePortConntrackZone),
-						// table 7, Sends the packet back out eth0 to the external client. Note that the constant etp svc
-						// cookie is used since this would be same for all such services.
-						fmt.Sprintf("cookie=%s, priority=110, table=7, "+
-							"actions=output:%s", etpSvcOpenFlowCookie, npw.ofportPhys))
-					npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
+					// case1 (see function description for details)
+					nodeIPs, _ := npw.nodeIPManager.ListAddresses()
+					nodeportFlows, nodeportGroups := npw.hostNetworkServiceOpenFlows(
+						service, key, cookie, flowProtocol,
+						fmt.Sprintf("in_port=%s, %s, tp_dst=%d", npw.ofportPhys, flowProtocol, svcPort.NodePort),
+						gatewayAddress, lbe, nodeIPs)
+					if len(nodeportFlows) > 0 {
+						npw.ofm.updateFlowCacheEntry(key, nodeportFlows)
+						npw.ofm.updateGroupCacheEntry(key, nodeportGroups)
+					} else {
+						npw.ofm.updateGroupCacheEntry(key, nil)
+					}
 				} else if config.Gateway.Mode == config.GatewayModeShared {
 					// case2 (see function description for details)
 					npw.ofm.updateFlowCacheEntry(key, []string{
@@ -376,6 +354,7 @@ func (npw *nodePortWatcher) updateServiceFlowCache(service *corev1.Service, netI
 						fmt.Sprintf("cookie=%s, priority=110, in_port=%s, dl_src=%s, %s, tp_src=%d, "+
 							"actions=output:%s",
 							cookie, netConfig.OfPortPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, svcPort.NodePort, npw.ofportPhys)})
+					npw.ofm.updateGroupCacheEntry(key, nil)
 				}
 			}
 		}
@@ -552,19 +531,6 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *corev1.Service,
 				errors = append(errors, err)
 				continue
 			}
-			// cookie uses externalIPOrLBIngressIP and thus generates different cookies for each of the IP addresses.
-			// The return traffic, however, matches on the flowProtocol + src port only. Therefore, generate a stable
-			// cookie regardless of IP address and use this for the return flows.
-			targetPort := lbe.Port
-			targetPortCookie, err := svcToCookie(service.Namespace, service.Name, flowProtocol, targetPort)
-			if err != nil {
-				klog.Warningf("Unable to generate target port cookie for %s svc: %s, %s, %d, error: %v",
-					ipType, service.Namespace, service.Name, targetPort, err)
-				targetPortCookie = "0"
-			}
-
-			// case1 (see function description for details)
-			klog.V(5).Infof("Adding flows on breth0 for %s Service %s in Namespace: %s since ExternalTrafficPolicy=local", ipType, service.Name, service.Namespace)
 			// table 0, This rule matches on all traffic with dst ip == LoadbalancerIP / externalIP, DNAT's the nodePort to the svc targetPort
 			// If IPv6 make sure to choose the IPv6 node address for rule, otherwise send to the IPv4 node address.
 			gatewayAddress := npw.gatewayIPv4
@@ -580,25 +546,19 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *corev1.Service,
 				continue
 			}
 
-			externalIPFlows = append(externalIPFlows,
-				fmt.Sprintf("cookie=%s, priority=110, in_port=%s, %s, %s=%s, tp_dst=%d, "+
-					"actions=ct(commit,zone=%d,nat(dst=%s:%d),table=6)",
-					cookie, npw.ofportPhys, flowProtocol, nwDst, externalIPOrLBIngressIP, svcPort.Port,
-					config.Default.HostNodePortConntrackZone, gatewayAddress, targetPort))
-
-			externalIPFlows = append(externalIPFlows,
-				// table 6, Sends the packet to Host. Note that the constant etp svc cookie is used since this flow would be
-				// same for all such services.
-				fmt.Sprintf("cookie=%s, priority=110, table=6, actions=output:LOCAL",
-					etpSvcOpenFlowCookie),
-				// table 0, Matches on return traffic, i.e traffic coming from the host networked pod's port, and unDNATs.
-				// Use targetPortCookie, as the flow will be the same for each ExternalIP / LB status IP.
-				fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%d, actions=ct(zone=%d nat,table=7)",
-					targetPortCookie, flowProtocol, targetPort, config.Default.HostNodePortConntrackZone),
-				// table 7, Sends the reply packet back out eth0 to the external client. Note that the constant etp svc
-				// cookie is used since this would be same for all such services.
-				fmt.Sprintf("cookie=%s, priority=110, table=7, actions=output:%s",
-					etpSvcOpenFlowCookie, npw.ofportPhys))
+			// case1 (see function description for details)
+			klog.V(5).Infof("Adding flows on breth0 for %s Service %s in Namespace: %s since ExternalTrafficPolicy=local", ipType, service.Name, service.Namespace)
+			nodeIPs, _ := npw.nodeIPManager.ListAddresses()
+			hostNetworkFlows, hostNetworkGroups := npw.hostNetworkServiceOpenFlows(
+				service, key, cookie, flowProtocol,
+				fmt.Sprintf("in_port=%s, %s, %s=%s, tp_dst=%d", npw.ofportPhys, flowProtocol, nwDst, externalIPOrLBIngressIP, svcPort.Port),
+				gatewayAddress, lbe, nodeIPs)
+			externalIPFlows = append(externalIPFlows, hostNetworkFlows...)
+			if len(hostNetworkFlows) > 0 {
+				npw.ofm.updateGroupCacheEntry(key, hostNetworkGroups)
+			} else {
+				npw.ofm.updateGroupCacheEntry(key, nil)
+			}
 		} else if config.Gateway.Mode == config.GatewayModeShared {
 			// add the ICMP Fragmentation flow for shared gateway mode.
 			icmpFlow := nodeutil.GenerateICMPFragmentationFlow(externalIPOrLBIngressIP, netConfig.OfPortPatch, npw.ofportPhys, cookie, 110)
@@ -613,11 +573,101 @@ func (npw *nodePortWatcher) createLbAndExternalSvcFlows(service *corev1.Service,
 				fmt.Sprintf("cookie=%s, priority=110, in_port=%s, dl_src=%s, %s, %s=%s, tp_src=%d, "+
 					"actions=output:%s",
 					cookie, netConfig.OfPortPatch, npw.ofm.getDefaultBridgeMAC(), flowProtocol, nwSrc, externalIPOrLBIngressIP, svcPort.Port, npw.ofportPhys))
+			npw.ofm.updateGroupCacheEntry(key, nil)
 		}
 		npw.ofm.updateFlowCacheEntry(key, externalIPFlows)
 	}
 
 	return utilerrors.Join(errors...)
+}
+
+func (npw *nodePortWatcher) hostNetworkServiceOpenFlows(service *corev1.Service, key, cookie, flowProtocol, match, gatewayAddress string,
+	lbe util.LBEndpoints, nodeIPs []net.IP) ([]string, []string) {
+	targetPorts := hostNetworkTargetPorts(lbe, nodeIPs, strings.Contains(flowProtocol, "6"))
+	if len(targetPorts) == 0 {
+		return nil, nil
+	}
+
+	flows := make([]string, 0, len(targetPorts)+3)
+	groups := []string(nil)
+	action := fmt.Sprintf("ct(commit,zone=%d,nat(dst=%s:%d),table=6)",
+		config.Default.HostNodePortConntrackZone, gatewayAddress, targetPorts[0])
+	if len(targetPorts) > 1 {
+		groupID := hostNetworkServiceGroupID(key)
+		buckets := make([]string, 0, len(targetPorts))
+		for _, targetPort := range targetPorts {
+			buckets = append(buckets, fmt.Sprintf("bucket=actions=ct(commit,zone=%d,nat(dst=%s:%d),table=6)",
+				config.Default.HostNodePortConntrackZone, gatewayAddress, targetPort))
+		}
+		groups = append(groups, fmt.Sprintf("group_id=%d,type=select,%s", groupID, strings.Join(buckets, ",")))
+		action = fmt.Sprintf("group:%d", groupID)
+	}
+
+	flows = append(flows,
+		fmt.Sprintf("cookie=%s, priority=110, %s, actions=%s", cookie, match, action),
+		// table 6 sends the packet to the host. The constant cookie is used because this flow is common to all ETP service traffic.
+		fmt.Sprintf("cookie=%s, priority=110, table=6, actions=output:LOCAL", etpSvcOpenFlowCookie))
+
+	for _, targetPort := range targetPorts {
+		targetPortCookie, err := svcToCookie(service.Namespace, service.Name, flowProtocol, targetPort)
+		if err != nil {
+			klog.Warningf("Unable to generate target port cookie for svc: %s, %s, %d, error: %v",
+				service.Namespace, service.Name, targetPort, err)
+			targetPortCookie = "0"
+		}
+
+		klog.V(5).Infof("Adding flows on breth0 for Service %s with targetPort %d in Namespace: %s since ExternalTrafficPolicy=local",
+			service.Name, targetPort, service.Namespace)
+		flows = append(flows,
+			fmt.Sprintf("cookie=%s, priority=110, in_port=LOCAL, %s, tp_src=%d, actions=ct(zone=%d nat,table=7)",
+				targetPortCookie, flowProtocol, targetPort, config.Default.HostNodePortConntrackZone))
+	}
+
+	flows = append(flows,
+		// table 7 sends the reply packet back out eth0 to the external client. The constant cookie is used because this flow is common to all ETP service traffic.
+		fmt.Sprintf("cookie=%s, priority=110, table=7, actions=output:%s", etpSvcOpenFlowCookie, npw.ofportPhys))
+	return flows, groups
+}
+
+func hostNetworkTargetPorts(lbe util.LBEndpoints, nodeIPs []net.IP, isIPv6 bool) []int32 {
+	if len(lbe) == 0 || len(nodeIPs) == 0 {
+		return nil
+	}
+
+	nodeIPSet := sets.New[string]()
+	for _, nodeIP := range nodeIPs {
+		if utilnet.IsIPv6(nodeIP) == isIPv6 {
+			nodeIPSet.Insert(nodeIP.String())
+		}
+	}
+	if len(nodeIPSet) == 0 {
+		return nil
+	}
+
+	targetPortSet := sets.New[int32]()
+	for _, entry := range lbe {
+		endpointIPs := entry.V4IPs
+		if isIPv6 {
+			endpointIPs = entry.V6IPs
+		}
+		for _, endpointIP := range endpointIPs {
+			if nodeIPSet.Has(endpointIP) {
+				targetPortSet.Insert(entry.Port)
+				break
+			}
+		}
+	}
+	return sets.List(targetPortSet)
+}
+
+func hostNetworkServiceGroupID(key string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte("hostNetworkService_" + key))
+	groupID := h.Sum32()
+	if groupID == 0 {
+		return 1
+	}
+	return groupID
 }
 
 // generate ARP/NS bypass flow which will send the ARP/NS request everywhere *but* to OVN
@@ -1346,6 +1396,7 @@ func (npw *nodePortWatcher) AddEndpointSlice(epSlice *discovery.EndpointSlice) e
 	}
 
 	if out.hasLocalHostNetworkEp != hasLocalHostNetworkEp ||
+		(hasLocalHostNetworkEp && !reflect.DeepEqual(out.localEndpoints, localEndpoints)) ||
 		(!util.LoadBalancerServiceHasNodePortAllocation(svc) && !reflect.DeepEqual(out.localEndpoints, localEndpoints)) {
 		klog.V(5).Infof("Endpointslice %s ADD event in namespace %s is updating rules", epSlice.Name, epSlice.Namespace)
 		if err = delServiceRules(svc, out.localEndpoints, npw); err != nil {
