@@ -98,6 +98,11 @@ type nadController struct {
 	nadClient           nadclientset.Interface
 
 	markedForRemoval map[string]time.Time
+	// dynamicallyRemovedNADs tracks NADs that still exist in the informer but
+	// have already been locally removed after their Dynamic UDN inactivity grace
+	// period expired. This prevents repeated local delete scheduling while the
+	// NAD remains inactive.
+	dynamicallyRemovedNADs sets.Set[string]
 
 	// filterNADsOnNode is the node identity used for local Dynamic UDN NAD
 	// rendering decisions. When set, this controller only renders a dynamic UDN
@@ -135,23 +140,24 @@ func newController(
 ) (*nadController, error) {
 	networkController := newNetworkController(name, zone, node, cm, wf)
 	c := &nadController{
-		name:                  fmt.Sprintf("[%s NAD controller]", name),
-		stopChan:              make(chan struct{}),
-		recorder:              recorder,
-		nadLister:             wf.NADInformer().Lister(),
-		nodeLister:            wf.NodeCoreInformer().Lister(),
-		networkController:     networkController,
-		reconcilers:           map[uint64]reconcilerRegistration{},
-		networkRefReconcilers: map[uint64]networkRefReconcilerRegistration{},
-		nads:                  map[string]string{},
-		nadsByNetwork:         map[string]sets.Set[string]{},
-		dynamicFilterNADs:     map[string]bool{},
-		cncSelectedNetworks:   map[string]sets.Set[string]{},
-		cncNetworkIDs:         map[string]sets.Set[int]{},
-		cncsByNetworkID:       map[int]sets.Set[string]{},
-		cncConnectedNetworks:  map[string]sets.Set[string]{},
-		primaryNADs:           map[string]string{},
-		markedForRemoval:      map[string]time.Time{},
+		name:                   fmt.Sprintf("[%s NAD controller]", name),
+		stopChan:               make(chan struct{}),
+		recorder:               recorder,
+		nadLister:              wf.NADInformer().Lister(),
+		nodeLister:             wf.NodeCoreInformer().Lister(),
+		networkController:      networkController,
+		reconcilers:            map[uint64]reconcilerRegistration{},
+		networkRefReconcilers:  map[uint64]networkRefReconcilerRegistration{},
+		nads:                   map[string]string{},
+		nadsByNetwork:          map[string]sets.Set[string]{},
+		dynamicFilterNADs:      map[string]bool{},
+		cncSelectedNetworks:    map[string]sets.Set[string]{},
+		cncNetworkIDs:          map[string]sets.Set[int]{},
+		cncsByNetworkID:        map[int]sets.Set[string]{},
+		cncConnectedNetworks:   map[string]sets.Set[string]{},
+		primaryNADs:            map[string]string{},
+		markedForRemoval:       map[string]time.Time{},
+		dynamicallyRemovedNADs: sets.New[string](),
 	}
 	networkController.getNADKeysForNetwork = c.GetNADKeysForNetwork
 
@@ -430,7 +436,11 @@ func (c *nadController) OnNetworkRefChange(node, nadNamespacedName string, activ
 	}
 	// Let the NAD controller handle lifecycle/teardown decisions asynchronously for local networks only.
 	if isLocal {
-		c.reconcileNetworkActivity(affectedNetworks, active, networkName, nadNamespacedName)
+		// Tracker events can arrive before syncNAD has populated nadsByNetwork
+		// for this NAD. Requeue the changed key directly, then requeue any
+		// already-known NADs for this network and its CNC-connected peers.
+		c.reconcile(nadNamespacedName)
+		c.reconcileNetworkActivity(affectedNetworks)
 	}
 
 }
@@ -452,12 +462,10 @@ func (c *nadController) getNetworkAndConnectedNetworks(networkName string) []str
 	return networks
 }
 
-// reconcileNetworkActivity updates Dynamic UDN removal state and requeues NAD
-// sync for all NADs belonging to the provided networks. changedNADActive is
-// used only for changedNADKey's own network, preserving direct activity before
-// NAD/network caches know about the key while still deriving CNC peer activity
-// from the current adjacency snapshot.
-func (c *nadController) reconcileNetworkActivity(networkNames []string, changedNADActive bool, changedNetworkName, changedNADKey string) {
+// reconcileNetworkActivity requeues NAD sync for all NADs belonging to the
+// provided networks. syncNAD recomputes current activity and updates local
+// Dynamic UDN removal state.
+func (c *nadController) reconcileNetworkActivity(networkNames []string) {
 	if len(networkNames) == 0 {
 		return
 	}
@@ -466,35 +474,12 @@ func (c *nadController) reconcileNetworkActivity(networkNames []string, changedN
 		if networkName == "" {
 			continue
 		}
-		nadKeys := sets.New[string](c.GetNADKeysForNetwork(networkName)...)
-		if networkName == changedNetworkName && changedNADKey != "" {
-			// Tracker events can arrive before syncNAD has populated
-			// nadsByNetwork for this NAD. Include the changed key so the
-			// first activity event still requeues the NAD.
-			nadKeys.Insert(changedNADKey)
-		}
+		nadKeys := c.GetNADKeysForNetwork(networkName)
 		if len(nadKeys) == 0 {
 			continue
 		}
 
-		active := false
-		if c.usesLocalDynamicFiltering() {
-			active = c.NodeHasNetwork(c.filterNADsOnNode, networkName)
-			if !active && changedNADActive && networkName == changedNetworkName {
-				// NodeHasNetwork is authoritative once nadsByNetwork
-				// includes this NAD. If the tracker event beat syncNAD,
-				// the changed active event is the only current signal for
-				// this network; bootstrap it as active so we do not start a
-				// stale removal timer.
-				active = true
-			}
-		}
-
-		for nadKey := range nadKeys {
-			if c.usesLocalDynamicFiltering() {
-				c.updateNADState(nadKey, active)
-				continue
-			}
+		for _, nadKey := range nadKeys {
 			c.reconcile(nadKey)
 		}
 	}
@@ -766,7 +751,7 @@ func (c *nadController) syncAllCNCs() error {
 	networksToReconcile := c.updateCNCConnectivityLocked()
 	c.Unlock()
 
-	c.reconcileNetworkActivity(networksToReconcile.UnsortedList(), false, "", "")
+	c.reconcileNetworkActivity(networksToReconcile.UnsortedList())
 	return nil
 }
 
@@ -797,7 +782,7 @@ func (c *nadController) syncCNC(key string) error {
 	networksToReconcile := c.updateCNCConnectivityLocked()
 	c.Unlock()
 
-	c.reconcileNetworkActivity(networksToReconcile.UnsortedList(), false, "", "")
+	c.reconcileNetworkActivity(networksToReconcile.UnsortedList())
 	return nil
 }
 
@@ -890,24 +875,14 @@ func (c *nadController) reconcile(key string) {
 	c.controller.Reconcile(key)
 }
 
-// updateNADState enqueues a sync for a given NAD.
-// "active" defines if the network is actively being used by a dynamic resource
-//   - For local events, we either want to wait for grace period before tearing down an inactive network
-//     or clear any removal timer, but both conditions should lead to the network being reconciled (nad sync)
-func (c *nadController) updateNADState(key string, active bool) {
-	if active { // if local and active, clear the mark for removal
-		c.removeMarkedForRemoval(key)
-	} else { // inactive start timer for removal
-		c.setMarkedForRemoval(key)
+// setMarkedForRemovalLocked starts the Dynamic UDN inactivity grace period for
+// a NAD that is currently filtered from local rendering.
+// Caller must hold nadController lock.
+func (c *nadController) setMarkedForRemovalLocked(key string) {
+	if c.dynamicallyRemovedNADs.Has(key) {
+		return
 	}
-	// always requeue to nad controller to syncNAD again
-	c.controller.Reconcile(key)
-}
-
-func (c *nadController) setMarkedForRemoval(key string) {
-	c.Lock()
 	if _, ok := c.markedForRemoval[key]; ok {
-		c.Unlock()
 		return
 	}
 	if c.markedForRemoval == nil {
@@ -915,7 +890,6 @@ func (c *nadController) setMarkedForRemoval(key string) {
 	}
 	removalTime := time.Now().Add(config.OVNKubernetesFeature.UDNDeletionGracePeriod)
 	c.markedForRemoval[key] = removalTime
-	c.Unlock()
 
 	// ensure we reconcile later
 	stopCh := c.stopChan
@@ -941,10 +915,14 @@ func (c *nadController) setMarkedForRemoval(key string) {
 	}()
 }
 
-func (c *nadController) removeMarkedForRemoval(key string) {
-	c.Lock()
-	defer c.Unlock()
+// clearDynamicRemovalStateLocked clears pending or completed local dynamic
+// removal state for a NAD that should render again or no longer exists.
+// Caller must hold nadController lock.
+func (c *nadController) clearDynamicRemovalStateLocked(key string) {
 	delete(c.markedForRemoval, key)
+	if c.dynamicallyRemovedNADs != nil {
+		c.dynamicallyRemovedNADs.Delete(key)
+	}
 }
 
 func (c *nadController) syncAll() (err error) {
@@ -1079,7 +1057,15 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 	}
 
 	deleteTime, setforDeletion := c.markedForRemoval[key]
-	if setforDeletion && time.Now().After(deleteTime) {
+	removalExpired := setforDeletion && time.Now().After(deleteTime)
+	if removalExpired && c.usesLocalDynamicFiltering() && c.nodeHasNetworkNoLock(c.filterNADsOnNode, previousNetworkName) {
+		// Activity may have returned while the grace-period reconcile was still
+		// queued. Since syncNAD is now the source of truth for activity state,
+		// clear the stale timer instead of honoring the expired edge.
+		c.clearDynamicRemovalStateLocked(key)
+		removalExpired = false
+	}
+	if removalExpired {
 		// Grace period expired. Force a local teardown, but keep caches aligned to informer state.
 		klog.Infof("%s: NAD %q: marked for deletion and time has expired, will remove locally", c.name, key)
 		dynamicDelete = nad != nil
@@ -1088,6 +1074,12 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		defer func() {
 			if syncErr == nil {
 				delete(c.markedForRemoval, key)
+				if dynamicDelete {
+					if c.dynamicallyRemovedNADs == nil {
+						c.dynamicallyRemovedNADs = sets.New[string]()
+					}
+					c.dynamicallyRemovedNADs.Insert(key)
+				}
 			}
 		}()
 	}
@@ -1212,7 +1204,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		// On a true delete (incoming nad nil or expired grace period) we must clean caches,
 		// except for dynamicDelete where we keep informer-derived state.
 		if !dynamicDelete {
-			delete(c.markedForRemoval, key)
+			c.clearDynamicRemovalStateLocked(key)
 			// clean up primary mapping even if we never had an oldNetwork rendered
 			if c.primaryNADs[namespace] == key {
 				delete(c.primaryNADs, namespace)
@@ -1257,21 +1249,25 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 
 	shouldNetworkExist := true
 	if c.usesLocalDynamicFiltering() {
+		// IMPORTANT: nad/network caches should be updated before
+		// filtering the nad. Asynchronous routines like trackers
+		// depend on cache state to enqueue keys. Trackers track
+		// filtering, and filter relies on the trackers. Trackers
+		// enqueue keys and rely on nad/network caches for CNC enqueuing.
+		// Therefore with this dual dependency we must ensure ordering is correct
+		// to avoid races between the two.
 		shouldFilter, err := c.filter(nad)
 		if err != nil {
 			return fmt.Errorf("%s: failed filtering NAD %s: %w", c.name, key, err)
 		}
 		if shouldFilter {
+			c.setMarkedForRemovalLocked(key)
 			shouldNetworkExist = false
+		} else {
+			c.clearDynamicRemovalStateLocked(key)
 		}
 	}
 	if shouldNetworkExist {
-		if c.usesLocalDynamicFiltering() {
-			// If this sync observes the locally filtered NAD should render,
-			// clear any stale removal timer left by a reordered or missed
-			// activity notification.
-			delete(c.markedForRemoval, key)
-		}
 		// ensure the network is associated with the NAD
 		ensureNetwork.AddNADs(key)
 		// reconcile the network
