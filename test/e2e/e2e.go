@@ -674,12 +674,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}
 
 		controlPlanePodName = "ovnkube-control-plane"
-		// in "one node per zone" config, ovnkube-controller doesn't create leader election lease
-		if !singleNodePerZone() {
-			controlPlaneLeaseName = "ovn-kubernetes-master-ovn-control-plane"
-		} else {
-			controlPlaneLeaseName = "ovn-kubernetes-master"
-		}
+		controlPlaneLeaseName = "ovn-kubernetes-master"
 
 		controlPlanePods, err := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(context.Background(), metav1.ListOptions{
 			LabelSelector: "name=" + controlPlanePodName,
