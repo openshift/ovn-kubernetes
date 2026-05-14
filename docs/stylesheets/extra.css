@@ -655,3 +655,8 @@ img {
   margin-left: auto;
   margin-right: auto;
 }
+@media screen and (min-width: 123.0625em) {
+.md-typeset h1 {
+  font-size: 1.5rem;
+}
+}
