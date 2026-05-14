@@ -343,7 +343,7 @@ jobs:
           --metrics-dir /tmp/${{ matrix.perf-test }}/perf/metrics/ \
           --output /tmp/${{ matrix.perf-test }}/performance_report.md \
           --title "OVN-Kubernetes Performance Test Results - Run ${{ github.run_id }}"
-        
+
         echo "Performance report generated successfully"
         cat /tmp/${{ matrix.perf-test }}/performance_report.md
 

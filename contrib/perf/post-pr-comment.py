@@ -19,7 +19,6 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict
 
 import requests
 
@@ -47,7 +46,7 @@ def get_repo_info() -> tuple[str, str]:
     sys.exit(1)
 
 
-def find_reports(reports_dir: Path) -> List[Dict[str, str]]:
+def find_reports(reports_dir: Path) -> list[dict[str, str]]:
     """
     Find all performance report markdown files in the reports directory.
 
@@ -97,8 +96,8 @@ def build_header(run_id: str, run_url: str, status: str, baseline_id: str = None
     return header
 
 
-def create_comment_chunks(reports: List[Dict], run_id: str, run_url: str, status: str,
-                         baseline_id: str = None, baseline_url: str = None) -> List[str]:
+def create_comment_chunks(reports: list[dict], run_id: str, run_url: str, status: str,
+                         baseline_id: str = None, baseline_url: str = None) -> list[str]:
     """
     Create comment chunks, splitting if necessary to fit GitHub's size limit.
 

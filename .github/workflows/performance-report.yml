@@ -17,6 +17,8 @@ jobs:
     name: Process Performance Results
     runs-on: ubuntu-24.04
     if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -33,51 +35,61 @@ jobs:
 
     - name: Download performance test data artifacts
       run: |
-        python contrib/perf/download-artifacts.py \
+        contrib/perf/download-artifacts.py \
           --run-id ${{ github.event.workflow_run.id }} \
           --filter "performance-test-data" \
           --output-dir . \
           --extract
 
-    - name: Download performance report artifacts
-      run: |
-        python contrib/perf/download-artifacts.py \
-          --run-id ${{ github.event.workflow_run.id }} \
-          --filter "performance-report" \
-          --output-dir . \
-          --extract
-
-    - name: Organize extracted artifacts
+    - name: Organize extracted artifacts and generate JSON data
       run: |
         # Organize performance test data
         for dir in *performance-test-data*; do
           if [ -d "$dir" ]; then
             workload=$(echo "$dir" | sed 's/-performance-test-data-.*//')
-            mkdir -p "perf-data/${workload}"
-            mv "$dir"/* "perf-data/${workload}/" 2>/dev/null || true
-            rmdir "$dir" 2>/dev/null || true
-          fi
-        done
-
-        # Organize performance reports
-        for dir in *performance-report*; do
-          if [ -d "$dir" ]; then
-            workload=$(echo "$dir" | sed 's/-performance-report-.*//')
             mkdir -p "reports/${workload}"
-            mv "$dir"/* "reports/${workload}/" 2>/dev/null || true
-            rmdir "$dir" 2>/dev/null || true
+
+            # Copy the test data
+            if [ -d "$dir/perf/metrics" ]; then
+              echo "Processing workload: $workload"
+
+              # Generate JSON data from raw metrics
+              cd contrib/perf
+              python3 generate_perf_report.py \
+                --workload "$workload" \
+                --metrics-dir "../../$dir/perf/metrics" \
+                --json-output "../../reports/${workload}/performance_data.json" \
+                --output "../../reports/${workload}/performance_report.md"
+              cd ../..
+            fi
+
+            # Clean up
+            rm -rf "$dir"
           fi
         done
 
-        echo "=== Organized artifacts structure ==="
-        find perf-data reports -type d 2>/dev/null || true
+        echo "=== Generated reports structure ==="
+        find reports -type f 2>/dev/null || true
 
     - name: Setup kube-burner for indexing
       run: |
         # Download kube-burner binary
-        curl -L https://github.com/kube-burner/kube-burner/releases/download/v2.5.0/kube-burner-V2.5.0-linux-x86_64.tar.gz | tar xz
+        KUBE_BURNER_VERSION="v2.5.0"
+        KUBE_BURNER_URL="https://github.com/kube-burner/kube-burner/releases/download/${KUBE_BURNER_VERSION}/kube-burner-V2.5.0-linux-x86_64.tar.gz"
+        KUBE_BURNER_CHECKSUM="47c03fab8d88db8ffb9deb796b45d6777bca5648d5a9f81e3c3592ce78678d28"
+
+        curl -L -o kube-burner.tar.gz "$KUBE_BURNER_URL"
+
+        # Verify checksum
+        echo "${KUBE_BURNER_CHECKSUM}  kube-burner.tar.gz" | sha256sum -c - || {
+          echo "::error::Checksum verification failed for kube-burner binary"
+          exit 1
+        }
+
+        tar xzf kube-burner.tar.gz
         chmod +x kube-burner
         sudo mv kube-burner /usr/local/bin/
+        rm kube-burner.tar.gz
 
     - name: Index results to Elasticsearch
       env:
@@ -120,7 +132,7 @@ jobs:
     - name: Get associated PRs
       id: get_prs
       run: |
-        PR_NUMBERS=$(python contrib/perf/get-pr-info.py \
+        PR_NUMBERS=$(contrib/perf/get-pr-info.py \
           --event-path $GITHUB_EVENT_PATH \
           --format json)
         echo "pr_numbers=$PR_NUMBERS" >> $GITHUB_OUTPUT
@@ -130,13 +142,13 @@ jobs:
       id: get_baseline
       if: steps.get_prs.outputs.pr_numbers != '[]'
       run: |
-        BASELINE_INFO=$(python contrib/perf/get-baseline-run.py \
+        BASELINE_INFO=$(contrib/perf/get-baseline-run.py \
           --workflow performance-test.yml \
           --event schedule \
           --output json) || echo "{}"
 
-        BASELINE_ID=$(echo "$BASELINE_INFO" | python -c "import sys, json; data=json.load(sys.stdin); print(data.get('id', ''))" 2>/dev/null || echo "")
-        BASELINE_URL=$(echo "$BASELINE_INFO" | python -c "import sys, json; data=json.load(sys.stdin); print(data.get('url', ''))" 2>/dev/null || echo "")
+        BASELINE_ID=$(echo "$BASELINE_INFO" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('id', ''))" 2>/dev/null || echo "")
+        BASELINE_URL=$(echo "$BASELINE_INFO" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('url', ''))" 2>/dev/null || echo "")
 
         echo "baseline_run_id=$BASELINE_ID" >> $GITHUB_OUTPUT
         echo "baseline_run_url=$BASELINE_URL" >> $GITHUB_OUTPUT
@@ -147,57 +159,75 @@ jobs:
     - name: Download baseline artifacts
       if: steps.get_baseline.outputs.baseline_run_id != ''
       run: |
-        python contrib/perf/download-artifacts.py \
+        contrib/perf/download-artifacts.py \
           --run-id ${{ steps.get_baseline.outputs.baseline_run_id }} \
-          --filter "performance-report" \
+          --filter "performance-test-data" \
           --output-dir baseline-downloads \
           --extract
 
-    - name: Organize baseline artifacts
+    - name: Organize baseline artifacts and generate JSON data
       if: steps.get_baseline.outputs.baseline_run_id != ''
       run: |
-        # Organize baseline performance reports
+        # Organize baseline performance test data and generate JSON
         mkdir -p baseline-reports
-        for dir in baseline-downloads/*performance-report*; do
+        for dir in baseline-downloads/*performance-test-data*; do
           if [ -d "$dir" ]; then
-            workload=$(basename "$dir" | sed 's/-performance-report-.*//')
+            workload=$(basename "$dir" | sed 's/-performance-test-data-.*//')
             mkdir -p "baseline-reports/${workload}"
-            mv "$dir"/* "baseline-reports/${workload}/" 2>/dev/null || true
+
+            # Generate JSON data from raw metrics
+            if [ -d "$dir/perf/metrics" ]; then
+              echo "Processing baseline workload: $workload"
+
+              cd contrib/perf
+              python3 generate_perf_report.py \
+                --workload "$workload" \
+                --metrics-dir "../../$dir/perf/metrics" \
+                --json-output "../../baseline-reports/${workload}/performance_data.json" \
+                --output "../../baseline-reports/${workload}/performance_report.md"
+              cd ../..
+            fi
+
+            # Clean up
+            rm -rf "$dir"
           fi
         done
 
         echo "=== Baseline reports structure ==="
-        find baseline-reports -type d 2>/dev/null || echo "No baseline reports found"
+        find baseline-reports -type f 2>/dev/null || echo "No baseline reports found"
 
     - name: Compare reports with baseline
       if: steps.get_prs.outputs.pr_numbers != '[]'
       run: |
         mkdir -p enhanced-reports
 
-        # Compare each workload report with its baseline
+        # Compare each workload using JSON data files
         for workload_dir in reports/*/; do
           if [ -d "$workload_dir" ]; then
             workload=$(basename "$workload_dir")
-            current_report="$workload_dir/performance_report.md"
-            baseline_report="baseline-reports/$workload/performance_report.md"
+            current_json="$workload_dir/performance_data.json"
+            baseline_json="baseline-reports/$workload/performance_data.json"
             enhanced_report="enhanced-reports/$workload/performance_report.md"
 
-            if [ -f "$current_report" ]; then
-              echo "Comparing report for workload: $workload"
+            if [ -f "$current_json" ]; then
+              echo "Comparing data for workload: $workload"
               mkdir -p "enhanced-reports/$workload"
 
-              if [ -f "$baseline_report" ]; then
-                python contrib/perf/compare-reports.py \
-                  --current "$current_report" \
-                  --baseline "$baseline_report" \
+              if [ -f "$baseline_json" ]; then
+                # Compare with baseline
+                contrib/perf/compare-reports.py \
+                  --current "$current_json" \
+                  --baseline "$baseline_json" \
                   --baseline-url "${{ steps.get_baseline.outputs.baseline_run_url }}" \
                   --output "$enhanced_report"
               else
-                echo "No baseline found for $workload, using current report as-is"
-                python contrib/perf/compare-reports.py \
-                  --current "$current_report" \
+                echo "No baseline found for $workload, using current data as-is"
+                contrib/perf/compare-reports.py \
+                  --current "$current_json" \
                   --output "$enhanced_report"
               fi
+            else
+              echo "Warning: No JSON data found for $workload"
             fi
           fi
         done
@@ -206,10 +236,10 @@ jobs:
       if: steps.get_prs.outputs.pr_numbers != '[]'
       run: |
         # Extract PR numbers from JSON array
-        PR_NUMBERS=$(echo '${{ steps.get_prs.outputs.pr_numbers }}' | python -c "import sys, json; print(' '.join(['--pr', str(pr) for pr in json.load(sys.stdin)]))")
+        PR_NUMBERS=$(echo '${{ steps.get_prs.outputs.pr_numbers }}' | python3 -c "import sys, json; print(' '.join(['--pr', str(pr) for pr in json.load(sys.stdin)]))")
 
         if [ -n "$PR_NUMBERS" ]; then
-          python contrib/perf/post-pr-comment.py \
+          contrib/perf/post-pr-comment.py \
             $PR_NUMBERS \
             --reports-dir enhanced-reports \
             --run-id "${{ github.event.workflow_run.id }}" \

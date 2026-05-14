@@ -5,31 +5,27 @@
 """
 Compare performance reports between current PR run and baseline.
 
-This script parses performance report markdown files and generates
-comparison tables showing deltas for:
-- Pod Ready Latency metrics
-- CPU usage per container type
-- Memory usage per container type
+This script works with structured JSON data files instead of parsing markdown.
+It compares metrics and generates markdown reports with comparison tables.
 
 Usage:
-    python compare-reports.py --current report.md --baseline baseline.md --output enhanced.md
+    python compare-reports.py --current data.json --baseline baseline.json --output report.md
 """
 
 import argparse
-import re
+import json
 import sys
 from pathlib import Path
-from typing import Dict, Optional
 
 
-def calc_delta(current: Optional[float], baseline: Optional[float], decimals: int = 1) -> str:
+def calc_delta(current: float | None, baseline: float | None, decimals: int = 1) -> dict:
     """
     Calculate delta and percentage change with safe division.
 
-    Returns 'N/A' if baseline is zero or either value is None.
+    Returns dict with absolute and percentage changes, or None values if invalid.
     """
     if current is None or baseline is None or baseline == 0:
-        return 'N/A'
+        return {'absolute': None, 'percent': None, 'display': 'N/A'}
 
     delta = current - baseline
     percent = (delta / baseline) * 100
@@ -37,277 +33,327 @@ def calc_delta(current: Optional[float], baseline: Optional[float], decimals: in
     sign = '+' if delta > 0 else ''
     percent_sign = '+' if percent > 0 else ''
 
-    return f"{sign}{delta:.{decimals}f} ({percent_sign}{percent:.1f}%)"
-
-
-def parse_latency_metrics(content: str) -> Dict[str, Optional[float]]:
-    """Parse pod ready latency metrics from markdown content."""
-    avg_match = re.search(r'\| Average Latency \| \*\*([0-9.]+) ms\*\*', content)
-    max_match = re.search(r'\| Max Latency \| \*\*([0-9.]+) ms\*\*', content)
-    min_match = re.search(r'\| Min Latency \| \*\*([0-9.]+) ms\*\*', content)
-    total_match = re.search(r'\| Total Pods \| \*\*([0-9]+)\*\*', content)
-
     return {
-        'avg': float(avg_match.group(1)) if avg_match else None,
-        'max': float(max_match.group(1)) if max_match else None,
-        'min': float(min_match.group(1)) if min_match else None,
-        'total': int(total_match.group(1)) if total_match else None
+        'absolute': delta,
+        'percent': percent,
+        'display': f"{sign}{delta:.{decimals}f} ({percent_sign}{percent:.1f}%)"
     }
 
 
-def parse_cpu_table(content: str) -> Dict[str, Dict[str, float]]:
-    """Parse CPU usage table from markdown content."""
-    # More specific regex: match exact separator line structure for 4-column table
-    pattern = r'### CPU Usage Summary\n\| Container Type \| Avg CPU \(%\) \| Max CPU \(%\) \| Data Points \|\n\|[-]+\|[-]+\|[-]+\|[-]+\|\n([\s\S]*?)(?=\n\n|$)'
-    match = re.search(pattern, content)
+def compare_latency_metrics(current: dict | None, baseline: dict | None) -> dict:
+    """Compare pod ready latency metrics."""
+    if not current:
+        return {'current': None, 'baseline': baseline, 'deltas': {}}
 
-    if not match:
-        return {}
+    if not baseline:
+        return {'current': current, 'baseline': None, 'deltas': {}}
 
-    data = {}
-    rows = match.group(1).strip().split('\n')
+    deltas = {}
+    for metric in ['avg_latency', 'max_latency', 'min_latency']:
+        if metric in current and metric in baseline:
+            decimals = 1 if metric == 'avg_latency' else 0
+            deltas[metric] = calc_delta(current[metric], baseline[metric], decimals)
 
-    for row in rows:
-        parts = [s.strip() for s in row.split('|') if s.strip()]
-        if len(parts) >= 4:
-            container_type = parts[0]
-            try:
-                data[container_type] = {
-                    'avg': float(parts[1].replace('%', '')),
-                    'max': float(parts[2].replace('%', '')),
-                    'data_points': int(parts[3])
-                }
-            except (ValueError, IndexError):
-                # Skip malformed rows
-                continue
+    # Handle total_pods separately (integer delta, no percentage)
+    if 'total_pods' in current and 'total_pods' in baseline:
+        delta = current['total_pods'] - baseline['total_pods']
+        sign = '+' if delta > 0 else ''
+        deltas['total_pods'] = {
+            'absolute': delta,
+            'percent': None,
+            'display': f"{sign}{delta}"
+        }
 
-    return data
-
-
-def parse_memory_table(content: str) -> Dict[str, Dict[str, float]]:
-    """Parse Memory usage table from markdown content."""
-    # More specific regex: match exact separator line structure for 4-column table
-    pattern = r'### Memory Usage Summary\n\| Container Type \| Avg Memory \(MB\) \| Max Memory \(MB\) \| Data Points \|\n\|[-]+\|[-]+\|[-]+\|[-]+\|\n([\s\S]*?)(?=\n\n|$)'
-    match = re.search(pattern, content)
-
-    if not match:
-        return {}
-
-    data = {}
-    rows = match.group(1).strip().split('\n')
-
-    for row in rows:
-        parts = [s.strip() for s in row.split('|') if s.strip()]
-        if len(parts) >= 4:
-            container_type = parts[0]
-            try:
-                data[container_type] = {
-                    'avg': float(parts[1].replace(' MB', '')),
-                    'max': float(parts[2].replace(' MB', '')),
-                    'data_points': int(parts[3])
-                }
-            except (ValueError, IndexError):
-                # Skip malformed rows
-                continue
-
-    return data
+    return {
+        'current': current,
+        'baseline': baseline,
+        'deltas': deltas
+    }
 
 
-def create_latency_comparison_table(current: Dict, baseline: Dict) -> str:
-    """Create comparison table for latency metrics."""
-    rows = [
-        '| Metric | Current | Baseline | Change |',
-        '|--------|---------|----------|--------|'
-    ]
+def compare_resource_metrics(current: dict, baseline: dict) -> dict:
+    """Compare CPU or memory metrics across container types."""
+    comparison = {}
 
-    if current['avg'] is not None and baseline['avg'] is not None:
-        rows.append(
-            f"| Average Latency | **{current['avg']:.1f} ms** | "
-            f"{baseline['avg']:.1f} ms | {calc_delta(current['avg'], baseline['avg'])} |"
-        )
+    # Get all container types from both current and baseline
+    all_types = set(list(current.keys()) + list(baseline.keys()))
 
-    if current['max'] is not None and baseline['max'] is not None:
-        rows.append(
-            f"| Max Latency | **{current['max']:.0f} ms** | "
-            f"{baseline['max']:.0f} ms | {calc_delta(current['max'], baseline['max'], 0)} |"
-        )
-
-    if current['min'] is not None and baseline['min'] is not None:
-        rows.append(
-            f"| Min Latency | **{current['min']:.0f} ms** | "
-            f"{baseline['min']:.0f} ms | {calc_delta(current['min'], baseline['min'], 0)} |"
-        )
-
-    if current['total'] is not None and baseline['total'] is not None:
-        total_delta = current['total'] - baseline['total']
-        sign = '+' if total_delta > 0 else ''
-        rows.append(
-            f"| Total Pods | **{current['total']}** | "
-            f"{baseline['total']} | {sign}{total_delta} |"
-        )
-    elif current['total'] is not None:
-        rows.append(f"| Total Pods | **{current['total']}** | - | - |")
-
-    return '\n'.join(rows) + '\n\n'
-
-
-def create_cpu_comparison_table(current: Dict, baseline: Dict) -> str:
-    """Create comparison table for CPU metrics."""
-    rows = [
-        '| Container Type | Avg CPU (Current) | Avg CPU (Baseline) | Change | Max CPU (Current) | Max CPU (Baseline) | Change |',
-        '|----------------|-------------------|-------------------|--------|-------------------|-------------------|--------|'
-    ]
-
-    for container_type, curr_data in current.items():
+    for container_type in all_types:
+        curr_data = current.get(container_type)
         base_data = baseline.get(container_type)
 
-        if base_data:
-            avg_change = calc_delta(curr_data['avg'], base_data['avg'], 2)
-            max_change = calc_delta(curr_data['max'], base_data['max'], 2)
-            rows.append(
-                f"| {container_type} | **{curr_data['avg']:.2f}%** | "
-                f"{base_data['avg']:.2f}% | {avg_change} | "
-                f"**{curr_data['max']:.2f}%** | {base_data['max']:.2f}% | {max_change} |"
-            )
+        if curr_data and base_data:
+            # Both exist - calculate deltas
+            comparison[container_type] = {
+                'current': curr_data,
+                'baseline': base_data,
+                'deltas': {
+                    'avg': calc_delta(curr_data['avg'], base_data['avg'], 2),
+                    'max': calc_delta(curr_data['max'], base_data['max'], 2)
+                }
+            }
+        elif curr_data:
+            # Only in current
+            comparison[container_type] = {
+                'current': curr_data,
+                'baseline': None,
+                'deltas': {}
+            }
         else:
-            rows.append(
-                f"| {container_type} | **{curr_data['avg']:.2f}%** | - | - | "
-                f"**{curr_data['max']:.2f}%** | - | - |"
-            )
+            # Only in baseline
+            comparison[container_type] = {
+                'current': None,
+                'baseline': base_data,
+                'deltas': {}
+            }
 
-    return '\n'.join(rows) + '\n\n'
-
-
-def create_memory_comparison_table(current: Dict, baseline: Dict) -> str:
-    """Create comparison table for Memory metrics."""
-    rows = [
-        '| Container Type | Avg Memory (Current) | Avg Memory (Baseline) | Change | Max Memory (Current) | Max Memory (Baseline) | Change |',
-        '|----------------|----------------------|-----------------------|--------|----------------------|-----------------------|--------|'
-    ]
-
-    for container_type, curr_data in current.items():
-        base_data = baseline.get(container_type)
-
-        if base_data:
-            avg_change = calc_delta(curr_data['avg'], base_data['avg'], 2)
-            max_change = calc_delta(curr_data['max'], base_data['max'], 2)
-            rows.append(
-                f"| {container_type} | **{curr_data['avg']:.2f} MB** | "
-                f"{base_data['avg']:.2f} MB | {avg_change} | "
-                f"**{curr_data['max']:.2f} MB** | {base_data['max']:.2f} MB | {max_change} |"
-            )
-        else:
-            rows.append(
-                f"| {container_type} | **{curr_data['avg']:.2f} MB** | - | - | "
-                f"**{curr_data['max']:.2f} MB** | - | - |"
-            )
-
-    return '\n'.join(rows) + '\n\n'
+    return comparison
 
 
-def add_baseline_comparison(current_content: str, baseline_content: str, baseline_url: str = None) -> str:
+def add_baseline_comparison(current_data: dict, baseline_data: dict | None, baseline_url: str = None) -> dict:
     """
-    Add baseline comparison to performance report.
+    Add baseline comparison to performance data.
 
     Args:
-        current_content: Current PR performance report markdown
-        baseline_content: Baseline performance report markdown
+        current_data: Current PR performance data (JSON)
+        baseline_data: Baseline performance data (JSON)
         baseline_url: Optional URL to baseline workflow run
 
     Returns:
-        Enhanced markdown with comparison tables
+        Enhanced data with comparison information
     """
-    if not baseline_content:
-        return current_content + '\n\n> ℹ️ **No baseline data available for comparison**\n'
+    enhanced = {
+        'workload': current_data.get('workload'),
+        'generated_at': current_data.get('generated_at'),
+        'baseline_url': baseline_url,
+        'has_baseline': baseline_data is not None
+    }
 
-    enhanced = current_content
+    if not baseline_data:
+        # No baseline - just return current data with no comparisons
+        enhanced['pod_latency'] = {
+            'current': current_data.get('pod_latency'),
+            'baseline': None,
+            'deltas': {}
+        }
+        enhanced['cpu'] = {k: {'current': v, 'baseline': None, 'deltas': {}}
+                          for k, v in current_data.get('cpu', {}).items()}
+        enhanced['memory'] = {k: {'current': v, 'baseline': None, 'deltas': {}}
+                             for k, v in current_data.get('memory', {}).items()}
+        return enhanced
 
-    # Compare Pod Latency metrics FIRST (before adding baseline header)
-    current_latency = parse_latency_metrics(current_content)
-    baseline_latency = parse_latency_metrics(baseline_content)
-
-    if current_latency['avg'] is not None and baseline_latency['avg'] is not None:
-        latency_table = create_latency_comparison_table(current_latency, baseline_latency)
-        # Match from the Pod Latency header through the table until the next ## section
-        # Use a non-greedy match to capture everything up to the next section
-        latency_section_regex = r'(## 🎯 Pod Ready Latency \(Main KPI\)\n)(.*?)(?=\n## |\Z)'
-
-        def replace_latency_section(match):
-            # Replace the entire section content with just the comparison table
-            return match.group(1) + latency_table
-
-        # Check if pattern exists before replacing
-        if re.search(latency_section_regex, enhanced, re.DOTALL):
-            enhanced = re.sub(
-                latency_section_regex,
-                replace_latency_section,
-                enhanced,
-                count=1,
-                flags=re.DOTALL
-            )
-
-    # Add baseline info header AFTER table replacement
-    baseline_ref = f'[workflow]({baseline_url})' if baseline_url else 'N/A'
-    enhanced = re.sub(
-        r'## 🎯 Pod Ready Latency \(Main KPI\)',
-        f'> 📊 **Baseline:** Daily run from {baseline_ref}\n\n## 🎯 Pod Ready Latency (Main KPI)',
-        enhanced,
-        count=1
+    # Compare pod latency metrics
+    enhanced['pod_latency'] = compare_latency_metrics(
+        current_data.get('pod_latency'),
+        baseline_data.get('pod_latency')
     )
 
-    # Compare CPU metrics - only if BOTH current and baseline have the data
-    current_cpu = parse_cpu_table(current_content)
-    baseline_cpu = parse_cpu_table(baseline_content)
+    # Compare CPU metrics
+    enhanced['cpu'] = compare_resource_metrics(
+        current_data.get('cpu', {}),
+        baseline_data.get('cpu', {})
+    )
 
-    if current_cpu and baseline_cpu:
-        cpu_table = create_cpu_comparison_table(current_cpu, baseline_cpu)
-        # More strict regex: match exact separator line structure for 4-column table
-        cpu_table_regex = r'### CPU Usage Summary\n\| Container Type \| Avg CPU \(%\) \| Max CPU \(%\) \| Data Points \|\n\|[-]+\|[-]+\|[-]+\|[-]+\|\n((?:\|[^\n]+\|\n)+)'
-
-        # Check if pattern exists before replacing
-        if re.search(cpu_table_regex, current_content):
-            enhanced = re.sub(
-                cpu_table_regex,
-                f'### CPU Usage Summary\n{cpu_table}',
-                enhanced,
-                count=1
-            )
-
-    # Compare Memory metrics - only if BOTH current and baseline have the data
-    current_memory = parse_memory_table(current_content)
-    baseline_memory = parse_memory_table(baseline_content)
-
-    if current_memory and baseline_memory:
-        memory_table = create_memory_comparison_table(current_memory, baseline_memory)
-        # More strict regex: match exact separator line structure for 4-column table
-        memory_table_regex = r'### Memory Usage Summary\n\| Container Type \| Avg Memory \(MB\) \| Max Memory \(MB\) \| Data Points \|\n\|[-]+\|[-]+\|[-]+\|[-]+\|\n((?:\|[^\n]+\|\n)+)'
-
-        # Check if pattern exists before replacing
-        if re.search(memory_table_regex, current_content):
-            enhanced = re.sub(
-                memory_table_regex,
-                f'### Memory Usage Summary\n{memory_table}',
-                enhanced,
-                count=1
-            )
+    # Compare memory metrics
+    enhanced['memory'] = compare_resource_metrics(
+        current_data.get('memory', {}),
+        baseline_data.get('memory', {})
+    )
 
     return enhanced
 
 
+def render_markdown(data: dict) -> str:
+    """
+    Render enhanced comparison data as markdown.
+
+    Args:
+        data: Enhanced data with comparisons
+
+    Returns:
+        Markdown formatted report
+    """
+    lines = []
+
+    # Header
+    lines.append("# 📊 Kubernetes Workload Metrics Report")
+    lines.append(f"## {data.get('workload', 'Unknown')} Performance Results")
+    lines.append("")
+    lines.append(f"**Generated on:** {data.get('generated_at', 'Unknown')}")
+    lines.append("")
+
+    # Baseline reference
+    if data.get('has_baseline'):
+        baseline_ref = f"[workflow]({data['baseline_url']})" if data.get('baseline_url') else 'N/A'
+        lines.append(f"> 📊 **Baseline:** Daily run from {baseline_ref}")
+        lines.append("")
+
+    # Pod Ready Latency
+    lines.append("## 🎯 Pod Ready Latency (Main KPI)")
+
+    latency = data.get('pod_latency', {})
+    current = latency.get('current')
+    baseline = latency.get('baseline')
+    deltas = latency.get('deltas', {})
+
+    if current and baseline:
+        # Comparison table
+        lines.append("| Metric | Current | Baseline | Change |")
+        lines.append("|--------|---------|----------|--------|")
+
+        if 'avg_latency' in current and 'avg_latency' in baseline:
+            lines.append(
+                f"| Average Latency | **{current['avg_latency']:.1f} ms** | "
+                f"{baseline['avg_latency']:.1f} ms | {deltas.get('avg_latency', {}).get('display', 'N/A')} |"
+            )
+
+        if 'max_latency' in current and 'max_latency' in baseline:
+            lines.append(
+                f"| Max Latency | **{current['max_latency']:.0f} ms** | "
+                f"{baseline['max_latency']:.0f} ms | {deltas.get('max_latency', {}).get('display', 'N/A')} |"
+            )
+
+        if 'min_latency' in current and 'min_latency' in baseline:
+            lines.append(
+                f"| Min Latency | **{current['min_latency']:.0f} ms** | "
+                f"{baseline['min_latency']:.0f} ms | {deltas.get('min_latency', {}).get('display', 'N/A')} |"
+            )
+
+        if 'total_pods' in current and 'total_pods' in baseline:
+            lines.append(
+                f"| Total Pods | **{current['total_pods']}** | "
+                f"{baseline['total_pods']} | {deltas.get('total_pods', {}).get('display', 'N/A')} |"
+            )
+
+    elif current:
+        # No baseline - simple table
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        if 'avg_latency' in current:
+            lines.append(f"| Average Latency | **{current.get('avg_latency', 0):.1f} ms** |")
+        if 'max_latency' in current:
+            lines.append(f"| Max Latency | **{current.get('max_latency', 0):.0f} ms** |")
+        if 'min_latency' in current:
+            lines.append(f"| Min Latency | **{current.get('min_latency', 0):.0f} ms** |")
+        if 'total_pods' in current:
+            lines.append(f"| Total Pods | **{current.get('total_pods', 0)}** |")
+    else:
+        lines.append("⚠️ No pod latency data available")
+
+    lines.append("")
+
+    # OVN Container Resource Usage
+    lines.append("## 💻 OVN Container-Level Resource Usage")
+
+    # CPU Usage
+    cpu_data = data.get('cpu', {})
+    if cpu_data:
+        lines.append("### CPU Usage Summary")
+
+        if data.get('has_baseline'):
+            # Comparison table
+            lines.append("| Container Type | Avg CPU (Current) | Avg CPU (Baseline) | Change | Max CPU (Current) | Max CPU (Baseline) | Change |")
+            lines.append("|----------------|-------------------|-------------------|--------|-------------------|-------------------|--------|")
+
+            for container_type in sorted(cpu_data.keys()):
+                info = cpu_data[container_type]
+                curr = info.get('current')
+                base = info.get('baseline')
+                deltas = info.get('deltas', {})
+
+                if curr and base:
+                    lines.append(
+                        f"| {container_type} | **{curr['avg']:.2f}%** | "
+                        f"{base['avg']:.2f}% | {deltas.get('avg', {}).get('display', 'N/A')} | "
+                        f"**{curr['max']:.2f}%** | {base['max']:.2f}% | {deltas.get('max', {}).get('display', 'N/A')} |"
+                    )
+                elif curr:
+                    lines.append(
+                        f"| {container_type} | **{curr['avg']:.2f}%** | - | - | "
+                        f"**{curr['max']:.2f}%** | - | - |"
+                    )
+        else:
+            # No baseline - simple table
+            lines.append("| Container Type | Avg CPU (%) | Max CPU (%) | Data Points |")
+            lines.append("|----------------|-------------|-------------|-------------|")
+
+            for container_type in sorted(cpu_data.keys()):
+                info = cpu_data[container_type]
+                curr = info.get('current')
+                if curr:
+                    lines.append(
+                        f"| {container_type} | {curr['avg']:.2f}% | {curr['max']:.2f}% | {curr.get('data_points', 0)} |"
+                    )
+    else:
+        lines.append("### CPU Usage Summary")
+        lines.append("⚠️ No OVN container CPU data available")
+
+    lines.append("")
+
+    # Memory Usage
+    memory_data = data.get('memory', {})
+    if memory_data:
+        lines.append("### Memory Usage Summary")
+
+        if data.get('has_baseline'):
+            # Comparison table
+            lines.append("| Container Type | Avg Memory (Current) | Avg Memory (Baseline) | Change | Max Memory (Current) | Max Memory (Baseline) | Change |")
+            lines.append("|----------------|----------------------|-----------------------|--------|----------------------|-----------------------|--------|")
+
+            for container_type in sorted(memory_data.keys()):
+                info = memory_data[container_type]
+                curr = info.get('current')
+                base = info.get('baseline')
+                deltas = info.get('deltas', {})
+
+                if curr and base:
+                    lines.append(
+                        f"| {container_type} | **{curr['avg']:.2f} MB** | "
+                        f"{base['avg']:.2f} MB | {deltas.get('avg', {}).get('display', 'N/A')} | "
+                        f"**{curr['max']:.2f} MB** | {base['max']:.2f} MB | {deltas.get('max', {}).get('display', 'N/A')} |"
+                    )
+                elif curr:
+                    lines.append(
+                        f"| {container_type} | **{curr['avg']:.2f} MB** | - | - | "
+                        f"**{curr['max']:.2f} MB** | - | - |"
+                    )
+        else:
+            # No baseline - simple table
+            lines.append("| Container Type | Avg Memory (MB) | Max Memory (MB) | Data Points |")
+            lines.append("|----------------|-----------------|-----------------|-------------|")
+
+            for container_type in sorted(memory_data.keys()):
+                info = memory_data[container_type]
+                curr = info.get('current')
+                if curr:
+                    lines.append(
+                        f"| {container_type} | {curr['avg']:.2f} MB | {curr['max']:.2f} MB | {curr.get('data_points', 0)} |"
+                    )
+    else:
+        lines.append("### Memory Usage Summary")
+        lines.append("⚠️ No OVN container memory data available")
+
+    lines.append("")
+    lines.append("---")
+    lines.append("*Report generated by ovn-kubernetes performance testing*")
+
+    return '\n'.join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description='Compare performance reports and generate comparison tables'
+        description='Compare performance reports and generate comparison markdown'
     )
     parser.add_argument(
         '--current',
         required=True,
         type=Path,
-        help='Path to current performance report markdown file'
+        help='Path to current performance data JSON file'
     )
     parser.add_argument(
         '--baseline',
         type=Path,
-        help='Path to baseline performance report markdown file'
+        help='Path to baseline performance data JSON file'
     )
     parser.add_argument(
         '--baseline-url',
@@ -316,36 +362,45 @@ def main():
     parser.add_argument(
         '--output',
         type=Path,
-        help='Output path for enhanced report (default: stdout)'
+        required=True,
+        help='Output path for markdown report'
     )
 
     args = parser.parse_args()
 
-    # Read current report
+    # Read current data
     if not args.current.exists():
-        print(f"Error: Current report not found: {args.current}", file=sys.stderr)
+        print(f"Error: Current data file not found: {args.current}", file=sys.stderr)
         sys.exit(1)
 
-    current_content = args.current.read_text()
+    with open(args.current, 'r') as f:
+        try:
+            current_data = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"Error: Failed to parse current data JSON: {e}", file=sys.stderr)
+            sys.exit(1)
 
-    # Read baseline report if provided
-    baseline_content = None
+    # Read baseline data if provided
+    baseline_data = None
     if args.baseline:
         if not args.baseline.exists():
-            print(f"Warning: Baseline report not found: {args.baseline}", file=sys.stderr)
+            print(f"Warning: Baseline data file not found: {args.baseline}", file=sys.stderr)
         else:
-            baseline_content = args.baseline.read_text()
+            with open(args.baseline, 'r') as f:
+                try:
+                    baseline_data = json.load(f)
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Failed to parse baseline data JSON: {e}", file=sys.stderr)
 
-    # Generate enhanced report
-    enhanced = add_baseline_comparison(current_content, baseline_content, args.baseline_url)
+    # Generate enhanced comparison data
+    enhanced_data = add_baseline_comparison(current_data, baseline_data, args.baseline_url)
 
-    # Write output
-    if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(enhanced)
-        print(f"Enhanced report written to: {args.output}", file=sys.stderr)
-    else:
-        print(enhanced)
+    # Generate markdown
+    markdown_content = render_markdown(enhanced_data)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with open(args.output, 'w') as f:
+        f.write(markdown_content)
+    print(f"Markdown report written to: {args.output}", file=sys.stderr)
 
     return 0
 

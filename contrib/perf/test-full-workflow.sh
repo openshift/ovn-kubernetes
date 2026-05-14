@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
 # SPDX-License-Identifier: Apache-2.0
 
@@ -44,66 +44,86 @@ BASELINE_URL=$(echo "$BASELINE" | python -c "import sys, json; print(json.load(s
 echo "Baseline Run ID: $BASELINE_ID"
 echo "Baseline URL: $BASELINE_URL"
 
-echo "- Step 3: Downloading current run artifacts..."
+echo "- Step 3: Downloading current run test data artifacts..."
 python ../download-artifacts.py \
   --run-id $RUN_ID \
-  --filter "performance-report" \
+  --filter "performance-test-data" \
   --output-dir current-artifacts \
   --extract
 
-echo "- Step 4: Downloading baseline artifacts..."
+echo "- Step 4: Downloading baseline test data artifacts..."
 python ../download-artifacts.py \
   --run-id $BASELINE_ID \
-  --filter "performance-report" \
+  --filter "performance-test-data" \
   --output-dir baseline-artifacts \
   --extract
 
-echo "- Step 5: Organizing artifacts..."
+echo "- Step 5: Generating JSON data from raw metrics..."
 mkdir -p reports baseline-reports
 
-for dir in current-artifacts/*performance-report*; do
+# Process current run artifacts
+for dir in current-artifacts/*performance-test-data*; do
   if [ -d "$dir" ]; then
-    workload=$(basename "$dir" | sed 's/-performance-report-.*//')
+    workload=$(basename "$dir" | sed 's/-performance-test-data-.*//')
     mkdir -p "reports/$workload"
-    cp -r "$dir"/* "reports/$workload/" 2>/dev/null || true
-    echo "  Organized: $workload (current)"
+
+    if [ -d "$dir/perf/metrics" ]; then
+      echo "  Generating data for: $workload (current)"
+      python ../generate_perf_report.py \
+        --workload "$workload" \
+        --metrics-dir "$dir/perf/metrics" \
+        --json-output "reports/$workload/performance_data.json" \
+        --output "reports/$workload/performance_report.md"
+    fi
   fi
 done
 
-for dir in baseline-artifacts/*performance-report*; do
+# Process baseline artifacts
+for dir in baseline-artifacts/*performance-test-data*; do
   if [ -d "$dir" ]; then
-    workload=$(basename "$dir" | sed 's/-performance-report-.*//')
+    workload=$(basename "$dir" | sed 's/-performance-test-data-.*//')
     mkdir -p "baseline-reports/$workload"
-    cp -r "$dir"/* "baseline-reports/$workload/" 2>/dev/null || true
-    echo "  Organized: $workload (baseline)"
+
+    if [ -d "$dir/perf/metrics" ]; then
+      echo "  Generating data for: $workload (baseline)"
+      python ../generate_perf_report.py \
+        --workload "$workload" \
+        --metrics-dir "$dir/perf/metrics" \
+        --json-output "baseline-reports/$workload/performance_data.json" \
+        --output "baseline-reports/$workload/performance_report.md"
+    fi
   fi
 done
 
 echo ""
-echo "- Step 6: Comparing reports..."
+echo "- Step 6: Comparing data with JSON..."
 mkdir -p enhanced-reports
 
 for workload_dir in reports/*/; do
   if [ -d "$workload_dir" ]; then
     workload=$(basename "$workload_dir")
-    current_report="$workload_dir/performance_report.md"
-    baseline_report="baseline-reports/$workload/performance_report.md"
+    current_json="$workload_dir/performance_data.json"
+    baseline_json="baseline-reports/$workload/performance_data.json"
     enhanced_report="enhanced-reports/$workload/performance_report.md"
 
-    if [ -f "$current_report" ]; then
+    if [ -f "$current_json" ]; then
       echo "  Comparing: $workload"
       mkdir -p "enhanced-reports/$workload"
 
-      if [ -f "$baseline_report" ]; then
-        python ../compare-reports.py \
-          --current "$current_report" \
-          --baseline "$baseline_report" \
+      if [ -f "$baseline_json" ]; then
+        ../compare-reports.py \
+          --current "$current_json" \
+          --baseline "$baseline_json" \
           --baseline-url "$BASELINE_URL" \
           --output "$enhanced_report"
       else
-        echo "      No baseline found, using current as-is"
-        cp "$current_report" "$enhanced_report"
+        echo "      No baseline found, using current data as-is"
+        ../compare-reports.py \
+          --current "$current_json" \
+          --output "$enhanced_report"
       fi
+    else
+      echo "  Warning: No JSON data found for $workload"
     fi
   fi
 done

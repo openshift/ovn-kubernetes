@@ -14,7 +14,6 @@ import os
 import sys
 import zipfile
 from pathlib import Path
-from typing import List, Optional
 
 import requests
 
@@ -58,7 +57,7 @@ def get_repo_info() -> tuple[str, str]:
     sys.exit(1)
 
 
-def list_artifacts(owner: str, repo: str, run_id: int, token: str) -> List[dict]:
+def list_artifacts(owner: str, repo: str, run_id: int, token: str) -> list[dict]:
     """List all artifacts for a workflow run."""
     url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts"
     headers = {

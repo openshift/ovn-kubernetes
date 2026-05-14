@@ -27,13 +27,32 @@ def get_github_token() -> str:
 
 
 def get_repo_info() -> tuple[str, str]:
-    """Get repository owner and name from environment."""
+    """Get repository owner and name from environment or git."""
+    # Try environment variables first (GitHub Actions)
     repo = os.getenv('GITHUB_REPOSITORY')
     if repo and '/' in repo:
         owner, name = repo.split('/', 1)
         return owner, name
 
-    print("Error: GITHUB_REPOSITORY environment variable not set", file=sys.stderr)
+    # Fallback: parse from git remote
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['git', 'config', '--get', 'remote.origin.url'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        url = result.stdout.strip()
+        # Parse github.com:owner/repo.git or https://github.com/owner/repo.git
+        if 'github.com' in url:
+            parts = url.split('github.com')[-1].strip('/:').replace('.git', '').split('/')
+            if len(parts) >= 2:
+                return parts[0], parts[1]
+    except subprocess.CalledProcessError:
+        pass
+
+    print("Error: Could not determine repository info", file=sys.stderr)
     sys.exit(1)
 
 
