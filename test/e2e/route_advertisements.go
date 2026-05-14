@@ -1987,8 +1987,11 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 					_, err = infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"sysctl", "-w", "net.ipv6.conf." + iface.InfName + ".keep_addr_on_down=1"})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				}
-				_, err = infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"ip", "link", "set", "dev", iface.InfName, "master", networkName})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// need to retry until VRF is added
+				gomega.Eventually(func() error {
+					_, err = infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"ip", "link", "set", "dev", iface.InfName, "master", networkName})
+					return err
+				}).WithTimeout(5 * time.Second).WithPolling(500 * time.Millisecond).Should(gomega.Succeed())
 			}
 		}
 
@@ -3049,6 +3052,23 @@ func createNamespaceWithPrimaryNetworkOfType(
 		return namespace, nil
 	}
 
+	// create RA before CUDN to reduce the likelihood the CUDN is configured as
+	// non-advertised and then reconfigured as advertised
+	isAdvertised := !(networkType == udn || networkType == cudn)
+	if isAdvertised {
+		err = createRouteAdvertisements(
+			f,
+			ictx,
+			networkName,
+			targetVRF,
+			networkLabels,
+			frrConfigurationLabels,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create primary network: %w", err)
+		}
+	}
+
 	err = createUserDefinedNetwork(
 		f,
 		ictx,
@@ -3062,21 +3082,11 @@ func createNamespaceWithPrimaryNetworkOfType(
 		return nil, fmt.Errorf("failed to create primary network: %w", err)
 	}
 
-	// not advertised, return
-	if networkType == udn || networkType == cudn {
-		return namespace, nil
-	}
-
-	err = createRouteAdvertisements(
-		f,
-		ictx,
-		networkName,
-		targetVRF,
-		networkLabels,
-		frrConfigurationLabels,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create primary network: %w", err)
+	if isAdvertised {
+		err = waitForRouteAdvertisements(f, networkName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to wait for the RouteAdvertisements to be ready: %w", err)
+		}
 	}
 
 	return namespace, nil
@@ -3217,7 +3227,16 @@ func createRouteAdvertisements(
 	ictx.AddCleanUpFn(func() error {
 		return raClient.K8sV1().RouteAdvertisements().Delete(context.Background(), name, metav1.DeleteOptions{})
 	})
-	wait.PollUntilContextTimeout(
+
+	return nil
+}
+
+func waitForRouteAdvertisements(f *framework.Framework, name string) error {
+	raClient, err := raclientset.NewForConfig(f.ClientConfig())
+	if err != nil {
+		return fmt.Errorf("failed to create RouteAdvertisements client: %w", err)
+	}
+	errWait := wait.PollUntilContextTimeout(
 		context.Background(),
 		time.Second,
 		5*time.Second,
@@ -3227,11 +3246,10 @@ func createRouteAdvertisements(
 			return err == nil, nil
 		},
 	)
-	if err != nil {
-		return fmt.Errorf("failed to wait for the RouteAdvertisements to be ready: %w", err)
+	if errWait != nil {
+		err = fmt.Errorf("%w: %w", errWait, err)
 	}
-
-	return nil
+	return err
 }
 
 // getBGPServerContainerIPs retrieves the IP addresses of the BGP server container.
