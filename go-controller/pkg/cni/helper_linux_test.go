@@ -1561,7 +1561,7 @@ func TestConfigureOVS(t *testing.T) {
 			fakeClient := fake.NewSimpleClientset(&corev1.PodList{Items: []corev1.Pod{pod}})
 			clientset := NewClientSet(fakeClient, &podLister)
 			err = ConfigureOVS(ctx, tc.podNs, tc.podName, "", tc.vfRep,
-				tc.ifInfo, sandboxID, vfPciAddress, clientset)
+				tc.ifInfo, sandboxID, vfPciAddress, false, clientset)
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
@@ -1696,7 +1696,7 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 			var podLister v1mocks.PodLister
 			podLister.On("Pods", mock.AnythingOfType("string")).Return(&podNamespaceLister)
 			err = ConfigureOVS(ctx, tc.podNs, tc.podName, "", tc.vfRep,
-				tc.ifInfo, sandboxID, vfPciAddress, nil)
+				tc.ifInfo, sandboxID, vfPciAddress, false, nil)
 			if tc.errMatch != nil {
 				assert.Contains(t, err.Error(), tc.errMatch.Error())
 			} else {
