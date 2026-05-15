@@ -342,10 +342,8 @@ jobs:
           --workload ${{ matrix.perf-test }} \
           --metrics-dir /tmp/${{ matrix.perf-test }}/perf/metrics/ \
           --output /tmp/${{ matrix.perf-test }}/performance_report.md \
-          --title "OVN-Kubernetes Performance Test Results - Run ${{ github.run_id }}" \
-          --pr-number ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }} \
-          --github-comment
-        
+          --title "OVN-Kubernetes Performance Test Results - Run ${{ github.run_id }}"
+
         echo "Performance report generated successfully"
         cat /tmp/${{ matrix.perf-test }}/performance_report.md
 
