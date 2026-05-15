@@ -10,7 +10,7 @@
 # from this image, for example:
 #
 # openvswitch-devel, openvswitch-ipsec, libpcap, iproute etc
-# ovn-kube-util, hybrid-overlay-node.exe, ovndbchecker and ovnkube-trace
+# ovn-kube-util, hybrid-overlay-node.exe and ovnkube-trace
 
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.22 AS builder
 
