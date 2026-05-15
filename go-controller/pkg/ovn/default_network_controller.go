@@ -365,6 +365,10 @@ func (oc *DefaultNetworkController) Stop() {
 	oc.wg.Wait()
 }
 
+func (oc *DefaultNetworkController) ServiceController() *svccontroller.Controller {
+	return oc.svcController
+}
+
 func (oc *DefaultNetworkController) RegisterNodeHandler() error {
 	return oc.nodeReconciler.RegisterNetworkController(oc)
 }
