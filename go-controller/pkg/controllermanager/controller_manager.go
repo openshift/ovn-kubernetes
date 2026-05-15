@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containernetworking/cni/pkg/types"
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +38,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
+	svccontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/services"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -70,6 +71,7 @@ type ControllerManager struct {
 	networkManager     networkmanager.Controller
 	routeImportManager routeimport.Controller
 	nodeController     *nodecontroller.NodeController
+	serviceController  *svccontroller.Controller
 
 	// eIPController programs OVN to support EgressIP
 	eIPController *ovn.EgressIPController
@@ -88,14 +90,14 @@ func (cm *ControllerManager) NewNetworkController(nInfo util.NetInfo) (networkma
 	switch topoType {
 	case ovntypes.Layer3Topology:
 		oc, err := ovn.NewLayer3UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.eIPController, cm.portCache, cm.addressSetManager, cm.nodeController)
+			cm.eIPController, cm.portCache, cm.addressSetManager, cm.nodeController, cm.serviceController)
 		if err != nil {
 			return nil, err
 		}
 		return oc, nil
 	case ovntypes.Layer2Topology:
 		oc, err := ovn.NewLayer2UserDefinedNetworkController(cnci, nInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.portCache, cm.eIPController, cm.addressSetManager, cm.nodeController)
+			cm.portCache, cm.eIPController, cm.addressSetManager, cm.nodeController, cm.serviceController)
 		if err != nil {
 			return nil, err
 		}
@@ -118,14 +120,14 @@ func (cm *ControllerManager) newDummyNetworkController(topoType, netName, role s
 	if err != nil {
 		return nil, fmt.Errorf("failed to create network controller info %w", err)
 	}
-	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: netName}, Topology: topoType, Role: role})
+	netInfo, _ := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: netName}, Topology: topoType, Role: role})
 	switch topoType {
 	case ovntypes.Layer3Topology:
 		return ovn.NewLayer3UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.eIPController, cm.portCache, cm.addressSetManager, nil)
+			cm.eIPController, cm.portCache, cm.addressSetManager, nil, nil)
 	case ovntypes.Layer2Topology:
 		return ovn.NewLayer2UserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.routeImportManager,
-			cm.portCache, cm.eIPController, cm.addressSetManager, nil)
+			cm.portCache, cm.eIPController, cm.addressSetManager, nil, nil)
 	case ovntypes.LocalnetTopology:
 		return ovn.NewLocalnetUserDefinedNetworkController(cnci, netInfo, cm.networkManager.Interface(), cm.addressSetManager, nil), nil
 	}
@@ -304,9 +306,6 @@ func NewControllerManager(ovnClient *util.OVNClientset, wf *factory.WatchFactory
 	cm.nodeController = nodecontroller.NewNodeController(cm.watchFactory, cm.networkManager.Interface())
 
 	if util.IsRouteAdvertisementsEnabled() {
-		if !config.OVNKubernetesFeature.EnableInterconnect {
-			return nil, fmt.Errorf("RouteAdvertisements can only be used if Interconnect is enabled")
-		}
 		cm.routeImportManager = routeimport.New(config.Default.Zone, cm.nbClient)
 	}
 	cm.addressSetManager = addresssetmanager.NewAddressSetManager(cm.watchFactory.PodCoreInformer(),
@@ -380,6 +379,7 @@ func (cm *ControllerManager) initDefaultNetworkController(observManager *observa
 	if err != nil {
 		return err
 	}
+	cm.serviceController = defaultController.ServiceController()
 	// Make sure we only set defaultNetworkController in case of no error,
 	// otherwise we would initialize the interface with a nil implementation
 	// which is not the same as nil interface.

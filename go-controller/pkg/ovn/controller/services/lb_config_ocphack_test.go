@@ -90,10 +90,7 @@ func Test_buildPerNodeLBs_OCPHackForDNS(t *testing.T) {
 					vips:     []string{"192.168.1.1"},
 					protocol: corev1.ProtocolTCP,
 					inport:   80,
-					clusterEndpoints: util.LBEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						Port:  8080,
-					},
+					clusterEndpoints: util.LBEndpoints{newLBEndpointEntry(8080, []string{"10.128.0.2", "10.128.1.2"}, []string{})},
 				},
 			},
 			expected: []LB{
@@ -263,13 +260,10 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					inport:               5, // node port
 					externalTrafficLocal: true,
 					hasNodePort:          true,
-					clusterEndpoints: util.LBEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						Port:  outport,
-					},
+					clusterEndpoints: util.LBEndpoints{newLBEndpointEntry(outport, []string{"10.128.0.2", "10.128.1.2"}, []string{})},
 					nodeEndpoints: map[string]util.LBEndpoints{
-						nodeA: {V4IPs: []string{"10.128.0.2"}, Port: outport},
-						nodeB: {V4IPs: []string{"10.128.1.2"}, Port: outport},
+						nodeA: {newLBEndpointEntry(outport, []string{"10.128.0.2"}, []string{})},
+						nodeB: {newLBEndpointEntry(outport, []string{"10.128.1.2"}, []string{})},
 					},
 				},
 				{
@@ -277,13 +271,10 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					protocol:             corev1.ProtocolTCP,
 					inport:               inport,
 					externalTrafficLocal: true,
-					clusterEndpoints: util.LBEndpoints{
-						V4IPs: []string{"10.128.0.2", "10.128.1.2"},
-						Port:  outport,
-					},
+					clusterEndpoints: util.LBEndpoints{newLBEndpointEntry(outport, []string{"10.128.0.2", "10.128.1.2"}, []string{})},
 					nodeEndpoints: map[string]util.LBEndpoints{
-						nodeA: {V4IPs: []string{"10.128.0.2"}, Port: outport},
-						nodeB: {V4IPs: []string{"10.128.1.2"}, Port: outport},
+						nodeA: {newLBEndpointEntry(outport, []string{"10.128.0.2"}, []string{})},
+						nodeB: {newLBEndpointEntry(outport, []string{"10.128.1.2"}, []string{})},
 					},
 				},
 			},
@@ -362,12 +353,9 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					inport:               5, // node port
 					externalTrafficLocal: true,
 					hasNodePort:          true,
-					clusterEndpoints: util.LBEndpoints{
-						V4IPs: []string{"10.128.1.2"}, // only endpoint on node-b is running
-						Port:  outport,
-					},
+					clusterEndpoints: util.LBEndpoints{newLBEndpointEntry(outport, []string{"10.128.1.2"}, []string{})}, // only endpoint on node-b is running
 					nodeEndpoints: map[string]util.LBEndpoints{
-						nodeB: {V4IPs: []string{"10.128.1.2"}, Port: outport},
+						nodeB: {newLBEndpointEntry(outport, []string{"10.128.1.2"}, []string{})},
 					},
 				},
 				{
@@ -375,12 +363,9 @@ func Test_buildPerNodeLBs_OCPHackForLocalWithFallback(t *testing.T) {
 					protocol:             corev1.ProtocolTCP,
 					inport:               inport,
 					externalTrafficLocal: true,
-					clusterEndpoints: util.LBEndpoints{
-						V4IPs: []string{"10.128.1.2"},
-						Port:  outport,
-					},
+					clusterEndpoints: util.LBEndpoints{newLBEndpointEntry(outport, []string{"10.128.1.2"}, []string{})},
 					nodeEndpoints: map[string]util.LBEndpoints{
-						nodeB: {V4IPs: []string{"10.128.1.2"}, Port: outport},
+						nodeB: {newLBEndpointEntry(outport, []string{"10.128.1.2"}, []string{})},
 					},
 				},
 			},

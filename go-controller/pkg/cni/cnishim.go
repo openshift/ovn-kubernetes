@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/skel"
-	"github.com/containernetworking/cni/pkg/types"
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
@@ -33,7 +33,7 @@ import (
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
-	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -101,7 +101,7 @@ func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		var cniErr types.Error
+		var cniErr cnitypes.Error
 		if err := json.Unmarshal(body, &cniErr); err == nil && cniErr.Code != 0 {
 			return nil, &cniErr
 		}
@@ -111,7 +111,7 @@ func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
 	return body, nil
 }
 
-func setupLogging(conf *ovntypes.NetConf) {
+func setupLogging(conf *ovncnitypes.NetConf) {
 	var err error
 	var level klog.Level
 
@@ -248,13 +248,14 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		// plugging an interface into Pod is on the Shim.
 
 		// Use the IPAM details from ovnkube-node to configure the pod interface
-		pr, err := cniRequestToPodRequest(req)
+		ctx, cancel := context.WithTimeout(context.Background(), kubeletDefaultCRIOperationTimeout)
+		defer cancel()
+		pr, err := cniRequestToPodRequest(req, ctx)
 		if err != nil {
 			err = fmt.Errorf("failed to create pod request: %v", err)
 			klog.Error(err.Error())
 			return err
 		}
-		defer pr.cancel()
 
 		if !response.PodIFInfo.IsDPUHostMode {
 			// Initialize OVS exec runner; find OVS binaries that the CNI code uses.
@@ -274,17 +275,18 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		}
 		if response.PrimaryUDNPodInfo != nil {
 			primaryUDNPodRequest := response.PrimaryUDNPodReq
-			primaryUDNPodRequest.ctx, primaryUDNPodRequest.cancel = context.WithCancel(pr.ctx)
-			defer primaryUDNPodRequest.cancel()
-			err = primaryUDNCmdAddGetCNIResultFunc(result, getCNIResult, primaryUDNPodRequest, clientset, response.PrimaryUDNPodInfo)
+			primaryUDNPodRequest.ctx = ctx
+
+			primaryUDNResult, err := getCNIResult(primaryUDNPodRequest, clientset, response.PrimaryUDNPodInfo)
 			if err != nil {
 				klog.Error(err.Error())
 				return err
 			}
+			mergePrimaryUDNResponse(&Response{Result: result}, &Response{Result: primaryUDNResult}, primaryUDNPodRequest)
 		}
 	}
 
-	return types.PrintResult(result, conf.CNIVersion)
+	return cnitypes.PrintResult(result, conf.CNIVersion)
 }
 
 // CmdDel is the callback for 'teardown' cni calls from skel
@@ -292,7 +294,7 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 	var err error
 	var body []byte
 	var pr *PodRequest
-	var conf *ovntypes.NetConf
+	var conf *ovncnitypes.NetConf
 
 	startTime := time.Now()
 	defer func() {
@@ -325,12 +327,13 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 
 	// if Result is nil, then ovnkube-node is running in unprivileged mode so unconfigure the Interface from here.
 	if response.Result == nil {
-		pr, err = cniRequestToPodRequest(req)
+		ctx, cancel := context.WithTimeout(context.Background(), kubeletDefaultCRIOperationTimeout)
+		defer cancel()
+		pr, err = cniRequestToPodRequest(req, ctx)
 		if err != nil {
 			err = fmt.Errorf("failed to create pod request: %v", err)
 			return err
 		}
-		defer pr.cancel()
 
 		if !response.PodIFInfo.IsDPUHostMode {
 			// Initialize OVS exec runner; find OVS binaries that the CNI code uses.

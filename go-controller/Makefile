@@ -54,7 +54,7 @@ export NOROOT
 #       (disables symbol table and DWARF generation when building ovnk binaries)
 
 all build:
-	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovndbchecker cmd/ovnkube-trace cmd/ovnkube-identity cmd/ovnkube-observ
+	hack/build-go.sh cmd/ovnkube cmd/ovn-k8s-cni-overlay cmd/ovn-kube-util hybrid-overlay/cmd/hybrid-overlay-node cmd/ovnkube-trace cmd/ovnkube-identity cmd/ovnkube-observ
 
 windows:
 	WINDOWS_BUILD="yes" hack/build-go.sh hybrid-overlay/cmd/hybrid-overlay-node
@@ -82,7 +82,6 @@ install:
 	install -D -m 755 ${OUT_DIR}/go/bin/ovnkube ${BINDIR}/
 	install -D -m 755 ${OUT_DIR}/go/bin/ovn-kube-util ${BINDIR}/
 	install -D -m 755 ${OUT_DIR}/go/bin/ovn-k8s-cni-overlay -t ${CNIBINDIR}/
-	install -D -m 755 ${OUT_DIR}/go/bin/ovndbchecker ${BINDIR}/
 
 clean:
 	rm -rf ${OUT_DIR}
@@ -91,7 +90,7 @@ clean:
 	rm -f ./pkg/sbdb/ovn-sb.ovsschema
 	rm -f ./pkg/vswitchd/vswitch.ovsschema
 
-.PHONY: lint gofmt verify-go-mod-vendor
+.PHONY: lint gofmt verify-go-mod-vendor third-party-licenses verify-third-party-licenses
 
 lint:
 ifeq ($(CONTAINER_RUNNABLE), 0)
@@ -124,6 +123,12 @@ ifeq ($(CONTAINER_RUNNABLE), 0)
 else
 	@./hack/verify-go-mod-vendor.sh
 endif
+
+third-party-licenses:
+	@GOPATH=${GOPATH} ./hack/update-third-party-licenses.sh || { echo "third-party license generation failed!"; exit 1; }
+
+verify-third-party-licenses:
+	@GOPATH=${GOPATH} ./hack/verify-third-party-licenses.sh || { echo "third-party license verification failed!"; exit 1; }
 
 pkg/nbdb/ovn-nb.ovsschema:
 	curl -sSL https://raw.githubusercontent.com/ovn-org/ovn/$(OVN_SCHEMA_VERSION)/ovn-nb.ovsschema -o $@
