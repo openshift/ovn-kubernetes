@@ -64,7 +64,7 @@ func (oc *DefaultNetworkController) getRoutingPodGWs(nsInfo *namespaceInfo) map[
 
 // addLocalPodToNamespace returns pod's routing gateway info and the ops needed
 // to add pod's IP to the namespace's address set and port group.
-func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, ips []*net.IPNet, portUUID string) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
+func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, portUUID string) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
 	var err error
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
 	if err != nil {
@@ -73,21 +73,11 @@ func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, ips []*net
 
 	defer nsUnlock()
 
-	ops, err := oc.addLocalPodToNamespaceLocked(nsInfo, ips, portUUID)
+	ops, err := oc.addLocalPodToNamespaceLocked(nsInfo, portUUID)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
-}
-
-func (oc *DefaultNetworkController) addRemotePodToNamespace(ns string, ips []*net.IPNet) error {
-	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
-	if err != nil {
-		return fmt.Errorf("failed to ensure namespace locked: %v", err)
-	}
-
-	defer nsUnlock()
-	return nsInfo.addressSet.AddAddresses(util.IPNetsIPToStringSlice(ips))
 }
 
 func isNamespaceMulticastEnabled(annotations map[string]string) bool {
@@ -205,12 +195,11 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *corev1.Namespace
 				}
 			}
 		}
-		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
-			// If interconnect is disabled OR interconnect is running in single-zone-mode,
-			// the ovnkube-master is responsible for patching ICNI managed namespaces with
-			// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
-			// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
-			// directly on the ovnkube-controller code to avoid an extra namespace annotation
+		if oc.zone != types.OvnDefaultZone {
+			// In multi-zone interconnect, ovnkube-controller flushes conntrack
+			// directly here rather than using the "k8s.ovn.org/external-gw-pod-ips"
+			// namespace annotation that ovnkube-node watches in single-zone
+			// deployments.
 			gatewayIPs, err := oc.apbExternalRouteController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(old.Name)
 			if err != nil {
 				return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects for namespace %s: %w", old.Name, err)

@@ -5,7 +5,9 @@ package networkconnect
 
 import (
 	"fmt"
+	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,7 +36,8 @@ import (
 )
 
 const (
-	controllerName = "ovnkube-network-connect-controller"
+	controllerName         = "ovnkube-network-connect-controller"
+	networkRefKeySeparator = "/"
 )
 
 // Controller manages network connectivity between (C)UDNs based on ClusterNetworkConnect CRs.
@@ -77,12 +80,22 @@ type Controller struct {
 	nadReconcilerID uint64
 	// serviceController handles Service events (for ServiceNetwork connectivity)
 	serviceController controllerutil.Controller
+	// networkRefQueue handles node+network activity-triggered CNC requeues
+	networkRefQueue controllerutil.Reconciler
+	// networkRefReconciler receives node+network activity notifications from networkmanager
+	networkRefReconciler   networkmanager.NetworkRefReconciler
+	networkRefReconcilerID uint64
 
 	// Single global lock protecting all controller state
 	sync.RWMutex
 
 	// cncCache holds the state for each CNC keyed by CNC name
 	cncCache map[string]*networkConnectState
+
+	// cncNetworkIDs tracks desired owner network IDs from each CNC's subnet annotation.
+	cncNetworkIDs map[string]sets.Set[int]
+	// cncsByNetworkID indexes CNCs by desired owner network ID for targeted requeues.
+	cncsByNetworkID map[int]sets.Set[string]
 
 	// localZoneNode is the node in this controller's zone.
 	// We only support 1 node per zone for this feature.
@@ -105,6 +118,13 @@ type networkConnectState struct {
 	// podNetworkConnectEnabled tracks whether PodNetwork connectivity is enabled
 	// Used to determine if partial connectivity (service without pod) was active.
 	podNetworkConnectEnabled bool
+}
+
+type networkRefReconcilerFunc func(node, networkName string)
+
+// Reconcile adapts a plain function to the NetworkRefReconciler interface.
+func (f networkRefReconcilerFunc) Reconcile(node, networkName string) {
+	f(node, networkName)
 }
 
 // NewController creates a new network connect controller for ovnkube-controller.
@@ -130,6 +150,8 @@ func NewController(
 		networkManager:    networkManager,
 		addressSetFactory: addressset.NewOvnAddressSetFactory(nbClient, config.IPv4Mode, config.IPv6Mode),
 		cncCache:          make(map[string]*networkConnectState),
+		cncNetworkIDs:     make(map[string]sets.Set[int]),
+		cncsByNetworkID:   make(map[int]sets.Set[string]),
 	}
 
 	cncCfg := &controllerutil.ControllerConfig[networkconnectv1.ClusterNetworkConnect]{
@@ -170,6 +192,26 @@ func NewController(
 		"ovnkube-network-connect-nad",
 		nadReconcilerConfig,
 	)
+	networkRefReconcilerConfig := &controllerutil.ReconcilerConfig{
+		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		Reconcile:   c.syncNetworkRef,
+		Threadiness: 1,
+		MaxAttempts: controllerutil.InfiniteAttempts,
+	}
+	c.networkRefQueue = controllerutil.NewReconciler(
+		"ovnkube-network-connect-network-ref",
+		networkRefReconcilerConfig,
+	)
+	networkRefQueue := c.networkRefQueue
+	c.networkRefReconciler = networkRefReconcilerFunc(func(node, networkName string) {
+		if node == "" || networkName == "" || networkRefQueue == nil {
+			return
+		}
+		// Network manager notifies with semantic node+network values. Adapt
+		// them to the CNC controller's string-keyed workqueue locally so the
+		// queue key format stays private to this controller.
+		networkRefQueue.Reconcile(networkRefKey(node, networkName))
+	})
 
 	serviceCfg := &controllerutil.ControllerConfig[corev1.Service]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
@@ -193,26 +235,34 @@ func NewController(
 func (c *Controller) Start() (err error) {
 	klog.Infof("Starting ovnkube network connect controller for zone %s", c.zone)
 	initialSync := func() error { return c.repairStaleCNCs() }
-	if c.nadReconciler == nil {
-		return controllerutil.StartWithInitialSync(initialSync,
-			c.cncController,
-			c.nodeController,
-			c.serviceController,
-		)
-	}
-	c.nadReconcilerID = c.networkManager.RegisterNADReconciler(c.nadReconciler)
-	defer func() {
-		if err != nil {
-			c.networkManager.DeRegisterNADReconciler(c.nadReconcilerID)
-			c.nadReconcilerID = 0
-		}
-	}()
-	return controllerutil.StartWithInitialSync(initialSync,
+	controllers := []controllerutil.Reconciler{
 		c.cncController,
 		c.nodeController,
-		c.nadReconciler,
 		c.serviceController,
-	)
+	}
+	if c.nadReconciler != nil {
+		c.nadReconcilerID = c.networkManager.RegisterNADReconciler(c.nadReconciler)
+		controllers = append(controllers, c.nadReconciler)
+	}
+	if c.networkRefReconciler != nil {
+		c.networkRefReconcilerID = c.networkManager.RegisterNetworkRefReconciler(c.networkRefReconciler)
+		if c.networkRefQueue != nil {
+			controllers = append(controllers, c.networkRefQueue)
+		}
+	}
+	defer func() {
+		if err != nil {
+			if c.nadReconcilerID != 0 {
+				c.networkManager.DeRegisterNADReconciler(c.nadReconcilerID)
+				c.nadReconcilerID = 0
+			}
+			if c.networkRefReconcilerID != 0 {
+				c.networkManager.DeRegisterNetworkRefReconciler(c.networkRefReconcilerID)
+				c.networkRefReconcilerID = 0
+			}
+		}
+	}()
+	return controllerutil.StartWithInitialSync(initialSync, controllers...)
 }
 
 // Stop stops the controller.
@@ -220,63 +270,169 @@ func (c *Controller) Stop() {
 	if c.nadReconcilerID != 0 {
 		c.networkManager.DeRegisterNADReconciler(c.nadReconcilerID)
 	}
-	if c.nadReconciler != nil {
-		controllerutil.Stop(
-			c.cncController,
-			c.nodeController,
-			c.nadReconciler,
-			c.serviceController,
-		)
-	} else {
-		controllerutil.Stop(
-			c.cncController,
-			c.nodeController,
-			c.serviceController,
-		)
+	if c.networkRefReconcilerID != 0 {
+		c.networkManager.DeRegisterNetworkRefReconciler(c.networkRefReconcilerID)
 	}
+	controllers := []controllerutil.Reconciler{
+		c.cncController,
+		c.nodeController,
+		c.serviceController,
+	}
+	if c.nadReconciler != nil {
+		controllers = append(controllers, c.nadReconciler)
+	}
+	if c.networkRefQueue != nil {
+		controllers = append(controllers, c.networkRefQueue)
+	}
+	controllerutil.Stop(controllers...)
 	c.nadReconciler = nil
 	c.nadReconcilerID = 0
+	c.networkRefQueue = nil
+	c.networkRefReconciler = nil
+	c.networkRefReconcilerID = 0
 	klog.Infof("Stopped ovnkube network connect controller for zone %s", c.zone)
 }
 
+// networkRefKey builds the queue key used for deferred node+network activity
+// processing. The network name is used instead of ID because activity can be
+// observed before NAD reconciliation has resolved the ID locally.
+func networkRefKey(node, networkName string) string {
+	return node + networkRefKeySeparator + networkName
+}
+
+// parseNetworkRefKey decodes a queue key back into node and network name.
+func parseNetworkRefKey(key string) (string, string, error) {
+	idx := strings.LastIndex(key, networkRefKeySeparator)
+	if idx <= 0 || idx == len(key)-1 {
+		return "", "", fmt.Errorf("invalid network-ref key %q", key)
+	}
+	node := key[:idx]
+	return node, key[idx+1:], nil
+}
+
+func (c *Controller) syncNetworkRef(key string) error {
+	if c.networkManager == nil {
+		return nil
+	}
+	_, networkName, err := parseNetworkRefKey(key)
+	if err != nil {
+		klog.Warningf("Skipping invalid network-ref key %q: %v", key, err)
+		return nil
+	}
+
+	c.reconcileCNCsForNetworkIDs(c.networkIDsForNetworkName(networkName)...)
+	return nil
+}
+
 func (c *Controller) syncNAD(key string) error {
-	if c.nadLister == nil || c.networkManager == nil {
+	if c.networkManager == nil {
 		return nil
 	}
 	nadNetwork := c.networkManager.GetNetInfoForNADKey(key)
-	if nadNetwork == nil {
+	if nadNetwork != nil {
+		// Common path: the NAD's network is rendered, so we can requeue
+		// CNCs directly by its network ID without scanning the CNC index.
+		networkID := nadNetwork.GetNetworkID()
+		if networkID == types.InvalidID {
+			return nil
+		}
+		c.reconcileCNCsForNetworkIDs(networkID)
 		return nil
 	}
-	networkID := nadNetwork.GetNetworkID()
-	if networkID == types.InvalidID {
-		return nil
-	}
-	cncs, err := c.cncLister.List(labels.Everything())
-	if err != nil {
-		return err
-	}
-	for _, cnc := range cncs {
-		subnets, err := util.ParseNetworkConnectSubnetAnnotation(cnc)
-		if err != nil {
-			klog.Warningf("Failed parsing CNC %s subnet annotation: %v", cnc.Name, err)
+
+	// Dynamic UDN can know a NAD-to-network mapping while the network is
+	// filtered and therefore absent from networkController. Fall back to the
+	// network name and resolve matching indexed CNC network IDs.
+	networkName := c.networkManager.GetNetworkNameForNADKey(key)
+	c.reconcileCNCsForNetworkIDs(c.networkIDsForNetworkName(networkName)...)
+	return nil
+}
+
+func networkIDsFromAllocatedSubnets(allocatedSubnets map[string][]*net.IPNet) sets.Set[int] {
+	networkIDs := sets.New[int]()
+	for owner := range allocatedSubnets {
+		_, ownerNetworkID, err := util.ParseNetworkOwner(owner)
+		if err != nil || ownerNetworkID == types.InvalidID {
 			continue
 		}
-		shouldReconcile := false
-		for owner := range subnets {
-			_, ownerNetworkID, err := util.ParseNetworkOwner(owner)
-			if err != nil {
-				continue
-			}
-			if ownerNetworkID == networkID {
-				shouldReconcile = true
-				break
-			}
-		}
-		if shouldReconcile {
-			c.cncController.Reconcile(cnc.Name)
+		networkIDs.Insert(ownerNetworkID)
+	}
+	return networkIDs
+}
+
+func (c *Controller) networkIDsForNetworkName(networkName string) []int {
+	if c.networkManager == nil || networkName == "" {
+		return nil
+	}
+
+	c.RLock()
+	indexedNetworkIDs := make([]int, 0, len(c.cncsByNetworkID))
+	for networkID := range c.cncsByNetworkID {
+		indexedNetworkIDs = append(indexedNetworkIDs, networkID)
+	}
+	c.RUnlock()
+
+	matchingNetworkIDs := sets.New[int]()
+	for _, networkID := range indexedNetworkIDs {
+		netInfo := c.networkManager.GetNetworkByID(networkID)
+		if netInfo != nil && netInfo.GetNetworkName() == networkName {
+			matchingNetworkIDs.Insert(networkID)
 		}
 	}
-	return nil
+	return matchingNetworkIDs.UnsortedList()
+}
+
+// updateCNCNetworkIDsLocked refreshes the desired network ID reverse index for a CNC.
+// Caller must hold c.Lock().
+func (c *Controller) updateCNCNetworkIDsLocked(cncName string, networkIDs sets.Set[int]) {
+	if c.cncNetworkIDs == nil {
+		c.cncNetworkIDs = map[string]sets.Set[int]{}
+	}
+	if c.cncsByNetworkID == nil {
+		c.cncsByNetworkID = map[int]sets.Set[string]{}
+	}
+
+	for networkID := range c.cncNetworkIDs[cncName] {
+		indexedCNCs := c.cncsByNetworkID[networkID]
+		indexedCNCs.Delete(cncName)
+		if len(indexedCNCs) == 0 {
+			delete(c.cncsByNetworkID, networkID)
+		}
+	}
+
+	if networkIDs == nil {
+		delete(c.cncNetworkIDs, cncName)
+		return
+	}
+
+	c.cncNetworkIDs[cncName] = networkIDs
+	for networkID := range networkIDs {
+		indexedCNCs := c.cncsByNetworkID[networkID]
+		if indexedCNCs == nil {
+			indexedCNCs = sets.New[string]()
+			c.cncsByNetworkID[networkID] = indexedCNCs
+		}
+		indexedCNCs.Insert(cncName)
+	}
+}
+
+func (c *Controller) reconcileCNCsForNetworkIDs(networkIDs ...int) {
+	if c.cncController == nil || len(networkIDs) == 0 {
+		return
+	}
+
+	cncsToReconcile := sets.New[string]()
+	c.RLock()
+	for _, networkID := range networkIDs {
+		for cncName := range c.cncsByNetworkID[networkID] {
+			cncsToReconcile.Insert(cncName)
+		}
+	}
+	c.RUnlock()
+
+	for cncName := range cncsToReconcile {
+		c.cncController.Reconcile(cncName)
+	}
 }
 
 // cncNeedsUpdate determines if a CNC update requires reconciliation.
@@ -578,6 +734,13 @@ func (c *Controller) syncCNC(cnc *networkconnectv1.ClusterNetworkConnect) error 
 		}
 		c.cncCache[cnc.Name] = cncState
 	}
+	allocatedSubnets, err := util.ParseNetworkConnectSubnetAnnotation(cnc)
+	if err != nil {
+		c.updateCNCNetworkIDsLocked(cnc.Name, nil)
+		return fmt.Errorf("failed to parse subnet annotation for CNC %s: %w", cnc.Name, err)
+	}
+	c.updateCNCNetworkIDsLocked(cnc.Name, networkIDsFromAllocatedSubnets(allocatedSubnets))
+
 	// STEP1: Create the connect router for the CNC using tunnel ID from CNC annotation
 	// This is always a one time operation - Every CNC has exactly one connect router.
 	// tunnelID is set by cluster manager during CNC creation and is considered immutable
@@ -599,10 +762,6 @@ func (c *Controller) syncCNC(cnc *networkconnectv1.ClusterNetworkConnect) error 
 		}
 		cncState.tunnelID = tunnelID
 	}
-	allocatedSubnets, err := util.ParseNetworkConnectSubnetAnnotation(cnc)
-	if err != nil {
-		return fmt.Errorf("failed to parse subnet annotation for CNC %s: %w", cnc.Name, err)
-	}
 
 	if err := c.syncNetworkConnections(cnc, allocatedSubnets); err != nil {
 		return fmt.Errorf("failed to sync network connections for CNC %s: %v", cnc.Name, err)
@@ -613,6 +772,7 @@ func (c *Controller) syncCNC(cnc *networkconnectv1.ClusterNetworkConnect) error 
 // cleanupCNC removes OVN resources for a deleted CNC.
 func (c *Controller) cleanupCNC(cncName string) error {
 	klog.V(4).Infof("Cleaning up CNC %s", cncName)
+	c.updateCNCNetworkIDsLocked(cncName, nil)
 
 	cncState, exists := c.cncCache[cncName]
 	if !exists {

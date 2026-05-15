@@ -20,7 +20,7 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -163,17 +163,15 @@ type PodRequest struct {
 	// Interface name to be configured
 	IfName string
 	// CNI conf obtained from stdin conf
-	CNIConf *types.NetConf
+	CNIConf *ovncnitypes.NetConf
 	// Timestamp when the request was started
 	timestamp time.Time
 	// ctx is a context tracking this request's lifetime
 	ctx context.Context
-	// cancel should be called to cancel this request
-	cancel context.CancelFunc
 	// if CNIConf.DeviceID is present, then captures if the VF is of type VFIO or not
 	IsVFIO bool
 
-	// network name, for default network, this will be types.DefaultNetworkName
+	// network name, for default network, this will be ovncnitypes.DefaultNetworkName
 	netName string
 
 	// for ovs interfaces plumbed for UDNs, their iface-id's prefix is derived from the specific nadName;
@@ -188,9 +186,6 @@ type PodRequest struct {
 	// the DeviceInfo struct
 	deviceInfo nadapi.DeviceInfo
 }
-
-type podRequestFunc func(request *PodRequest, clientset *ClientSet, kubeAuth *KubeAPIAuth, networkManager networkmanager.Interface, ovsClient client.Client) ([]byte, error)
-type getCNIResultFunc func(request *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error)
 
 type PodInfoGetter interface {
 	getPod(namespace, name string) (*corev1.Pod, error)
@@ -219,10 +214,9 @@ type DPUStatusProvider interface {
 // on a private root-only Unix domain socket.
 type Server struct {
 	http.Server
-	handlePodRequestFunc podRequestFunc
-	clientSet            *ClientSet
-	kubeAuth             *KubeAPIAuth
-	networkManager       networkmanager.Interface
-	ovsClient            client.Client
-	dpuHealth            DPUStatusProvider
+	clientSet      *ClientSet
+	kubeAuth       *KubeAPIAuth
+	networkManager networkmanager.Interface
+	ovsClient      client.Client
+	dpuHealth      DPUStatusProvider
 }

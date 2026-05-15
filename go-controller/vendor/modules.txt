@@ -32,9 +32,6 @@ github.com/Microsoft/hcsshim/osversion
 # github.com/alexflint/go-filemutex v1.3.0
 ## explicit; go 1.13
 github.com/alexflint/go-filemutex
-# github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
-## explicit; go 1.13
-github.com/asaskevich/govalidator
 # github.com/beorn7/perks v1.0.1
 ## explicit; go 1.11
 github.com/beorn7/perks/quantile
@@ -418,6 +415,9 @@ github.com/openshift/client-go/network/listers/network/v1alpha1
 # github.com/openshift/custom-resource-status v1.1.2
 ## explicit; go 1.12
 github.com/openshift/custom-resource-status/conditions/v1
+# github.com/ovn-kubernetes/dpu-simulator/lib/dpusim v0.0.0-20260507161134-3aec48e5cb25
+## explicit; go 1.25.0
+github.com/ovn-kubernetes/dpu-simulator/lib/dpusim
 # github.com/ovn-kubernetes/libovsdb v0.8.2-0.20260302130604-c07ce22366ac
 ## explicit; go 1.24.0
 github.com/ovn-kubernetes/libovsdb/cache

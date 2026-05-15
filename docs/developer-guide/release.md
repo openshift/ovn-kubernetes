@@ -10,7 +10,6 @@ Each new release of OVN-Kubernetes is defined with a "version" that represents t
     * `ovn-k8s-cni-overlay`: is the cni executable to be placed in /opt/cni/bin (or another directory in which kubernetes will look for the plugin) so that it can be invoked for each pod event by kubernetes
     * `hybrid-overlay-node`
     * `ovn-kube-util`: contains the Utils for ovn-kubernetes
-    * `ovndbchecker`
     * `ovnkube-trace`: is the binary that contains ovnkube-trace which is an abstraction used to invoke OVN/OVS packet tracing utils
     * `ovnkube-identity`: is the executable that is invoked to run ovn-kubernetes identity manager, which includes the admission webhook and the CertificateSigningRequest approver
 * `ovnkube` API configuration 
@@ -52,5 +51,6 @@ Each new release of OVN-Kubernetes is defined with a "version" that represents t
 ## Information on Past Releases
 
 * [v1.0.0](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/release-1.0) - [release-notes](https://github.com/ovn-kubernetes/ovn-kubernetes/releases/tag/v1.0.0) - not maintained anymore.
-* [v1.1.0](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/release-1.1) - [release-notes](https://github.com/ovn-kubernetes/ovn-kubernetes/releases/tag/v1.1.0) - actively maintained
+* [v1.1.0](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/release-1.1) - [release-notes](https://github.com/ovn-kubernetes/ovn-kubernetes/releases/tag/v1.1.0) - not maintained anymore.
 * [v1.2.0](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/release-1.2) - [release-notes](https://github.com/ovn-kubernetes/ovn-kubernetes/releases/tag/v1.2.0) - actively maintained
+* [v1.3.0](https://github.com/ovn-kubernetes/ovn-kubernetes/tree/release-1.3) - [release-notes](https://github.com/ovn-kubernetes/ovn-kubernetes/releases/tag/v1.3.0) - actively maintained

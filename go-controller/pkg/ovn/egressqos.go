@@ -30,6 +30,7 @@ import (
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	egressqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	egressqosapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/egressqos/v1"
 	egressqosinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/informers/externalversions/egressqos/v1"
@@ -188,7 +189,7 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 	oc.egressQoSLister = eqInformer.Lister()
 	oc.egressQoSSynced = eqInformer.Informer().HasSynced
 	oc.egressQoSQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		controller.DefaultRateLimiter[string](),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressqos"},
 	)
 	_, err := eqInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -204,7 +205,7 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 	oc.egressQoSPodLister = podInformer.Lister()
 	oc.egressQoSPodSynced = podInformer.Informer().HasSynced
 	oc.egressQoSPodQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		controller.DefaultRateLimiter[string](),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressqospods"},
 	)
 	_, err = podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
@@ -219,7 +220,7 @@ func (oc *DefaultNetworkController) initEgressQoSController(
 	oc.egressQoSNodeLister = nodeInformer.Lister()
 	oc.egressQoSNodeSynced = nodeInformer.Informer().HasSynced
 	oc.egressQoSNodeQueue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
+		controller.DefaultRateLimiter[string](),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "egressqosnodes"},
 	)
 	_, err = nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -386,7 +387,7 @@ func (oc *DefaultNetworkController) processNextEgressQoSWorkItem(wg *sync.WaitGr
 }
 
 // This takes care of syncing stale data which we might have in OVN if
-// there's no ovnkube-master running for a while.
+// there's no ovnkube-controller running for a while.
 // It deletes all QoSes and Address Sets from OVN that belong to deleted EgressQoSes.
 func (oc *DefaultNetworkController) repairEgressQoSes() error {
 	startTime := time.Now()
@@ -817,9 +818,9 @@ func (oc *DefaultNetworkController) onEgressQoSPodAdd(obj interface{}) {
 		// That either means node changed zones - which will involve a full delete and recreate
 		// the OVN objects in a new zone's DB and/or node is gone etc. All those scenarios don't
 		// need this controller to take any action.
-		// NOTE2: During upgrades when the legacy ovnkube-master is still running it will detect
-		// nodes have gone remote which for this feature means deleting the switches totally and
-		// based on OVN db schema this will remove all referenced QoS rules created on the switch
+		// NOTE2: The controller that owns a node's previous zone is responsible for
+		// deleting that zone's switch, which removes all referenced QoS rules created
+		// on the switch based on the OVN DB schema.
 		return // not local to this zone, nothing to do; no-op
 	}
 	oc.egressQoSPodQueue.Add(key)
@@ -876,9 +877,9 @@ func (oc *DefaultNetworkController) onEgressQoSPodDelete(obj interface{}) {
 		// That either means node changed zones - which will involve a full delete and recreate
 		// the OVN objects in a new zone's DB and/or node is gone etc. All those scenarios don't
 		// need this controller to take any action.
-		// NOTE2: During upgrades when the legacy ovnkube-master is still running it will detect
-		// nodes have gone remote which for this feature means deleting the switches totally and
-		// based on OVN db schema this will remove all referenced QoS rules created on the switch
+		// NOTE2: The controller that owns a node's previous zone is responsible for
+		// deleting that zone's switch, which removes all referenced QoS rules created
+		// on the switch based on the OVN DB schema.
 		return // not local to this zone, nothing to do; no-op
 	}
 	oc.egressQoSPodQueue.Add(key)
