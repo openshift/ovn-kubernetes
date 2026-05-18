@@ -543,8 +543,8 @@ func (ncm *NodeControllerManager) checkForStaleOVSPodInterfaces() {
 	for _, pod := range pods {
 		if pod.Spec.NodeName == ncm.name && !util.PodWantsHostNetwork(pod) {
 			// Note: wf (WatchFactory) *usually* returns pods assigned to this node, however we dont rely on it
-			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube master and node
-			// share the same process)
+			// and add this check to filter out pods assigned to other nodes. (e.g when ovnkube controller and
+			// node share the same process)
 			expectedPodUIDs[string(pod.UID)] = struct{}{}
 		}
 	}

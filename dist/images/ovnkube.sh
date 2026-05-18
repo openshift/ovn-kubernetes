@@ -128,7 +128,6 @@ ovnkube_version="1.3.0"
 ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.3.0"}
 
 # hostname is the host's hostname when using host networking,
-# This is useful on the master
 # otherwise it is the container ID (useful for debugging).
 ovn_pod_host=${K8S_NODE:-$(hostname)}
 
@@ -1150,7 +1149,7 @@ local-sb-ovsdb() {
   echo "=============== run sb-ovsdb (unix sockets only) ========== terminated"
 }
 
-# v1.3.0 - Runs northd on master. Does not run nb_ovsdb, and sb_ovsdb
+# v1.3.0 - Runs northd. Does not run nb_ovsdb, and sb_ovsdb
 run-ovn-northd() {
   trap 'ovn-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
   check_ovn_daemonset_version "1.3.0"
@@ -1160,7 +1159,7 @@ run-ovn-northd() {
   echo "=============== run-ovn-northd (wait for ready_to_start_node)"
   wait_for_event ready_to_start_node
 
-  echo "=============== run_ovn_northd ========== MASTER ONLY"
+  echo "=============== run_ovn_northd =========="
   echo "ovn_nbdb ${ovn_nbdb}   ovn_sbdb ${ovn_sbdb}"
   echo "ovn_northd_opts=${ovn_northd_opts}"
   echo "ovn_loglevel_northd=${ovn_loglevel_northd}"
@@ -1423,8 +1422,8 @@ ovnkube-controller() {
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
-  ovnkube_master_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
-  echo "ovnkube_master_metrics_bind_address=${ovnkube_master_metrics_bind_address}"
+  ovnkube_controller_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
+  echo "ovnkube_controller_metrics_bind_address=${ovnkube_controller_metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
   if [[ ${OVNKUBE_METRICS_PK} != "" && ${OVNKUBE_METRICS_CERT} != "" ]]; then
@@ -1516,7 +1515,7 @@ ovnkube-controller() {
   fi
   echo "ovn_stateless_netpol_enable_flag: ${ovn_stateless_netpol_enable_flag}"
 
-  echo "=============== ovnkube-controller ========== MASTER ONLY"
+  echo "=============== ovnkube-controller =========="
   /usr/bin/ovnkube --init-ovnkube-controller ${K8S_NODE} \
     ${anp_enabled_flag} \
     ${disable_snat_multiple_gws_flag} \
@@ -1565,7 +1564,7 @@ ovnkube-controller() {
     --logfile-maxsize=${ovnkube_logfile_maxsize} \
     --logfile /var/log/ovn-kubernetes/ovnkube-controller.log \
     --loglevel=${ovnkube_loglevel} \
-    --metrics-bind-address ${ovnkube_master_metrics_bind_address} \
+    --metrics-bind-address ${ovnkube_controller_metrics_bind_address} \
     --metrics-enable-pprof \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
@@ -1586,6 +1585,7 @@ ovnkube-controller-with-node() {
   check_ovn_daemonset_version "1.3.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller-with-node.pid
 
+  # wait for ovs-servers to start since ovnkube initialization sets some fields in OVS DB
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovnkube-controller-with-node - (wait for ovs)"
     wait_for_event ovs_ready
@@ -1597,10 +1597,6 @@ ovnkube-controller-with-node() {
 
   # wait for northd to start
   wait_for_event process_ready ovn-northd
-
-  # wait for ovs-servers to start since ovnkube initialization sets some fields in OVS DB
-  echo "=============== ovnkube-controller-with-node - (wait for ovs)"
-  wait_for_event ovs_ready
 
   if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
     echo "=============== ovnkube-controller-with-node - (ovn-node  wait for ovn-controller.pid)"
@@ -2337,7 +2333,7 @@ ovn-cluster-manager() {
   fi
   echo "ovn_allow_icmp_netpol_flag=${ovn_allow_icmp_netpol_flag}"
 
-  echo "=============== ovn-cluster-manager ========== MASTER ONLY"
+  echo "=============== ovn-cluster-manager ========== control plane node only"
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
     ${anp_enabled_flag} \
     ${egressfirewall_enabled_flag} \
@@ -2892,7 +2888,7 @@ display_version
 # run-ovn-northd Runs ovn-northd as a process does not run nb_ovsdb or sb_ovsdb (v3)
 # nb-ovsdb       Runs nb_ovsdb as a process (no detach or monitor) (v3)
 # sb-ovsdb       Runs sb_ovsdb as a process (no detach or monitor) (v3)
-# ovn-identity     - master only (v3)
+# ovn-identity     - control plane only (v3)
 # ovn-controller - all nodes (v3)
 # ovn-node       - all nodes (v3)
 # cleanup-ovn-node - all nodes (v3)

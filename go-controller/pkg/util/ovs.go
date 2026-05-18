@@ -405,7 +405,7 @@ func runOVNretry(cmdPath string, envVars []string, extraArgsFunc func() ([]strin
 		}
 
 		// Connection refused
-		// Master may not be up so keep trying
+		// OVN DB may not be up so keep trying
 		if strings.Contains(stderr.String(), "Connection refused") {
 			if retriesLeft == 0 {
 				return stdout, stderr, err

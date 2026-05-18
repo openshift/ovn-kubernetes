@@ -442,7 +442,7 @@ var _ = Describe("Config Operations", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	It("reads defaults (multiple master) from ovs-vsctl external IDs", func() {
+	It("reads defaults from ovs-vsctl external IDs (comma-separated endpoints)", func() {
 		app.Action = func(ctx *cli.Context) error {
 			fexec := ovntest.NewFakeExec()
 
@@ -1274,7 +1274,7 @@ enable-pprof=true
 		gomega.Expect(ClusterManager.V4TransitSubnet).To(gomega.Equal("100.89.0.0/16"))
 		gomega.Expect(ClusterManager.V6TransitSubnet).To(gomega.Equal("fd99::/64"))
 	})
-	It("overrides config file and defaults with CLI options (multi-master)", func() {
+	It("overrides config file and defaults with CLI options (comma-separated endpoints)", func() {
 		kubeconfigFile, _, err := createTempFile("kubeconfig")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		defer os.Remove(kubeconfigFile)

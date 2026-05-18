@@ -206,13 +206,6 @@ var (
 	// Set Leaderelection config values based on
 	// https://github.com/openshift/enhancements/blame/84e894ead7b188a1013556e0ba6973b8463995f1/CONVENTIONS.md#L183
 
-	// MasterHA holds master HA related config options.
-	MasterHA = HAConfig{
-		ElectionRetryPeriod:   26,
-		ElectionRenewDeadline: 107,
-		ElectionLeaseDuration: 137,
-	}
-
 	// ClusterMgrHA holds cluster manager HA related config options.
 	ClusterMgrHA = HAConfig{
 		ElectionRetryPeriod:   26,
@@ -474,7 +467,7 @@ type MetricsConfig struct {
 	EnablePprof           bool   `gcfg:"enable-pprof"`
 	NodeServerPrivKey     string `gcfg:"node-server-privkey"`
 	NodeServerCert        string `gcfg:"node-server-cert"`
-	// EnableConfigDuration holds the boolean flag to enable OVN-Kubernetes master to monitor OVN-Kubernetes master
+	// EnableConfigDuration holds the boolean flag to enable ovnkube controller to monitor ovnkube controller
 	// configuration duration and optionally, its application to all nodes
 	EnableConfigDuration bool `gcfg:"enable-config-duration"`
 	EnableScaleMetrics   bool `gcfg:"enable-scale-metrics"`
@@ -717,7 +710,6 @@ type config struct {
 	OvnNorth             OvnAuthConfig
 	OvnSouth             OvnAuthConfig
 	Gateway              GatewayConfig
-	MasterHA             HAConfig
 	ClusterMgrHA         HAConfig
 	HybridOverlay        HybridOverlayConfig
 	OvnKubeNode          OvnKubeNodeConfig
@@ -739,7 +731,6 @@ var (
 	savedOvnNorth             OvnAuthConfig
 	savedOvnSouth             OvnAuthConfig
 	savedGateway              GatewayConfig
-	savedMasterHA             HAConfig
 	savedClusterMgrHA         HAConfig
 	savedHybridOverlay        HybridOverlayConfig
 	savedOvnKubeNode          OvnKubeNodeConfig
@@ -771,7 +762,6 @@ func init() {
 	savedOvnNorth = OvnNorth
 	savedOvnSouth = OvnSouth
 	savedGateway = Gateway
-	savedMasterHA = MasterHA
 	savedClusterMgrHA = ClusterMgrHA
 	savedHybridOverlay = HybridOverlay
 	savedOvnKubeNode = OvnKubeNode
@@ -805,7 +795,6 @@ func PrepareTestConfig() error {
 	OvnNorth = savedOvnNorth
 	OvnSouth = savedOvnSouth
 	Gateway = savedGateway
-	MasterHA = savedMasterHA
 	HybridOverlay = savedHybridOverlay
 	OvnKubeNode = savedOvnKubeNode
 	ClusterManager = savedClusterManager
@@ -1504,7 +1493,7 @@ var MetricsFlags = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:        "metrics-enable-config-duration",
-		Usage:       "Enables monitoring OVN-Kubernetes master and OVN configuration duration",
+		Usage:       "Enables monitoring OVN-Kubernetes ovnkube controller and OVN configuration duration",
 		Destination: &cliConfig.Metrics.EnableConfigDuration,
 	},
 	&cli.BoolFlag{
@@ -1756,28 +1745,6 @@ var OVNGatewayFlags = []cli.Flag{
 	},
 }
 
-// MasterHAFlags capture leader election flags for master
-var MasterHAFlags = []cli.Flag{
-	&cli.IntFlag{
-		Name:        "ha-election-lease-duration",
-		Usage:       "Leader election lease duration (in secs)",
-		Destination: &cliConfig.MasterHA.ElectionLeaseDuration,
-		Value:       MasterHA.ElectionLeaseDuration,
-	},
-	&cli.IntFlag{
-		Name:        "ha-election-renew-deadline",
-		Usage:       "Leader election renew deadline (in secs)",
-		Destination: &cliConfig.MasterHA.ElectionRenewDeadline,
-		Value:       MasterHA.ElectionRenewDeadline,
-	},
-	&cli.IntFlag{
-		Name:        "ha-election-retry-period",
-		Usage:       "Leader election retry period (in secs)",
-		Destination: &cliConfig.MasterHA.ElectionRetryPeriod,
-		Value:       MasterHA.ElectionRetryPeriod,
-	},
-}
-
 // ClusterMgrHAFlags capture leader election flags for cluster manager
 var ClusterMgrHAFlags = []cli.Flag{
 	&cli.IntFlag{
@@ -1910,7 +1877,6 @@ func GetFlags(customFlags []cli.Flag) []cli.Flag {
 	flags = append(flags, OvnNBFlags...)
 	flags = append(flags, OvnSBFlags...)
 	flags = append(flags, OVNGatewayFlags...)
-	flags = append(flags, MasterHAFlags...)
 	flags = append(flags, ClusterMgrHAFlags...)
 	flags = append(flags, HybridOverlayFlags...)
 	flags = append(flags, MonitoringFlags...)
@@ -2314,31 +2280,6 @@ func buildOVNKubernetesFeatureConfig(cli, file *config) error {
 	return nil
 }
 
-func buildMasterHAConfig(cli, file *config) error {
-	// Copy config file values over default values
-	if err := overrideFields(&MasterHA, &file.MasterHA, &savedMasterHA); err != nil {
-		return err
-	}
-
-	// And CLI overrides over config file and default values
-	if err := overrideFields(&MasterHA, &cli.MasterHA, &savedMasterHA); err != nil {
-		return err
-	}
-
-	if MasterHA.ElectionLeaseDuration <= MasterHA.ElectionRenewDeadline {
-		return fmt.Errorf("invalid HA election lease duration '%d'. "+
-			"It should be greater than HA election renew deadline '%d'",
-			MasterHA.ElectionLeaseDuration, MasterHA.ElectionRenewDeadline)
-	}
-
-	if MasterHA.ElectionRenewDeadline <= MasterHA.ElectionRetryPeriod {
-		return fmt.Errorf("invalid HA election renew deadline duration '%d'. "+
-			"It should be greater than HA election retry period '%d'",
-			MasterHA.ElectionRenewDeadline, MasterHA.ElectionRetryPeriod)
-	}
-	return nil
-}
-
 func buildClusterMgrHAConfig(cli, file *config) error {
 	// Copy config file values over default values
 	if err := overrideFields(&ClusterMgrHA, &file.ClusterMgrHA, &savedClusterMgrHA); err != nil {
@@ -2728,7 +2669,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 		OvnNorth:             savedOvnNorth,
 		OvnSouth:             savedOvnSouth,
 		Gateway:              savedGateway,
-		MasterHA:             savedMasterHA,
 		ClusterMgrHA:         savedClusterMgrHA,
 		HybridOverlay:        savedHybridOverlay,
 		OvnKubeNode:          savedOvnKubeNode,
@@ -2826,10 +2766,6 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	}
 
 	if err = buildGatewayConfig(ctx, &cliConfig, &cfg); err != nil {
-		return "", err
-	}
-
-	if err = buildMasterHAConfig(&cliConfig, &cfg); err != nil {
 		return "", err
 	}
 
@@ -3164,22 +3100,6 @@ func (a *OvnAuthConfig) SetDBAuth() error {
 	}
 
 	return nil
-}
-
-func (a *OvnAuthConfig) updateIP(newIPs []string, port string) {
-	newAddresses := make([]string, 0, len(newIPs))
-	for _, ipAddress := range newIPs {
-		newAddresses = append(newAddresses, fmt.Sprintf("%v:%s", a.Scheme, net.JoinHostPort(ipAddress, port)))
-	}
-	a.Address = strings.Join(newAddresses, ",")
-}
-
-// UpdateOVNNodeAuth updates the host and URL in ClientAuth
-// for both OvnNorth and OvnSouth. It updates them with the new masterIP.
-func UpdateOVNNodeAuth(masterIP []string, southboundDBPort, northboundDBPort string) {
-	klog.V(5).Infof("Update OVN node auth with new master ip: %s", masterIP)
-	OvnNorth.updateIP(masterIP, northboundDBPort)
-	OvnSouth.updateIP(masterIP, southboundDBPort)
 }
 
 // ovnKubeNodeModeSupported validates the provided mode is supported by ovnkube node
