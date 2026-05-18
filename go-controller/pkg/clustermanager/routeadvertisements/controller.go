@@ -687,6 +687,9 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 				if err != nil {
 					return nil, err
 				}
+				if len(subnets) == 0 {
+					klog.V(5).Infof("No subnets found for network %q on node %q, annotation might not be set yet", network, nodeName)
+				}
 			}
 		}
 		// gather EgressIPs
