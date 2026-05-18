@@ -333,8 +333,10 @@ build_ovn_image() {
 }
 
 run_kubectl() {
-  # Skip kubeconfig export in container mode - it overwrites container IPs with localhost.
-  if [ "$RUN_IN_CONTAINER" != true ]; then
+  # In deploy mode, KUBECONFIG points at an existing cluster and must not be
+  # merged with `kind export kubeconfig`; repeated merges can duplicate entries.
+  # In container mode, export would also overwrite reachable container IPs with localhost.
+  if [ "$RUN_IN_CONTAINER" != true ] && [ "${KIND_CREATE:-true}" == true ]; then
     kind export kubeconfig --name ${KIND_CLUSTER_NAME}
   fi
 
@@ -735,9 +737,40 @@ delete_metallb_dir() {
   rm -rf "${METALLB_DIR}"
 }
 
+wait_for_ovn_daemonset() {
+  local ds=$1
+  local required=${2:-true}
+  local endtime=$3
+
+  if ! kubectl -n ovn-kubernetes get daemonset "${ds}" >/dev/null 2>&1; then
+    if [ "${required}" = true ]; then
+      echo "DaemonSet ${ds} was not found in namespace ovn-kubernetes" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  local timeout
+  timeout=$(calculate_timeout ${endtime})
+  echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
+  # `kubectl rollout status` errors on DaemonSets with updateStrategy=OnDelete
+  # (upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
+  # OVS out from under still-running ovnkube-node pods). For OnDelete DSes
+  # we can't observe rollout progress; just wait for pods to be Ready.
+  local strategy
+  strategy=$(kubectl -n ovn-kubernetes get daemonset ${ds} \
+    -o=jsonpath='{.spec.updateStrategy.type}' 2>/dev/null)
+  if [ "${strategy}" = "OnDelete" ]; then
+    kubectl wait -n ovn-kubernetes --for=condition=ready pods \
+      -l app=${ds} --timeout=${timeout}s
+  else
+    kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+  fi
+}
+
 # kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
 # DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
-# Next, it waits for ovnkube-control-plane pods to post "Ready".
+# Next, it waits for ovnkube-control-plane pods to post "Ready" when that deployment is part of the mode.
 # Last, it will do the same with all pods in the kube-system namespace.
 kubectl_wait_pods() {
   # IPv6 cluster seems to take a little longer to come up, so extend the wait time.
@@ -749,28 +782,31 @@ kubectl_wait_pods() {
   # We will make sure that we timeout all commands at current seconds + the desired timeout.
   endtime=$(( SECONDS + OVN_TIMEOUT ))
 
-  for ds in ovnkube-node ovs-node; do
-    timeout=$(calculate_timeout ${endtime})
-    echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
-    # `kubectl rollout status` errors on DaemonSets with updateStrategy=OnDelete
-    # (upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
-    # OVS out from under still-running ovnkube-node pods). For OnDelete DSes
-    # we can't observe rollout progress; just wait for pods to be Ready.
-    strategy=$(kubectl -n ovn-kubernetes get daemonset ${ds} \
-      -o=jsonpath='{.spec.updateStrategy.type}' 2>/dev/null)
-    if [ "${strategy}" = "OnDelete" ]; then
-      kubectl wait -n ovn-kubernetes --for=condition=ready pods \
-        -l app=${ds} --timeout=${timeout}s
-    else
-      kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
-    fi
-  done
+  case "${DPU_MODE:-none}" in
+    dpu)
+      wait_for_ovn_daemonset ovnkube-node-dpu true ${endtime}
+      ;;
+    host)
+      wait_for_ovn_daemonset ovnkube-node-dpu-host true ${endtime}
+      wait_for_ovn_daemonset ovnkube-node false ${endtime}
+      wait_for_ovn_daemonset ovs-node false ${endtime}
+      ;;
+    *)
+      wait_for_ovn_daemonset ovnkube-node true ${endtime}
+      wait_for_ovn_daemonset ovs-node true ${endtime}
+      ;;
+  esac
 
-  for name in ovnkube-control-plane; do
+  if [ "${DPU_MODE:-none}" != "dpu" ]; then
+    local name
+    name=ovnkube-control-plane
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
     kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
-  done
+  fi
+
+  restart_dpu_sim_multus_after_ovnk
+  restart_dpu_sim_system_deployments_after_ovnk
 
   timeout=$(calculate_timeout ${endtime})
   if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=${timeout}s ; then
@@ -916,7 +952,11 @@ docker_create_second_disconnected_interface() {
 }
 
 enable_multi_net() {
-  install_multus
+  if [ "${DPU_MODE:-none}" == "none" ]; then
+    install_multus
+  else
+    echo "Skipping multus-cni installation; DPU simulator mode expects Multus to be installed by dpu-simulator"
+  fi
   install_mpolicy_crd
   install_ipamclaim_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
@@ -1247,7 +1287,18 @@ deploy_frr_external_container() {
     # Add route-reflector-client for IPv6 neighbors
     sed -i '/neighbor fc00.*remote-as 64512/a \ neighbor {{ . }} route-reflector-client' frr/frr.conf.tmpl
   fi
-  ./demo.sh
+  if [ "${OCI_BIN}" == "podman" ]; then
+    # frr-k8s' demo script prefers docker when both docker and podman are
+    # installed. Keep it on the same runtime as kind-helm.sh so later podman
+    # operations can find the external frr container.
+    local docker_wrapper_dir
+    docker_wrapper_dir=$(mktemp -d)
+    ln -s "$(command -v podman)" "${docker_wrapper_dir}/docker"
+    PATH="${docker_wrapper_dir}:${PATH}" ./demo.sh
+    rm -rf "${docker_wrapper_dir}"
+  else
+    ./demo.sh
+  fi
   popd || exit 1
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     # Enable IPv6 forwarding in FRR
@@ -1379,6 +1430,13 @@ destroy_bgp() {
   fi
 }
 
+install_frr_k8s_crds() {
+  echo "Installing frr-k8s CRDs ..."
+  clone_frr
+  kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/frrk8s.metallb.io_frrconfigurations.yaml
+  kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/frrk8s.metallb.io_frrnodestates.yaml
+}
+
 install_frr_k8s() {
   local bgp_port=${1:-0}
   echo "Installing frr-k8s ..."
@@ -1415,15 +1473,27 @@ install_frr_k8s() {
       exit 1
     }
   fi
+  install_frr_k8s_host_api_crds
   kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+  create_frr_k8s_remote_kubeconfig_secret
+  configure_frr_k8s_remote_daemonsets
 }
 
 wait_for_frr_k8s() {
-  kubectl wait -n frr-k8s-system deployment frr-k8s-statuscleaner --for condition=Available --timeout 2m
-  kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
+  if kubectl -n frr-k8s-system get deployment frr-k8s-statuscleaner >/dev/null 2>&1; then
+    kubectl wait -n frr-k8s-system deployment frr-k8s-statuscleaner --for condition=Available --timeout 2m
+  fi
+  if kubectl -n frr-k8s-system get daemonset frr-k8s-daemon >/dev/null 2>&1; then
+    kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
+    return
+  fi
+  local ds
+  for ds in $(kubectl -n frr-k8s-system get daemonset -l dpu-sim.ovn.org/frr-remote=true -o name); do
+    kubectl rollout status -n frr-k8s-system "${ds}" --timeout 2m
+  done
 }
 
-configure_frr_k8s() {
+apply_frr_k8s_receive_config() {
   # apply a BGP peer configration with the external gateway that does not
   # exchange routes
   pushd "${FRR_TMP_DIR}"/frr-k8s/hack/demo/configs || exit 1
@@ -1443,10 +1513,12 @@ configure_frr_k8s() {
   
   # frr-k8s webhook is declaring readiness before its endpoint is serving.
   # Let's do our own probing. Also will print logs in case of failure so we get
-  # insights on why this is hapenning 
+  # insights on why this is hapenning. In remote mode the host API does not use
+  # the DPU-cluster webhook service, so skip this probe.
   local r
   r=0
-  timeout 60s bash -x <<EOF || r=$?
+  if ! frr_k8s_remote_enabled; then
+    timeout 60s bash -x <<EOF || r=$?
 echo "Attempting to reach frr-k8s webhook"
 kind export kubeconfig --name ovn
 while true; do
@@ -1459,16 +1531,22 @@ echo "Couldn't reach frr-k8s webhook, trying in 1s..."
 sleep 1s
 done
 EOF
+  fi
   echo "r=$r"
   if [ "$r" -ne "0" ]; then
     kubectl describe pod -n frr-k8s-system -l app=frr-k8s-webhook-server
     kubectl logs -n frr-k8s-system -l app=frr-k8s-webhook-server
   fi
 
-  kubectl apply -n frr-k8s-system -f receive_filtered.yaml
+  local kubectl_cmd=(kubectl)
+  if frr_k8s_remote_enabled; then
+    kubectl_cmd=(kubectl --kubeconfig "$(frr_k8s_host_kubeconfig)")
+  fi
+  "${kubectl_cmd[@]}" apply -n frr-k8s-system -f receive_filtered.yaml
   popd || exit 1
+}
 
-  rm -rf "${FRR_TMP_DIR}"
+configure_frr_k8s_routes() {
   # Add routes for pod networks dynamically into the github runner for return traffic to pass back
   if [ "$ADVERTISE_DEFAULT_NETWORK" = "true" ]; then
     echo "Adding routes for Kubernetes pod networks..."
@@ -1505,6 +1583,13 @@ EOF
       fi
     done
   fi
+
+  rm -rf "${FRR_TMP_DIR}"
+}
+
+configure_frr_k8s() {
+  apply_frr_k8s_receive_config
+  configure_frr_k8s_routes
 }
 
 setup_coredumps() {
