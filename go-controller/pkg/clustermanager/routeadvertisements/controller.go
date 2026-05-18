@@ -58,8 +58,18 @@ const (
 var (
 	errConfig      = errors.New("configuration error")
 	errPending     = errors.New("configuration pending")
+	errPermanent   = errors.New("internal error")
 	cudnController = userdefinednetworkv1.SchemeGroupVersion.WithKind("ClusterUserDefinedNetwork")
 )
+
+func isRetriableError(err error) bool {
+	switch {
+	case errors.Is(err, errConfig), errors.Is(err, errPending), errors.Is(err, errPermanent):
+		return false
+	default:
+		return true
+	}
+}
 
 // Controller reconciles RouteAdvertisements
 type Controller struct {
@@ -281,7 +291,7 @@ func (c *Controller) reconcile(name string) error {
 	}
 
 	hadUpdates, err := c.reconcileRouteAdvertisements(name, ra)
-	if err != nil && !errors.Is(err, errConfig) && !errors.Is(err, errPending) {
+	if err != nil && isRetriableError(err) {
 		return fmt.Errorf("failed to reconcile RouteAdvertisements %q: %w", name, err)
 	}
 
@@ -600,7 +610,7 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 			// A malformed annotation must not be silently skipped: the
 			// VTEP IPs for this node would not be advertised, breaking
 			// VXLAN underlay reachability and all EVPN traffic to/from it.
-			return nil, nil, fmt.Errorf("%w: failed to parse VTEP annotation for VTEPs %v on node %s: %w", errConfig, sets.List(vtepNames), node.Name, err)
+			return nil, nil, fmt.Errorf("%w: failed to parse VTEP annotation for VTEPs %v on node %s: %w", errPermanent, sets.List(vtepNames), node.Name, err)
 		}
 		for _, vtepName := range sets.List(vtepNames) {
 			entry, ok := vteps[vtepName]
@@ -635,8 +645,8 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 				return nil, err
 			}
 			subnets, err := util.ParseNodeHostSubnetsAnnotation(node)
-			if err != nil {
-				return nil, fmt.Errorf("%w: waiting for subnet annotation to be set for node %q: %w", errConfig, nodeName, err)
+			if err != nil && !util.IsAnnotationNotSetError(err) {
+				return nil, fmt.Errorf("%w: failed to parse subnet annotation for node %q: %w", errPermanent, nodeName, err)
 			}
 			hostSubnets[nodeName] = make(map[string][]string, len(subnets))
 			for network, subnet := range subnets {
@@ -674,11 +684,10 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 				}
 			} else {
 				subnets, err = getHostSubnets(nodeName, network)
-				if err != nil || len(subnets) == 0 {
-					return nil, fmt.Errorf("%w: will wait for subnet annotation to be set for node %q and network %q: %w", errConfig, nodeName, network, err)
+				if err != nil {
+					return nil, err
 				}
 			}
-
 		}
 		// gather EgressIPs
 		var eips []string

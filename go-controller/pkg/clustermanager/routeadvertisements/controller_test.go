@@ -145,8 +145,10 @@ func (tn testNode) Node() *corev1.Node {
 		primaryAddressAnnotation = "{\"ipv4\":\"" + nodePrimaryAddr[tn.Name] + "\", \"ipv6\":\"" + nodePrimaryAddrIPv6[tn.Name] + "\"}"
 	}
 	annotations := map[string]string{
-		"k8s.ovn.org/node-subnets": tn.SubnetsAnnotation,
-		util.OvnNodeIfAddr:         primaryAddressAnnotation,
+		util.OvnNodeIfAddr: primaryAddressAnnotation,
+	}
+	if tn.SubnetsAnnotation != "" {
+		annotations[types.NodeSubnetsAnnotation] = tn.SubnetsAnnotation
 	}
 	if tn.RawVTEPAnnotation != nil {
 		annotations[util.OVNNodeVTEPs] = *tn.RawVTEPAnnotation
@@ -996,8 +998,8 @@ func TestController_reconcile(t *testing.T) {
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
-			name: "fails to reconcile when subnet annotation is missing from node",
-			ra:   &testRA{Name: "ra", AdvertisePods: true},
+			name: "reconciles when subnet annotation is missing from node",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
 			frrConfigs: []*testFRRConfig{
 				{
 					Name:      "frrConfig",
@@ -1011,11 +1013,12 @@ func TestController_reconcile(t *testing.T) {
 			},
 			nodes:                []*testNode{{Name: "node"}},
 			reconcile:            "ra",
-			expectAcceptedStatus: metav1.ConditionFalse,
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
-			name: "fails to reconcile when subnet annotation is missing for network",
-			ra:   &testRA{Name: "ra", AdvertisePods: true},
+			name: "reconciles when subnet annotation is missing for network",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
 			frrConfigs: []*testFRRConfig{
 				{
 					Name:      "frrConfig",
@@ -1029,11 +1032,12 @@ func TestController_reconcile(t *testing.T) {
 			},
 			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"red\":\"1.1.0.0/24\"}"}},
 			reconcile:            "ra",
-			expectAcceptedStatus: metav1.ConditionFalse,
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
 			name: "fails to reconcile if a selectd FRRConfiguration has no matching VRF",
-			ra:   &testRA{Name: "ra", TargetVRF: "red", AdvertisePods: true},
+			ra:   &testRA{Name: "ra", TargetVRF: "red", AdvertisePods: true, SelectsDefault: true},
 			frrConfigs: []*testFRRConfig{
 				{
 					Name:      "frrConfig",
@@ -1094,7 +1098,7 @@ func TestController_reconcile(t *testing.T) {
 		},
 		{
 			name: "fails to reconcile if DisableMP is unset",
-			ra:   &testRA{Name: "ra", AdvertisePods: true},
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
 			frrConfigs: []*testFRRConfig{
 				{
 					Name:      "frrConfig",
