@@ -4,6 +4,7 @@
 package bridgeconfig
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -13,8 +14,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/egressip"
 	nodetypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/types"
 	nodeutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/util"
@@ -88,7 +92,7 @@ type BridgeConfiguration struct {
 	dropGARP   bool
 }
 
-func NewBridgeConfiguration(intfName, nodeName,
+func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
 	physicalNetworkName string,
 	nodeSubnets, gwIPs []*net.IPNet,
 	advertised bool) (*BridgeConfiguration, error) {
@@ -115,9 +119,9 @@ func NewBridgeConfiguration(intfName, nodeName,
 	res.netConfig[types.DefaultNetworkName].Advertised.Store(advertised)
 
 	// temp workaround for https://issues.redhat.com/browse/FDP-1537
-	// we need to ensure we continue dropping GARPs for any new bridge config if the run mode is ovnkube controller + ovnkube node + IC + single zone node
+	// we need to ensure we continue dropping GARPs for any new bridge config if the run mode is ovnkube controller + ovnkube node + single zone node
 	// FIXME: only add if run mode is ovnkube controller + node in single process
-	if config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeFull {
+	if config.OVNKubernetesFeature.EnableEgressIP && config.IsModeFull() {
 		// drop by default - set to false later when ovnkube controller has sync'd and changes propagated to OVN southbound database
 		// we should also match on run mode here to ensure ovnkube controller + ovnkube node are running in the same process
 		res.dropGARP = true
@@ -178,6 +182,17 @@ func NewBridgeConfiguration(intfName, nodeName,
 		if err != nil {
 			return nil, fmt.Errorf("nicToBridge failed for %s: %w", intfName, err)
 		}
+		if config.Gateway.DPUHostGatewayRepresentorInterface != "" {
+			_, stderr, repErr := util.RunOVSVsctl(
+				"--", "--may-exist", "add-port", bridgeName, config.Gateway.DPUHostGatewayRepresentorInterface,
+				"--", "set", "port", config.Gateway.DPUHostGatewayRepresentorInterface, "other-config:transient=true",
+			)
+			if repErr != nil {
+				return nil, fmt.Errorf("failed to add DPU host gateway representor %s to bridge %s: %w, stderr: %s",
+					config.Gateway.DPUHostGatewayRepresentorInterface, bridgeName, repErr, stderr)
+			}
+			klog.Infof("Adding host representor interface %s to bridge %s", config.Gateway.DPUHostGatewayRepresentorInterface, bridgeName)
+		}
 		res.bridgeName = bridgeName
 		res.gwIface = bridgeName
 		res.uplinkName = intfName
@@ -217,7 +232,7 @@ func NewBridgeConfiguration(intfName, nodeName,
 		}
 	}
 
-	res.interfaceID, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, physicalNetworkName)
+	res.interfaceID, err = bridgedGatewayNodeSetup(ovsClient, nodeName, res.bridgeName, physicalNetworkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
@@ -227,12 +242,8 @@ func NewBridgeConfiguration(intfName, nodeName,
 	defaultNetConfig.PatchPort = (&util.DefaultNetInfo{}).GetNetworkScopedPatchPortName(res.bridgeName, nodeName)
 
 	// for DPU we use the host MAC address for the Gateway configuration
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
-		hostRep, err := util.GetDPUHostInterface(res.bridgeName)
-		if err != nil {
-			return nil, err
-		}
-		res.macAddress, err = util.GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
+	if config.IsModeDPU() {
+		res.macAddress, err = util.GetDPUOps().GetHostGatewayMACAddress(res.bridgeName, nodeName)
 		if err != nil {
 			return nil, err
 		}
@@ -265,7 +276,7 @@ func (b *BridgeConfiguration) UpdateInterfaceIPAddresses(node *corev1.Node) ([]*
 
 	// For DPU, here we need to use the DPU host's IP address which is the tenant cluster's
 	// host internal IP address instead of the DPU's external bridge IP address.
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		nodeIfAddr, err := util.GetNodePrimaryDPUHostAddrAnnotation(node)
 		if err != nil {
 			return nil, err
@@ -406,9 +417,9 @@ func (b *BridgeConfiguration) ConfigureBridgePorts() error {
 
 	// Get ofport representing the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
 	var hostOVSInterfaceName string
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		var stderr string
-		hostRep, err := util.GetDPUHostInterface(b.bridgeName)
+		hostRep, err := util.GetDPUOps().GetDPUHostRepInterface(b.bridgeName)
 		if err != nil {
 			return err
 		}
@@ -560,7 +571,7 @@ func getIntfName(gatewayIntf string) (string, error) {
 
 // bridgedGatewayNodeSetup enables forwarding on bridge interface, sets up the physical network name mappings for the bridge,
 // and returns an ifaceID created from the bridge name and the node name
-func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (string, error) {
+func bridgedGatewayNodeSetup(ovsClient libovsdbclient.Client, nodeName, bridgeName, physicalNetworkName string) (string, error) {
 	// IPv6 forwarding is enabled globally
 	if config.IPv4Mode {
 		err := util.SetforwardingModeForInterface(bridgeName)
@@ -573,21 +584,27 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (
 	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
-	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-		"external_ids:ovn-bridge-mappings")
-	if err != nil {
-		return "", fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	existing := ""
+	if ovs, err := ovsops.GetOpenvSwitch(ovsClient); err != nil {
+		if !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return "", fmt.Errorf("failed to get Open_vSwitch row: %w", err)
+		}
+		// no row yet => no existing mappings
+	} else {
+		existing = ovs.ExternalIDs["ovn-bridge-mappings"]
 	}
+
 	// skip the existing mapping setting for the specified physicalNetworkName
 	mapString := ""
-	bridgeMappings := strings.Split(stdout, ",")
-	for _, bridgeMapping := range bridgeMappings {
-		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network != physicalNetworkName {
-			if len(mapString) != 0 {
-				mapString += ","
+	if existing != "" {
+		for _, bridgeMapping := range strings.Split(existing, ",") {
+			m := strings.Split(bridgeMapping, ":")
+			if network := m[0]; network != physicalNetworkName {
+				if len(mapString) != 0 {
+					mapString += ","
+				}
+				mapString += bridgeMapping
 			}
-			mapString += bridgeMapping
 		}
 	}
 	if len(mapString) != 0 {
@@ -595,11 +612,10 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (
 	}
 	mapString += physicalNetworkName + ":" + bridgeName
 
-	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
-		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
-	if err != nil {
-		return "", fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
-			", stderr:%s (%v)", bridgeName, stderr, err)
+	if err := ovsops.UpdateOpenvSwitchExternalIDs(ovsClient, map[string]string{
+		"ovn-bridge-mappings": mapString,
+	}); err != nil {
+		return "", fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s: %w", bridgeName, err)
 	}
 
 	ifaceID := bridgeName + "_" + nodeName

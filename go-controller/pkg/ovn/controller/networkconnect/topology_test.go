@@ -43,11 +43,15 @@ func chassisIDForNode(nodeName string) string {
 
 type testNetworkManager struct {
 	networkmanager.FakeNetworkManager
-	nodeHas map[string]bool
+	nodeHas map[string]map[string]bool
 }
 
-func (t *testNetworkManager) NodeHasNetwork(_ string, networkName string) bool {
-	return t.nodeHas[networkName]
+func (t *testNetworkManager) NodeHasNetwork(node, networkName string) bool {
+	networks, ok := t.nodeHas[node]
+	if !ok {
+		return false
+	}
+	return networks[networkName]
 }
 
 func TestGetConnectRouterName(t *testing.T) {
@@ -711,6 +715,15 @@ func TestEnsureConnectPortsOps(t *testing.T) {
 			c := &Controller{
 				nbClient: nbClient,
 				zone:     tt.zone,
+				networkManager: &testNetworkManager{
+					nodeHas: func() map[string]map[string]bool {
+						nodeHas := map[string]map[string]bool{}
+						for _, node := range tt.nodes {
+							nodeHas[node.Name] = map[string]bool{tt.networkName: true}
+						}
+						return nodeHas
+					}(),
+				},
 			}
 
 			cnc := &networkconnectv1.ClusterNetworkConnect{
@@ -765,6 +778,84 @@ func TestEnsureConnectPortsOps(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnsureConnectPortsOpsDeletesInactiveLayer3RemoteNodePorts(t *testing.T) {
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{
+		NBData: []libovsdbtest.TestData{
+			&nbdb.LogicalRouter{
+				UUID:  "connect-router-uuid",
+				Name:  "connect_router_test-cnc",
+				Ports: []string{"connect-port-uuid"},
+			},
+			&nbdb.LogicalRouter{
+				UUID:  "network-router-uuid",
+				Name:  "cluster-router_test-network",
+				Ports: []string{"network-port-uuid"},
+			},
+			&nbdb.LogicalRouterPort{
+				UUID: "connect-port-uuid",
+				Name: ovntypes.ConnectRouterToRouterPrefix + "test-cnc_test-network_node2",
+			},
+			&nbdb.LogicalRouterPort{
+				UUID: "network-port-uuid",
+				Name: ovntypes.RouterToConnectRouterPrefix + "test-network_node2_test-cnc",
+			},
+		},
+	}, nil)
+	require.NoError(t, err)
+	defer cleanup.Cleanup()
+
+	c := &Controller{
+		nbClient: nbClient,
+		zone:     "node1",
+		networkManager: &testNetworkManager{
+			nodeHas: map[string]map[string]bool{
+				"node2": {"test-network": false},
+			},
+		},
+	}
+
+	cnc := &networkconnectv1.ClusterNetworkConnect{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-cnc"},
+		Spec: networkconnectv1.ClusterNetworkConnectSpec{
+			ConnectSubnets: []networkconnectv1.ConnectSubnet{
+				{CIDR: "192.168.0.0/16", NetworkPrefix: 24},
+			},
+		},
+	}
+
+	netInfo := &mocks.NetInfo{}
+	netInfo.On("GetNetworkName").Return("test-network")
+	netInfo.On("GetNetworkID").Return(1)
+	netInfo.On("TopologyType").Return(ovntypes.Layer3Topology)
+	netInfo.On("GetNetworkScopedClusterRouterName").Return("cluster-router_test-network")
+
+	nodes := []*corev1.Node{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node2",
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-id": "2",
+					util.OvnNodeChassisID: chassisIDForNode("node2"),
+					util.OvnNodeZoneName:  "node2",
+				},
+			},
+		},
+	}
+
+	ops, err := c.ensureConnectPortsOps(nil, cnc, netInfo, []*net.IPNet{ovntest.MustParseIPNet("192.168.0.0/24")}, nodes, true)
+	require.NoError(t, err)
+	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
+	require.NoError(t, err)
+
+	connectRouter, err := libovsdbops.GetLogicalRouter(nbClient, &nbdb.LogicalRouter{Name: "connect_router_test-cnc"})
+	require.NoError(t, err)
+	assert.Empty(t, connectRouter.Ports)
+
+	networkRouter, err := libovsdbops.GetLogicalRouter(nbClient, &nbdb.LogicalRouter{Name: "cluster-router_test-network"})
+	require.NoError(t, err)
+	assert.Empty(t, networkRouter.Ports)
 }
 
 func TestCleanupNetworkConnections(t *testing.T) {
@@ -915,26 +1006,45 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 
 	fakeClientset := util.GetOVNClientset().GetOVNKubeControllerClientset()
 
-	nodeSubnets := map[string]string{
+	node1Subnets := map[string]string{
 		"netA": "10.0.0.0/24",
 		"netB": "10.1.0.0/24",
 	}
-	subnetsBytes, err := json.Marshal(nodeSubnets)
+	node2Subnets := map[string]string{
+		"netA": "10.0.1.0/24",
+		"netB": "10.1.1.0/24",
+	}
+	node1SubnetsBytes, err := json.Marshal(node1Subnets)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	node2SubnetsBytes, err := json.Marshal(node2Subnets)
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
-	// Seed a local node with per-network subnets and required annotations.
-	node := &corev1.Node{
+	// Seed local and remote nodes with per-network subnets and required annotations.
+	node1 := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node1",
 			Annotations: map[string]string{
 				util.OvnNodeZoneName:       "zone1",
 				util.OvnNodeID:             "1",
 				util.OvnNodeChassisID:      chassisIDForNode("node1"),
-				"k8s.ovn.org/node-subnets": string(subnetsBytes),
+				"k8s.ovn.org/node-subnets": string(node1SubnetsBytes),
 			},
 		},
 	}
-	_, err = fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	node2 := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node2",
+			Annotations: map[string]string{
+				util.OvnNodeZoneName:       "zone2",
+				util.OvnNodeID:             "2",
+				util.OvnNodeChassisID:      chassisIDForNode("node2"),
+				"k8s.ovn.org/node-subnets": string(node2SubnetsBytes),
+			},
+		},
+	}
+	_, err = fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node1, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	_, err = fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node2, metav1.CreateOptions{})
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	// Start node informer so getNodeSubnet can resolve node annotations.
@@ -971,7 +1081,7 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 		{CIDR: ovntest.MustParseIPNet("10.1.0.0/16")},
 	})
 
-	// netA is active locally, netB is inactive initially.
+	// netA is active locally, netB is inactive locally but active on node2.
 	networks := map[string]util.NetInfo{
 		"netA": networkA,
 		"netB": networkB,
@@ -980,9 +1090,15 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 		FakeNetworkManager: networkmanager.FakeNetworkManager{
 			PrimaryNetworks: networks,
 		},
-		nodeHas: map[string]bool{
-			"netA": true,
-			"netB": false,
+		nodeHas: map[string]map[string]bool{
+			"node1": {
+				"netA": true,
+				"netB": false,
+			},
+			"node2": {
+				"netA": false,
+				"netB": true,
+			},
 		},
 	}
 
@@ -1002,7 +1118,7 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 		zone:           "zone1",
 		nodeLister:     wf.NodeCoreInformer().Lister(),
 		networkManager: nm,
-		localZoneNode:  node,
+		localZoneNode:  node1,
 		cncCache: map[string]*networkConnectState{
 			cncName: {
 				name:              cncName,
@@ -1027,7 +1143,7 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 		util.ComputeNetworkOwner(ovntypes.Layer3Topology, 2): {ovntest.MustParseIPNet("192.168.1.0/24")},
 	}
 
-	// First sync: netB inactive, so only remote/static programming is expected.
+	// First sync: netB inactive locally, but active remotely on node2.
 	err = c.syncNetworkConnections(cnc, allocatedSubnets)
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
@@ -1038,21 +1154,22 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	g.Expect(policies).ToNot(gomega.BeEmpty())
 
-	// Static routes for netB should be programmed on the connect router.
+	// Static routes for netB should be programmed for the remote active node only.
 	routes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(nbClient, func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return item.ExternalIDs[libovsdbops.ObjectNameKey.String()] == cncName &&
-			item.ExternalIDs[libovsdbops.NetworkIDKey.String()] == "2"
+			item.ExternalIDs[libovsdbops.NetworkIDKey.String()] == "2" &&
+			item.ExternalIDs[libovsdbops.NodeIDKey.String()] == "2"
 	})
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	g.Expect(routes).ToNot(gomega.BeEmpty())
-	portPairInfo, err := GetP2PAddresses(allocatedSubnets[util.ComputeNetworkOwner(ovntypes.Layer3Topology, 2)], 1)
+	portPairInfo, err := GetP2PAddresses(allocatedSubnets[util.ComputeNetworkOwner(ovntypes.Layer3Topology, 2)], 2)
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	expectedNexthops := util.IPNetsToIPs(portPairInfo.networkPortIPs)
 	g.Expect(expectedNexthops).ToNot(gomega.BeEmpty())
 
 	foundRoute := false
 	for _, route := range routes {
-		if route.IPPrefix == "10.1.0.0/24" {
+		if route.IPPrefix == "10.1.1.0/24" {
 			g.Expect(route.Nexthop).To(gomega.Equal(expectedNexthops[0].String()))
 			foundRoute = true
 			break
@@ -1060,22 +1177,44 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 	}
 	g.Expect(foundRoute).To(gomega.BeTrue())
 
-	// No local router port should be created for inactive netB.
+	// No local router port should be created for inactive local netB.
 	ports, err := libovsdbops.FindLogicalRouterPortWithPredicate(nbClient, func(item *nbdb.LogicalRouterPort) bool {
-		return item.ExternalIDs[libovsdbops.NetworkIDKey.String()] == "2" &&
-			item.ExternalIDs[libovsdbops.RouterNameKey.String()] == "cluster-router_netB"
+		return item.Name == getNetworkRouterToConnectRouterPortName("netB", "node1", cncName)
 	})
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	g.Expect(ports).To(gomega.BeEmpty())
 
-	// Activate netB and re-sync: local router ports and policies should now be created.
-	nm.nodeHas["netB"] = true
+	// Remote connect-router port for active node2 should exist.
+	_, err = libovsdbops.GetLogicalRouterPort(nbClient, &nbdb.LogicalRouterPort{
+		Name: getConnectRouterToNetworkRouterPortName(cncName, "netB", "node2"),
+	})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	// Deactivate remote netB and re-sync: remote routes and remote connect port should be removed.
+	nm.nodeHas["node2"]["netB"] = false
+	err = c.syncNetworkConnections(cnc, allocatedSubnets)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	routes, err = libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(nbClient, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.ExternalIDs[libovsdbops.ObjectNameKey.String()] == cncName &&
+			item.ExternalIDs[libovsdbops.NetworkIDKey.String()] == "2" &&
+			item.ExternalIDs[libovsdbops.NodeIDKey.String()] == "2"
+	})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Expect(routes).To(gomega.BeEmpty())
+
+	_, err = libovsdbops.GetLogicalRouterPort(nbClient, &nbdb.LogicalRouterPort{
+		Name: getConnectRouterToNetworkRouterPortName(cncName, "netB", "node2"),
+	})
+	g.Expect(err).To(gomega.HaveOccurred())
+
+	// Activate local netB and re-sync: local router ports and reverse policies should be created.
+	nm.nodeHas["node1"]["netB"] = true
 	err = c.syncNetworkConnections(cnc, allocatedSubnets)
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	ports, err = libovsdbops.FindLogicalRouterPortWithPredicate(nbClient, func(item *nbdb.LogicalRouterPort) bool {
-		return item.ExternalIDs[libovsdbops.NetworkIDKey.String()] == "2" &&
-			item.ExternalIDs[libovsdbops.RouterNameKey.String()] == "cluster-router_netB"
+		return item.Name == getNetworkRouterToConnectRouterPortName("netB", "node1", cncName)
 	})
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	g.Expect(ports).ToNot(gomega.BeEmpty())
@@ -2102,6 +2241,15 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 				nbClient:   nbClient,
 				zone:       tt.zone,
 				nodeLister: wf.NodeCoreInformer().Lister(),
+				networkManager: &testNetworkManager{
+					nodeHas: func() map[string]map[string]bool {
+						nodeHas := map[string]map[string]bool{}
+						for _, node := range tt.nodes {
+							nodeHas[node.name] = map[string]bool{tt.networkName: true}
+						}
+						return nodeHas
+					}(),
+				},
 			}
 
 			cnc := &networkconnectv1.ClusterNetworkConnect{
@@ -2116,7 +2264,7 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 				nodes = append(nodes, node)
 			}
 
-			ops, err := c.ensureStaticRoutesOps(nil, cnc, netInfo, tt.connectSubnets, nodes)
+			ops, err := c.ensureStaticRoutesOps(nil, cnc, netInfo, tt.connectSubnets, nodes, true)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -3797,4 +3945,137 @@ func TestCleanupPartialConnectivity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnsureStaticRoutesOpsDeletesInactiveLayer3RemoteNodeRoutes(t *testing.T) {
+	fakeClientset := util.GetOVNClientset().GetOVNKubeControllerClientset()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node2",
+			Annotations: map[string]string{
+				"k8s.ovn.org/node-id": "2",
+			},
+		},
+	}
+	_, err := fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset)
+	require.NoError(t, err)
+	err = wf.Start()
+	require.NoError(t, err)
+	defer wf.Shutdown()
+
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer syncCancel()
+	synced := cache.WaitForCacheSync(syncCtx.Done(), wf.NodeCoreInformer().Informer().HasSynced)
+	require.True(t, synced, "informer caches should sync")
+
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{
+		NBData: []libovsdbtest.TestData{
+			&nbdb.LogicalRouter{
+				UUID:         "connect-router-uuid",
+				Name:         "connect_router_test-cnc",
+				StaticRoutes: []string{"route-uuid"},
+			},
+			&nbdb.LogicalRouterStaticRoute{
+				UUID:     "route-uuid",
+				IPPrefix: "10.128.2.0/24",
+				Nexthop:  "192.168.0.3",
+				ExternalIDs: map[string]string{
+					libovsdbops.ObjectNameKey.String(): "test-cnc",
+					libovsdbops.NetworkIDKey.String():  "1",
+					libovsdbops.NodeIDKey.String():     "2",
+				},
+			},
+		},
+	}, nil)
+	require.NoError(t, err)
+	defer cleanup.Cleanup()
+
+	netInfo := &mocks.NetInfo{}
+	netInfo.On("GetNetworkName").Return("test-network")
+	netInfo.On("GetNetworkID").Return(1)
+	netInfo.On("TopologyType").Return(ovntypes.Layer3Topology)
+	netInfo.On("Subnets").Return([]config.CIDRNetworkEntry{{CIDR: ovntest.MustParseIPNet("10.128.0.0/16")}})
+
+	c := &Controller{
+		nbClient:   nbClient,
+		zone:       "node1",
+		nodeLister: wf.NodeCoreInformer().Lister(),
+		networkManager: &testNetworkManager{
+			nodeHas: map[string]map[string]bool{
+				"node2": {"test-network": false},
+			},
+		},
+	}
+
+	listerNode, err := wf.NodeCoreInformer().Lister().Get("node2")
+	require.NoError(t, err)
+
+	ops, err := c.ensureStaticRoutesOps(
+		nil,
+		&networkconnectv1.ClusterNetworkConnect{ObjectMeta: metav1.ObjectMeta{Name: "test-cnc"}},
+		netInfo,
+		[]*net.IPNet{ovntest.MustParseIPNet("192.168.0.0/24")},
+		[]*corev1.Node{listerNode},
+		true,
+	)
+	require.NoError(t, err)
+	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
+	require.NoError(t, err)
+
+	router, err := libovsdbops.GetLogicalRouter(nbClient, &nbdb.LogicalRouter{Name: "connect_router_test-cnc"})
+	require.NoError(t, err)
+	assert.Empty(t, router.StaticRoutes)
+}
+
+func TestEnsureStaticRoutesOpsDeletesInactiveLayer2Routes(t *testing.T) {
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{
+		NBData: []libovsdbtest.TestData{
+			&nbdb.LogicalRouter{
+				UUID:         "connect-router-uuid",
+				Name:         "connect_router_test-cnc",
+				StaticRoutes: []string{"route-uuid"},
+			},
+			&nbdb.LogicalRouterStaticRoute{
+				UUID:     "route-uuid",
+				IPPrefix: "10.200.0.0/24",
+				Nexthop:  "192.168.0.1",
+				ExternalIDs: map[string]string{
+					libovsdbops.ObjectNameKey.String(): "test-cnc",
+					libovsdbops.NetworkIDKey.String():  "1",
+					libovsdbops.NodeIDKey.String():     "0",
+				},
+			},
+		},
+	}, nil)
+	require.NoError(t, err)
+	defer cleanup.Cleanup()
+
+	netInfo := &mocks.NetInfo{}
+	netInfo.On("GetNetworkName").Return("test-l2-network")
+	netInfo.On("GetNetworkID").Return(1)
+	netInfo.On("TopologyType").Return(ovntypes.Layer2Topology)
+	netInfo.On("Subnets").Return([]config.CIDRNetworkEntry{{CIDR: ovntest.MustParseIPNet("10.200.0.0/24")}})
+
+	c := &Controller{
+		nbClient: nbClient,
+	}
+
+	ops, err := c.ensureStaticRoutesOps(
+		nil,
+		&networkconnectv1.ClusterNetworkConnect{ObjectMeta: metav1.ObjectMeta{Name: "test-cnc"}},
+		netInfo,
+		[]*net.IPNet{ovntest.MustParseIPNet("192.168.0.0/31")},
+		nil,
+		false,
+	)
+	require.NoError(t, err)
+	_, err = libovsdbops.TransactAndCheck(nbClient, ops)
+	require.NoError(t, err)
+
+	router, err := libovsdbops.GetLogicalRouter(nbClient, &nbdb.LogicalRouter{Name: "connect_router_test-cnc"})
+	require.NoError(t, err)
+	assert.Empty(t, router.StaticRoutes)
 }
