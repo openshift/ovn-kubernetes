@@ -101,8 +101,6 @@ type BaseNetworkController struct {
 	retryNetworkPolicies *ovnretry.RetryFramework
 	// retry framework for network policies
 	retryMultiNetworkPolicies *ovnretry.RetryFramework
-	// retry framework for IPAMClaims
-	retryIPAMClaims *ovnretry.RetryFramework
 
 	// nodeReconciler is the shared node controller used by controllers that
 	// reconcile node topology through pkg/controllers/node.
@@ -114,8 +112,6 @@ type BaseNetworkController struct {
 	podHandler *factory.Handler
 	// namespace events factory Handler
 	namespaceHandler *factory.Handler
-	// ipam claims events factory Handler
-	ipamClaimsHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager

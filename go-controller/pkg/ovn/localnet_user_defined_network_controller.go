@@ -138,9 +138,6 @@ func (h *LocalnetUserDefinedNetworkControllerEventHandler) SyncFunc(objs []inter
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
-		case factory.IPAMClaimsType:
-			syncFunc = h.oc.syncIPAMClaims
-
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -330,9 +327,6 @@ func (oc *LocalnetUserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) 
 
 func (oc *LocalnetUserDefinedNetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
-		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
-	}
 
 	// For secondary networks, we don't have to watch namespace events if
 	// multi-network policy support is not enabled. We don't support

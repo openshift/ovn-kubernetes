@@ -167,9 +167,6 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interfa
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
 
-		case factory.IPAMClaimsType:
-			syncFunc = h.oc.syncIPAMClaims
-
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
 		}
@@ -635,9 +632,6 @@ func (oc *Layer2UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) er
 
 func (oc *Layer2UserDefinedNetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
-		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
-	}
 
 	// When a user-defined network is enabled as a primary network for namespace,
 	// then watch for namespace and network policy events.

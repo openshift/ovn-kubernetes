@@ -4,14 +4,12 @@
 package ovn
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"strings"
 	"time"
 
-	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -35,7 +33,6 @@ import (
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -98,8 +95,6 @@ func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommo
 				mp.Namespace, mp.Name, err)
 			return err
 		}
-	case factory.IPAMClaimsType:
-		return nil
 
 	default:
 		return bsnc.AddResourceCommon(objType, obj)
@@ -160,8 +155,6 @@ func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCo
 				return err
 			}
 		}
-	case factory.IPAMClaimsType:
-		return nil
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -203,25 +196,6 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 				mp.Namespace, mp.Name, err)
 			return err
 		}
-
-	case factory.IPAMClaimsType:
-		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
-		if !ok {
-			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
-		}
-
-		switchName, err := bsnc.getExpectedSwitchName(dummyPod())
-		if err != nil {
-			return err
-		}
-		ipAllocator := bsnc.lsManager.ForSwitch(switchName)
-		err = bsnc.ipamClaimsReconciler.Reconcile(ipamClaim, nil, ipAllocator)
-		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
-			return fmt.Errorf("error deleting IPAMClaim: %w", err)
-		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
-			return nil // let's avoid the log below, since nothing was released.
-		}
-		klog.Infof("Released IPs %q for network %q", ipamClaim.Status.IPs, ipamClaim.Spec.Network)
 
 	default:
 		return bsnc.DeleteResourceCommon(objType, obj)
@@ -895,19 +869,6 @@ func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Op
 		return ops, fmt.Errorf("failed to get ops to delete address sets owned by controller %s", controllerName)
 	}
 	return ops, nil
-}
-
-// WatchIPAMClaims starts the watching of IPAMClaim resources and calls
-// back the appropriate handler logic
-func (bsnc *BaseUserDefinedNetworkController) WatchIPAMClaims() error {
-	if bsnc.ipamClaimsHandler != nil {
-		return nil
-	}
-	handler, err := bsnc.retryIPAMClaims.WatchResource()
-	if err != nil {
-		bsnc.ipamClaimsHandler = handler
-	}
-	return err
 }
 
 func (oc *BaseUserDefinedNetworkController) allowPersistentIPs() bool {
