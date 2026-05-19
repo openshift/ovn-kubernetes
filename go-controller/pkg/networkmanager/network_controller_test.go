@@ -65,13 +65,16 @@ func TestSetAdvertisements(t *testing.T) {
 			},
 		},
 	}
-	nonPodNetworkRA := ratypes.RouteAdvertisements{
+	egressIPRA := ratypes.RouteAdvertisements{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: testRAName,
 		},
 		Spec: ratypes.RouteAdvertisementsSpec{
 			TargetVRF:    testVRFName,
 			NodeSelector: metav1.LabelSelector{},
+			Advertisements: []ratypes.AdvertisementType{
+				ratypes.EgressIP,
+			},
 		},
 		Status: ratypes.RouteAdvertisementsStatus{
 			Conditions: []metav1.Condition{
@@ -109,20 +112,21 @@ func TestSetAdvertisements(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		network         *ovncnitypes.NetConf
-		ra              *ratypes.RouteAdvertisements
-		skipRACreate    bool
-		node            corev1.Node
-		expectNoNetwork bool
-		expected        map[string][]string
+		name                      string
+		network                   *ovncnitypes.NetConf
+		ra                        *ratypes.RouteAdvertisements
+		skipRACreate              bool
+		node                      corev1.Node
+		expectNoNetwork           bool
+		expectedPodAdvertisements map[string][]string
+		expectedEIPAdvertisements map[string][]string
 	}{
 		{
 			name:    "reconciles VRF advertisements for selected node of default node network controller",
 			network: defaultNetwork,
 			ra:      &podNetworkRA,
 			node:    testNode,
-			expected: map[string][]string{
+			expectedPodAdvertisements: map[string][]string{
 				testNodeName: {testVRFName},
 			},
 		},
@@ -131,15 +135,18 @@ func TestSetAdvertisements(t *testing.T) {
 			network: primaryNetwork,
 			ra:      &podNetworkRA,
 			node:    testNodeOnZone,
-			expected: map[string][]string{
+			expectedPodAdvertisements: map[string][]string{
 				testNodeOnZoneName: {testVRFName},
 			},
 		},
 		{
-			name:    "ignores advertisements that are not for the pod network",
+			name:    "reconciles EgressIP advertisements",
 			network: defaultNetwork,
-			ra:      &nonPodNetworkRA,
+			ra:      &egressIPRA,
 			node:    testNode,
+			expectedEIPAdvertisements: map[string][]string{
+				testNodeName: {testVRFName},
+			},
 		},
 		{
 			name:    "ignores advertisements that are not for applicable node",
@@ -266,10 +273,14 @@ func TestSetAdvertisements(t *testing.T) {
 				}
 				g.Expect(reconcilable).ToNot(gomega.BeNil())
 
-				if tt.expected == nil {
-					tt.expected = map[string][]string{}
+				if tt.expectedPodAdvertisements == nil {
+					tt.expectedPodAdvertisements = map[string][]string{}
 				}
-				g.Expect(reconcilable.GetPodNetworkAdvertisedVRFs()).To(gomega.Equal(tt.expected))
+				if tt.expectedEIPAdvertisements == nil {
+					tt.expectedEIPAdvertisements = map[string][]string{}
+				}
+				g.Expect(reconcilable.GetPodNetworkAdvertisedVRFs()).To(gomega.Equal(tt.expectedPodAdvertisements))
+				g.Expect(reconcilable.GetEgressIPAdvertisedVRFs()).To(gomega.Equal(tt.expectedEIPAdvertisements))
 			}
 
 			g.Eventually(meetsExpectations).Should(gomega.Succeed())
