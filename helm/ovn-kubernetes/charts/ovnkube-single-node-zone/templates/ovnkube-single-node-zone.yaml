@@ -437,6 +437,8 @@ spec:
           value: {{ include "isUnprivilegedMode" . | quote }}
         - name: OVN_EX_GW_NETWORK_INTERFACE
           value: {{ default "" .Values.global.extGatewayNetworkInterface | quote }}
+        - name: OVN_SSL_ENABLE
+          value: {{ include "isSslEnabled" . | quote }}
         - name: OVN_REMOTE_PROBE_INTERVAL
           value: {{ default 100000 .Values.global.remoteProbeInterval | quote }}
         - name: OVN_MONITOR_ALL

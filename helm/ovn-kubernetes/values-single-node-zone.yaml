@@ -99,6 +99,9 @@ global:
   enablePreconfiguredUDNAddresses: false
   # -- Configure to enable IPsec
   enableIpsec: false
+  # -- Use SSL transport for the Egress IP gRPC health-check (NB cert paths
+  # are reused for this; OVN NB/SB DB connections are always unix sockets).
+  enableSsl: false
   # -- Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes
   enableMultiExternalGateway: true
   # -- Configure to use stateless network policy feature with ovn-kubernetes

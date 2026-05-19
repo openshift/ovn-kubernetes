@@ -222,6 +222,8 @@ spec:
           value: {{ default "" .Values.global.extGatewayNetworkInterface | quote }}
         - name: OVN_ENABLE_OVNKUBE_IDENTITY
           value: {{ hasKey .Values.global "enableOvnKubeIdentity" | ternary .Values.global.enableOvnKubeIdentity true | quote }}
+        - name: OVN_SSL_ENABLE
+          value: {{ include "isSslEnabled" . | quote }}
         - name: OVN_REMOTE_PROBE_INTERVAL
           value: {{ default 100000 .Values.global.remoteProbeInterval | quote }}
         - name: OVN_MONITOR_ALL

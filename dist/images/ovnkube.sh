@@ -141,6 +141,14 @@ fi
 # certs and private keys for k8s and OVN
 k8s_cacert=${K8S_CACERT:-/var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
 
+# NB cert material used by ovnkube components to authenticate the Egress IP
+# gRPC health-check channel (historical name; no longer used for the OVN NB
+# DB connection which is unix-socket only since central mode was removed).
+ovn_ca_cert=/ovn-cert/ca-cert.pem
+ovn_controller_pk=/ovn-cert/ovncontroller-privkey.pem
+ovn_controller_cert=/ovn-cert/ovncontroller-cert.pem
+ovn_controller_cname="ovncontroller"
+
 # ovn-northd - /etc/sysconfig/ovn-northd
 ovn_northd_opts=${OVN_NORTHD_OPTS:-""}
 
@@ -1746,6 +1754,20 @@ ovnkube-controller-with-node() {
   fi
   echo "ovn_disable_requestedchassis_flag=${ovn_disable_requestedchassis_flag}"
 
+  # NB client cert material is only consumed by the Egress IP gRPC
+  # health-check channel (see pkg/ovn/healthcheck/egressip_healthcheck.go).
+  # The OVN NB/SB DB connections themselves are unix-socket only.
+  local ssl_opts=""
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ssl_opts="
+        --nb-client-privkey ${ovn_controller_pk}
+        --nb-client-cert ${ovn_controller_cert}
+        --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
+      "
+  }
+  echo "ssl_opts=${ssl_opts}"
+
   # Pass DPU Host cluster access credentials provided via environment variables in case of DPU
   cluster_access_opts=""
   if [[ ${ovnkube_node_mode} == "dpu" ]]; then
@@ -1802,6 +1824,7 @@ ovnkube-controller-with-node() {
     ${ovnkube_node_mode_flag} \
     ${ovn_simulate_dpu_flag} \
     ${ovn_dpu_host_gateway_representor_interface_flag} \
+    ${ssl_opts} \
     ${ovn_unprivileged_flag} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
@@ -2048,6 +2071,21 @@ ovn-cluster-manager() {
   fi
   echo "ovn_allow_icmp_netpol_flag=${ovn_allow_icmp_netpol_flag}"
 
+  # NB client cert material is only consumed by the Egress IP gRPC
+  # health-check channel (see pkg/ovn/healthcheck/egressip_healthcheck.go).
+  # The cluster-manager is the gRPC client; the OVN NB/SB DB connections
+  # themselves are unix-socket only.
+  local ovn_cluster_manager_ssl_opts=""
+  [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+    ovn_cluster_manager_ssl_opts="
+        --nb-client-privkey ${ovn_controller_pk}
+        --nb-client-cert ${ovn_controller_cert}
+        --nb-client-cacert ${ovn_ca_cert}
+        --nb-cert-common-name ${ovn_controller_cname}
+      "
+  }
+  echo "ovn_cluster_manager_ssl_opts=${ovn_cluster_manager_ssl_opts}"
+
   echo "=============== ovn-cluster-manager ========== control plane node only"
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
     ${anp_enabled_flag} \
@@ -2071,6 +2109,7 @@ ovn-cluster-manager() {
     ${ovnkube_enable_multi_external_gateway_flag} \
     ${ovnkube_metrics_tls_opts} \
     ${ovn_encap_port_flag} \
+    ${ovn_cluster_manager_ssl_opts} \
     ${ovn_v4_join_subnet_opt} \
     ${ovn_v4_masquerade_subnet_opt} \
     ${ovn_v6_join_subnet_opt} \
@@ -2430,6 +2469,21 @@ ovn-node() {
   fi
   echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
 
+  # NB client cert material is only consumed by the Egress IP gRPC
+  # health-check channel (see pkg/ovn/healthcheck/egressip_healthcheck.go).
+  # The OVN NB/SB DB connections themselves are unix-socket only.
+  local ovn_node_ssl_opts=""
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+      [[ "yes" == ${OVN_SSL_ENABLE} ]] && {
+        ovn_node_ssl_opts="
+            --nb-client-privkey ${ovn_controller_pk}
+            --nb-client-cert ${ovn_controller_cert}
+            --nb-client-cacert ${ovn_ca_cert}
+            --nb-cert-common-name ${ovn_controller_cname}
+          "
+      }
+  fi
+
   echo "=============== ovn-node   --init-node"
   /usr/bin/ovnkube --init-node ${K8S_NODE} \
         ${anp_enabled_flag} \
@@ -2470,6 +2524,7 @@ ovn-node() {
         ${ovnkube_node_mode_flag} \
         ${ovn_simulate_dpu_flag} \
         ${ovn_dpu_host_gateway_representor_interface_flag} \
+        ${ovn_node_ssl_opts} \
         ${ovn_unprivileged_flag} \
         ${routable_mtu_flag} \
         ${sflow_targets} \
