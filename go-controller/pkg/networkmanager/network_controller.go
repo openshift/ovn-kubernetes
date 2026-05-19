@@ -12,6 +12,7 @@ import (
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -26,6 +27,8 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
+
+var errInformationPending = errors.New("network information pending")
 
 func newNetworkController(name, zone, node string, cm ControllerManager, wf watchFactory) *networkController {
 	nc := &networkController{
@@ -64,7 +67,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 			RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 			Informer:       wf.RouteAdvertisementsInformer().Informer(),
 			Lister:         nc.raLister.List,
-			Reconcile:      func(string) error { return nc.syncRunningNetworks() },
+			Reconcile:      func(string) error { return nc.reconcileAll() },
 			ObjNeedsUpdate: raNeedsUpdate,
 			Threadiness:    1,
 		}
@@ -78,7 +81,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 			RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 			Informer:       wf.NodeCoreInformer().Informer(),
 			Lister:         nc.nodeLister.List,
-			Reconcile:      func(string) error { return nc.syncRunningNetworks() },
+			Reconcile:      func(string) error { return nc.reconcileAll() },
 			ObjNeedsUpdate: nodeNeedsUpdate,
 			Threadiness:    1,
 		}
@@ -385,10 +388,10 @@ func (c *networkController) syncAll() error {
 	return nil
 }
 
-func (c *networkController) syncRunningNetworks() error {
+func (c *networkController) reconcileAll() error {
 	c.networkReconciler.Reconcile(types.DefaultNetworkName)
-	for _, network := range c.getAllNetworkStates() {
-		c.networkReconciler.Reconcile(network.controller.GetNetworkName())
+	for _, network := range c.getAllNetworks() {
+		c.networkReconciler.Reconcile(network.GetNetworkName())
 	}
 
 	return nil
@@ -421,6 +424,10 @@ func (c *networkController) syncNetwork(network string) error {
 	// fetch other relevant network information
 	err := c.gatherNetwork(want)
 	if err != nil {
+		if errors.Is(err, errInformationPending) {
+			klog.V(5).Infof("%s: skipping network %s: %v", c.name, network, err)
+			return nil
+		}
 		return fmt.Errorf("failed to fetch other network information for network %s: %w", network, err)
 	}
 
@@ -552,6 +559,14 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo) error
 	eipAdvertisements := map[string][]string{}
 	for raName := range raNames {
 		ra, err := c.raLister.Get(raName)
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf(
+				"%w: network %q needs RouteAdvertisements %q but not found yet",
+				errInformationPending,
+				network.GetNetworkName(),
+				raName,
+			)
+		}
 		if err != nil {
 			return err
 		}
@@ -562,14 +577,15 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo) error
 		}
 
 		accepted := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
-		if accepted == nil {
-			// if there is no status we can safely ignore
-			continue
-		}
-		if accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != ra.Generation {
+		if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != ra.Generation {
 			// if the RA is not accepted, we commit to no change, best to
 			// preserve the old config while we can't validate new config
-			return fmt.Errorf("failed to reconcile network %q: RouteAdvertisements %q not in accepted status", network.GetNetworkName(), ra.Name)
+			return fmt.Errorf(
+				"%w: network %q needs RouteAdvertisements %q which is not in accepted status yet",
+				errInformationPending,
+				network.GetNetworkName(),
+				ra.Name,
+			)
 		}
 
 		nodeSelector, err := metav1.LabelSelectorAsSelector(&ra.Spec.NodeSelector)
@@ -599,8 +615,22 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo) error
 			}
 		}
 	}
+
+	// wait until we have some advertisements for the networks that require it,
+	// best effort since we don't really know here what the network needs but we
+	// know it can't function without any advertisements
+	if hasAdvertisedTransport(network) && len(podAdvertisements) == 0 {
+		return fmt.Errorf(
+			"%w: network %q with transport %s needs pod network RouteAdvertisements but none found yet",
+			errInformationPending,
+			network.GetNetworkName(),
+			network.Transport(),
+		)
+	}
+
 	network.SetPodNetworkAdvertisedVRFs(podAdvertisements)
 	network.SetEgressIPAdvertisedVRFs(eipAdvertisements)
+
 	return nil
 }
 
@@ -623,14 +653,18 @@ func (c *networkController) isNodeManaged(node *corev1.Node) bool {
 	return false
 }
 
+func hasAdvertisedTransport(network util.NetInfo) bool {
+	return network.Transport() == types.NetworkTransportEVPN || network.Transport() == types.NetworkTransportNoOverlay
+}
+
 func raNeedsUpdate(oldRA, newRA *ratypes.RouteAdvertisements) bool {
-	if oldRA == nil || newRA == nil {
-		// handle RA add/delete through the NAD annotation update
-		return false
+	if newRA == nil {
+		// won't be called on delete but be on the safe side
+		return true
 	}
 
 	// don't process resync or objects that are marked for deletion
-	if oldRA.ResourceVersion == newRA.ResourceVersion ||
+	if (oldRA != nil && oldRA.ResourceVersion == newRA.ResourceVersion) ||
 		!newRA.GetDeletionTimestamp().IsZero() {
 		return false
 	}
@@ -647,6 +681,12 @@ func raNeedsUpdate(oldRA, newRA *ratypes.RouteAdvertisements) bool {
 	if newCondition.ObservedGeneration != newRA.Generation {
 		return false
 	}
+
+	// RA creation observed directly in accepted status
+	if oldRA == nil {
+		return true
+	}
+
 	// there had to be a change on observed generation or status, otherwise we
 	// already processed this RA in its current form
 	oldCondition := meta.FindStatusCondition(oldRA.Status.Conditions, "Accepted")

@@ -112,6 +112,7 @@ func TestSetAdvertisements(t *testing.T) {
 		name            string
 		network         *ovncnitypes.NetConf
 		ra              *ratypes.RouteAdvertisements
+		skipRACreate    bool
 		node            corev1.Node
 		expectNoNetwork bool
 		expected        map[string][]string
@@ -166,6 +167,29 @@ func TestSetAdvertisements(t *testing.T) {
 			node:            testNode,
 			expectNoNetwork: true,
 		},
+		{
+			name:            "does not start network when referenced RouteAdvertisements does not exist",
+			network:         primaryNetwork,
+			ra:              &podNetworkRA,
+			skipRACreate:    true,
+			node:            testNode,
+			expectNoNetwork: true,
+		},
+		{
+			name: "does not start EVPN network without RouteAdvertisements",
+			network: &ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{
+					Name: "evpn-no-ra",
+					Type: "ovn-k8s-cni-overlay",
+				},
+				Topology:  "layer3",
+				Role:      "primary",
+				MTU:       1400,
+				Transport: types.NetworkTransportEVPN,
+			},
+			node:            testNode,
+			expectNoNetwork: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -187,16 +211,21 @@ func TestSetAdvertisements(t *testing.T) {
 
 			namespace, name, err := cache.SplitMetaNamespaceKey(testNADName)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
-			nadAnnotations := map[string]string{
-				types.OvnRouteAdvertisementsKey: "[\"" + tt.ra.Name + "\"]",
+			var nadAnnotations map[string]string
+			if tt.ra != nil {
+				nadAnnotations = map[string]string{
+					types.OvnRouteAdvertisementsKey: "[\"" + tt.ra.Name + "\"]",
+				}
 			}
 			nad, err := buildNADWithAnnotations(name, namespace, tt.network, nadAnnotations)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			_, err = fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), &tt.node, metav1.CreateOptions{})
 			g.Expect(err).ToNot(gomega.HaveOccurred())
-			_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), tt.ra, metav1.CreateOptions{})
-			g.Expect(err).ToNot(gomega.HaveOccurred())
+			if tt.ra != nil && !tt.skipRACreate {
+				_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), tt.ra, metav1.CreateOptions{})
+				g.Expect(err).ToNot(gomega.HaveOccurred())
+			}
 			_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), nad, metav1.CreateOptions{})
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 

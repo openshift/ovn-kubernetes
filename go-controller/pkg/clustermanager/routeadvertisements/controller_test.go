@@ -2230,14 +2230,7 @@ exit
 			)
 
 			err = nm.Start()
-			// some test cases start with a bad RA status, avoid asserting
-			// initial sync in this case as it will fail
-			if tt.ra == nil || tt.ra.Status == nil || *tt.ra.Status == metav1.ConditionTrue {
-				g.Expect(err).ToNot(gomega.HaveOccurred())
-			} else {
-				g.Expect(err).To(gomega.HaveOccurred())
-			}
-			// we just need the inital sync
+			g.Expect(err).ToNot(gomega.HaveOccurred())
 			nm.Stop()
 
 			if err := c.reconcile(tt.reconcile); (err != nil) != tt.wantErr {
