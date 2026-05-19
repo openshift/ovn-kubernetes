@@ -25,7 +25,6 @@ import (
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -205,21 +204,11 @@ func NewLocalnetUserDefinedNetworkController(
 	}
 
 	if oc.allocatesPodAnnotation() {
-		var claimsReconciler persistentips.PersistentAllocations
-		if oc.allowPersistentIPs() {
-			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
-				oc.kube,
-				oc.GetNetInfo(),
-				oc.watchFactory.IPAMClaimsInformer().Lister(),
-			)
-			oc.ipamClaimsReconciler = ipamClaimsReconciler
-			claimsReconciler = ipamClaimsReconciler
-		}
 		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
 			netInfo,
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
-			claimsReconciler)
+			nil)
 	}
 
 	// disable multicast support for UDNs

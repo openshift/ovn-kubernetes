@@ -46,7 +46,6 @@ import (
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	zoneic "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovnretry "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -118,8 +117,6 @@ type BaseNetworkController struct {
 
 	// An utility to allocate the PodAnnotation to pods
 	podAnnotationAllocator *pod.PodAnnotationAllocator
-
-	ipamClaimsReconciler *persistentips.IPAMClaimReconciler
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *PortCache

@@ -38,7 +38,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneinterconnect "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -318,21 +317,11 @@ func NewLayer2UserDefinedNetworkController(
 	}
 
 	if oc.allocatesPodAnnotation() {
-		var claimsReconciler persistentips.PersistentAllocations
-		if oc.allowPersistentIPs() {
-			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
-				oc.kube,
-				oc.GetNetInfo(),
-				oc.watchFactory.IPAMClaimsInformer().Lister(),
-			)
-			oc.ipamClaimsReconciler = ipamClaimsReconciler
-			claimsReconciler = ipamClaimsReconciler
-		}
 		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
 			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
-			claimsReconciler)
+			nil)
 	}
 
 	// enable multicast support for UDN only for primaries + multicast enabled

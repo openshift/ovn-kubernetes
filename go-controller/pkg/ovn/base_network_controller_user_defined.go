@@ -14,7 +14,6 @@ import (
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
@@ -489,18 +488,6 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 			continue
 		}
 
-		// if we allow for persistent IPs, then we need to check if this pod has an IPAM Claim
-		if bsnc.allowPersistentIPs() {
-			hasIPAMClaim, err := bsnc.hasIPAMClaim(pod, nadKey)
-			if err != nil {
-				return fmt.Errorf("unable to determine if pod %s has IPAM Claim: %w", podDesc, err)
-			}
-			// if there is an IPAM claim, don't release the pod IPs
-			if hasIPAMClaim {
-				continue
-			}
-		}
-
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
@@ -515,73 +502,6 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 
 	}
 	return nil
-}
-
-// hasIPAMClaim determines whether a pod's IPAM is being handled by IPAMClaim CR.
-// pod passed should already be validated as having a network connection to nadKey
-func (bsnc *BaseUserDefinedNetworkController) hasIPAMClaim(pod *corev1.Pod, nadKey string) (bool, error) {
-	if !bsnc.AllowsPersistentIPs() {
-		return false, nil
-	}
-
-	var ipamClaimName string
-	var wasPersistentIPRequested bool
-	if bsnc.IsPrimaryNetwork() {
-		// 'k8s.ovn.org/primary-udn-ipamclaim' annotation has been deprecated. Maintain backward compatibility by
-		// using it as a fallback; when defaultNSE.IPAMClaimReference is set, it takes precedence.
-		if desiredClaimName, isIPAMClaimRequested := pod.Annotations[util.DeprecatedOvnUDNIPAMClaimName]; isIPAMClaimRequested && desiredClaimName != "" {
-			wasPersistentIPRequested = true
-			ipamClaimName = desiredClaimName
-		}
-		defaultNSE, err := util.GetK8sPodDefaultNetworkSelection(pod)
-		if err != nil {
-			return false, err
-		}
-		if defaultNSE != nil && defaultNSE.IPAMClaimReference != "" {
-			wasPersistentIPRequested = true
-			ipamClaimName = defaultNSE.IPAMClaimReference
-		}
-	} else {
-		// secondary network the IPAM claim reference is on the network selection element
-		on, networkMap, err := util.GetUDNPodNADToNetworkMapping(
-			pod,
-			bsnc.GetNetInfo(),
-			bsnc.networkManager.GetNetworkNameForNADKey,
-		)
-		if err != nil {
-			return false, fmt.Errorf("failed to get network mapping for pod %s/%s on network %s: %v",
-				pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
-		}
-		if !on {
-			klog.Warningf("Pod %s/%s is not scheduled on network %s", pod.Namespace, pod.Name, bsnc.GetNetworkName())
-			return false, nil
-		}
-		for key, network := range networkMap {
-			if key == nadKey {
-				if len(network.IPAMClaimReference) > 0 {
-					ipamClaimName = network.IPAMClaimReference
-					wasPersistentIPRequested = true
-				}
-				break
-			}
-		}
-	}
-
-	if !wasPersistentIPRequested || len(ipamClaimName) == 0 {
-		return false, nil
-	}
-
-	ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(ipamClaimName, pod.Namespace)
-	if apierrors.IsNotFound(err) {
-		klog.Errorf("IPAMClaim %q for namespace: %q not found...will release IPs: %v",
-			ipamClaimName, pod.Namespace, err)
-		return false, nil
-	} else if err != nil {
-		return false, fmt.Errorf("failed to get IPAMClaim %s/%s: %w", pod.Namespace, ipamClaimName, err)
-	}
-
-	hasIPAMClaim := ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
-	return hasIPAMClaim, nil
 }
 
 func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods []interface{}) error {
@@ -869,12 +789,6 @@ func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Op
 		return ops, fmt.Errorf("failed to get ops to delete address sets owned by controller %s", controllerName)
 	}
 	return ops, nil
-}
-
-func (oc *BaseUserDefinedNetworkController) allowPersistentIPs() bool {
-	return config.OVNKubernetesFeature.EnablePersistentIPs &&
-		util.DoesNetworkRequireIPAM(oc.GetNetInfo()) &&
-		util.AllowsPersistentIPs(oc.GetNetInfo())
 }
 
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
