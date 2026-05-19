@@ -53,142 +53,6 @@ var AppendedAnnotations = map[string]string{
 
 	"ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
@@ -233,13 +97,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -247,15 +111,83 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
 
@@ -301,13 +233,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -315,15 +247,83 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
 
@@ -369,13 +369,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -383,83 +383,15 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
 
@@ -505,13 +437,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -519,15 +451,83 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
 
@@ -573,13 +573,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -587,9 +587,9 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -725,6 +725,66 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
 
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks UDN pod to a different node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks UDN pod to local node should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks host to a different node UDN pod should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks host to a local UDN pod should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access a service in the same network": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access kapi in default network service": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access kapi service cluster IP directly": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should not be able to access a default network service": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should not be able to access a service in a different UDN": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access a UDN service": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access an advertised UDN pod on a different node": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access an advertised UDN pod on the same node": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod connectivity on different networks and different nodes": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod connectivity on different networks and same node": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and different nodes should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
+
 	"Check whether gateway-mtu-support annotation on node is set based on disable-pkt-mtu-check value when DisablePacketMTUCheck is either not set or set to false Verify whether gateway-mtu-support annotation is not set on nodes when DisablePacketMTUCheck is either not set or set to false": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect ClusterManagerController CNC lifecycle CNC deletion and recreation - tunnel ID is allocated after recreate": "[Disabled:Unimplemented]",
@@ -802,6 +862,8 @@ var AppendedAnnotations = map[string]string{
 	"ClusterNetworkConnect ClusterManagerController when networks exist before CNC creation single network: has both subnet and tunnel ID annotations L3 P-CUDN": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect ClusterManagerController when networks exist before CNC creation single network: has both subnet and tunnel ID annotations L3 P-UDN": "[Disabled:Unimplemented]",
+
+	"ClusterNetworkConnect OVN-Kubernetes Controller Dynamic UDN allocation should connect cross-node L3 and L2 UDN pods through CNC when dynamic UDN allocation is enabled": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect OVN-Kubernetes Controller Multiple CNCs with overlapping network selection should maintain non-transitive connectivity when a network is selected by multiple CNCs": "[Disabled:Unimplemented]",
 
@@ -1289,8 +1351,6 @@ var AppendedAnnotations = map[string]string{
 
 	"Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that deny traffic using pod selectors and wrong port range for a localnet topology": "[Disabled:Unimplemented]",
 
-	"Multi node zones interconnect Pod interconnectivity": "[Disabled:Unimplemented]",
-
 	"Multicast when multicast enabled for namespace should be able to receive multicast IGMP query": "[Disabled:Unimplemented]",
 
 	"Multicast when multicast enabled for namespace should be able to send multicast UDP traffic between nodes": "[Disabled:Unimplemented]",
@@ -1591,6 +1651,14 @@ var AppendedAnnotations = map[string]string{
 
 	"Services Creates a service with session-affinity, and ensures it works after backend deletion": "[Disabled:Unimplemented]",
 
+	"Services Distributes external traffic to multiple host-network endpoints with different named target ports": "[Disabled:Unimplemented]",
+
+	"Services Distributes traffic to multiple endpoints with different named target ports": "[Disabled:Unimplemented]",
+
+	"Services Distributes traffic to multiple host-network endpoints with different named target ports": "[Disabled:Unimplemented]",
+
+	"Services Maintains service connectivity during rolling update when target port changes": "[Disabled:Unimplemented]",
+
 	"Services does not use host masquerade address as source IP address when communicating externally": "[Disabled:Unimplemented]",
 
 	"Services of type NodePort should be able to preserve UDP traffic when server pod cycles for a NodePort service via a different node": "[Disabled:Unimplemented]",
@@ -1714,16 +1782,6 @@ var AppendedAnnotations = map[string]string{
 	"e2e control plane test node readiness according to its defaults interface MTU size should get node not ready with a too small MTU": "[Disabled:Unimplemented]",
 
 	"e2e control plane test node readiness according to its defaults interface MTU size should get node ready with a big enough MTU": "[Disabled:Unimplemented]",
-
-	"e2e delete databases Should validate connectivity before and after deleting all the db-pods at once in HA mode": "[Disabled:Unimplemented]",
-
-	"e2e delete databases Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode": "[Disabled:Unimplemented]",
-
-	"e2e delete databases recovering from deleting db files while maintaining connectivity when deleting both db files on ovnkube-db-0": "[Disabled:Unimplemented]",
-
-	"e2e delete databases recovering from deleting db files while maintaining connectivity when deleting both db files on ovnkube-db-1": "[Disabled:Unimplemented]",
-
-	"e2e delete databases recovering from deleting db files while maintaining connectivity when deleting both db files on ovnkube-db-2": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
