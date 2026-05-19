@@ -500,7 +500,6 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEVPN                      bool `gcfg:"enable-evpn"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
-	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
 	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
 	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
@@ -547,6 +546,12 @@ type GatewayConfig struct {
 	// on the external bridge. The Host IP would be on this device.
 	// Should be used mutually exclusive to the `--gateway-interface` flag.
 	GatewayAcceleratedInterface string `gcfg:"gateway-accelerated-interface"`
+	// DPUHostGatewayRepresentorInterface is the DPU-side representor of the host's
+	// uplink (PF). For some DPUs this is discovered automatically via
+	// phys_port_name via switchdev metadata. In simulated environments or other
+	// interpretations of DPUs, it must be specified explicitly
+	// because the interface has no switchdev metadata.
+	DPUHostGatewayRepresentorInterface string `gcfg:"dpu-host-gateway-representor-interface"`
 	// Egress gateway interface is the optional network interface to use for external gw pods traffic.
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
@@ -645,6 +650,7 @@ type OvnKubeNodeConfig struct {
 	MgmtPortDPResourceName    string `gcfg:"mgmt-port-dp-resource-name"`
 	DPUNodeLeaseRenewInterval int    `gcfg:"dpu-node-lease-renew-interval"`
 	DPUNodeLeaseDuration      int    `gcfg:"dpu-node-lease-duration"`
+	SimulateDPU               bool   `gcfg:"simulate-dpu"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -898,10 +904,6 @@ var cliConfig config
 var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
-		Name:  "init-master",
-		Usage: "initialize master (both cluster-manager and ovnkube-controller), requires the hostname as argument",
-	},
-	&cli.StringFlag{
 		Name:  "init-cluster-manager",
 		Usage: "initialize cluster manager (but not ovnkube-controller), requires the hostname as argument",
 	},
@@ -1053,7 +1055,7 @@ var CommonFlags = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multicast",
-		Usage:       "Adds multicast support. Valid only with --init-master option.",
+		Usage:       "Adds multicast support. Valid only with ovnkube-controller mode.",
 		Destination: &EnableMulticast,
 	},
 	// Logging options
@@ -1280,12 +1282,6 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Allow ICMP/ICMPv6 traffic to bypass NetworkPolicy default-deny rules.",
 		Destination: &cliConfig.OVNKubernetesFeature.AllowICMPNetworkPolicy,
 		Value:       OVNKubernetesFeature.AllowICMPNetworkPolicy,
-	},
-	&cli.BoolFlag{
-		Name:        "enable-interconnect",
-		Usage:       "Enable interconnecting multiple zones.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnableInterconnect,
-		Value:       OVNKubernetesFeature.EnableInterconnect,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-service",
@@ -1649,6 +1645,13 @@ var OVNGatewayFlags = []cli.Flag{
 		Destination: &cliConfig.Gateway.GatewayAcceleratedInterface,
 	},
 	&cli.StringFlag{
+		Name: "dpu-host-gateway-representor-interface",
+		Usage: "The DPU-side representor interface for the host's uplink (PF). For some DPUs this is discovered " +
+			"automatically via phys_port_name via switchdev metadata. In simulated environments or other interpretations of " +
+			"DPUs, it must be specified explicitly because the interface has no switchdev metadata.",
+		Destination: &cliConfig.Gateway.DPUHostGatewayRepresentorInterface,
+	},
+	&cli.StringFlag{
 		Name: "exgw-interface",
 		Usage: "The interface on nodes that will be used for external gw network traffic. " +
 			"If none specified, ovnk will use the default interface",
@@ -1857,6 +1860,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "Lease duration in seconds before the DPU is considered unhealthy",
 		Value:       OvnKubeNode.DPUNodeLeaseDuration,
 		Destination: &cliConfig.OvnKubeNode.DPUNodeLeaseDuration,
+	},
+	&cli.BoolFlag{
+		Name:        "simulate-dpu",
+		Usage:       "Use simulated DPU operations instead of real SR-IOV/switchdev hardware. Required for Kind and VM-based DPU simulation environments.",
+		Value:       OvnKubeNode.SimulateDPU,
+		Destination: &cliConfig.OvnKubeNode.SimulateDPU,
 	},
 }
 
@@ -3189,6 +3198,18 @@ func ovnKubeNodeModeSupported(mode string) error {
 	return nil
 }
 
+func IsModeFull() bool {
+	return OvnKubeNode.Mode == types.NodeModeFull
+}
+
+func IsModeDPU() bool {
+	return OvnKubeNode.Mode == types.NodeModeDPU
+}
+
+func IsModeDPUHost() bool {
+	return OvnKubeNode.Mode == types.NodeModeDPUHost
+}
+
 // buildOvnKubeNodeConfig updates OvnKubeNode config from cli and config file
 func buildOvnKubeNodeConfig(cli, file *config) error {
 	// Copy config file values over default values
@@ -3207,7 +3228,7 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	}
 
 	// ovnkube-node-mode dpu/dpu-host does not support hybrid overlay
-	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
+	if (IsModeDPU() || IsModeDPUHost()) && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
 	}
 
@@ -3234,13 +3255,13 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	// when DPU is used, management port is always backed by a representor. On the
 	// host side, it needs to be provided through --ovnkube-node-mgmt-port-netdev.
 	// On the DPU, it is derrived from the annotation exposed on the host side.
-	if OvnKubeNode.Mode == types.NodeModeDPU && !(OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "") {
+	if IsModeDPU() && !(OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "") {
 		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided")
 	}
-	if OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
+	if IsModeDPUHost() && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
 		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided")
 	}
-	if OVNKubernetesFeature.EnableNetworkSegmentation && OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortDPResourceName == "" {
+	if OVNKubernetesFeature.EnableNetworkSegmentation && IsModeDPUHost() && OvnKubeNode.MgmtPortDPResourceName == "" {
 		return fmt.Errorf("ovnkube-node-mgmt-port-dp-resource-name must be provided on dpu-host mode if network segmentation is enabled")
 	}
 	return nil
