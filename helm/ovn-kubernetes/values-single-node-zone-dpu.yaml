@@ -85,8 +85,6 @@ global:
   enablePreconfiguredUDNAddresses: false
   # -- Configure to enable IPsec
   enableIpsec: false
-  # -- Use SSL transport to NB/SB db and northd
-  enableSsl: false
   # -- Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes
   enableMultiExternalGateway: false
   # -- Configure to use stateless network policy feature with ovn-kubernetes

@@ -260,15 +260,6 @@ false
 			<td>Configure to use the IPAMClaims CRD feature with ovn-kubernetes, thus granting persistent IPs across restarts / migration for KubeVirt VMs</td>
 		</tr>
 		<tr>
-			<td>global.enableSsl</td>
-			<td>bool</td>
-			<td><pre lang="json">
-false
-</pre>
-</td>
-			<td>Use SSL transport to NB/SB db and northd</td>
-		</tr>
-		<tr>
 			<td>global.enableStatelessNetworkPolicy</td>
 			<td>bool</td>
 			<td><pre lang="json">

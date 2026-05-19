@@ -52,18 +52,6 @@ Generate DPU image
 {{- end }}
 
 {{/*
-Output "yes" if enableSsl is true, otherwise "no"
-*/}}
-{{- define "isSslEnabled" -}}
-{{- $sslEnabled := hasKey .Values.global "enableSsl" | ternary .Values.global.enableSsl false }}
-{{- if eq $sslEnabled true }}
-  {{- print "yes" }}
-{{- else }}
-  {{- print "no" }}
-{{- end }}
-{{- end }}
-
-{{/*
 Output "yes" if unprivilegedMode is true, otherwise "no"
 */}}
 {{- define "isUnprivilegedMode" -}}
