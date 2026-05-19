@@ -1230,6 +1230,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		config.Gateway.NodeportEnable = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+		Expect(configureAdvertisedUDNIsolationNFTables()).To(Succeed())
 		ifAddrs := ovntest.MustParseIPNets(v4NodeIP, v6NodeIP)
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{

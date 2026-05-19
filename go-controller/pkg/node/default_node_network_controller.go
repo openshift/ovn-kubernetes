@@ -220,6 +220,13 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 			return nil, fmt.Errorf("failed to setup PMTUD nftables chain: %w", err)
 		}
 
+		if util.IsRouteAdvertisementsEnabled() {
+			err = configureAdvertisedUDNIsolationNFTables()
+			if err != nil {
+				return nil, fmt.Errorf("failed to setup advertised UDN isolation nftables: %w", err)
+			}
+		}
+
 		// Setup nftables sets for no-overlay SNAT exemption in LGW mode.
 		// In SGW mode, OVN address sets are used instead.
 		if config.Default.Transport == types.NetworkTransportNoOverlay && config.NoOverlay.OutboundSNAT == types.NoOverlaySNATEnabled && config.Gateway.Mode == config.GatewayModeLocal {
