@@ -113,7 +113,7 @@ spec:
        severity: warning
       annotations:
        description: |
-         {{`The ovn-nbctl 99th percentile CLI latency {{ value }} aggregated 
+         {{`The ovn-nbctl 99th percentile CLI latency {{ $value }} aggregated 
          across all ovnkube-controller instances for the last 15minutes is more than 3 seconds.`}}
 
     - alert: OvnKubeHighSBCliLatency99thPercentile
@@ -129,7 +129,7 @@ spec:
        severity: warning
       annotations:
        description: |
-         {{`The ovn-sbctl 99th percentile CLI latency {{ value }} aggregated
+         {{`The ovn-sbctl 99th percentile CLI latency {{ $value }} aggregated
          across all ovnkube-controller instances for the last 15minutes is more than 3 seconds.`}}
 
     - alert: OvnKubeHighK8sNetworkPolicyUpdateLatency99thPercentile
@@ -145,7 +145,7 @@ spec:
        severity: warning
       annotations:
        description: |
-         {{`The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
+         {{`The 99th percentile {{ $labels.name }} update latency {{ $value }} aggregated 
          across all ovnkube-controller instances for the last 15minutes is more than 1 seconds.`}}
 
     - alert: OvnKubeHighK8sNamespaceUpdateLatency99thPercentile
@@ -161,7 +161,7 @@ spec:
        severity: warning
       annotations:
        description: |
-         {{`The 99th percentile {{ $labels.name }} update latency {{ value }} 
+         {{`The 99th percentile {{ $labels.name }} update latency {{ $value }} 
          aggregated across all ovnkube-controller instances for the last 15minutes is more than 1 seconds.`}}
 
     - alert: OvnKubeHighK8sServiceUpdateLatency99thPercentile
@@ -177,7 +177,7 @@ spec:
        severity: warning
       annotations:
        description: |
-         {{`The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated 
+         {{`The 99th percentile {{ $labels.name }} update latency {{ $value }} aggregated 
          across all ovnkube-controller instances for the last 15minutes is more than 1 seconds.`}}
 
     - alert: OvnKubeHighK8sEndpointUpdateLatency99thPercentile
@@ -193,7 +193,7 @@ spec:
        severity: warning
       annotations:
        description: |
-         {{`The 99th percentile {{ $labels.name }} update latency {{ value }} aggregated
+         {{`The 99th percentile {{ $labels.name }} update latency {{ $value }} aggregated
          across all ovnkube-controller instances for the last 15minutes is more than 1 seconds.`}}
 
     - alert: OvnNBDBStale
