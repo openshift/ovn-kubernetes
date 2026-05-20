@@ -154,18 +154,16 @@ func Run(ctx context.Context, restCfg *rest.Config, config Config) error {
 	listener := tls.NewListener(innerListener, cfg)
 
 	idleWebhookConnectionsClosed := make(chan struct{})
-	defer func() {
-		klog.Infof("Waiting for the webhook server to gracefully close")
-		<-idleWebhookConnectionsClosed
-	}()
+
 	go func() {
 		<-ctx.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 		defer cancel()
+		defer close(idleWebhookConnectionsClosed)
+
 		if err := srv.Shutdown(ctx); err != nil {
 			klog.Errorf("Failed shutting down the HTTP server: %v", err)
 		}
-		close(idleWebhookConnectionsClosed)
 	}()
 
 	klog.Infof("Starting the webhook server")
@@ -173,6 +171,11 @@ func Run(ctx context.Context, restCfg *rest.Config, config Config) error {
 	err = srv.Serve(listener)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("webhook server failed: %w", err)
+	}
+
+	if ctx.Err() != nil {
+		klog.Infof("Waiting for the webhook server to gracefully close")
+		<-idleWebhookConnectionsClosed
 	}
 
 	return nil
