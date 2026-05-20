@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -14,38 +16,38 @@ import (
 // This test validates the fix for: "Drain queued pods before returning from Stop"
 func TestPodBatchProcessorShutdownDrain(t *testing.T) {
 	tests := []struct {
-		name               string
-		queuedPods         int
-		batchSize          int
-		expectedProcessed  int
+		name                 string
+		queuedPods           int
+		batchSize            int
+		expectedProcessed    int
 		shutdownAfterEnqueue bool
 	}{
 		{
-			name:               "drain single batch on shutdown",
-			queuedPods:         10,
-			batchSize:          50,
-			expectedProcessed:  10,
+			name:                 "drain single batch on shutdown",
+			queuedPods:           10,
+			batchSize:            50,
+			expectedProcessed:    10,
 			shutdownAfterEnqueue: true,
 		},
 		{
-			name:               "drain multiple batches on shutdown",
-			queuedPods:         150,
-			batchSize:          50,
-			expectedProcessed:  150,
+			name:                 "drain multiple batches on shutdown",
+			queuedPods:           150,
+			batchSize:            50,
+			expectedProcessed:    150,
 			shutdownAfterEnqueue: true,
 		},
 		{
-			name:               "drain partial batch on shutdown",
-			queuedPods:         25,
-			batchSize:          50,
-			expectedProcessed:  25,
+			name:                 "drain partial batch on shutdown",
+			queuedPods:           25,
+			batchSize:            50,
+			expectedProcessed:    25,
 			shutdownAfterEnqueue: true,
 		},
 		{
-			name:               "drain exactly one batch on shutdown",
-			queuedPods:         50,
-			batchSize:          50,
-			expectedProcessed:  50,
+			name:                 "drain exactly one batch on shutdown",
+			queuedPods:           50,
+			batchSize:            50,
+			expectedProcessed:    50,
 			shutdownAfterEnqueue: true,
 		},
 	}
@@ -190,7 +192,7 @@ func TestPodBatchProcessorAddPodAfterStop(t *testing.T) {
 	}
 
 	err := processor.AddPod(pod, "default", nil)
-	assert.Error(t, err, "AddPod should return error after Stop()")
+	require.Error(t, err, "AddPod should return error after Stop()")
 	assert.Contains(t, err.Error(), "processor stopped", "Error should indicate processor is stopped")
 }
 

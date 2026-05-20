@@ -7,8 +7,8 @@ import (
 	"time"
 
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
@@ -20,12 +20,12 @@ import (
 )
 
 const (
-	defaultPodBatchWindowMS  = 100
-	defaultPodBatchSize      = 50
-	defaultParallelBatches   = 4
-	maxPodBatchWindowMS      = 1000
-	maxPodBatchSize          = 200
-	maxParallelBatches       = 16
+	defaultPodBatchWindowMS = 100
+	defaultPodBatchSize     = 50
+	defaultParallelBatches  = 4
+	maxPodBatchWindowMS     = 1000
+	maxPodBatchSize         = 200
+	maxParallelBatches      = 16
 )
 
 // initPodBatching initializes the pod batch processor with configuration from environment variables
@@ -137,9 +137,6 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 	var allOps []ovsdb.Operation
 	var podInfos []podBatchResult
 
-	// Collect all IPs that need to be added to namespace address set
-	allPodIPs := sets.NewString()
-
 	// Build operations for all pods - track individual errors
 	for _, item := range items {
 		ops, lsp, podAnnotation, err := bnc.buildLogicalPortOps(item.pod, item.nadKey, item.network, nil)
@@ -154,11 +151,6 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 		}
 
 		allOps = append(allOps, ops...)
-
-		// Collect IPs for batch address set update
-		for _, ip := range podAnnotation.IPs {
-			allPodIPs.Insert(ip.IP.String())
-		}
 
 		switchName := item.pod.Spec.NodeName
 		podInfos = append(podInfos, podBatchResult{
@@ -177,22 +169,8 @@ func (bnc *BaseNetworkController) processPodBatchForNamespace(namespace string, 
 		return fmt.Errorf("all %d pods in batch failed during build phase", len(podInfos))
 	}
 
-	// Add batch address set update for all pod IPs at once
-	nsInfo, nsUnlock := bnc.getNamespaceLocked(namespace, false)
-	var addrSetOps []ovsdb.Operation
-	if nsInfo != nil && nsInfo.addressSet != nil {
-		var err error
-		addrSetOps, err = nsInfo.addressSet.AddAddressesReturnOps(allPodIPs.List())
-		nsUnlock() // CRITICAL: Release lock BEFORE transaction to prevent deadlock
-		if err != nil {
-			// Address set build failed, return error
-			// Caller (processPodBatch) will handle fallback
-			return fmt.Errorf("failed to build address set ops: %v", err)
-		}
-		allOps = append(allOps, addrSetOps...)
-	} else if nsInfo != nil {
-		nsUnlock()
-	}
+	// Note: Address set management has been moved to addressSetManager
+	// and is no longer handled directly in the pod creation path
 
 	// Execute all operations in a single transaction
 	klog.Infof("Executing batch transaction with %d operations for %d pods in namespace %s",
@@ -264,22 +242,8 @@ func (bnc *BaseNetworkController) addLogicalPortIndividual(pod *corev1.Pod, nadK
 		return fmt.Errorf("failed to build ops for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
 
-	// Add namespace address set update
-	nsInfo, nsUnlock := bnc.getNamespaceLocked(pod.Namespace, false)
-	if nsInfo != nil && nsInfo.addressSet != nil {
-		podIPs := make([]string, 0, len(podAnnotation.IPs))
-		for _, ip := range podAnnotation.IPs {
-			podIPs = append(podIPs, ip.IP.String())
-		}
-		addrSetOps, err := nsInfo.addressSet.AddAddressesReturnOps(podIPs)
-		nsUnlock() // Release lock before transaction
-		if err != nil {
-			return fmt.Errorf("failed to build address set ops: %w", err)
-		}
-		ops = append(ops, addrSetOps...)
-	} else if nsInfo != nil {
-		nsUnlock()
-	}
+	// Note: Address set management has been moved to addressSetManager
+	// and is no longer handled directly in the pod creation path
 
 	// Execute transaction
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
