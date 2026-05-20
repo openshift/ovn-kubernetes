@@ -632,6 +632,23 @@ The routing table of the default VRF of node A which contains learned BGP routes
 10.128.2.0/24 nhid 25 via 172.18.0.4 dev eth0 proto bgp metric 20
 ```
 
+For layer-3 no-overlay UDNs in local gateway mode, OVN-Kubernetes installs the
+management port address with `noprefixroute` and adds explicit VRF routes through
+the UDN gateway IP. The local UDN pod subnet is routed as
+`10.128.0.0/24 via 10.128.0.1 dev ovn-k8s-mpX` instead of using a connected
+route on the management port, so underlay ingress to local UDN pods still goes
+through the OVN logical topology.
+
+For example, the relevant routes in the UDN VRF on a node with local UDN pod
+subnet `10.128.0.0/24` look like:
+
+```text
+10.128.0.0/24 via 10.128.0.1 dev ovn-k8s-mpX
+10.128.0.1 dev ovn-k8s-mpX scope link
+10.128.1.0/24 nhid 30 via 172.18.0.2 dev breth0 proto bgp metric 20
+10.128.2.0/24 nhid 25 via 172.18.0.4 dev breth0 proto bgp metric 20
+```
+
 ```mermaid
 sequenceDiagram
     participant Pod1 on Node A
