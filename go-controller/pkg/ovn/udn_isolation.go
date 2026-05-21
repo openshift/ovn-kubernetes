@@ -521,6 +521,7 @@ func (oc *DefaultNetworkController) debugVerifyUDNIsolationState() {
 	}
 
 	// Dump LSP details for each port in the port group
+	var firstPodIP, firstPodName, firstNodeName string
 	for i, portUUID := range pg.Ports {
 		lsp := &nbdb.LogicalSwitchPort{UUID: portUUID}
 		lsp, lspErr := libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
@@ -534,6 +535,32 @@ func (oc *DefaultNetworkController) debugVerifyUDNIsolationState() {
 		}
 		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: PORT[%d] uuid=%s name=%s up=%s addresses=%v portSecurity=%v pod=%s",
 			i, lsp.UUID, lsp.Name, upStr, lsp.Addresses, lsp.PortSecurity, lsp.ExternalIDs["pod"])
+
+		// Capture first pod details for OVS diagnostics
+		if i == 0 && len(lsp.Addresses) > 0 {
+			firstPodName = lsp.Name
+			// Extract IP from addresses (format: ["MAC IP"])
+			for _, addr := range lsp.Addresses {
+				parts := strings.Fields(addr)
+				if len(parts) > 1 {
+					firstPodIP = parts[1] // IP is second field
+					break
+				}
+			}
+			// Extract node name from LSP options
+			if nodeName, ok := lsp.Options["requested-chassis"]; ok {
+				firstNodeName = nodeName
+			}
+		}
+	}
+
+	// CRITICAL: Check SBDB to verify NBDB ACLs are translated to logical flows
+	// This detects if the control plane → data plane translation is broken
+	oc.checkSBDBLogicalFlows(pgName)
+
+	// Log OVS flow diagnostics for manual verification on worker nodes
+	if firstPodIP != "" && firstNodeName != "" {
+		oc.logOVSFlowDiagnostics(firstPodName, firstPodIP, firstNodeName)
 	}
 
 	// Check UDN service routes — look for static routes with UDN-enabled-service external IDs
@@ -627,7 +654,11 @@ func (oc *DefaultNetworkController) debugVerifyUDNIsolationState() {
 		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: ======== TROUBLESHOOTING CHECKLIST (if connectivity fails) ========")
 		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 1. Routes in NBDB: VERIFIED ABOVE (%d routes found)", len(udnRoutes))
 		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 2. Service endpoints: %s", func() string {
-			if kapiRouteFound { return "CHECKED ABOVE" } else { return "N/A (no kapi route)" }
+			if kapiRouteFound {
+				return "CHECKED ABOVE"
+			} else {
+				return "N/A (no kapi route)"
+			}
 		}())
 		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 3. Routes in SBDB: Check with 'ovn-sbctl --no-leader-only find Logical_Flow match~kubernetes'")
 		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 4. OVS flows: Check with 'ovs-ofctl dump-flows br-int | grep kubernetes'")
