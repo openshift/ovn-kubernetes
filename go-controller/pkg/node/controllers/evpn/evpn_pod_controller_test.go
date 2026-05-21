@@ -82,7 +82,7 @@ var _ = Describe("EVPN pod controller", func() {
 
 			nlMock.On("LinkByName", sviName).Return(sviLink, nil)
 			nlMock.On("LinkByName", ovsPortName).Return(ovsPortLink, nil)
-			nlMock.On("NeighAdd", mock.Anything).Return(nil)
+			nlMock.On("NeighSet", mock.Anything).Return(nil)
 
 			mac, _ := net.ParseMAC("0a:58:0a:00:00:05")
 			podAnnotation := `{"test-ns/test-nad":{"ip_addresses":["10.0.0.5/24"],"mac_address":"0a:58:0a:00:00:05","ip_address":"10.0.0.5/24"}}`
@@ -99,12 +99,12 @@ var _ = Describe("EVPN pod controller", func() {
 			Expect(ctrl.reconcilePod("test-ns/test-pod")).To(Succeed())
 
 			By("verifying FDB entry was added on OVS port")
-			nlMock.AssertCalled(GinkgoT(), "NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+			nlMock.AssertCalled(GinkgoT(), "NeighSet", mock.MatchedBy(func(n *netlink.Neigh) bool {
 				return n.LinkIndex == 20 && n.HardwareAddr.String() == mac.String() && n.Vlan == 100
 			}))
 
 			By("verifying neighbor entry was added on SVI")
-			nlMock.AssertCalled(GinkgoT(), "NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+			nlMock.AssertCalled(GinkgoT(), "NeighSet", mock.MatchedBy(func(n *netlink.Neigh) bool {
 				return n.LinkIndex == 10 && n.IP.Equal(net.ParseIP("10.0.0.5"))
 			}))
 
@@ -240,7 +240,7 @@ var _ = Describe("EVPN pod controller", func() {
 			ctrl.podLister = newFakePodLister(pod)
 
 			Expect(ctrl.reconcilePod("test-ns/test-pod")).To(Succeed())
-			nlMock.AssertNotCalled(GinkgoT(), "NeighAdd", mock.Anything)
+			nlMock.AssertNotCalled(GinkgoT(), "NeighSet", mock.Anything)
 
 			By("verifying no cache entry was created")
 			_, exists := ctrl.podNeighbors["test-ns/test-pod"]
@@ -263,7 +263,7 @@ var _ = Describe("EVPN pod controller", func() {
 			ctrl.podLister = newFakePodLister(pod)
 
 			Expect(ctrl.reconcilePod("test-ns/test-pod")).To(Succeed())
-			nlMock.AssertNotCalled(GinkgoT(), "NeighAdd", mock.Anything)
+			nlMock.AssertNotCalled(GinkgoT(), "NeighSet", mock.Anything)
 		})
 
 		It("cleans up entries when pod completes", func() {
@@ -342,7 +342,7 @@ var _ = Describe("EVPN pod controller", func() {
 			ctrl.podLister = newFakePodLister(pod)
 
 			Expect(ctrl.reconcilePod("test-ns/remote-pod")).To(Succeed())
-			nlMock.AssertNotCalled(GinkgoT(), "NeighAdd", mock.Anything)
+			nlMock.AssertNotCalled(GinkgoT(), "NeighSet", mock.Anything)
 		})
 	})
 })
