@@ -150,9 +150,9 @@ spec:
       - image: quay.io/openshifttest/hello-sdn@sha256:c89445416459e7adea9a5a416b3365ed3d74f2491beb904d61dc8d1eb89a72a4
         name: hello-pod
         securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop: ["ALL"]
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
       terminationGracePeriodSeconds: 10
       tolerations:
       - operator: Exists
@@ -406,15 +406,15 @@ metadata:
   name: allow-to-openshift-dns
 spec:
   egress:
-  - ports:
-    - port: 5353
-      protocol: TCP
-    - port: 5353
-      protocol: UDP
   - to:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: openshift-dns
+    ports:
+    - port: 5353
+      protocol: TCP
+    - port: 5353
+      protocol: UDP
   podSelector: {}
   policyTypes:
   - Egress
@@ -552,11 +552,8 @@ spec:
       name: test-pods
   egress:
     - {}
-  ingress:
-    - {}
   policyTypes:
     - Egress
-    - Ingress
 `)
 
 func networkingNetworkpolicyEgressAllowAllYamlBytes() ([]byte, error) {
@@ -1351,9 +1348,9 @@ objects:
     - image: "quay.io/openshifttest/hello-sdn@sha256:c89445416459e7adea9a5a416b3365ed3d74f2491beb904d61dc8d1eb89a72a4"
       name: hello-pod
       securityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop: ["ALL"]
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
 parameters:
 - name: NAME
 - name: NAMESPACE
@@ -1782,6 +1779,18 @@ func _filePath(dir, name string) string {
 	return filepath.Join(append([]string{dir}, strings.Split(cannonicalName, "/")...)...)
 }
 
+var fixtureDir string
+
 func FixturePath(elem ...string) string {
-	return filepath.Join(elem...)
+	if fixtureDir == "" {
+		dir, err := os.MkdirTemp("", "otp-testdata-")
+		if err != nil {
+			panic(fmt.Sprintf("failed to create temp dir for testdata: %v", err))
+		}
+		if err := RestoreAssets(dir, "networking"); err != nil {
+			panic(fmt.Sprintf("failed to restore testdata assets: %v", err))
+		}
+		fixtureDir = dir
+	}
+	return filepath.Join(append([]string{fixtureDir}, elem...)...)
 }

@@ -4,15 +4,15 @@ metadata:
   name: allow-to-openshift-dns
 spec:
   egress:
-  - ports:
-    - port: 5353
-      protocol: TCP
-    - port: 5353
-      protocol: UDP
   - to:
     - namespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: openshift-dns
+    ports:
+    - port: 5353
+      protocol: TCP
+    - port: 5353
+      protocol: UDP
   podSelector: {}
   policyTypes:
   - Egress

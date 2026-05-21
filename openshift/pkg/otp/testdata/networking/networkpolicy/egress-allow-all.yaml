@@ -8,8 +8,5 @@ spec:
       name: test-pods
   egress:
     - {}
-  ingress:
-    - {}
   policyTypes:
     - Egress
-    - Ingress
