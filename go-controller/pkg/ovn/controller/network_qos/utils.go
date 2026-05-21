@@ -10,7 +10,6 @@ import (
 
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	ovnkutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -39,7 +38,7 @@ func getPodAddresses(pod *corev1.Pod, networkInfo ovnkutil.NetInfo, resolver fun
 	// check annotation "k8s.ovn.org/pod-networks" before calling GetPodIPsOfNetwork,
 	// as it's no easy to check if the error is caused by missing annotation, while
 	// we don't want to return error for such case as it will trigger retry
-	_, ok := pod.Annotations[types.OvnPodAnnotationName]
+	_, ok := pod.Annotations[ovnkutil.OvnPodAnnotationName]
 	if !ok {
 		// pod hasn't been annotated yet, return nil to avoid retry
 		return nil, nil

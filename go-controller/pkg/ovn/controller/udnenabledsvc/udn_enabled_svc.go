@@ -22,7 +22,6 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
-	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -68,7 +67,7 @@ func NewController(nbClient libovsdbclient.Client, addressSetFactory addressset.
 		addressSetMu:      &sync.Mutex{},
 		serviceInformer:   serviceInformer,
 		queue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			controllerutil.DefaultRateLimiter[string](),
+			workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 			workqueue.TypedRateLimitingQueueConfig[string]{Name: "udnenabledservice"},
 		),
 		cache:    make(map[string][]string),

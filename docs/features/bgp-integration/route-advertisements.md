@@ -1002,11 +1002,8 @@ TBD
 
 ## Future Items
 
+- EVPN support
 - No overlay support
-
-## Related Features
-
-- [EVPN](./evpn.md)
 
 ## Known Limitations
 

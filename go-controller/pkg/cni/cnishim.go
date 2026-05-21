@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/skel"
-	cnitypes "github.com/containernetworking/cni/pkg/types"
+	"github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
@@ -33,7 +33,7 @@ import (
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
-	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -101,7 +101,7 @@ func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		var cniErr cnitypes.Error
+		var cniErr types.Error
 		if err := json.Unmarshal(body, &cniErr); err == nil && cniErr.Code != 0 {
 			return nil, &cniErr
 		}
@@ -111,7 +111,7 @@ func (p *Plugin) doCNI(url string, req interface{}) ([]byte, error) {
 	return body, nil
 }
 
-func setupLogging(conf *ovncnitypes.NetConf) {
+func setupLogging(conf *ovntypes.NetConf) {
 	var err error
 	var level klog.Level
 
@@ -284,7 +284,7 @@ func (p *Plugin) CmdAdd(args *skel.CmdArgs) error {
 		}
 	}
 
-	return cnitypes.PrintResult(result, conf.CNIVersion)
+	return types.PrintResult(result, conf.CNIVersion)
 }
 
 // CmdDel is the callback for 'teardown' cni calls from skel
@@ -292,7 +292,7 @@ func (p *Plugin) CmdDel(args *skel.CmdArgs) error {
 	var err error
 	var body []byte
 	var pr *PodRequest
-	var conf *ovncnitypes.NetConf
+	var conf *ovntypes.NetConf
 
 	startTime := time.Now()
 	defer func() {
