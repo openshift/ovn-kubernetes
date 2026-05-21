@@ -451,10 +451,7 @@ func RunOVNNbctl(args ...string) (string, string, error) {
 // FIXME: Remove when https://github.com/ovn-kubernetes/libovsdb/issues/235 is fixed
 func RunOVNSbctlWithTimeout(timeout int, args ...string) (string, string,
 	error) {
-	cmdArgs := []string{
-		fmt.Sprintf("--timeout=%d", timeout),
-		"--no-leader-only",
-	}
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
 	cmdArgs = append(cmdArgs, args...)
 	stdout, stderr, err := runOVNretry(runner.sbctlPath, nil, nil, cmdArgs...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
