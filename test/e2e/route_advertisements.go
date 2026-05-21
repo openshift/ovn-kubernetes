@@ -929,10 +929,16 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 						Layer3: &udnv1.Layer3Config{
 							Role: "Primary",
 							Subnets: []udnv1.Layer3Subnet{{
-								CIDR:       "103.103.0.0/16",
+								CIDR:       "103.103.0.0/23",
 								HostSubnet: 24,
 							}, {
-								CIDR:       "2014:100:200::0/60",
+								CIDR:       "103.104.0.0/16",
+								HostSubnet: 24,
+							}, {
+								CIDR:       "2014:100:200::0/63",
+								HostSubnet: 64,
+							}, {
+								CIDR:       "2014:100:201::0/48",
 								HostSubnet: 64,
 							}},
 						},
@@ -1931,10 +1937,16 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 					Layer3: &udnv1.Layer3Config{
 						Role: "Primary",
 						Subnets: []udnv1.Layer3Subnet{{
-							CIDR:       "102.102.0.0/16",
+							CIDR:       "102.102.0.0/23",
 							HostSubnet: 24,
 						}, {
-							CIDR:       "2013:100:200::0/60",
+							CIDR:       "102.104.0.0/16",
+							HostSubnet: 24,
+						}, {
+							CIDR:       "2013:100:200::0/63",
+							HostSubnet: 64,
+						}, {
+							CIDR:       "2013:100:201::0/48",
 							HostSubnet: 64,
 						}},
 					},
@@ -1951,10 +1963,16 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 					Layer3: &udnv1.Layer3Config{
 						Role: "Primary",
 						Subnets: []udnv1.Layer3Subnet{{
-							CIDR:       "103.103.0.0/16",
+							CIDR:       "103.103.0.0/23",
 							HostSubnet: 24,
 						}, {
-							CIDR:       "2014:100:200::0/60",
+							CIDR:       "103.104.0.0/16",
+							HostSubnet: 24,
+						}, {
+							CIDR:       "2014:100:200::0/63",
+							HostSubnet: 64,
+						}, {
+							CIDR:       "2014:100:201::0/48",
 							HostSubnet: 64,
 						}},
 					},

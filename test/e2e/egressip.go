@@ -637,10 +637,10 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 		if netConfigParams.cidr == "" {
 			return false, "UDN network must have subnet specified"
 		}
-		if utilnet.IsIPv4CIDRString(netConfigParams.cidr) && !isNodeInternalAddressesPresentForIPFamily(nodes, corev1.IPv4Protocol) {
+		if cidrsContainIPFamily(netConfigParams.cidr, false) && !isNodeInternalAddressesPresentForIPFamily(nodes, corev1.IPv4Protocol) {
 			return false, "cluster must have IPv4 Node internal address"
 		}
-		if utilnet.IsIPv6CIDRString(netConfigParams.cidr) && !isNodeInternalAddressesPresentForIPFamily(nodes, corev1.IPv6Protocol) {
+		if cidrsContainIPFamily(netConfigParams.cidr, true) && !isNodeInternalAddressesPresentForIPFamily(nodes, corev1.IPv6Protocol) {
 			return false, "cluster must have IPv6 Node internal address"
 		}
 		return true, "network is supported"
@@ -666,11 +666,11 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 			if netConfigParams.cidr == "" {
 				framework.Failf("network config must have subnet defined")
 			}
-			if utilnet.IsIPv4CIDRString(netConfigParams.cidr) && isIPv4Cluster {
-				ipFamily = corev1.IPv4Protocol
-			}
-			if utilnet.IsIPv6CIDRString(netConfigParams.cidr) && isIPv6Cluster {
+			if cidrsContainIPFamily(netConfigParams.cidr, true) && isIPv6Cluster {
 				ipFamily = corev1.IPv6Protocol
+			}
+			if cidrsContainIPFamily(netConfigParams.cidr, false) && isIPv4Cluster {
+				ipFamily = corev1.IPv4Protocol
 			}
 		}
 		if ipFamily == corev1.IPFamilyUnknown {
@@ -3528,10 +3528,9 @@ spec:
 		var otherNetworkNamespace *corev1.Namespace
 		var err error
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
-		isOtherNetworkIPv6 := utilnet.IsIPv6CIDRString(otherNetworkAttachParms.cidr)
 		// The EgressIP IP must match both networks IP family
-		if isOtherNetworkIPv6 != isIPv6TestRun {
-			ginkgo.Skip(fmt.Sprintf("Test run IP family (is IPv6: %v) doesn't match other networks IP family (is IPv6: %v)", isIPv6TestRun, isOtherNetworkIPv6))
+		if !cidrsContainIPFamily(otherNetworkAttachParms.cidr, isIPv6TestRun) {
+			ginkgo.Skip(fmt.Sprintf("Test run IP family (is IPv6: %v) isn't supported by other network", isIPv6TestRun))
 		}
 		// is the test namespace a CDN? If so create the UDN namespace
 		if isClusterDefaultNetwork(netConfigParams) {
@@ -3642,7 +3641,7 @@ spec:
 		ginkgo.Entry("L3 Primary UDN", networkAttachmentConfigParams{
 			name:     "l3primary",
 			topology: types.Layer3Topology,
-			cidr:     joinStrings("30.10.0.0/16", "2014:100:200::0/60"),
+			cidr:     primaryLayer3MultiCIDRs(),
 			role:     "primary",
 		}),
 		ginkgo.Entry("L2 Primary UDN", networkAttachmentConfigParams{
@@ -3666,7 +3665,7 @@ spec:
 		networkAttachmentConfigParams{
 			name:     "l3primaryv4",
 			topology: types.Layer3Topology,
-			cidr:     "10.10.0.0/16",
+			cidr:     primaryLayer3MultiIPv4CIDRs(),
 			role:     "primary",
 		},
 	),
@@ -3675,7 +3674,7 @@ spec:
 		networkAttachmentConfigParams{
 			name:     "l3primaryv6",
 			topology: types.Layer3Topology,
-			cidr:     "2014:100:200::0/60",
+			cidr:     primaryLayer3MultiIPv6CIDRs(),
 			role:     "primary",
 		},
 	),
