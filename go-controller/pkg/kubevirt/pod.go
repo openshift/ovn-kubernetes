@@ -483,6 +483,17 @@ func IsPodAllowedForMigration(pod *corev1.Pod, netInfo util.NetInfo) bool {
 			netInfo.TopologyType() == ovntypes.LocalnetTopology)
 }
 
+// LiveMigrationStatusChanged returns true if the live migration status
+// changed between the old and new pod. This is a lightweight check suitable
+// for use in informer event filters to detect when a migration completes.
+func LiveMigrationStatusChanged(oldPod, newPod *corev1.Pod) bool {
+	if oldPod == nil || newPod == nil {
+		return false
+	}
+	return oldPod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp] !=
+		newPod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp]
+}
+
 func isTargetPodReady(targetPod *corev1.Pod) bool {
 	if targetPod == nil {
 		return false
