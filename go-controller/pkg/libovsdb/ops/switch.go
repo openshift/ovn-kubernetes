@@ -363,6 +363,9 @@ func createOrUpdateLogicalSwitchPortsOps(nbClient libovsdbclient.Client, ops []o
 	opModels := make([]operationModel, 0, len(lsps)+1)
 
 	for _, lsp := range lsps {
+		if err := validateRequestedChassisOption(lsp.Options); err != nil {
+			return nil, err
+		}
 		opModel := createOrUpdateLogicalSwitchPortOpModelWithCustomFields(sw, lsp, createLSP, customFields)
 		opModels = append(opModels, opModel)
 	}

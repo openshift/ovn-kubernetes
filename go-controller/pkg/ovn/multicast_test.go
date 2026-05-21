@@ -20,7 +20,6 @@ import (
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -118,20 +117,45 @@ func getMulticastExpectedData(netInfo util.NetInfo, clusterPortGroup, clusterRtr
 	}
 }
 
-func getMulticastPolicyExpectedData(netInfo util.NetInfo, ns string, ports []string) []libovsdb.TestData {
-	return getMulticastPolicyExpectedDataWithPodIPs(netInfo, ns, ports, nil)
+func getMulticastStaleData(netInfo util.NetInfo, clusterPortGroup, clusterRtrPortGroup *nbdb.PortGroup) []libovsdb.TestData {
+	testData := getMulticastExpectedData(netInfo, clusterPortGroup, clusterRtrPortGroup)
+	defaultDenyIngressACL := testData[0].(*nbdb.ACL)
+	newName := libovsdbutil.JoinACLName(types.ClusterPortGroupNameBase, "DefaultDenyMulticastIngress")
+	defaultDenyIngressACL.Name = &newName
+	defaultDenyIngressACL.Options = nil
+
+	defaultDenyEgressACL := testData[1].(*nbdb.ACL)
+	newName1 := libovsdbutil.JoinACLName(types.ClusterPortGroupNameBase, "DefaultDenyMulticastEgress")
+	defaultDenyEgressACL.Name = &newName1
+	defaultDenyEgressACL.Options = nil
+
+	defaultAllowEgressACL := testData[2].(*nbdb.ACL)
+	newName2 := libovsdbutil.JoinACLName(types.ClusterRtrPortGroupNameBase, "DefaultAllowMulticastEgress")
+	defaultAllowEgressACL.Name = &newName2
+	defaultAllowEgressACL.Options = nil
+
+	defaultAllowIngressACL := testData[3].(*nbdb.ACL)
+	newName3 := libovsdbutil.JoinACLName(types.ClusterRtrPortGroupNameBase, "DefaultAllowMulticastIngress")
+	defaultAllowIngressACL.Name = &newName3
+	defaultAllowIngressACL.Options = nil
+
+	return []libovsdb.TestData{
+		defaultDenyIngressACL,
+		defaultDenyEgressACL,
+		defaultAllowEgressACL,
+		defaultAllowIngressACL,
+		testData[4],
+		testData[5],
+	}
 }
 
-func getMulticastPolicyExpectedDataWithPodIPs(netInfo util.NetInfo, ns string, ports, podIPs []string) []libovsdb.TestData {
+func getMulticastPolicyExpectedData(netInfo util.NetInfo, ns string, ports []string) []libovsdb.TestData {
 	netControllerName := getNetworkControllerName(netInfo.GetNetworkName())
 	fakeController := getFakeController(netControllerName)
 	pg_hash := fakeController.getNamespacePortGroupName(ns)
 	egressMatch := libovsdbutil.GetACLMatch(pg_hash, fakeController.getMulticastACLEgrMatch(), libovsdbutil.ACLEgress)
 
-	peerIndex := addresssetmanager.GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, nil, nil,
-		ns, netControllerName, true)
-	nsASv4, nsASv6 := addressset.GetTestDbAddrSets(peerIndex, podIPs)
-	ip4AddressSet, ip6AddressSet := addressset.GetHashNamesForAS(peerIndex)
+	ip4AddressSet, ip6AddressSet := getNsAddrSetHashNames(netControllerName, ns)
 	mcastMatch := getACLMatchAF(getMulticastACLIgrMatchV4(ip4AddressSet), getMulticastACLIgrMatchV6(ip6AddressSet), config.IPv4Mode, config.IPv6Mode)
 	ingressMatch := libovsdbutil.GetACLMatch(pg_hash, mcastMatch, libovsdbutil.ACLIngress)
 
@@ -184,19 +208,11 @@ func getMulticastPolicyExpectedDataWithPodIPs(netInfo util.NetInfo, ns string, p
 	)
 	pg.UUID = pg.Name + "-UUID"
 
-	data := []libovsdb.TestData{}
-	if config.IPv4Mode {
-		data = append(data, nsASv4)
-	}
-	if config.IPv6Mode {
-		data = append(data, nsASv6)
-	}
-
-	return append(data,
+	return []libovsdb.TestData{
 		egressACL,
 		ingressACL,
 		pg,
-	)
+	}
 }
 
 func getNamespacePG(ns, controllerName string) *nbdb.PortGroup {
@@ -206,13 +222,24 @@ func getNamespacePG(ns, controllerName string) *nbdb.PortGroup {
 	return pg
 }
 
-func getMulticastPolicyStaleData(netInfo util.NetInfo, ns string) []libovsdb.TestData {
-	testData := getMulticastPolicyExpectedData(netInfo, ns, nil)
-	// remove address sets
-	result := testData[len(testData)-3:]
-	// get ingress ACL and spoil the match (just to make sure it will be updated)
-	result[1].(*nbdb.ACL).Match = "stale-match"
-	return result
+func getMulticastPolicyStaleData(netInfo util.NetInfo, ns string, ports []string) []libovsdb.TestData {
+	testData := getMulticastPolicyExpectedData(netInfo, ns, ports)
+
+	egressACL := testData[0].(*nbdb.ACL)
+	newName := libovsdbutil.JoinACLName(ns, "MulticastAllowEgress")
+	egressACL.Name = &newName
+	egressACL.Options = nil
+
+	ingressACL := testData[1].(*nbdb.ACL)
+	newName1 := libovsdbutil.JoinACLName(ns, "MulticastAllowIngress")
+	ingressACL.Name = &newName1
+	ingressACL.Options = nil
+
+	return []libovsdb.TestData{
+		egressACL,
+		ingressACL,
+		testData[2],
+	}
 }
 
 func getNetInfoFromNAD(nad *nadapi.NetworkAttachmentDefinition) util.NetInfo {
@@ -292,16 +319,16 @@ func updateMulticast(fakeOvn *FakeOVN, ns *corev1.Namespace, enable bool) {
 	Expect(err).NotTo(HaveOccurred())
 }
 
-func startBaseNetworkController(fakeOvn *FakeOVN, nad *nadapi.NetworkAttachmentDefinition) *BaseNetworkController {
+func startBaseNetworkController(fakeOvn *FakeOVN, nad *nadapi.NetworkAttachmentDefinition) (*BaseNetworkController, *addressset.FakeAddressSetFactory) {
 	if nad != nil {
 		netInfo, err := util.ParseNADInfo(nad)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(fakeOvn.NewUserDefinedNetworkController(nad)).To(Succeed())
 		controller, ok := fakeOvn.userDefinedNetworkControllers[netInfo.GetNetworkName()]
 		Expect(ok).To(BeTrue())
-		return &controller.bnc.BaseNetworkController
+		return &controller.bnc.BaseNetworkController, controller.asf
 	} else {
-		return &fakeOvn.controller.BaseNetworkController
+		return &fakeOvn.controller.BaseNetworkController, fakeOvn.asf
 	}
 }
 
@@ -354,7 +381,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 		// alternative approach is to give this flag to app.Run, but that require more changes.
 		//app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(false)
+		fakeOvn = NewFakeOVN(true)
 		gomegaFormatMaxLength = format.MaxLength
 		format.MaxLength = 0
 	})
@@ -379,11 +406,43 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 						clusterRtrPortGroup,
 					},
 				})
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				Expect(bnc.createDefaultDenyMulticastPolicy()).To(Succeed())
 				Expect(bnc.createDefaultAllowMulticastPolicy()).To(Succeed())
 
+				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(
+					getMulticastExpectedData(netInfo, clusterPortGroup, clusterRtrPortGroup)))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		},
+			Entry("IPv4", true, false, nil),
+			Entry("IPv6", false, true, nil),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
+		)
+
+		DescribeTable("updates stale default Multicast ACLs", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
+			app.Action = func(*cli.Context) error {
+				config.IPv4Mode = useIPv4
+				config.IPv6Mode = useIPv6
+
+				// start with stale ACLs
+				netInfo := getNetInfoFromNAD(nad)
+				clusterPortGroup := newNetworkClusterPortGroup(netInfo)
+				clusterRtrPortGroup := newNetworkRouterPortGroup(netInfo)
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{
+					NBData: getMulticastStaleData(netInfo, clusterPortGroup, clusterRtrPortGroup),
+				})
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
+
+				Expect(bnc.createDefaultDenyMulticastPolicy()).To(Succeed())
+				Expect(bnc.createDefaultAllowMulticastPolicy()).To(Succeed())
+
+				// check acls are updated
 				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(
 					getMulticastExpectedData(netInfo, clusterPortGroup, clusterRtrPortGroup)))
 				return nil
@@ -409,9 +468,6 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				initialData := getMulticastExpectedData(netInfo, clusterPortGroup, clusterRtrPortGroup)
 
 				nsData := getMulticastPolicyExpectedData(netInfo, namespaceName1, nil)
-				// preserve address set because it will only be cleaned up on the next restart by the addresssetManager as unreferenced
-				// we never use dualstack mode in tests, so it will always be 1 address set
-				addrSet := nsData[0]
 				initialData = append(initialData, nsData...)
 				// namespace is still present, but multicast support is disabled
 				namespace1 := *ovntest.NewNamespace(namespaceName1)
@@ -422,7 +478,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 						},
 					},
 				)
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				// this "if !oc.multicastSupport" part of SetupMaster
 				Expect(bnc.disableMulticast()).To(Succeed())
@@ -434,7 +490,6 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					clusterPortGroup,
 					clusterRtrPortGroup,
 					namespacePortGroup,
-					addrSet,
 				}
 				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
 				return nil
@@ -477,7 +532,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					Expect(fakeOvn.networkManager.Start()).To(Succeed())
 					defer fakeOvn.networkManager.Stop()
 				}
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())
 				expectedData = append(expectedData, getMulticastPolicyExpectedData(netInfo, namespaceName1, nil)...)
@@ -504,7 +559,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				clusterPortGroup := newNetworkClusterPortGroup(netInfo)
 				clusterRtrPortGroup := newNetworkRouterPortGroup(netInfo)
 				expectedData := getMulticastExpectedData(netInfo, clusterPortGroup, clusterRtrPortGroup)
-				expectedData = append(expectedData, getMulticastPolicyStaleData(netInfo, namespaceName1)...)
+				expectedData = append(expectedData, getMulticastPolicyStaleData(netInfo, namespaceName1, nil)...)
 				namespace1 := *ovntest.NewNamespace(namespaceName1)
 				namespace1.Annotations[util.NsMulticastAnnotation] = "true"
 
@@ -523,7 +578,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					Expect(fakeOvn.networkManager.Start()).To(Succeed())
 					defer fakeOvn.networkManager.Stop()
 				}
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())
 				expectedData = getMulticastExpectedData(netInfo, clusterPortGroup, clusterRtrPortGroup)
@@ -552,9 +607,6 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				clusterRtrPortGroup := newNetworkRouterPortGroup(netInfo)
 				defaultMulticastData := getMulticastExpectedData(netInfo, clusterPortGroup, clusterRtrPortGroup)
 				namespaceMulticastData := getMulticastPolicyExpectedData(netInfo, namespaceName1, nil)
-				// preserve address set because it will only be cleaned up on the next restart by the addresssetManager as unreferenced
-				// we never use dualstack mode in tests, so it will always be 1 address set
-				addrSet := namespaceMulticastData[0]
 				namespace1 := *ovntest.NewNamespace(namespaceName1)
 
 				objs := []runtime.Object{&corev1.NamespaceList{
@@ -572,12 +624,12 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					Expect(fakeOvn.networkManager.Start()).To(Succeed())
 					defer fakeOvn.networkManager.Stop()
 				}
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				Expect(bnc.WatchNamespaces()).To(Succeed())
 				// only namespaced acls should be dereferenced, default acls will stay
 				namespacePortGroup := getNamespacePG(namespaceName1, getNetworkControllerName(netInfo.GetNetworkName()))
-				expectedData := append(defaultMulticastData, namespacePortGroup, addrSet)
+				expectedData := append(defaultMulticastData, namespacePortGroup)
 				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData))
 				return nil
 			}
@@ -619,7 +671,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 					defer fakeOvn.networkManager.Stop()
 				}
 
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 				Expect(bnc.WatchNamespaces()).To(Succeed())
 
 				ns, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespace1.Name, metav1.GetOptions{})
@@ -688,7 +740,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				}
 
 				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: getNodeData(netInfo, nodeName)}, objs...)
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, asf := startBaseNetworkController(fakeOvn, nad)
 
 				for _, tPod := range tPods {
 					tPod.populateControllerLogicalSwitchCache(bnc)
@@ -711,13 +763,14 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				for _, tPod := range tPods {
 					ports = append(ports, tPod.portUUID)
 				}
-				expectedData := getMulticastPolicyExpectedDataWithPodIPs(netInfo, namespace1.Name, ports, tPodIPs)
+				expectedData := getMulticastPolicyExpectedData(netInfo, namespace1.Name, ports)
 				nadKey := ""
 				if nad != nil {
 					nadKey = util.GetNADName(nad.Namespace, nad.Name)
 				}
 				expectedData = append(expectedData, getExpectedPodsAndSwitches(bnc.GetNetInfo(), tPods, []string{nodeName}, nadKey)...)
 				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedData...))
+				asf.ExpectAddressSetWithAddresses(namespace1.Name, tPodIPs)
 				return nil
 			}
 
@@ -761,7 +814,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				}
 
 				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: getNodeData(netInfo, nodeName)}, objs...)
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
 
 				if nad != nil {
 					Expect(fakeOvn.networkManager.Start()).To(Succeed())
@@ -777,8 +830,9 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				Expect(err).To(Succeed())
 				Expect(ns2).NotTo(BeNil())
 
-				expectedData := getMulticastPolicyExpectedData(netInfo, longnamespaceName1Name, nil)
-				acl := expectedData[1].(*nbdb.ACL)
+				portsns1 := []string{}
+				expectedData := getMulticastPolicyExpectedData(netInfo, longnamespaceName1Name, portsns1)
+				acl := expectedData[0].(*nbdb.ACL)
 				// Post ACL indexing work, multicast ACL's don't have names
 				// We use externalIDs instead; so we can check if the expected IDs exist for the long namespace so that
 				// isEquivalent logic will be correct
@@ -789,7 +843,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				// longNameSpace2Name
 				if nad == nil {
 					expectedData = append(expectedData, getMulticastPolicyExpectedData(netInfo, longNameSpace2Name, nil)...)
-					acl = expectedData[5].(*nbdb.ACL)
+					acl = expectedData[3].(*nbdb.ACL)
 					Expect(acl.Name).To(BeNil())
 					Expect(acl.ExternalIDs[libovsdbops.ObjectNameKey.String()]).To(Equal(longNameSpace2Name))
 				}
@@ -852,7 +906,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				}
 
 				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: getNodeData(netInfo, nodeName)}, objs...)
-				bnc := startBaseNetworkController(fakeOvn, nad)
+				bnc, asf := startBaseNetworkController(fakeOvn, nad)
 
 				for _, tPod := range tPods {
 					tPod.populateControllerLogicalSwitchCache(bnc)
@@ -884,7 +938,8 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 				}
 
 				// Check pods were added
-				expectedDataWithPods := getMulticastPolicyExpectedDataWithPodIPs(netInfo, namespace1.Name, ports, tPodIPs)
+				asf.EventuallyExpectAddressSetWithAddresses(namespace1.Name, tPodIPs)
+				expectedDataWithPods := getMulticastPolicyExpectedData(netInfo, namespace1.Name, ports)
 				nadKey := ""
 				if nad != nil {
 					nadKey = util.GetNADName(nad.Namespace, nad.Name)
@@ -898,6 +953,7 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 						tPod.podName, *metav1.NewDeleteOptions(0))
 					Expect(err).NotTo(HaveOccurred())
 				}
+				asf.EventuallyExpectEmptyAddressSetExist(namespace1.Name)
 				Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDataWithoutPods))
 
 				return nil

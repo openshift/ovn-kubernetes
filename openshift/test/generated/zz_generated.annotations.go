@@ -1101,37 +1101,35 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with Secondary/Localnet with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Localnet with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress routed": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 with routed ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress routed over evpn": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 with routed ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress routed": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Localnet with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Localnet with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
-
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after failed live migration": "[Disabled:Unimplemented]",
 

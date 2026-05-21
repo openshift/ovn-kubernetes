@@ -18,7 +18,7 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 
-	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -88,7 +88,7 @@ var _ = Describe("Network Segmentation", func() {
 			SandboxID:    "824bceff24af3",
 			Netns:        "ns",
 			IfName:       "eth0",
-			CNIConf: &ovncnitypes.NetConf{
+			CNIConf: &types.NetConf{
 				NetConf:  cnitypes.NetConf{},
 				DeviceID: "",
 			},
