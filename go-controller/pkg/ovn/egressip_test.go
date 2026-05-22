@@ -2067,7 +2067,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 						node2Switch.QOSRules = []string{"default-QoS-UUID"}
 					}
 					if node1Zone == "global" {
-						// QoS Rule is configured only for nodes in local zones, the master of the remote zone will do it for the remote nodes
+						// QoS Rule is configured only for nodes in local zones; the controller in the remote zone will do it for the remote nodes
 						node1Switch.QOSRules = []string{"default-QoS-UUID"}
 						ipNets, _ := util.ParseIPNets(append(node1IPv4Addresses, node2IPv4Addresses...))
 						egressNodeIPs := []string{}
@@ -2101,10 +2101,10 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
-			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
+			// will showcase localzone setup - the controller for the pod's zone is local, where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
 			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
-			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
+			// will showcase localzone setup - the controller for the egress node's zone is local, where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
 			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
@@ -2504,7 +2504,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 						egressNodeIPsASv4,
 					}
 					if node1Zone != "remote" {
-						// QoS rules is configured only for nodes in local zones, the master of the remote zone will do it for the remote nodes
+						// QoS rules is configured only for nodes in local zones; the controller in the remote zone will do it for the remote nodes
 						node1Switch.QOSRules = []string{"default-QoS-UUID"}
 						expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat = append(expectedDatabaseState[3].(*nbdb.LogicalRouter).Nat, "egressip-nat-UUID", "egressip2-nat-UUID")
 						expectedDatabaseState = append(expectedDatabaseState, &nbdb.NAT{
@@ -2548,10 +2548,10 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
-			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
+			// will showcase localzone setup - the controller for the pod's zone is local, where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
 			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
-			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
+			// will showcase localzone setup - the controller for the egress node's zone is local, where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
 			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
@@ -2873,7 +2873,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = append(expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies, "reroute-UUID")
 						node1Switch.QOSRules = []string{"default-QoS-UUID"}
 					} else {
-						// if node1 where the pod lives is remote we can't see the EIP setup done since master belongs to local zone
+						// if node1 where the pod lives is remote we can't see the EIP setup done since the local controller is in the local zone
 						expectedDatabaseState[4].(*nbdb.LogicalRouter).Nat = []string{}
 						expectedDatabaseState[6].(*nbdb.LogicalRouter).Policies = []string{"no-reroute-node-UUID", "default-no-reroute-UUID",
 							"no-reroute-service-UUID", "default-no-reroute-reply-traffic"}
@@ -3008,10 +3008,10 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			ginkgo.Entry("node1 and node2 in global zones", "global", "global"),
-			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
+			// will showcase localzone setup - the controller for the pod's zone is local, where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
 			ginkgo.Entry("node1 in global and node2 in remote zones", "global", "remote"),
-			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will* be done.
+			// will showcase localzone setup - the controller for the egress node's zone is local, where pod's SNAT policy and static route will* be done.
 			// * the static route won't be visible because the pod's node node1 is getting deleted in this test
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
 			ginkgo.Entry("node1 in remote and node2 in global zones", "remote", "global"),
@@ -3321,7 +3321,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 					}
 
 					if node1Zone == "global" {
-						// QoS Rule is configured only for nodes in local zones, the master of the remote zone will do it for the remote nodes
+						// QoS Rule is configured only for nodes in local zones; the controller in the remote zone will do it for the remote nodes
 						node1Switch.QOSRules = []string{"default-QoS-UUID"}
 					}
 					if node2Zone != "remote" {
@@ -3346,10 +3346,10 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
-			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
+			// will showcase localzone setup - the controller for the pod's zone is local, where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
 			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
-			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
+			// will showcase localzone setup - the controller for the egress node's zone is local, where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
 			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
@@ -6005,10 +6005,10 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			ginkgo.Entry("interconnect enabled; node1 and node2 in single zone", true, "global", "global"),
-			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
+			// will showcase localzone setup - the controller for the pod's zone is local, where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
 			ginkgo.Entry("interconnect enabled; node1 in local and node2 in remote zones", true, "local", "remote"),
-			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
+			// will showcase localzone setup - the controller for the egress node's zone is local, where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
 			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in local zones", true, "remote", "local"),
 		)
@@ -8008,10 +8008,10 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			},
 			ginkgo.Entry("interconnect enabled; node1 and node2 in global zones", true, "global", "global"),
-			// will showcase localzone setup - master is in pod's zone where pod's reroute policy towards egressNode will be done.
+			// will showcase localzone setup - the controller for the pod's zone is local, where pod's reroute policy towards egressNode will be done.
 			// NOTE: SNAT won't be visible because its in remote zone
 			ginkgo.Entry("interconnect enabled; node1 in global and node2 in remote zones", true, "global", "remote"),
-			// will showcase localzone setup - master is in egress node's zone where pod's SNAT policy and static route will be done.
+			// will showcase localzone setup - the controller for the egress node's zone is local, where pod's SNAT policy and static route will be done.
 			// NOTE: reroute policy won't be visible because its in remote zone (pod is in remote zone)
 			ginkgo.Entry("interconnect enabled; node1 in remote and node2 in global zones", true, "remote", "global"),
 		)
@@ -9302,7 +9302,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 							},
 							node1Switch,
 							// This is unexpected snat entry where its logical port refers to an unavailable node
-							// and ensure this entry is removed as soon as ovnk master is up and running.
+							// and ensure this entry is removed as soon as ovnkube-controller is up and running.
 							&nbdb.NAT{
 								UUID:        "egressip-nat-UUID2",
 								LogicalIP:   podV4IP,

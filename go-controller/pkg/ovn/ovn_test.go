@@ -104,7 +104,7 @@ func (ni *testNetInfo) OutboundSNAT() string {
 }
 
 type FakeOVN struct {
-	fakeClient        *util.OVNMasterClientset
+	fakeClient        *util.OVNKubeControllerClientset
 	watcher           *factory.WatchFactory
 	controller        *DefaultNetworkController
 	stopChan          chan struct{}
@@ -202,7 +202,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			v1Objects = append(v1Objects, object)
 		}
 	}
-	o.fakeClient = &util.OVNMasterClientset{
+	o.fakeClient = &util.OVNKubeControllerClientset{
 		KubeClient:               fake.NewSimpleClientset(v1Objects...),
 		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
 		EgressIPClient:           egressipfake.NewSimpleClientset(egressIPObjects...),
@@ -260,7 +260,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	// (e.g., on GitHub).
 	factory.SetEventQueueSize(10)
 
-	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewOVNKubeControllerWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
@@ -439,7 +439,7 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(
-	ovnClient *util.OVNMasterClientset,
+	ovnClient *util.OVNKubeControllerClientset,
 	wf *factory.WatchFactory,
 	stopChan chan struct{},
 	addressSetFactory addressset.AddressSetFactory,

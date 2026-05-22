@@ -1008,7 +1008,7 @@ func (e *EgressIPController) addPodEgressIPAssignments(ni util.NetInfo, name str
 		e.nodeZoneState.UnlockKey(status.Node)
 	}
 	if !proceed && !e.isPodScheduledinLocalZone(pod) {
-		return nil // nothing to do if none of the status nodes are local to this master and pod is also remote
+		return nil // nothing to do if none of the status nodes are local to this controller and the pod is also remote
 	}
 	for _, status := range remainingAssignments {
 		klog.V(2).Infof("Adding pod egress IP status: %v for EgressIP: %s and pod: %s/%s/%v", status, name, pod.Namespace, pod.Name, podIPNets)
@@ -2059,7 +2059,7 @@ func (e *EgressIPController) syncStaleSNATRules(egressIPCache egressIPCache) err
 	if len(errors) > 0 {
 		return utilerrors.Join(errors...)
 	}
-	// The routers length 0 check is needed because some of ovnk master restart unit tests have
+	// The routers length 0 check is needed because some of ovnkube-controller restart unit tests have
 	// router object referring to SNAT's UUID string instead of actual UUID (though it may not
 	// happen in real scenario). Hence this check is needed to delete those stale SNATs as well.
 	if len(routers) == 0 {
@@ -2285,7 +2285,7 @@ func (e *EgressIPController) generateCacheForEgressIP() (egressIPCache, error) {
 					continue
 				}
 				if egressLocalNodesCache.Len() == 0 && !e.isPodScheduledinLocalZone(pod) {
-					continue // don't process anything on master's that have nothing to do with the pod
+					continue // don't process anything on controllers that have nothing to do with the pod
 				}
 				nadKey, err := e.getPodNADKeyForNetwork(ni, pod)
 				if err != nil {
@@ -3985,7 +3985,7 @@ func (e *EgressIPController) getPodIPs(ni util.NetInfo, pod *corev1.Pod, nadKey 
 			return nil, nil
 		}
 		podIPs = getIPFromIPNetFn(logicalPort.ips)
-	} else { // means this is egress node's local master
+	} else { // means this is the egress node's local controller
 		if ni.IsDefault() {
 			podIPNets, err := util.GetPodCIDRsWithFullMask(pod, ni, nil)
 			if err != nil {

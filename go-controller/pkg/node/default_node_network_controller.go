@@ -840,7 +840,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
-	// First wait for the node logical switch to be created by the Master, timeout is 300s.
+	// First wait for the node logical switch to be created by ovnkube-controller, timeout is 300s.
 	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
 		if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)

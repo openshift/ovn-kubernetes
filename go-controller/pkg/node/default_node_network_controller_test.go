@@ -365,12 +365,12 @@ var _ = Describe("Node", func() {
 					Output: chassisUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only --data=bare --no-heading --columns=_uuid find "+
+					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
 						"Encap chassis_name=%s", chassisUUID),
 					Output: encapUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only set encap "+
+					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
 						"%s options:dst_port=%d", encapUUID, encapPort),
 				})
 
