@@ -915,6 +915,11 @@ priority            : 0
 type                : snat
 ```
 
+In local gateway mode, conditional SNATs on network-scoped UDN cluster routers
+use `options:ct-commit-all=true`. This keeps the NAT condition while committing
+traffic in the router SNAT zone, allowing the reverse conntrack handling needed
+by NodePort reply traffic.
+
 #### UDN Traffic Isolation
 
 Currently, for inter-UDN pod-to-pod traffic, OVN-Kubernetes supports 2 modes:
