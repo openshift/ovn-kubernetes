@@ -358,28 +358,27 @@ func (ncc *networkClusterController) clearScheduledNodeCleanup(nodeName string) 
 }
 
 func (ncc *networkClusterController) hasPodAllocation() bool {
-	// we only do pod allocation on L2 topologies with interconnect
+	// we only do pod allocation on L2 topologies and localnet topologies with IPAM
 	switch ncc.TopologyType() {
 	case types.Layer2Topology:
 		// We need to allocate the PodAnnotation
-		return config.OVNKubernetesFeature.EnableInterconnect
+		return true
 	case types.LocalnetTopology:
 		// We need to allocate the PodAnnotation if there is IPAM
-		return config.OVNKubernetesFeature.EnableInterconnect && len(ncc.Subnets()) > 0
+		return len(ncc.Subnets()) > 0
 	}
 	return false
 }
 
 func (ncc *networkClusterController) hasNodeAllocation() bool {
-	// we only do node allocation on L3 or default network, and L2 on
-	// interconnect
+	// we only do node allocation on L3, L2, or the default network
 	switch ncc.TopologyType() {
 	case types.Layer3Topology:
 		// we need to allocate network IDs and subnets
 		return true
 	case types.Layer2Topology:
 		// we need to allocate network IDs
-		return config.OVNKubernetesFeature.EnableInterconnect
+		return true
 	default:
 		// we need to allocate network IDs and subnets
 		return !ncc.IsUserDefinedNetwork()
@@ -815,8 +814,54 @@ func (ncc *networkClusterController) Cleanup() error {
 	return nil
 }
 
+// getNewSubnets returns subnets that are in new but not in old
+func getNewSubnets(old, new []config.CIDRNetworkEntry) []config.CIDRNetworkEntry {
+	if len(old) == 0 {
+		return new
+	}
+
+	oldSubnetMap := make(map[string]bool)
+	for _, subnet := range old {
+		oldSubnetMap[subnet.CIDR.String()] = true
+	}
+
+	var ret []config.CIDRNetworkEntry
+	for _, newSubnet := range new {
+		if !oldSubnetMap[newSubnet.CIDR.String()] {
+			ret = append(ret, newSubnet)
+		}
+	}
+
+	return ret
+}
+
 func (ncc *networkClusterController) Reconcile(netInfo util.NetInfo) error {
 	nadKeys := ncc.networkManager.GetNADKeysForNetwork(netInfo.GetNetworkName())
+	if ncc.nodeAllocator != nil {
+		oldSubnets := ncc.GetNetInfo().Subnets()
+		newSubnets := netInfo.Subnets()
+
+		// Find subnets that are in newSubnets but not in oldSubnets
+		addedSubnets := getNewSubnets(oldSubnets, newSubnets)
+		if len(addedSubnets) > 0 {
+			if err := ncc.nodeAllocator.AddSubnets(addedSubnets); err != nil {
+				return fmt.Errorf("failed to add new subnets to node allocator for network %s: %w", ncc.GetNetworkName(), err)
+			}
+
+			// Trigger a full reconcile for all allocatable nodes so any previous
+			// allocation failures are retried after subnet pool expansion.
+			nodes, err := ncc.watchFactory.GetNodes()
+			if err != nil {
+				klog.Errorf("Failed to list nodes for network %s: %v", ncc.GetNetworkName(), err)
+			} else {
+				for _, node := range nodes {
+					if !util.NoHostSubnet(node) {
+						ncc.nodeReconciler.ReconcileNetwork(node.Name, netInfo.GetNetworkName())
+					}
+				}
+			}
+		}
+	}
 	reconcilePendingPods := ncc.updateNADKeysChanged(nadKeys)
 	// update network information, point of no return
 	err := util.ReconcileNetInfo(ncc.ReconcilableNetInfo, netInfo)

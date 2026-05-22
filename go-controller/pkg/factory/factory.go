@@ -525,14 +525,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			return nil, err
 		}
 
-		if config.OVNKubernetesFeature.EnablePersistentIPs && !config.OVNKubernetesFeature.EnableInterconnect {
-			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-			wf.informers[IPAMClaimsType], err = newQueuedInformer(eventQueueSize, IPAMClaimsType,
-				wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(), wf.stopChan, minNumEventQueues)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
@@ -927,7 +919,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to know what is the primary network for a namespace on the CNI side, which
 	// needs the NAD factory whenever the UDN feature is used.
-	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || config.OvnKubeNode.Mode == types.NodeModeDPU) {
+	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || config.IsModeDPU()) {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(eventQueueSize,
 			NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(),
@@ -1089,23 +1081,21 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 
-		if config.OVNKubernetesFeature.EnableInterconnect {
-			wf.informers[PodType], err = newQueuedInformer(eventQueueSize,
-				PodType, wf.iFactory.Core().V1().Pods().Informer(),
-				wf.stopChan, defaultNumEventQueues)
+		wf.informers[PodType], err = newQueuedInformer(eventQueueSize,
+			PodType, wf.iFactory.Core().V1().Pods().Informer(),
+			wf.stopChan, defaultNumEventQueues)
+		if err != nil {
+			return nil, err
+		}
+
+		if config.OVNKubernetesFeature.EnablePersistentIPs {
+			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
+			wf.informers[IPAMClaimsType], err = newQueuedInformer(eventQueueSize,
+				IPAMClaimsType,
+				wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(),
+				wf.stopChan, minNumEventQueues)
 			if err != nil {
 				return nil, err
-			}
-
-			if config.OVNKubernetesFeature.EnablePersistentIPs {
-				wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-				wf.informers[IPAMClaimsType], err = newQueuedInformer(eventQueueSize,
-					IPAMClaimsType,
-					wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(),
-					wf.stopChan, minNumEventQueues)
-				if err != nil {
-					return nil, err
-				}
 			}
 		}
 	}

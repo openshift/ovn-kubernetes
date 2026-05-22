@@ -1,0 +1,297 @@
+name: performance-report
+
+on:
+  workflow_run:
+    workflows: ["performance-test"]
+    types: 
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  process-performance-results:
+    name: Process Performance Results
+    runs-on: ubuntu-24.04
+    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r contrib/perf/requirements.txt
+
+    - name: Download performance test data artifacts
+      run: |
+        contrib/perf/download-artifacts.py \
+          --run-id ${{ github.event.workflow_run.id }} \
+          --filter "performance-test-data" \
+          --output-dir . \
+          --extract
+
+    - name: Organize extracted artifacts and generate JSON data
+      run: |
+        # Organize performance test data
+        for dir in *performance-test-data*; do
+          if [ -d "$dir" ]; then
+            workload=$(echo "$dir" | sed 's/-performance-test-data-.*//')
+            mkdir -p "reports/${workload}"
+
+            # Copy the test data
+            if [ -d "$dir/perf/metrics" ]; then
+              echo "Processing workload: $workload"
+
+              # Generate JSON data from raw metrics
+              cd contrib/perf
+              python3 generate_perf_report.py \
+                --workload "$workload" \
+                --metrics-dir "../../$dir/perf/metrics" \
+                --json-output "../../reports/${workload}/performance_data.json" \
+                --output "../../reports/${workload}/performance_report.md"
+              cd ../..
+            fi
+
+          fi
+        done
+
+        echo "=== Generated reports structure ==="
+        find reports -type f 2>/dev/null || true
+
+    - name: Setup kube-burner for indexing
+      run: |
+        # Download kube-burner binary
+        KUBE_BURNER_VERSION="v2.5.0"
+        KUBE_BURNER_URL="https://github.com/kube-burner/kube-burner/releases/download/${KUBE_BURNER_VERSION}/kube-burner-V2.5.0-linux-x86_64.tar.gz"
+        KUBE_BURNER_CHECKSUM="47c03fab8d88db8ffb9deb796b45d6777bca5648d5a9f81e3c3592ce78678d28"
+
+        curl -L -o kube-burner.tar.gz "$KUBE_BURNER_URL"
+
+        # Verify checksum
+        echo "${KUBE_BURNER_CHECKSUM}  kube-burner.tar.gz" | sha256sum -c - || {
+          echo "::error::Checksum verification failed for kube-burner binary"
+          exit 1
+        }
+
+        tar xzf kube-burner.tar.gz
+        chmod +x kube-burner
+        sudo mv kube-burner /usr/local/bin/
+        rm kube-burner.tar.gz
+
+    - name: Index results to Elasticsearch
+      env:
+        ES_SERVER: ${{ secrets.PERF_DATASTORE }}
+      run: |
+        if [ -z "$ES_SERVER" ]; then
+          echo "No Elasticsearch server configured, skipping indexing"
+          exit 0
+        fi
+        
+        # Find all metrics directories from extracted performance test data
+        METRICS_DIRS=$(find . -path "*performance-test-data*/perf/metrics" -type d 2>/dev/null || true)
+        
+        if [ -z "$METRICS_DIRS" ]; then
+          echo "::warning::No metrics directories found in artifacts, skipping indexing"
+          exit 0
+        fi
+        
+        echo "Found metrics directories:"
+        echo "$METRICS_DIRS"
+        
+        # Index each metrics directory
+        for METRICS_DIR in $METRICS_DIRS; do
+          # Extract workload name from path (e.g., perf-data/kubelet-density-cni/...)
+          WORKLOAD=$(echo "$METRICS_DIR" | cut -d'/' -f2 | sed 's/-performance-test-data-.*//')
+          echo ""
+          echo "=== Indexing metrics for workload: $WORKLOAD ==="
+          echo "Metrics directory: $METRICS_DIR"
+
+          tar -czf archive-${WORKLOAD}.tar.gz $METRICS_DIR
+          
+          # Index the metrics
+          echo "Indexing performance metrics to Elasticsearch..."
+          kube-burner import --es-server $ES_SERVER --es-index upstream-ovnk-kube-burner --tarball archive-${WORKLOAD}.tar.gz || echo "Warning: Failed to index $WORKLOAD metrics"
+        done
+        
+        echo ""
+        echo "Successfully indexed all performance data to Elasticsearch"
+
+    - name: Get associated PRs
+      id: get_prs
+      run: |
+        PR_NUMBERS=$(contrib/perf/get-pr-info.py \
+          --event-path $GITHUB_EVENT_PATH \
+          --format json)
+        echo "pr_numbers=$PR_NUMBERS" >> $GITHUB_OUTPUT
+        echo "Found PRs: $PR_NUMBERS"
+
+    - name: Fetch baseline run
+      id: get_baseline
+      if: steps.get_prs.outputs.pr_numbers != '[]'
+      run: |
+        BASELINE_INFO=$(contrib/perf/get-baseline-run.py \
+          --workflow performance-test.yml \
+          --event schedule \
+          --output json) || echo "{}"
+
+        BASELINE_ID=$(echo "$BASELINE_INFO" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('id', ''))" 2>/dev/null || echo "")
+        BASELINE_URL=$(echo "$BASELINE_INFO" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('url', ''))" 2>/dev/null || echo "")
+
+        echo "baseline_run_id=$BASELINE_ID" >> $GITHUB_OUTPUT
+        echo "baseline_run_url=$BASELINE_URL" >> $GITHUB_OUTPUT
+
+        echo "Baseline run ID: $BASELINE_ID"
+        echo "Baseline run URL: $BASELINE_URL"
+
+    - name: Download baseline artifacts
+      if: steps.get_baseline.outputs.baseline_run_id != ''
+      run: |
+        contrib/perf/download-artifacts.py \
+          --run-id ${{ steps.get_baseline.outputs.baseline_run_id }} \
+          --filter "performance-test-data" \
+          --output-dir baseline-downloads \
+          --extract
+
+    - name: Organize baseline artifacts and generate JSON data
+      if: steps.get_baseline.outputs.baseline_run_id != ''
+      run: |
+        # Organize baseline performance test data and generate JSON
+        mkdir -p baseline-reports
+        for dir in baseline-downloads/*performance-test-data*; do
+          if [ -d "$dir" ]; then
+            workload=$(basename "$dir" | sed 's/-performance-test-data-.*//')
+            mkdir -p "baseline-reports/${workload}"
+
+            # Generate JSON data from raw metrics
+            if [ -d "$dir/perf/metrics" ]; then
+              echo "Processing baseline workload: $workload"
+
+              cd contrib/perf
+              python3 generate_perf_report.py \
+                --workload "$workload" \
+                --metrics-dir "../../$dir/perf/metrics" \
+                --json-output "../../baseline-reports/${workload}/performance_data.json" \
+                --output "../../baseline-reports/${workload}/performance_report.md"
+              cd ../..
+            fi
+
+            # Clean up
+            rm -rf "$dir"
+          fi
+        done
+
+        echo "=== Baseline reports structure ==="
+        find baseline-reports -type f 2>/dev/null || echo "No baseline reports found"
+
+    - name: Compare reports with baseline
+      if: steps.get_prs.outputs.pr_numbers != '[]'
+      run: |
+        mkdir -p enhanced-reports
+
+        # Compare each workload using JSON data files
+        for workload_dir in reports/*/; do
+          if [ -d "$workload_dir" ]; then
+            workload=$(basename "$workload_dir")
+            current_json="$workload_dir/performance_data.json"
+            baseline_json="baseline-reports/$workload/performance_data.json"
+            enhanced_report="enhanced-reports/$workload/performance_report.md"
+
+            if [ -f "$current_json" ]; then
+              echo "Comparing data for workload: $workload"
+              mkdir -p "enhanced-reports/$workload"
+
+              if [ -f "$baseline_json" ]; then
+                # Compare with baseline
+                contrib/perf/compare-reports.py \
+                  --current "$current_json" \
+                  --baseline "$baseline_json" \
+                  --baseline-url "${{ steps.get_baseline.outputs.baseline_run_url }}" \
+                  --output "$enhanced_report"
+              else
+                echo "No baseline found for $workload, using current data as-is"
+                contrib/perf/compare-reports.py \
+                  --current "$current_json" \
+                  --output "$enhanced_report"
+              fi
+            else
+              echo "Warning: No JSON data found for $workload"
+            fi
+          fi
+        done
+
+    - name: Post performance report to PRs
+      if: steps.get_prs.outputs.pr_numbers != '[]'
+      run: |
+        # Extract PR numbers from JSON array
+        PR_NUMBERS=$(echo '${{ steps.get_prs.outputs.pr_numbers }}' | python3 -c "import sys, json; print(' '.join(f'--pr {pr}' for pr in json.load(sys.stdin)))")
+
+        if [ -n "$PR_NUMBERS" ]; then
+          contrib/perf/post-pr-comment.py \
+            $PR_NUMBERS \
+            --reports-dir enhanced-reports \
+            --run-id "${{ github.event.workflow_run.id }}" \
+            --run-url "${{ github.event.workflow_run.html_url }}" \
+            --status "${{ github.event.workflow_run.conclusion }}" \
+            --baseline-id "${{ steps.get_baseline.outputs.baseline_run_id }}" \
+            --baseline-url "${{ steps.get_baseline.outputs.baseline_run_url }}"
+        fi
+
+    - name: Upload processed artifacts
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: processed-performance-data-${{ github.event.workflow_run.id }}
+        path: |
+          *.zip
+          perf-data/
+          reports/
+          *.md
+        retention-days: 90
+
+    - name: Summary
+      if: always()
+      run: |
+        echo "## Performance Report Processing Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow Run ID:** ${{ github.event.workflow_run.id }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Conclusion:** ${{ github.event.workflow_run.conclusion }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Associated PRs:** ${{ steps.get_prs.outputs.pr_numbers }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -n "${{ secrets.PERF_DATASTORE }}" ]; then
+          echo "- **Elasticsearch Indexing:** ✅ Configured" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Elasticsearch Indexing:** ❌ Not configured" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Artifacts Processed" >> $GITHUB_STEP_SUMMARY
+        
+        # Count performance test data artifacts
+        PERF_TEST_COUNT=$(ls -1 *performance-test-data*.zip 2>/dev/null | wc -l)
+        if [ "$PERF_TEST_COUNT" -gt 0 ]; then
+          echo "- ✅ Performance test data: **${PERF_TEST_COUNT}** workload(s)" >> $GITHUB_STEP_SUMMARY
+          for zip in *performance-test-data*.zip; do
+            workload=$(echo "$zip" | sed 's/-performance-test-data-.*//')
+            echo "  - ${workload}" >> $GITHUB_STEP_SUMMARY
+          done
+        else
+          echo "- ❌ Performance test data: none found" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        # Count performance report artifacts
+        REPORT_COUNT=$(ls -1 *performance-report*.zip 2>/dev/null | wc -l)
+        if [ "$REPORT_COUNT" -gt 0 ]; then
+          echo "- ✅ Performance reports: **${REPORT_COUNT}** workload(s)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- ❌ Performance reports: none found" >> $GITHUB_STEP_SUMMARY
+        fi

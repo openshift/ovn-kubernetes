@@ -10,20 +10,28 @@ import (
 	"strconv"
 	"sync"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	"github.com/urfave/cli/v2"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	utilnet "k8s.io/utils/net"
 
 	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	udncontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	networkconnect "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
@@ -407,6 +415,170 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
+
+		ginkgo.It("Add subnet to primary layer3 UDN", func() {
+			app.Action = func(ctx *cli.Context) error {
+
+				testNADName := "test/primary"
+				oneSubnetNetwork := &ovncnitypes.NetConf{
+					Topology: ovntypes.Layer3Topology,
+					NADName:  testNADName,
+					NetConf: cnitypes.NetConf{
+						Name: "primary",
+						Type: "ovn-k8s-cni-overlay",
+					},
+					Subnets: "10.10.0.0/16/17",
+					Role:    ovntypes.NetworkRolePrimary,
+					MTU:     1400,
+				}
+				twoSubnetNetwork := &ovncnitypes.NetConf{
+					Topology: ovntypes.Layer3Topology,
+					NADName:  testNADName,
+					NetConf: cnitypes.NetConf{
+						Name: "primary",
+						Type: "ovn-k8s-cni-overlay",
+					},
+					Subnets: "10.10.0.0/16/17, 10.20.0.0/16/17",
+					Role:    ovntypes.NetworkRolePrimary,
+					MTU:     1400,
+				}
+
+				nodes := []corev1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node3",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node4",
+						},
+					},
+				}
+
+				objs := []runtime.Object{
+					&corev1.NodeList{
+						Items: nodes,
+					},
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.Kubernetes.HostNetworkNamespace = ""
+				config.OVNKubernetesFeature.EnableMultiNetwork = true
+
+				fakeClient := util.GetOVNClientset(objs...).GetClusterManagerClientset()
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				c, cancel := context.WithCancel(ctx.Context)
+				defer cancel()
+				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
+				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = clusterManager.Start(c)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer clusterManager.Stop()
+
+				meetsExpectations := func(g gomega.Gomega, netName string,
+					expectedSubnetCount int, expectedSubnets []string, expectedNodeSubnetMap map[string]string) {
+					// Check subnet allocations
+					nodes, err := fakeClient.KubeClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+					g.Expect(err).ToNot(gomega.HaveOccurred())
+
+					nodesWithSubnets := 0
+					actualSubnets := []string{}
+					actualNodeSubnetMap := map[string]string{}
+					for _, node := range nodes.Items {
+						ipnets, err := util.ParseNodeHostSubnetAnnotation(&node, netName)
+						if err == nil {
+							nodesWithSubnets++
+							g.Expect(ipnets).To(gomega.HaveLen(1))
+							actualSubnets = append(actualSubnets, ipnets[0].String())
+							actualNodeSubnetMap[node.Name] = ipnets[0].String()
+						}
+					}
+					g.Expect(nodesWithSubnets).To(gomega.Equal(expectedSubnetCount))
+					if expectedSubnets != nil {
+						g.Expect(actualSubnets).To(gomega.ConsistOf(expectedSubnets))
+					}
+
+					for k, v := range expectedNodeSubnetMap {
+
+						g.Expect(actualNodeSubnetMap[k]).To(gomega.Equal(v))
+					}
+				}
+
+				// Wait for nodes to be allocated a default network subnet.
+				// Only the number of allocated subnets is checked here; the actual subnet values are not validated.
+				gomega.Eventually(func(g gomega.Gomega) {
+					meetsExpectations(g, ovntypes.DefaultNetworkName, 4, nil, nil)
+				}, "10s", "250ms").Should(gomega.Succeed())
+
+				// create NAD with one subnet
+				namespace, nadName, err := cache.SplitMetaNamespaceKey(testNADName)
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				nad, err := testing.BuildNAD(nadName, namespace, oneSubnetNetwork)
+				nad.ResourceVersion = "2" // apparently changing the actual config isn't enough
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), nad, metav1.CreateOptions{})
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+				// Check that only 2 nodes get subnet due to subnet shortage
+				gomega.Eventually(func(g gomega.Gomega) {
+					meetsExpectations(g, nadName, 2, []string{"10.10.0.0/17", "10.10.128.0/17"}, nil)
+				}, "10s", "250ms").Should(gomega.Succeed())
+
+				getNodeSubnetMap := func(netName string) map[string]string {
+					nodes, err := fakeClient.KubeClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+					gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+					ret := map[string]string{}
+					for _, node := range nodes.Items {
+						ipnets, _ := util.ParseNodeHostSubnetAnnotation(&node, netName)
+						if len(ipnets) > 0 {
+							ret[node.Name] = ipnets[0].String()
+						}
+					}
+					return ret
+				}
+
+				expectedNodeSubnetMap := getNodeSubnetMap(nadName)
+
+				// Update NAD to add one more subnet
+				nad, err = testing.BuildNAD(nadName, namespace, twoSubnetNetwork)
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+				_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
+				gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+				// Verify that all nodes have been allocated subnets after adding the new subnet.
+				gomega.Eventually(func(g gomega.Gomega) {
+					meetsExpectations(g, nadName, 4, []string{"10.10.0.0/17", "10.10.128.0/17", "10.20.0.0/17", "10.20.128.0/17"}, expectedNodeSubnetMap)
+				}, "10s", "250ms").Should(gomega.Succeed())
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 	})
 
 	ginkgo.Context("Node Id allocations", func() {
@@ -1284,7 +1456,7 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 	})
 
 	ginkgo.Context("Transit switch port IP allocations", func() {
-		ginkgo.It("Interconnect enabled", func() {
+		ginkgo.It("allocates transit switch port IPs", func() {
 			config.ClusterManager.V4TransitSubnet = "100.89.0.0/16"
 			config.ClusterManager.V6TransitSubnet = "fd99::/64"
 			app.Action = func(ctx *cli.Context) error {
@@ -1377,12 +1549,11 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				app.Name,
 				"-cluster-subnets=" + clusterCIDR + "," + clusterv6CIDR,
 				"-k8s-service-cidr=10.96.0.0/16,fd00:10:96::/112",
-				"--enable-interconnect",
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("Interconnect enabled - clear the transit switch port ips and check", func() {
+		ginkgo.It("reallocates missing transit switch port IPs", func() {
 			app.Action = func(ctx *cli.Context) error {
 				nodes := []corev1.Node{
 					{
@@ -1490,78 +1661,10 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 			err := app.Run([]string{
 				app.Name,
 				"-cluster-subnets=" + clusterCIDR,
-				"--enable-interconnect",
 			})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
-		ginkgo.It("Interconnect disabled", func() {
-			app.Action = func(ctx *cli.Context) error {
-				nodes := []corev1.Node{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node1",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node2",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "node3",
-						},
-					},
-				}
-				kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
-					Items: nodes,
-				})
-				fakeClient := &util.OVNClusterManagerClientset{
-					KubeClient: kubeFakeClient,
-				}
-
-				_, err := config.InitConfig(ctx, nil, nil)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = f.Start()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-				clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
-				gomega.Expect(clusterManager).NotTo(gomega.BeNil())
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				err = clusterManager.Start(ctx.Context)
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				defer clusterManager.Stop()
-
-				// Check that cluster manager has allocated id transit switch port ips for each node
-				for _, n := range nodes {
-					gomega.Eventually(func() error {
-						updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), n.Name, metav1.GetOptions{})
-						if err != nil {
-							return err
-						}
-
-						_, ok := updatedNode.Annotations[ovnTransitSwitchPortAddrAnnotation]
-						if ok {
-							return fmt.Errorf("not expected node annotation for node %s to have transit switch port ips allocated", n.Name)
-						}
-
-						return nil
-					}).ShouldNot(gomega.HaveOccurred())
-				}
-
-				return nil
-			}
-
-			err := app.Run([]string{
-				app.Name,
-				"-cluster-subnets=" + clusterCIDR,
-			})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		})
 	})
 
 	ginkgo.Context("starting the cluster manager", func() {
@@ -1649,7 +1752,393 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 		})
 	})
 
+	ginkgo.Context("EVPN VTEP and UDN integration", func() {
+		ginkgo.It("should freeze NADs when VTEP goes into CIDROverlap after a second VTEP is created", func() {
+			app.Action = func(ctx *cli.Context) error {
+				// Node with VTEP annotation for vtep-a
+				node := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{
+							util.OVNNodeVTEPs: `{"vtep-a": {"ips": ["100.64.0.1"]}}`,
+						},
+					},
+				}
+
+				ns := &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-ns",
+					},
+				}
+
+				vtepA := &vtepv1.VTEP{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "vtep-a",
+					},
+					Spec: vtepv1.VTEPSpec{
+						CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+						Mode:  vtepv1.VTEPModeUnmanaged,
+					},
+				}
+
+				cudn := &udnv1.ClusterUserDefinedNetwork{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "evpn-cudn",
+					},
+					Spec: udnv1.ClusterUserDefinedNetworkSpec{
+						NamespaceSelector: metav1.LabelSelector{},
+						Network: udnv1.NetworkSpec{
+							Topology: udnv1.NetworkTopologyLayer3,
+							Layer3: &udnv1.Layer3Config{
+								Role: udnv1.NetworkRoleSecondary,
+								Subnets: []udnv1.Layer3Subnet{
+									{CIDR: "10.100.0.0/16"},
+								},
+							},
+							Transport: udnv1.TransportOptionEVPN,
+							EVPN: &udnv1.EVPNConfig{
+								VTEP: "vtep-a",
+								IPVRF: &udnv1.VRFConfig{
+									VNI: 200,
+								},
+							},
+						},
+					},
+				}
+
+				kubeFakeClient := fake.NewSimpleClientset(node, ns)
+				fakeClient := util.GetOVNClientset(vtepA, cudn)
+				fakeClient.KubeClient = kubeFakeClient
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.OVNKubernetesFeature.EnableMultiNetwork = true
+				config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+				config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+				config.OVNKubernetesFeature.EnableEgressIP = true
+				config.OVNKubernetesFeature.EnableEVPN = true
+				config.Gateway.Mode = config.GatewayModeLocal
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient.GetClusterManagerClientset())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				c, cancel := context.WithCancel(ctx.Context)
+				defer cancel()
+				cm, err := NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", record.NewFakeRecorder(10))
+				gomega.Expect(cm).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = cm.Start(c)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer cm.Stop()
+
+				cmClient := fakeClient.GetClusterManagerClientset()
+
+				// Step 1: VTEP-A should become Accepted=True
+				expectVTEPCondition(cmClient, "vtep-a", metav1.Condition{
+					Type:   "Accepted",
+					Status: metav1.ConditionTrue,
+				})
+
+				// Step 2: CUDN should have NAD created (NetworkCreated=True)
+				var networkCreatedTransitionTime metav1.Time
+				gomega.Eventually(func() bool {
+					cudnObj, err := cmClient.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), "evpn-cudn", metav1.GetOptions{})
+					if err != nil {
+						return false
+					}
+					cond := meta.FindStatusCondition(cudnObj.Status.Conditions, "NetworkCreated")
+					if cond != nil && cond.Status == metav1.ConditionTrue {
+						networkCreatedTransitionTime = cond.LastTransitionTime
+						return true
+					}
+					return false
+				}, 10).Should(gomega.BeTrue(), "CUDN should have NetworkCreated=True")
+
+				// TransportAccepted should report RA missing (VTEP passes but no RA)
+				expectCUDNTransportCondition(cmClient, "evpn-cudn", metav1.Condition{
+					Type:    udncontroller.ConditionTypeTransportAccepted,
+					Status:  metav1.ConditionFalse,
+					Reason:  udncontroller.ReasonEVPNRouteAdvertisementsIsMissing,
+					Message: "No RouteAdvertisements CR is advertising the pod networks.",
+				})
+
+				// NAD should exist
+				gomega.Eventually(func() error {
+					_, err := cmClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-ns").Get(context.Background(), "evpn-cudn", metav1.GetOptions{})
+					return err
+				}, 10).Should(gomega.Succeed(), "NAD should be created")
+
+				// Step 3: Create VTEP-B with overlapping CIDRs — this will cause
+				// the VTEP controller to set both VTEPs to Accepted=False
+				vtepB := &vtepv1.VTEP{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "vtep-b",
+					},
+					Spec: vtepv1.VTEPSpec{
+						CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+						Mode:  vtepv1.VTEPModeUnmanaged,
+					},
+				}
+				_, err = cmClient.VTEPClient.K8sV1().VTEPs().Create(context.Background(), vtepB, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Step 4: VTEP-A should transition to Accepted=False (CIDROverlap)
+				expectVTEPCondition(cmClient, "vtep-a", metav1.Condition{
+					Type:   "Accepted",
+					Status: metav1.ConditionFalse,
+					Reason: "CIDROverlap",
+				})
+
+				// Step 5: NAD should still exist and NetworkCreated should remain True
+				// (frozen, not torn down). Also verify LastTransitionTime hasn't changed.
+				gomega.Consistently(func() bool {
+					cudnObj, err := cmClient.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), "evpn-cudn", metav1.GetOptions{})
+					if err != nil {
+						return false
+					}
+					cond := meta.FindStatusCondition(cudnObj.Status.Conditions, "NetworkCreated")
+					return cond != nil && cond.Status == metav1.ConditionTrue &&
+						cond.LastTransitionTime.Equal(&networkCreatedTransitionTime)
+				}, 3).Should(gomega.BeTrue(), "NetworkCreated should remain True with unchanged LastTransitionTime during CIDROverlap")
+
+				// TransportAccepted should report VTEPNotAccepted
+				expectCUDNTransportCondition(cmClient, "evpn-cudn", metav1.Condition{
+					Type:    udncontroller.ConditionTypeTransportAccepted,
+					Status:  metav1.ConditionFalse,
+					Reason:  udncontroller.ReasonVTEPNotAccepted,
+					Message: `VTEP "vtep-a" exists but is not accepted.`,
+				})
+
+				_, err = cmClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-ns").Get(context.Background(), "evpn-cudn", metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "NAD should still exist during CIDROverlap")
+
+				// Step 6: Delete VTEP-B to resolve the overlap
+				err = cmClient.VTEPClient.K8sV1().VTEPs().Delete(context.Background(), "vtep-b", metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Step 7: VTEP-A should go back to Accepted=True
+				expectVTEPCondition(cmClient, "vtep-a", metav1.Condition{
+					Type:   "Accepted",
+					Status: metav1.ConditionTrue,
+				})
+
+				// TransportAccepted should transition back to RA missing (VTEP passes again)
+				expectCUDNTransportCondition(cmClient, "evpn-cudn", metav1.Condition{
+					Type:    udncontroller.ConditionTypeTransportAccepted,
+					Status:  metav1.ConditionFalse,
+					Reason:  udncontroller.ReasonEVPNRouteAdvertisementsIsMissing,
+					Message: "No RouteAdvertisements CR is advertising the pod networks.",
+				})
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should not create NAD when VTEP is in failed state", func() {
+			app.Action = func(ctx *cli.Context) error {
+				// Node WITHOUT VTEP annotation — the VTEP controller will
+				// set AllocationFailed because there's no IP for this VTEP.
+				node := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				}
+
+				ns := &corev1.Namespace{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-ns",
+					},
+				}
+
+				vtep := &vtepv1.VTEP{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "vtep-failed",
+					},
+					Spec: vtepv1.VTEPSpec{
+						CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
+						Mode:  vtepv1.VTEPModeUnmanaged,
+					},
+				}
+
+				cudn := &udnv1.ClusterUserDefinedNetwork{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "evpn-cudn-blocked",
+					},
+					Spec: udnv1.ClusterUserDefinedNetworkSpec{
+						NamespaceSelector: metav1.LabelSelector{},
+						Network: udnv1.NetworkSpec{
+							Topology: udnv1.NetworkTopologyLayer3,
+							Layer3: &udnv1.Layer3Config{
+								Role: udnv1.NetworkRoleSecondary,
+								Subnets: []udnv1.Layer3Subnet{
+									{CIDR: "10.200.0.0/16"},
+								},
+							},
+							Transport: udnv1.TransportOptionEVPN,
+							EVPN: &udnv1.EVPNConfig{
+								VTEP: "vtep-failed",
+								IPVRF: &udnv1.VRFConfig{
+									VNI: 300,
+								},
+							},
+						},
+					},
+				}
+
+				kubeFakeClient := fake.NewSimpleClientset(node, ns)
+				fakeClient := util.GetOVNClientset(vtep, cudn)
+				fakeClient.KubeClient = kubeFakeClient
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				config.OVNKubernetesFeature.EnableMultiNetwork = true
+				config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+				config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+				config.OVNKubernetesFeature.EnableEgressIP = true
+				config.OVNKubernetesFeature.EnableEVPN = true
+				config.Gateway.Mode = config.GatewayModeLocal
+
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient.GetClusterManagerClientset())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				c, cancel := context.WithCancel(ctx.Context)
+				defer cancel()
+				cm, err := NewClusterManager(fakeClient.GetClusterManagerClientset(), f, "identity", record.NewFakeRecorder(10))
+				gomega.Expect(cm).NotTo(gomega.BeNil())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = cm.Start(c)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				defer cm.Stop()
+
+				cmClient := fakeClient.GetClusterManagerClientset()
+
+				// Step 1: VTEP controller should set Accepted=False (AllocationFailed)
+				// because the node has no VTEP annotation.
+				expectVTEPCondition(cmClient, "vtep-failed", metav1.Condition{
+					Type:   "Accepted",
+					Status: metav1.ConditionFalse,
+					Reason: "AllocationFailed",
+				})
+
+				// Step 2: CUDN should report VTEPNotAccepted — NAD must NOT be created.
+				gomega.Eventually(func() string {
+					cudnObj, err := cmClient.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), "evpn-cudn-blocked", metav1.GetOptions{})
+					if err != nil {
+						return ""
+					}
+					cond := meta.FindStatusCondition(cudnObj.Status.Conditions, "NetworkCreated")
+					if cond == nil {
+						return ""
+					}
+					return cond.Reason
+				}, 10).Should(gomega.Equal("VTEPNotAccepted"), "CUDN should report VTEPNotAccepted")
+
+				// TransportAccepted should also report VTEPNotAccepted
+				expectCUDNTransportCondition(cmClient, "evpn-cudn-blocked", metav1.Condition{
+					Type:    udncontroller.ConditionTypeTransportAccepted,
+					Status:  metav1.ConditionFalse,
+					Reason:  udncontroller.ReasonVTEPNotAccepted,
+					Message: `VTEP "vtep-failed" exists but is not accepted.`,
+				})
+
+				// NAD should NOT exist
+				gomega.Consistently(func() bool {
+					_, err := cmClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-ns").Get(context.Background(), "evpn-cudn-blocked", metav1.GetOptions{})
+					return err != nil
+				}, 3).Should(gomega.BeTrue(), "NAD should not be created when VTEP is not accepted")
+
+				// Step 3: Fix the node — add VTEP annotation so VTEP becomes Accepted
+				node, err = kubeFakeClient.CoreV1().Nodes().Get(context.Background(), "node1", metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				node.Annotations = map[string]string{
+					util.OVNNodeVTEPs: `{"vtep-failed": {"ips": ["100.64.0.1"]}}`,
+				}
+				_, err = kubeFakeClient.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Step 4: VTEP should become Accepted=True
+				expectVTEPCondition(cmClient, "vtep-failed", metav1.Condition{
+					Type:   "Accepted",
+					Status: metav1.ConditionTrue,
+				})
+
+				// Step 5: CUDN should now have NetworkCreated=True and NAD should exist
+				gomega.Eventually(func() bool {
+					cudnObj, err := cmClient.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), "evpn-cudn-blocked", metav1.GetOptions{})
+					if err != nil {
+						return false
+					}
+					cond := meta.FindStatusCondition(cudnObj.Status.Conditions, "NetworkCreated")
+					return cond != nil && cond.Status == metav1.ConditionTrue
+				}, 10).Should(gomega.BeTrue(), "CUDN should have NetworkCreated=True after VTEP is accepted")
+
+				// TransportAccepted should transition to RA missing (VTEP now passes but no RA exists)
+				expectCUDNTransportCondition(cmClient, "evpn-cudn-blocked", metav1.Condition{
+					Type:    udncontroller.ConditionTypeTransportAccepted,
+					Status:  metav1.ConditionFalse,
+					Reason:  udncontroller.ReasonEVPNRouteAdvertisementsIsMissing,
+					Message: "No RouteAdvertisements CR is advertising the pod networks.",
+				})
+
+				gomega.Eventually(func() error {
+					_, err := cmClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions("test-ns").Get(context.Background(), "evpn-cudn-blocked", metav1.GetOptions{})
+					return err
+				}, 10).Should(gomega.Succeed(), "NAD should be created after VTEP becomes accepted")
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+	})
+
 })
+
+func expectCUDNTransportCondition(cmClient *util.OVNClusterManagerClientset, cudnName string, expected metav1.Condition) {
+	gomega.Eventually(func(g gomega.Gomega) {
+		cudnObj, err := cmClient.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		cond := meta.FindStatusCondition(cudnObj.Status.Conditions, expected.Type)
+		g.Expect(cond).NotTo(gomega.BeNil())
+		g.Expect(cond.Status).To(gomega.Equal(expected.Status))
+		if expected.Reason != "" {
+			g.Expect(cond.Reason).To(gomega.Equal(expected.Reason))
+		}
+		if expected.Message != "" {
+			g.Expect(cond.Message).To(gomega.Equal(expected.Message))
+		}
+	}, 10).Should(gomega.Succeed())
+}
+
+func expectVTEPCondition(cmClient *util.OVNClusterManagerClientset, vtepName string, expected metav1.Condition) {
+	gomega.Eventually(func(g gomega.Gomega) {
+		vtep, err := cmClient.VTEPClient.K8sV1().VTEPs().Get(context.Background(), vtepName, metav1.GetOptions{})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		cond := meta.FindStatusCondition(vtep.Status.Conditions, expected.Type)
+		g.Expect(cond).NotTo(gomega.BeNil())
+		g.Expect(cond.Status).To(gomega.Equal(expected.Status))
+		if expected.Reason != "" {
+			g.Expect(cond.Reason).To(gomega.Equal(expected.Reason))
+		}
+		if expected.Message != "" {
+			g.Expect(cond.Message).To(gomega.Equal(expected.Message))
+		}
+	}, 10).Should(gomega.Succeed())
+}
 
 func clusterManager(client *util.OVNClusterManagerClientset, f *factory.WatchFactory) (*ClusterManager, error) {
 	if err := f.Start(); err != nil {
