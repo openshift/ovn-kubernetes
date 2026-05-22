@@ -852,13 +852,32 @@ func (eIPC *egressIPClusterController) initEgressIPAllocator(node *v1.Node) (err
 }
 
 // deleteAllocatorEgressIPAssignments deletes the allocation as to keep the
-// cache state correct, also see addAllocatorEgressIPAssignments
+// cache state correct for known status assignments.
+// Also see addAllocatorEgressIPAssignments and deleteAllAllocatorEgressIPAssignments
 func (eIPC *egressIPClusterController) deleteAllocatorEgressIPAssignments(statusAssignments []egressipv1.EgressIPStatusItem) {
 	eIPC.allocator.Lock()
 	defer eIPC.allocator.Unlock()
 	for _, status := range statusAssignments {
 		if eNode, exists := eIPC.allocator.cache[status.Node]; exists {
 			delete(eNode.allocations, status.EgressIP)
+		}
+	}
+}
+
+// deleteAllAllocatorEgressIPAssignments deletes the egressIP allocation from
+// all nodes in the cache, regardless of status. This ensures cache consistency
+// when the EgressIP status may be stale or empty due to failed status updates,
+// race conditions, or node deletions before status patch completes.
+// This function should be used when processing EgressIP deletions or cleanup
+// operations where the status field cannot be trusted.
+func (eIPC *egressIPClusterController) deleteAllAllocatorEgressIPAssignments(name, egressIP string) {
+	eIPC.allocator.Lock()
+	defer eIPC.allocator.Unlock()
+	for nodeName, eNode := range eIPC.allocator.cache {
+		if egressIPName, exists := eNode.allocations[egressIP]; exists && egressIPName == name {
+			klog.V(5).Infof("Deleting egress IP allocation from cache - node: %s, EIP name: %s, IP: %s",
+				nodeName, name, egressIP)
+			delete(eNode.allocations, egressIP)
 		}
 	}
 }
@@ -924,6 +943,15 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 				if staleEgressIPs.Has(egressIP) {
 					staleEgressIPs.Delete(egressIP)
 				}
+			}
+		}
+	} else {
+		// When processing EgressIP deletion (new == nil), ensure complete cache cleanup.
+		// The status may be empty or stale, so we cannot rely on deleteAllocatorEgressIPAssignments.
+		// Instead, iterate through all spec IPs and clean them from cache regardless of status.
+		if old != nil {
+			for _, egressIP := range old.Spec.EgressIPs {
+				eIPC.deleteAllAllocatorEgressIPAssignments(name, egressIP)
 			}
 		}
 	}
@@ -1064,8 +1092,14 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		}
 		for staleEgressIP := range staleEgressIPs {
 			if nodeName := eIPC.deleteAllocatorEgressIPAssignmentIfExists(name, staleEgressIP); nodeName != "" {
-				statusToRemove = append(statusToRemove,
-					egressipv1.EgressIPStatusItem{EgressIP: staleEgressIP, Node: nodeName})
+				statusToRemove = append(statusToRemove, egressipv1.EgressIPStatusItem{
+					EgressIP: staleEgressIP,
+					Node:     nodeName,
+				})
+			} else {
+				// If deleteAllocatorEgressIPAssignmentIfExists didn't find it, ensure complete cleanup
+				// This handles cases where the allocation exists but status is out of sync
+				eIPC.deleteAllAllocatorEgressIPAssignments(name, staleEgressIP)
 			}
 		}
 		// If running on a public cloud we should not program OVN just yet for assignment
