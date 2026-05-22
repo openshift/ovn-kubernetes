@@ -853,13 +853,12 @@ is_nested_virt_enabled() {
 
 install_kubevirt() {
     # possible values:
-    # stable - install newest stable (default)
+    # stable - install newest stable
     # vX.Y.Z - install specific stable (i.e v1.3.1)
-    # nightly - install newest nightly
+    # nightly - install newest nightly (default)
     # nightly tag - install specific nightly (i.e 20240910)
-    # KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"stable"}
-
-    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"v1.6.2"}
+    # TODO: move back to stable once KubeVirt releases K8s 1.36-compatible CRDs.
+    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"nightly"}
 
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
