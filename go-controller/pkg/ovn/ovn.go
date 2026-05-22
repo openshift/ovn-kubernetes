@@ -403,10 +403,15 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
 		return fmt.Errorf("error creating gateway for node %s: %v", node.Name, err)
 	}
 
-	if util.IsPodNetworkAdvertisedAtNode(oc, node.Name) &&
-		config.OVNKubernetesFeature.AdvertisedUDNIsolationMode == config.AdvertisedUDNIsolationModeStrict {
+	isAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
+	isolationMode := config.OVNKubernetesFeature.AdvertisedUDNIsolationMode
+	if isAdvertised && isolationMode == config.AdvertisedUDNIsolationModeStrict {
+		klog.Infof("[UDN-DEBUG] syncNodeGateway: node=%s -> addAdvertisedNetworkIsolation (isAdvertised=%v isolationMode=%s)",
+			node.Name, isAdvertised, isolationMode)
 		return oc.addAdvertisedNetworkIsolation(node.Name)
 	}
+	klog.Infof("[UDN-DEBUG] syncNodeGateway: node=%s -> deleteAdvertisedNetworkIsolation (isAdvertised=%v isolationMode=%s)",
+		node.Name, isAdvertised, isolationMode)
 	return oc.deleteAdvertisedNetworkIsolation(node.Name)
 }
 

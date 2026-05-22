@@ -404,9 +404,11 @@ func (c *Controller) syncService(key string) error {
 		util.IsUDNEnabledService(key) {
 
 		if service == nil {
+			klog.Infof("[UDN-DEBUG] syncService: UDN-enabled service %s deleted, cleaning up route for network=%s", key, c.netInfo.GetNetworkName())
 			return c.cleanupUDNEnabledServiceRoute(key)
 		}
 
+		klog.Infof("[UDN-DEBUG] syncService: UDN-enabled service %s found, configuring route for network=%s", key, c.netInfo.GetNetworkName())
 		err = c.configureUDNEnabledServiceRoute(service)
 		if err != nil {
 			return fmt.Errorf("failed to configure the UDN enabled service route: %v", err)
@@ -571,7 +573,10 @@ func (c *Controller) syncNodeInfos(nodeInfos []nodeInfo) {
 
 // RequestFullSync re-syncs every service that currently exists
 func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
-	klog.Infof("Full service sync requested for network=%s", c.netInfo.GetNetworkName())
+	c.startupDoneLock.RLock()
+	startupDone := c.startupDone
+	c.startupDoneLock.RUnlock()
+	klog.Infof("[UDN-DEBUG] RequestFullSync: called for network=%s nodeInfos=%d startupDone=%v", c.netInfo.GetNetworkName(), len(nodeInfos), startupDone)
 
 	// Resync node infos and node IP templates.
 	c.syncNodeInfos(nodeInfos)
@@ -588,9 +593,12 @@ func (c *Controller) RequestFullSync(nodeInfos []nodeInfo) {
 			return
 		}
 
+		klog.Infof("[UDN-DEBUG] RequestFullSync: requeuing %d services for network=%s", len(services), c.netInfo.GetNetworkName())
 		for _, service := range services {
 			c.onServiceAdd(service)
 		}
+	} else {
+		klog.Infof("[UDN-DEBUG] RequestFullSync: skipping service requeue because startupDone=false for network=%s", c.netInfo.GetNetworkName())
 	}
 }
 
@@ -810,7 +818,15 @@ func (c *Controller) cleanupUDNEnabledServiceRoute(key string) error {
 }
 
 func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) error {
-	klog.Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, c.netInfo.GetNetworkName())
+	startTime := time.Now()
+	klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: START timestamp=%s service=%s/%s network=%s topology=%s clusterIP=%s nodeInfos=%d",
+		startTime.Format(time.RFC3339Nano), service.Namespace, service.Name, c.netInfo.GetNetworkName(), c.netInfo.TopologyType(), service.Spec.ClusterIP, len(c.nodeInfos))
+
+	if len(c.nodeInfos) == 0 {
+		klog.Warningf("[UDN-DEBUG] configureUDNEnabledServiceRoute: WARNING - no nodeInfos available, cannot create routes for service=%s/%s network=%s",
+			service.Namespace, service.Name, c.netInfo.GetNetworkName())
+		return fmt.Errorf("no nodeInfos available for UDN service route configuration")
+	}
 
 	extIDs := map[string]string{
 		types.NetworkExternalID:           c.netInfo.GetNetworkName(),
@@ -827,9 +843,13 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 
 	}
 	var ops []ovsdb.Operation
-	for _, nodeInfo := range c.nodeInfos {
+	var allNodes []string
+	for i, nodeInfo := range c.nodeInfos {
+		allNodes = append(allNodes, nodeInfo.name)
 		mgmtIP, err := util.MatchFirstIPFamily(utilnet.IsIPv6String(service.Spec.ClusterIP), nodeInfo.mgmtIPs)
 		if err != nil {
+			klog.Errorf("[UDN-DEBUG] configureUDNEnabledServiceRoute: ERROR matching IP family for node=%s service=%s/%s: %v",
+				nodeInfo.name, service.Namespace, service.Name, err)
 			return err
 		}
 		staticRoute := nbdb.LogicalRouterStaticRoute{
@@ -842,15 +862,86 @@ func (c *Controller) configureUDNEnabledServiceRoute(service *corev1.Service) er
 		if c.netInfo.TopologyType() == types.Layer2Topology && !globalconfig.Layer2UsesTransitRouter {
 			routerName = nodeInfo.gatewayRouterName
 		}
-		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, nil, routerName, &staticRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: iteration %d/%d node=%s mgmtIP=%s routerName=%s ipPrefix=%s nexthop=%s policy=%s",
+			i+1, len(c.nodeInfos), nodeInfo.name, mgmtIP.String(), routerName, staticRoute.IPPrefix, staticRoute.Nexthop, *staticRoute.Policy)
+		prevOpsCount := len(ops)
+		ops, err = libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, routerName, &staticRoute, func(item *nbdb.LogicalRouterStaticRoute) bool {
 			return routesEqual(item, &staticRoute)
 		})
 		if err != nil {
+			klog.Errorf("[UDN-DEBUG] configureUDNEnabledServiceRoute: ERROR creating ops for node=%s: %v", nodeInfo.name, err)
 			return err
+		}
+		klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: iteration %d/%d accumulated ops: previous=%d current=%d", i+1, len(c.nodeInfos), prevOpsCount, len(ops))
+	}
+	klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: all nodes in network=%s: %v", c.netInfo.GetNetworkName(), allNodes)
+
+	klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: transacting %d ops for service=%s/%s network=%s",
+		len(ops), service.Namespace, service.Name, c.netInfo.GetNetworkName())
+
+	txStart := time.Now()
+	_, err := libovsdbops.TransactAndCheck(c.nbClient, ops)
+	txDuration := time.Since(txStart)
+
+	if err != nil {
+		klog.Errorf("[UDN-DEBUG] configureUDNEnabledServiceRoute: TransactAndCheck FAILED after %v: %v", txDuration, err)
+	} else {
+		klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: TransactAndCheck succeeded in %v", txDuration)
+
+		// POST-TX VERIFICATION: read back routes to confirm they were installed
+		verifyStart := time.Now()
+		serviceKey := ktypes.NamespacedName{Namespace: service.Namespace, Name: service.Name}.String()
+		verifyRoutes, verifyErr := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(c.nbClient, func(route *nbdb.LogicalRouterStaticRoute) bool {
+			return route.ExternalIDs[types.UDNEnabledServiceExternalID] == serviceKey &&
+				route.ExternalIDs[types.NetworkExternalID] == c.netInfo.GetNetworkName()
+		})
+		verifyDuration := time.Since(verifyStart)
+
+		if verifyErr != nil {
+			klog.Errorf("[UDN-DEBUG] configureUDNEnabledServiceRoute: POST-TX route verification FAILED to query after %v: %v", verifyDuration, verifyErr)
+		} else {
+			klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: POST-TX found %d routes for service=%s network=%s in %v (expected %d for nodes)",
+				len(verifyRoutes), serviceKey, c.netInfo.GetNetworkName(), verifyDuration, len(c.nodeInfos))
+
+			nodesSeen := make(map[string]bool)
+			for i, r := range verifyRoutes {
+				klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: POST-TX route[%d] uuid=%s prefix=%s nexthop=%s policy=%v externalIDs=%v",
+					i, r.UUID, r.IPPrefix, r.Nexthop, r.Policy, r.ExternalIDs)
+
+				// Try to match nexthop to a node
+				for _, nodeInfo := range c.nodeInfos {
+					mgmtIP, _ := util.MatchFirstIPFamily(utilnet.IsIPv6String(service.Spec.ClusterIP), nodeInfo.mgmtIPs)
+					if mgmtIP != nil && mgmtIP.String() == r.Nexthop {
+						nodesSeen[nodeInfo.name] = true
+						klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: POST-TX route[%d] maps to node=%s", i, nodeInfo.name)
+					}
+				}
+			}
+
+			if len(verifyRoutes) < len(c.nodeInfos) {
+				klog.Errorf("[UDN-DEBUG] configureUDNEnabledServiceRoute: POST-TX VERIFICATION FAILED - only %d routes installed for %d nodes. KAPI access may be broken on some nodes.",
+					len(verifyRoutes), len(c.nodeInfos))
+				klog.Errorf("[UDN-DEBUG] configureUDNEnabledServiceRoute: POST-TX nodes with routes: %v, all nodes: %v", nodesSeen, allNodes)
+			} else {
+				klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: POST-TX VERIFICATION SUCCESS - all %d nodes have routes", len(c.nodeInfos))
+			}
 		}
 	}
 
-	_, err := libovsdbops.TransactAndCheck(c.nbClient, ops)
+	totalDuration := time.Since(startTime)
+	klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: COMPLETE timestamp=%s totalDuration=%v service=%s/%s network=%s result=%v",
+		time.Now().Format(time.RFC3339Nano), totalDuration, service.Namespace, service.Name, c.netInfo.GetNetworkName(), err)
+
+	// Add guidance for further debugging
+	if err == nil && len(c.nodeInfos) > 0 {
+		klog.Infof("[UDN-DEBUG] configureUDNEnabledServiceRoute: NBDB routes configured. Next steps for debugging connectivity issues:")
+		klog.Infof("[UDN-DEBUG]   1. Check if ovn-northd translated routes to SBDB: ovn-sbctl --no-leader-only find Logical_Flow 'match ~ \"%s\"'", service.Spec.ClusterIP)
+		klog.Infof("[UDN-DEBUG]   2. Check ovn-controller logs on nodes for flow programming: grep -i '%s' /var/log/ovn/ovn-controller.log", service.Spec.ClusterIP)
+		klog.Infof("[UDN-DEBUG]   3. Check datapath flows on nodes: ovs-ofctl dump-flows br-int | grep -i '%s'", service.Spec.ClusterIP)
+		klog.Infof("[UDN-DEBUG]   4. Check DNS resolution from UDN pod: kubectl exec <udn-pod> -- nslookup kubernetes.default")
+		klog.Infof("[UDN-DEBUG]   5. Router name: %s", c.netInfo.GetNetworkScopedClusterRouterName())
+	}
+
 	return err
 }
 

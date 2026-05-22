@@ -443,6 +443,24 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 		return err
 	}
 
+	// [UDN-DEBUG] Start periodic isolation state verification goroutine
+	oc.wg.Add(1)
+	go func() {
+		defer oc.wg.Done()
+		klog.Infof("[UDN-DEBUG] Starting periodic UDN isolation state verifier (every 5s)")
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				oc.debugVerifyUDNIsolationState()
+			case <-oc.stopChan:
+				klog.Infof("[UDN-DEBUG] Stopping periodic UDN isolation state verifier")
+				return
+			}
+		}
+	}()
+
 	if config.OVNKubernetesFeature.EnableAdminNetworkPolicy {
 		err := oc.newANPController()
 		if err != nil {

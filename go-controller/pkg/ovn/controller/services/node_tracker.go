@@ -185,6 +185,7 @@ func (nt *nodeTracker) updateNodeInfo(nodeName, switchName, routerName, chassisI
 // removeNodeWithServiceReSync removes a node from the LB -> node mapper
 // *and* forces full reconciliation of services.
 func (nt *nodeTracker) removeNodeWithServiceReSync(nodeName string) {
+	klog.Infof("[UDN-DEBUG] nodeTracker.removeNodeWithServiceReSync: removing node=%s network=%q and triggering full resync", nodeName, nt.netInfo.GetNetworkName())
 	nt.removeNode(nodeName)
 	nt.Lock()
 	nt.resyncFn(nt.getZoneNodes())
@@ -212,12 +213,14 @@ func (nt *nodeTracker) updateNode(node *corev1.Node) {
 		for _, subnet := range nt.netInfo.Subnets() {
 			hsn = append(hsn, subnet.CIDR)
 		}
+		klog.Infof("[UDN-DEBUG] nodeTracker.updateNode: node=%s network=%q topology=L2 subnets=%v", node.Name, nt.netInfo.GetNetworkName(), hsn)
 	} else {
 		hsn, err = util.ParseNodeHostSubnetAnnotation(node, nt.netInfo.GetNetworkName())
+		klog.Infof("[UDN-DEBUG] nodeTracker.updateNode: node=%s network=%q topology=L3 ParseNodeHostSubnetAnnotation result: hsn=%v err=%v", node.Name, nt.netInfo.GetNetworkName(), hsn, err)
 	}
 	if err != nil || hsn == nil || util.NoHostSubnet(node) {
 		// usually normal; means the node's gateway hasn't been initialized yet
-		klog.Infof("Node %s has invalid / no HostSubnet annotations (probably waiting on initialization), or it's a hybrid overlay node: %v", node.Name, err)
+		klog.Infof("[UDN-DEBUG] nodeTracker.updateNode: REMOVING node=%s network=%q (err=%v hsn=%v noHostSubnet=%v)", node.Name, nt.netInfo.GetNetworkName(), err, hsn, util.NoHostSubnet(node))
 		nt.removeNode(node.Name)
 		return
 	}
@@ -257,6 +260,8 @@ func (nt *nodeTracker) updateNode(node *corev1.Node) {
 	for _, hostSubnet := range hsn {
 		mgmtIPs = append(mgmtIPs, nt.netInfo.GetNodeManagementIP(hostSubnet).IP)
 	}
+	klog.Infof("[UDN-DEBUG] nodeTracker.updateNode: node=%s network=%q switchName=%s grName=%s chassisID=%s mgmtIPs=%v l3gatewayAddresses=%v hostAddresses=%v",
+		node.Name, nt.netInfo.GetNetworkName(), switchName, grName, chassisID, mgmtIPs, l3gatewayAddresses, hostAddressesIPs)
 
 	nt.updateNodeInfo(
 		node.Name,

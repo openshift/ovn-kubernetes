@@ -188,6 +188,7 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *corev1.Pod, portInfo 
 
 	// delete open port ACLs for UDN pods
 	if util.IsNetworkSegmentationSupportEnabled() {
+		klog.Infof("[UDN-DEBUG] deleteLogicalPort: cleaning up UDN open port ACLs for pod=%s/%s", pod.Namespace, pod.Name)
 		// safe to call for non-UDN pods
 		err = oc.setUDNPodOpenPorts(pod.Namespace+"/"+pod.Name, pod.Annotations, "")
 		if err != nil {
@@ -282,8 +283,11 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) 
 	if err != nil {
 		return err
 	}
+	klog.Infof("[UDN-DEBUG] addLogicalPort: pod=%s/%s node=%s networkRole=%s lsp.Name=%s lsp.UUID=%s newlyCreatedPort=%v segmentationEnabled=%v",
+		pod.Namespace, pod.Name, pod.Spec.NodeName, networkRole, lsp.Name, lsp.UUID, newlyCreatedPort, util.IsNetworkSegmentationSupportEnabled())
 	if networkRole == types.NetworkRoleInfrastructure && util.IsNetworkSegmentationSupportEnabled() {
 		pgName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
+		klog.Infof("[UDN-DEBUG] addLogicalPort: adding UDN pod %s/%s LSP %s (UUID=%s) to isolation portGroup=%s", pod.Namespace, pod.Name, lsp.Name, lsp.UUID, pgName)
 		if ops, err = libovsdbops.AddPortsToPortGroupOps(oc.nbClient, ops, pgName, lsp.UUID); err != nil {
 			return err
 		}
@@ -294,6 +298,7 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) 
 		if err != nil {
 			return fmt.Errorf("failed to set UDN pod %s/%s open ports: %w", pod.Namespace, pod.Name, err)
 		}
+		klog.Infof("[UDN-DEBUG] addLogicalPort: UDN pod %s/%s isolation setup complete, total ops=%d", pod.Namespace, pod.Name, len(ops))
 	}
 
 	// Ensure the namespace/nsInfo exists
@@ -351,6 +356,32 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) 
 	}
 	txOkCallBack()
 	oc.podRecorder.AddLSP(pod.UID, oc.GetNetInfo())
+
+	// [UDN-DEBUG] Post-transaction verification: confirm port group membership is correct
+	if networkRole == types.NetworkRoleInfrastructure && util.IsNetworkSegmentationSupportEnabled() {
+		pgIDs := oc.getSecondaryPodsPortGroupDbIDs()
+		pgName := libovsdbutil.GetPortGroupName(pgIDs)
+		verifyPG := &nbdb.PortGroup{Name: pgName}
+		verifyPG, verifyErr := libovsdbops.GetPortGroup(oc.nbClient, verifyPG)
+		if verifyErr != nil {
+			klog.Errorf("[UDN-DEBUG] addLogicalPort: POST-TX VERIFICATION FAILED - cannot read portGroup=%s: %v", pgName, verifyErr)
+		} else {
+			found := false
+			for _, pUUID := range verifyPG.Ports {
+				if pUUID == lsp.UUID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				klog.Errorf("[UDN-DEBUG] addLogicalPort: POST-TX VERIFICATION FAILED - LSP uuid=%s (name=%s) for pod %s/%s NOT FOUND in portGroup=%s (has %d ports). ISOLATION IS BROKEN.",
+					lsp.UUID, lsp.Name, pod.Namespace, pod.Name, pgName, len(verifyPG.Ports))
+			} else {
+				klog.Infof("[UDN-DEBUG] addLogicalPort: POST-TX VERIFICATION OK - LSP uuid=%s for pod %s/%s confirmed in portGroup=%s (total ports=%d)",
+					lsp.UUID, pod.Namespace, pod.Name, pgName, len(verifyPG.Ports))
+			}
+		}
+	}
 
 	// check if this pod is serving as an external GW
 	err = oc.addPodExternalGW(pod)

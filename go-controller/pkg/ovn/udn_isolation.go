@@ -1,12 +1,14 @@
 package ovn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
@@ -135,6 +137,13 @@ func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 	ingressAllowACL := libovsdbutil.BuildACL(ingressAllowIDs, types.PrimaryUDNAllowPriority, match, nbdb.ACLActionAllowRelated,
 		nil, libovsdbutil.LportIngress, isolationTier)
 
+	klog.Infof("[UDN-DEBUG] setupUDNACLs: creating/updating isolation ACLs for portGroup=%s with mgmtPortIPs=%v", pgName, mgmtPortIPs)
+	klog.Infof("[UDN-DEBUG] setupUDNACLs: egressDenyACL match=%q action=%s", egressDenyACL.Match, egressDenyACL.Action)
+	klog.Infof("[UDN-DEBUG] setupUDNACLs: egressARPACL match=%q action=%s", egressARPACL.Match, egressARPACL.Action)
+	klog.Infof("[UDN-DEBUG] setupUDNACLs: ingressDenyACL match=%q action=%s", ingressDenyACL.Match, ingressDenyACL.Action)
+	klog.Infof("[UDN-DEBUG] setupUDNACLs: ingressARPACL match=%q action=%s", ingressARPACL.Match, ingressARPACL.Action)
+	klog.Infof("[UDN-DEBUG] setupUDNACLs: ingressAllowACL match=%q action=%s", ingressAllowACL.Match, ingressAllowACL.Action)
+
 	ops, err := libovsdbops.CreateOrUpdateACLsOps(oc.nbClient, nil, oc.GetSamplingConfig(), egressDenyACL, egressARPACL, ingressARPACL, ingressDenyACL, ingressAllowACL)
 	if err != nil {
 		return fmt.Errorf("failed to create or update UDN ACLs: %v", err)
@@ -145,7 +154,13 @@ func (oc *DefaultNetworkController) setupUDNACLs(mgmtPortIPs []net.IP) error {
 		return fmt.Errorf("failed to add UDN ACLs to portGroup %s: %v", pgName, err)
 	}
 
+	klog.Infof("[UDN-DEBUG] setupUDNACLs: transacting %d ops to apply isolation ACLs to portGroup=%s", len(ops), pgName)
 	_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
+	if err != nil {
+		klog.Errorf("[UDN-DEBUG] setupUDNACLs: TransactAndCheck FAILED: %v", err)
+	} else {
+		klog.Infof("[UDN-DEBUG] setupUDNACLs: TransactAndCheck succeeded for portGroup=%s", pgName)
+	}
 	return err
 }
 
@@ -216,6 +231,7 @@ func (oc *DefaultNetworkController) setUDNPodOpenPortsOps(podNamespacedName stri
 	udnPGName := libovsdbutil.GetPortGroupName(oc.getSecondaryPodsPortGroupDbIDs())
 
 	ingressMatch, egressMatch, parseErr := getPortsMatches(podAnnotations, lspName)
+	klog.Infof("[UDN-DEBUG] setUDNPodOpenPortsOps: pod=%s lspName=%q ingressMatch=%q egressMatch=%q parseErr=%v", podNamespacedName, lspName, ingressMatch, egressMatch, parseErr)
 	// don't return on parseErr, as we need to cleanup potentially present ACLs from the previous config
 	ingressIDs := oc.getUDNOpenPortDbIDs(podNamespacedName, libovsdbutil.ACLIngress)
 	ingressACL := libovsdbutil.BuildACL(ingressIDs, types.PrimaryUDNAllowPriority,
@@ -319,6 +335,7 @@ func BuildAdvertisedNetworkSubnetsDropACL(advertisedNetworkSubnetsAddressSet add
 // pass   "(ip[4|6].src == <UDN_SUBNET> && ip[4|6].dst == <UDN_SUBNET>)"                1100
 // drop   "(ip[4|6].src == $<ALL_ADV_SUBNETS> && ip[4|6].dst == $<ALL_ADV_SUBNETS>)"    1050
 func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string) error {
+	klog.Infof("[UDN-DEBUG] addAdvertisedNetworkIsolation: entry for node=%s network=%s topology=%s", nodeName, bnc.GetNetworkName(), bnc.TopologyType())
 	var passMatches, cidrs []string
 	var ops []ovsdb.Operation
 
@@ -389,15 +406,20 @@ func (bnc *BaseNetworkController) addAdvertisedNetworkIsolation(nodeName string)
 		return fmt.Errorf("failed to add network isolation drop ACL to switch %s for network %s: %w", bnc.GetNetworkScopedSwitchName(nodeName), bnc.GetNetworkName(), err)
 	}
 
+	klog.Infof("[UDN-DEBUG] addAdvertisedNetworkIsolation: transacting %d ops for node=%s network=%s switchName=%s cidrs=%v passMatches=%v",
+		len(ops), nodeName, bnc.GetNetworkName(), bnc.GetNetworkScopedSwitchName(nodeName), cidrs, passMatches)
 	if _, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops); err != nil {
+		klog.Errorf("[UDN-DEBUG] addAdvertisedNetworkIsolation: TransactAndCheck FAILED for node=%s network=%s: %v", nodeName, bnc.GetNetworkName(), err)
 		return fmt.Errorf("failed to configure network isolation OVN rules for network %s: %w", bnc.GetNetworkName(), err)
 	}
+	klog.Infof("[UDN-DEBUG] addAdvertisedNetworkIsolation: TransactAndCheck succeeded for node=%s network=%s", nodeName, bnc.GetNetworkName())
 	return nil
 }
 
 // deleteAdvertisedNetworkIsolation deletes advertised network isolation rules from the given node switch.
 // It removes the network CIDRs from the global advertised networks addresset together with the ACLs on the node switch.
 func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName string) error {
+	klog.Infof("[UDN-DEBUG] deleteAdvertisedNetworkIsolation: entry for node=%s network=%s topology=%s", nodeName, bnc.GetNetworkName(), bnc.TopologyType())
 	addrSet, err := bnc.addressSetFactory.GetAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
 	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
 		return fmt.Errorf("failed to get advertised subnets addresset %s for network %s: %w", GetAdvertisedNetworkSubnetsAddressSetDBIDs(), bnc.GetNetworkName(), err)
@@ -440,11 +462,214 @@ func (bnc *BaseNetworkController) deleteAdvertisedNetworkIsolation(nodeName stri
 		}
 	}
 
+	klog.Infof("[UDN-DEBUG] deleteAdvertisedNetworkIsolation: transacting %d ops for node=%s network=%s, ACLsToRemove=%d",
+		len(ops), nodeName, bnc.GetNetworkName(), len(allACLsToRemove))
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
+	if err != nil {
+		klog.Errorf("[UDN-DEBUG] deleteAdvertisedNetworkIsolation: TransactAndCheck FAILED for node=%s network=%s: %v", nodeName, bnc.GetNetworkName(), err)
+	} else {
+		klog.Infof("[UDN-DEBUG] deleteAdvertisedNetworkIsolation: TransactAndCheck succeeded for node=%s network=%s", nodeName, bnc.GetNetworkName())
+	}
 	return err
 }
 
+// debugVerifyUDNIsolationState is a diagnostic function that verifies the
+// SecondaryPods port group has ACLs and ports present in NBDB. It reads
+// the port group state and logs it, including full ACL details (match, action,
+// direction, priority), LSP details (name, addresses, up status), and UDN
+// service route status. This provides a complete "why is communication broken"
+// snapshot when the failure is permanent.
+func (oc *DefaultNetworkController) debugVerifyUDNIsolationState() {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return
+	}
+	pgIDs := oc.getSecondaryPodsPortGroupDbIDs()
+	pgName := libovsdbutil.GetPortGroupName(pgIDs)
+	pg := &nbdb.PortGroup{Name: pgName}
+	pg, err := libovsdbops.GetPortGroup(oc.nbClient, pg)
+	if err != nil {
+		klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: cannot read SecondaryPods portGroup=%s: %v", pgName, err)
+		return
+	}
+
+	// Check that the port group has ACLs attached — 5 is expected
+	if len(pg.ACLs) == 0 {
+		klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: SecondaryPods portGroup=%s has ZERO ACLs! Isolation rules are missing.", pgName)
+	} else if len(pg.ACLs) != 5 {
+		klog.Warningf("[UDN-DEBUG] PERIODIC-CHECK: SecondaryPods portGroup=%s has unexpected aclCount=%d (expected 5) portCount=%d",
+			pgName, len(pg.ACLs), len(pg.Ports))
+	} else {
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: SecondaryPods portGroup=%s aclCount=%d portCount=%d portUUIDs=%v",
+			pgName, len(pg.ACLs), len(pg.Ports), pg.Ports)
+	}
+
+	// Dump full ACL details for each ACL in the port group
+	for i, aclUUID := range pg.ACLs {
+		aclLookup := &nbdb.ACL{UUID: aclUUID}
+		foundACLs, aclErr := libovsdbops.FindACLs(oc.nbClient, []*nbdb.ACL{aclLookup})
+		if aclErr != nil || len(foundACLs) == 0 {
+			klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: ACL[%d] uuid=%s LOOKUP FAILED: %v", i, aclUUID, aclErr)
+			continue
+		}
+		a := foundACLs[0]
+		aclName := ""
+		if a.Name != nil {
+			aclName = *a.Name
+		}
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: ACL[%d] uuid=%s name=%q direction=%s action=%s priority=%d tier=%d match=%q",
+			i, a.UUID, aclName, a.Direction, a.Action, a.Priority, a.Tier, a.Match)
+	}
+
+	// Dump LSP details for each port in the port group
+	var firstPodIP, firstPodName, firstNodeName string
+	for i, portUUID := range pg.Ports {
+		lsp := &nbdb.LogicalSwitchPort{UUID: portUUID}
+		lsp, lspErr := libovsdbops.GetLogicalSwitchPort(oc.nbClient, lsp)
+		if lspErr != nil {
+			klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: PORT[%d] uuid=%s LOOKUP FAILED: %v", i, portUUID, lspErr)
+			continue
+		}
+		upStr := "nil"
+		if lsp.Up != nil {
+			upStr = fmt.Sprintf("%v", *lsp.Up)
+		}
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: PORT[%d] uuid=%s name=%s up=%s addresses=%v portSecurity=%v pod=%s",
+			i, lsp.UUID, lsp.Name, upStr, lsp.Addresses, lsp.PortSecurity, lsp.ExternalIDs["pod"])
+
+		// Capture first pod details for OVS diagnostics
+		if i == 0 && len(lsp.Addresses) > 0 {
+			firstPodName = lsp.Name
+			// Extract IP from addresses (format: ["MAC IP"])
+			for _, addr := range lsp.Addresses {
+				parts := strings.Fields(addr)
+				if len(parts) > 1 {
+					firstPodIP = parts[1] // IP is second field
+					break
+				}
+			}
+			// Extract node name from LSP options
+			if nodeName, ok := lsp.Options["requested-chassis"]; ok {
+				firstNodeName = nodeName
+			}
+		}
+	}
+
+	// CRITICAL: Check SBDB to verify NBDB ACLs are translated to logical flows
+	// This detects if the control plane → data plane translation is broken
+	oc.checkSBDBLogicalFlows(pgName)
+
+	// Log OVS flow diagnostics for manual verification on worker nodes
+	if firstPodIP != "" && firstNodeName != "" {
+		oc.logOVSFlowDiagnostics(firstPodName, firstPodIP, firstNodeName)
+	}
+
+	// Check UDN service routes — look for static routes with UDN-enabled-service external IDs
+	udnRoutes, routeErr := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(oc.nbClient, func(route *nbdb.LogicalRouterStaticRoute) bool {
+		_, hasUDNService := route.ExternalIDs[types.UDNEnabledServiceExternalID]
+		return hasUDNService
+	})
+	if routeErr != nil {
+		klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: failed to look up UDN service routes: %v", routeErr)
+	} else if len(udnRoutes) == 0 {
+		klog.Warningf("[UDN-DEBUG] PERIODIC-CHECK: NO UDN-enabled service routes found in NBDB — KAPI access may be broken for UDN pods")
+	} else {
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: ======== FOUND %d UDN SERVICE ROUTES IN NBDB ========", len(udnRoutes))
+
+		// Log each route in detail
+		kapiRouteFound := false
+		var kapiRoutePrefix string
+		for i, route := range udnRoutes {
+			klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: UDN-ROUTE[%d] uuid=%s prefix=%s nexthop=%s network=%s topology=%s service=%s",
+				i, route.UUID, route.IPPrefix, route.Nexthop,
+				route.ExternalIDs[types.NetworkExternalID],
+				route.ExternalIDs[types.TopologyExternalID],
+				route.ExternalIDs[types.UDNEnabledServiceExternalID])
+
+			// Check if this is a kubernetes.default (kapi) route
+			if strings.Contains(route.ExternalIDs[types.UDNEnabledServiceExternalID], "default/kubernetes") {
+				kapiRouteFound = true
+				kapiRoutePrefix = route.IPPrefix
+			}
+		}
+
+		// CRITICAL DEBUGGING: When kapi route exists, check if service has endpoints
+		if kapiRouteFound {
+			klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: ======== KAPI ROUTE EXISTS (prefix=%s) - CHECKING SERVICE HEALTH ========", kapiRoutePrefix)
+
+			// Check kubernetes.default service endpoints using kubernetes API
+			endpoints, endpointsErr := oc.client.CoreV1().Endpoints("default").Get(context.TODO(), "kubernetes", metav1.GetOptions{})
+			if endpointsErr != nil {
+				klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: CRITICAL - Failed to get kubernetes.default endpoints: %v", endpointsErr)
+				klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: ROOT CAUSE: Cannot verify kapi service has healthy backends - API query failed")
+			} else if len(endpoints.Subsets) == 0 {
+				klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: CRITICAL - kubernetes.default service has NO endpoint subsets!")
+				klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: ROOT CAUSE: KAPI service has no backends - this will cause connection timeouts")
+			} else {
+				readyCount := 0
+				notReadyCount := 0
+				for _, subset := range endpoints.Subsets {
+					readyCount += len(subset.Addresses)
+					notReadyCount += len(subset.NotReadyAddresses)
+				}
+				klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: kubernetes.default endpoints: ready=%d notReady=%d subsets=%d",
+					readyCount, notReadyCount, len(endpoints.Subsets))
+
+				if readyCount == 0 {
+					klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: CRITICAL - kubernetes.default has %d endpoints but ZERO are ready!", notReadyCount)
+					klog.Errorf("[UDN-DEBUG] PERIODIC-CHECK: ROOT CAUSE: KAPI service has no ready backends - connection will timeout")
+				} else {
+					// Endpoints exist and are ready - log first few for reference
+					for i, subset := range endpoints.Subsets {
+						for j, addr := range subset.Addresses {
+							if i == 0 && j < 3 { // Log first 3 addresses from first subset
+								targetRef := "nil"
+								if addr.TargetRef != nil {
+									targetRef = fmt.Sprintf("%s/%s", addr.TargetRef.Namespace, addr.TargetRef.Name)
+								}
+								klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: kubernetes.default ready endpoint[%d]: ip=%s targetRef=%s",
+									j, addr.IP, targetRef)
+							}
+						}
+					}
+				}
+			}
+
+			// Check DNS service route (needed for kubernetes.default hostname resolution)
+			dnsRouteFound := false
+			for _, route := range udnRoutes {
+				if strings.Contains(route.ExternalIDs[types.UDNEnabledServiceExternalID], "openshift-dns/dns-default") {
+					dnsRouteFound = true
+					klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: DNS route exists: prefix=%s nexthop=%s", route.IPPrefix, route.Nexthop)
+					break
+				}
+			}
+			if !dnsRouteFound {
+				klog.Warningf("[UDN-DEBUG] PERIODIC-CHECK: WARNING - No DNS service route found - hostname resolution may fail")
+				klog.Warningf("[UDN-DEBUG] PERIODIC-CHECK: POSSIBLE ROOT CAUSE: UDN pods cannot resolve 'kubernetes.default' to IP")
+			}
+
+			klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: ======== END KAPI ROUTE DIAGNOSTICS ========")
+		}
+
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: ======== TROUBLESHOOTING CHECKLIST (if connectivity fails) ========")
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 1. Routes in NBDB: VERIFIED ABOVE (%d routes found)", len(udnRoutes))
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 2. Service endpoints: %s", func() string {
+			if kapiRouteFound {
+				return "CHECKED ABOVE"
+			} else {
+				return "N/A (no kapi route)"
+			}
+		}())
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 3. Routes in SBDB: Check with 'ovn-sbctl --no-leader-only find Logical_Flow match~kubernetes'")
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 4. OVS flows: Check with 'ovs-ofctl dump-flows br-int | grep kubernetes'")
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 5. DNS resolution: Check with 'kubectl exec <pod> -- nslookup kubernetes.default'")
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: 6. Direct IP test: Check with 'kubectl exec <pod> -- curl -k https://<kapi-ip>/healthz'")
+		klog.Infof("[UDN-DEBUG] PERIODIC-CHECK: ======== END TROUBLESHOOTING CHECKLIST ========")
+	}
+}
+
 func (oc *DefaultNetworkController) syncUDNIsolation() error {
+	klog.Infof("[UDN-DEBUG] syncUDNIsolation: starting legacy ACL rename sync")
 	// Find ACLs with old "secondary" naming IDs, update them
 	type aclUpdate struct {
 		old *libovsdbops.DbObjectIDs

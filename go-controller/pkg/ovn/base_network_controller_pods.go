@@ -147,7 +147,12 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPortsOnSwitches(switch
 	var err error
 	for _, switchName := range switchNames {
 		p := func(item *nbdb.LogicalSwitchPort) bool {
-			return item.ExternalIDs["pod"] == "true" && !expectedLogicalPorts[item.Name]
+			isStale := item.ExternalIDs["pod"] == "true" && !expectedLogicalPorts[item.Name]
+			if isStale {
+				klog.Infof("[UDN-DEBUG] deleteStaleLogicalSwitchPortsOnSwitches: STALE port found: name=%s uuid=%s switch=%s network=%s externalIDs=%v",
+					item.Name, item.UUID, switchName, bnc.GetNetworkName(), item.ExternalIDs)
+			}
+			return isStale
 		}
 		sw := nbdb.LogicalSwitch{
 			Name: switchName,
@@ -159,6 +164,10 @@ func (bnc *BaseNetworkController) deleteStaleLogicalSwitchPortsOnSwitches(switch
 		}
 	}
 
+	if len(ops) > 0 {
+		klog.Infof("[UDN-DEBUG] deleteStaleLogicalSwitchPortsOnSwitches: transacting %d ops to delete stale ports across %d switches for network=%s expectedPorts=%d",
+			len(ops), len(switchNames), bnc.GetNetworkName(), len(expectedLogicalPorts))
+	}
 	_, err = libovsdbops.TransactAndCheck(bnc.nbClient, ops)
 	if err != nil {
 		return fmt.Errorf("could not remove stale logicalPorts from switches for network %s (%+v)", bnc.GetNetworkName(), err)
@@ -204,6 +213,8 @@ func (bnc *BaseNetworkController) deletePodLogicalPort(pod *corev1.Pod, portInfo
 
 	podDesc := fmt.Sprintf("pod %s/%s/%s", nadKey, pod.Namespace, pod.Name)
 	logicalPort = bnc.GetLogicalPortName(pod, nadKey)
+	klog.Infof("[UDN-DEBUG] deletePodLogicalPort: entry for %s logicalPort=%s expectedSwitch=%s network=%s hasCachedPortInfo=%v",
+		podDesc, logicalPort, expectedSwitchName, bnc.GetNetworkName(), portInfo != nil)
 	if portInfo == nil {
 		// If ovnkube-master restarts, it is also possible the Pod's logical switch port
 		// is not re-added into the cache. Delete logical switch port anyway.
@@ -502,6 +513,14 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	}
 	lspExist = !errors.Is(err, libovsdbclient.ErrNotFound)
 
+	if lspExist {
+		klog.Infof("[UDN-DEBUG] addLogicalPortToNetwork: LSP ALREADY EXISTS port=%s uuid=%s switch=%s network=%s — UUID will be preserved",
+			portName, existingLSP.UUID, switchName, bnc.GetNetworkName())
+	} else {
+		klog.Infof("[UDN-DEBUG] addLogicalPortToNetwork: LSP does NOT exist port=%s switch=%s network=%s — new UUID will be assigned",
+			portName, switchName, bnc.GetNetworkName())
+	}
+
 	// Sanity check. If port exists, it should be in the logical switch obtained from the pod spec.
 	if lspExist {
 		portFound := false
@@ -518,6 +537,8 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 		}
 		if !portFound {
 			// This should never happen and indicates we failed to clean up an LSP for a pod that was recreated
+			klog.Errorf("[UDN-DEBUG] addLogicalPortToNetwork: CRITICAL - existing LSP %s (uuid=%s) NOT FOUND in switch %s ports list! This breaks port group membership.",
+				existingLSP.Name, existingLSP.UUID, switchName)
 			return nil, nil, nil, false, fmt.Errorf("[%s] failed to locate existing logical port %s (%s) in logical switch %s",
 				podDesc, existingLSP.Name, existingLSP.UUID, switchName)
 		}
@@ -746,6 +767,8 @@ func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, podIfAddrs [
 	}
 
 	if nsInfo.portGroupName != "" && len(portUUID) > 0 {
+		klog.Infof("[UDN-DEBUG] deletePodFromNamespace: removing portUUID=%s from portGroup=%s in namespace=%s network=%s",
+			portUUID, nsInfo.portGroupName, ns, bnc.GetNetworkName())
 		if ops, err = libovsdbops.DeletePortsFromPortGroupOps(bnc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
 			return nil, err
 		}
