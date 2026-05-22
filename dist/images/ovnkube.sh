@@ -80,7 +80,8 @@ fi
 # OVN_DISABLE_FORWARDING - disable forwarding on OVNK controlled interfaces
 # OVN_ENABLE_MULTI_EXTERNAL_GATEWAY - enable multi external gateway for ovn-kubernetes
 # OVN_ENABLE_OVNKUBE_IDENTITY - enable per node certificate ovn-kubernetes
-# OVN_METRICS_MASTER_PORT - metrics port which will be exposed by ovnkube control plane components (default 9409)
+# OVN_METRICS_CONTROLLER_PORT - metrics port exposed by ovnkube-controller (default 9409)
+# OVN_METRICS_MASTER_PORT - deprecated alias for OVN_METRICS_CONTROLLER_PORT
 # OVN_METRICS_WORKER_PORT - metrics port which will be exposed by ovnkube-node (default 9410)
 # OVN_METRICS_BIND_PORT - port for the OVN metrics server to serve on (default 9476)
 # OVN_METRICS_EXPORTER_PORT - ovs-metrics exporter port (default 9310)
@@ -173,8 +174,8 @@ routable_mtu=${OVN_ROUTABLE_MTU:-}
 metrics_endpoint_ip="${METRICS_IP:-${K8S_NODE_IP:-0.0.0.0}}"
 metrics_endpoint_ip=$(bracketify $metrics_endpoint_ip)
 
-# set metrics master port
-metrics_master_port=${OVN_METRICS_MASTER_PORT:-9409}
+# set metrics controller port (OVN_METRICS_MASTER_PORT kept as deprecated alias)
+metrics_controller_port=${OVN_METRICS_CONTROLLER_PORT:-${OVN_METRICS_MASTER_PORT:-9409}}
 
 # set metrics worker port
 metrics_worker_port=${OVN_METRICS_WORKER_PORT:-9410}
@@ -1182,7 +1183,7 @@ ovnkube-controller() {
   fi
   echo "egressservice_enabled_flag=${egressservice_enabled_flag}"
 
-  ovnkube_controller_metrics_bind_address="${metrics_endpoint_ip}:${metrics_master_port}"
+  ovnkube_controller_metrics_bind_address="${metrics_endpoint_ip}:${metrics_controller_port}"
   echo "ovnkube_controller_metrics_bind_address=${ovnkube_controller_metrics_bind_address}"
 
   local ovnkube_metrics_tls_opts=""
