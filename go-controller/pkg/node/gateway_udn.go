@@ -47,6 +47,10 @@ const (
 	// UDNMasqueradeIPRulePriority the priority of the ip routing rules created for masquerade IP address
 	// allocated for every user defined network.
 	UDNMasqueradeIPRulePriority = 2000
+	// dpuUDNVRFRouteTableIDStart is a distinct table range for UDN VRFs
+	// created on DPUs. DPU mode has no host management interface to derive a
+	// table from, so this avoids colliding with link-index based tables.
+	dpuUDNVRFRouteTableIDStart = 100000
 )
 
 // UserDefinedNetworkGateway contains information
@@ -264,6 +268,11 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 			return fmt.Errorf("could not add VRF %s routes for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err)
 		}
 	}
+	if config.IsModeDPU() {
+		if err = udng.ensureDPUVRF(); err != nil {
+			return err
+		}
+	}
 
 	udng.updateAdvertisementStatus()
 
@@ -342,16 +351,16 @@ func (udng *UserDefinedNetworkGateway) GetNetworkRuleMetadata() string {
 // DelNetwork has returned succesfully.
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 	var errs []error
+	vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
 	if config.IsModeDPUHost() || config.IsModeFull() {
-		vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
 		// delete the iprules for this network
 		if err := udng.ruleManager.DeleteWithMetadata(udng.GetNetworkRuleMetadata()); err != nil {
 			errs = append(errs, fmt.Errorf("unable to delete iprules for network %s, err: %v", udng.GetNetworkName(), err))
 		}
-		// delete the VRF device for this network
-		if err := udng.vrfManager.DeleteVRF(vrfDeviceName); err != nil {
-			errs = append(errs, fmt.Errorf("unable to delete VRF device %s for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err))
-		}
+	}
+	// delete the VRF device for this network
+	if err := udng.vrfManager.DeleteVRF(vrfDeviceName); err != nil {
+		errs = append(errs, fmt.Errorf("unable to delete VRF device %s for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err))
 	}
 	if config.IsModeDPU() || config.IsModeFull() {
 		// delete the openflows for this network
@@ -803,6 +812,21 @@ func (udng *UserDefinedNetworkGateway) doReconcile() error {
 		if err := udng.updateAdvertisedUDNIsolationRules(); err != nil {
 			return fmt.Errorf("error while updating advertised UDN isolation rules for network %s: %w", udng.GetNetworkName(), err)
 		}
+	}
+	return nil
+}
+
+func dpuUDNVRFRouteTableID(networkID int) int {
+	return dpuUDNVRFRouteTableIDStart + networkID
+}
+
+func (udng *UserDefinedNetworkGateway) ensureDPUVRF() error {
+	vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
+	vrfTableID := dpuUDNVRFRouteTableID(udng.GetNetworkID())
+	udng.vrfTableId = vrfTableID
+	if err := udng.vrfManager.AddVRF(vrfDeviceName, "", uint32(vrfTableID), nil); err != nil {
+		return fmt.Errorf("could not add DPU VRF %d for network %s, err: %v",
+			vrfTableID, udng.GetNetworkName(), err)
 	}
 	return nil
 }
