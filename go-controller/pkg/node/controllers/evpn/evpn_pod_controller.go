@@ -185,9 +185,7 @@ func (c *Controller) ensurePodNeighbors(entries *neighEntries) error {
 		return fmt.Errorf("failed to get OVS port %s: %w", entries.ovsPortName, err)
 	}
 	if err := util.LinkFDBSet(ovsPort, entries.mac, entries.macvrfVID); err != nil {
-		if !errors.Is(err, syscall.EEXIST) {
-			return fmt.Errorf("failed to add FDB entry for %s on %s: %w", entries.mac, entries.ovsPortName, err)
-		}
+		return fmt.Errorf("failed to set FDB entry for %s on %s: %w", entries.mac, entries.ovsPortName, err)
 	}
 	klog.V(5).Infof("Configured FDB %s vlan %d on %s", entries.mac, entries.macvrfVID, entries.ovsPortName)
 	for _, ip := range entries.ips {
