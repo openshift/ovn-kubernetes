@@ -39,6 +39,9 @@ spec:
       serviceAccountName: ovnkube-node
       hostNetwork: true
       dnsPolicy: Default
+      {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) false }}
+      hostPID: true
+      {{- end }}
       priorityClassName: "system-node-critical"
       initContainers:
       - name: ovn-keys
