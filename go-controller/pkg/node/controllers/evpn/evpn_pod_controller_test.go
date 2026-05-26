@@ -82,7 +82,6 @@ var _ = Describe("EVPN pod controller", func() {
 
 			nlMock.On("LinkByName", sviName).Return(sviLink, nil)
 			nlMock.On("LinkByName", ovsPortName).Return(ovsPortLink, nil)
-			nlMock.On("NeighAdd", mock.Anything).Return(nil)
 			nlMock.On("NeighSet", mock.Anything).Return(nil)
 
 			mac, _ := net.ParseMAC("0a:58:0a:00:00:05")
@@ -100,7 +99,7 @@ var _ = Describe("EVPN pod controller", func() {
 			Expect(ctrl.reconcilePod("test-ns/test-pod")).To(Succeed())
 
 			By("verifying FDB entry was added on OVS port")
-			nlMock.AssertCalled(GinkgoT(), "NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+			nlMock.AssertCalled(GinkgoT(), "NeighSet", mock.MatchedBy(func(n *netlink.Neigh) bool {
 				return n.LinkIndex == 20 && n.HardwareAddr.String() == mac.String() && n.Vlan == 100
 			}))
 

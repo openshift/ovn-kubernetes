@@ -184,7 +184,7 @@ func (c *Controller) ensurePodNeighbors(entries *neighEntries) error {
 	if err != nil {
 		return fmt.Errorf("failed to get OVS port %s: %w", entries.ovsPortName, err)
 	}
-	if err := util.LinkFDBAdd(ovsPort, entries.mac, entries.macvrfVID); err != nil {
+	if err := util.LinkFDBSet(ovsPort, entries.mac, entries.macvrfVID); err != nil {
 		if !errors.Is(err, syscall.EEXIST) {
 			return fmt.Errorf("failed to add FDB entry for %s on %s: %w", entries.mac, entries.ovsPortName, err)
 		}
