@@ -1120,6 +1120,12 @@ ovnkube-controller() {
   fi
   echo "egressqos_enabled_flag=${egressqos_enabled_flag}"
 
+  ipsec_enabled_flag=
+  if [[ ${ENABLE_IPSEC} == "true" ]]; then
+	  ipsec_enabled_flag="--enable-ipsec"
+  fi
+  echo "ipsec_enabled_flag=${ipsec_enabled_flag}"
+
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
 	  multi_network_enabled_flag="--enable-multi-network --enable-multi-networkpolicy"
@@ -1307,6 +1313,7 @@ ovnkube-controller() {
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
     ${ovn_allow_icmp_netpol_flag} \
+    ${ipsec_enabled_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -1460,6 +1467,12 @@ ovnkube-controller-with-node() {
 	  egressqos_enabled_flag="--enable-egress-qos"
   fi
   echo "egressqos_enabled_flag=${egressqos_enabled_flag}"
+
+  ipsec_enabled_flag=
+  if [[ ${ENABLE_IPSEC} == "true" ]]; then
+	  ipsec_enabled_flag="--enable-ipsec"
+  fi
+  echo "ipsec_enabled_flag=${ipsec_enabled_flag}"
 
   multi_network_enabled_flag=
   if [[ ${ovn_multi_network_enable} == "true" ]]; then
@@ -1840,6 +1853,7 @@ ovnkube-controller-with-node() {
     ${ovn_disable_requestedchassis_flag} \
     ${cluster_access_opts} \
     ${ovn_allow_icmp_netpol_flag} \
+    ${ipsec_enabled_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --export-ovs-metrics \
     --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
@@ -1916,6 +1930,11 @@ ovn-cluster-manager() {
 	  egressqos_enabled_flag="--enable-egress-qos"
   fi
   echo "egressqos_enabled_flag=${egressqos_enabled_flag}"
+
+  ipsec_enabled_flag=
+  if [[ ${ENABLE_IPSEC} == "true" ]]; then
+	  ipsec_enabled_flag="--enable-ipsec"
+  fi
 
   hybrid_overlay_flags=
   if [[ ${ovn_hybrid_overlay_enable} == "true" ]]; then
@@ -2122,6 +2141,7 @@ ovn-cluster-manager() {
     ${dynamic_udn_grace_period} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_allow_icmp_netpol_flag} \
+    ${ipsec_enabled_flag} \
     --gateway-mode=${ovn_gateway_mode} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --host-network-namespace ${ovn_host_network_namespace} \
@@ -2470,6 +2490,12 @@ ovn-node() {
   fi
   echo "dynamic_udn_grace_period=${dynamic_udn_grace_period}"
 
+  ipsec_enabled_flag=
+  if [[ ${ENABLE_IPSEC} == "true" ]]; then
+	  ipsec_enabled_flag="--enable-ipsec"
+  fi
+
+
   # NB client cert material is only consumed by the Egress IP gRPC
   # health-check channel (see pkg/ovn/healthcheck/egressip_healthcheck.go).
   # The OVN NB/SB DB connections themselves are unix-socket only.
@@ -2532,6 +2558,7 @@ ovn-node() {
         ${dynamic_udn_allocation_flag} \
         ${dynamic_udn_grace_period} \
         ${network_qos_enabled_flag} \
+        ${ipsec_enabled_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --export-ovs-metrics \
         --gateway-mode=${ovn_gateway_mode} ${ovn_gateway_opts} \
