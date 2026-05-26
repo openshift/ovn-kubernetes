@@ -191,7 +191,7 @@ func (c *Controller) ensurePodNeighbors(entries *neighEntries) error {
 	}
 	klog.V(5).Infof("Configured FDB %s vlan %d on %s", entries.mac, entries.macvrfVID, entries.ovsPortName)
 	for _, ip := range entries.ips {
-		if err := util.LinkNeighAdd(svi, ip, entries.mac); err != nil {
+		if err := util.LinkNeighSet(svi, ip, entries.mac); err != nil {
 			return fmt.Errorf("failed to add neighbor %s on %s: %w", ip, entries.sviName, err)
 		}
 		klog.V(5).Infof("Configured neighbor %s lladdr %s on %s", ip, entries.mac, entries.sviName)

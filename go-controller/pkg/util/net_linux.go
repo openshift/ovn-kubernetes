@@ -663,10 +663,10 @@ func LinkNeighDel(link netlink.Link, neighIP net.IP) error {
 	return nil
 }
 
-// LinkNeighAdd adds or replaces MAC/IP bindings for the given link.
-// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so that existing entries
-// (e.g. extern_learn from EVPN) are replaced with the desired state.
-func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
+// LinkNeighSet adds or replaces MAC/IP bindings for the given link.
+// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so it succeeds whether
+// the entry is new or already exists (e.g. zebra's extern_learn).
+func LinkNeighSet(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,
 		Family:       getFamily(neighIP),
