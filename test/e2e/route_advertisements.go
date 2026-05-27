@@ -73,7 +73,7 @@ var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.Ro
 	var serverContainerIPs []string
 	var frrContainerIPv4, frrContainerIPv6 string
 	var nodes *corev1.NodeList
-	f := NewTestFramework("pod2external-route-advertisements")
+	f := wrappedTestFramework("pod2external-route-advertisements")
 
 	ginkgo.BeforeEach(func() {
 		serverContainerIPs = getBGPServerContainerIPs(f)
@@ -645,7 +645,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 	var nodes *corev1.NodeList
 	var clientPod *corev1.Pod
 
-	f := NewTestFramework("pod2external-route-advertisements")
+	f := wrappedTestFramework("pod2external-route-advertisements")
 	f.SkipNamespaceCreation = true
 
 	ginkgo.BeforeEach(func() {
@@ -1009,7 +1009,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 		const curlConnectionResetCode = "56"
 		const curlConnectionTimeoutCode = "28"
 
-		f := NewTestFramework("bgp-network-isolation")
+		f := wrappedTestFramework("bgp-network-isolation")
 		f.SkipNamespaceCreation = true
 		var udnNamespaceA, udnNamespaceB *corev1.Namespace
 		var nodes *corev1.NodeList
@@ -1390,7 +1390,7 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						framework.Logf("Connectivity check successful:'%s' -> %s", client, targetAddress)
 						return out, nil
 					}
-					for _, ipFamily := range GetSupportedIPFamiliesSlice(f.ClientSet) {
+					for _, ipFamily := range getSupportedIPFamiliesSlice(f.ClientSet) {
 						clientName, clientNamespace, dst, expectedOutput, expectErr := connInfo(ipFamily)
 						asyncAssertion := gomega.Eventually
 						timeout := time.Second * 30
@@ -2112,7 +2112,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			if networkType == cudnAdvertisedEVPNUnmanagedRandomVTEP {
 				// Random VTEP subnets: IPs are added to loopback by the test
 				// and discovered by the node-side EVPN controller automatically
-				vtepV4, _ := RandomVTEPSubnets()
+				vtepV4, _ := randomVTEPSubnets()
 				vtepSubnets = []string{vtepV4}
 				bridgeName = "br" + networkName
 				vxlanName = "vx" + networkName
@@ -2332,7 +2332,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		baseName = "bgp"
 	)
 
-	f := NewTestFramework(baseName)
+	f := wrappedTestFramework(baseName)
 	f.SkipNamespaceCreation = true
 	var ipFamilySet sets.Set[utilnet.IPFamily]
 	var ictx infraapi.Context
@@ -2340,11 +2340,11 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 	var externalServers []string
 
 	ginkgo.BeforeEach(func() {
-		if !IsLocalGWModeEnabled() {
+		if !isLocalGWModeEnabled() {
 			e2eskipper.Skipf("Test case only supported in Local Gateway mode")
 		}
 		framework.Logf("Running in ginkgo process %d", ginkgo.GinkgoParallelProcess())
-		ipFamilySet = sets.New(GetSupportedIPFamiliesSlice(f.ClientSet)...)
+		ipFamilySet = sets.New(getSupportedIPFamiliesSlice(f.ClientSet)...)
 		ictx = infraprovider.Get().NewTestContext()
 		testSuffix = framework.RandomSuffix()
 		testBaseName = baseName + testSuffix
