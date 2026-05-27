@@ -2331,6 +2331,17 @@ ip route add %[3]s via %[4]s
 				test:     liveMigrateFailed,
 				topology: udnv1.NetworkTopologyLocalnet,
 			}),
+			Entry(nil, testData{
+				resource: virtualMachineWithUDN,
+				test:     liveMigrateFailed,
+				topology: udnv1.NetworkTopologyLayer2,
+				role:     udnv1.NetworkRolePrimary,
+				ingress:  "routed",
+				evpn: &udnv1.EVPNConfig{
+					MACVRF: &udnv1.VRFConfig{},
+					IPVRF:  &udnv1.VRFConfig{},
+				},
+			}),
 		)
 	})
 	Context("with kubevirt VM using layer2 UDPN", Ordered, func() {
