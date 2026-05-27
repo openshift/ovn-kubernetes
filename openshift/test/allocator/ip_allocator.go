@@ -33,17 +33,37 @@ const (
 //	ip, err := AllocateIP(f, cleanup, "192.168.1.0/24")
 //	// Returns an IP like "192.168.1.5" (skipping .0 and .255)
 func AllocateIP(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string) (string, error) {
-	return allocateIPFromCIDR(f, cleanup, cidr, false)
+	return allocateIPFromCIDR(f, cleanup, cidr, false, nil)
 }
 
 // AllocateIPv6 allocates a unique IPv6 address from the given subnet CIDR.
 // Subnet size limits: The subnet must provide no more than 1024 IPs (e.g., /120 to /128).
 func AllocateIPv6(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string) (string, error) {
-	return allocateIPFromCIDR(f, cleanup, cidr, true)
+	return allocateIPFromCIDR(f, cleanup, cidr, true, nil)
+}
+
+// AllocateIPWithReserved allocates a unique IP address from the given subnet CIDR,
+// excluding the specified reserved IPs from allocation. Reserved IPs are avoided
+// by retrying allocation if a reserved IP is selected.
+//
+// Example:
+//
+//	reserved := []string{"192.168.1.1", "192.168.1.254"}
+//	ip, err := AllocateIPWithReserved(f, cleanup, "192.168.1.0/24", reserved)
+//	// Returns an IP like "192.168.1.5" (skipping .0, .1, .254, and .255)
+func AllocateIPWithReserved(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string, reservedIPs []string) (string, error) {
+	return allocateIPFromCIDR(f, cleanup, cidr, false, reservedIPs)
+}
+
+// AllocateIPv6WithReserved allocates a unique IPv6 address from the given subnet CIDR,
+// excluding the specified reserved IPs from allocation.
+func AllocateIPv6WithReserved(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string, reservedIPs []string) (string, error) {
+	return allocateIPFromCIDR(f, cleanup, cidr, true, reservedIPs)
 }
 
 // allocateIPFromCIDR allocates an IP address from the given CIDR using AllocateInt.
-func allocateIPFromCIDR(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string, isIPv6 bool) (string, error) {
+// If reservedIPs is provided, those IPs are avoided by retrying if allocated.
+func allocateIPFromCIDR(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string, isIPv6 bool, reservedIPs []string) (string, error) {
 	ip, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse CIDR %q: %w", cidr, err)
@@ -91,15 +111,84 @@ func allocateIPFromCIDR(f *framework.Framework, cleanup infraapi.ContextCleanUp,
 	sum := sha256.Sum256([]byte(normalizedCIDR))
 	key := fmt.Sprintf("%s-%s", ipAllocatorPrefix, hex.EncodeToString(sum[:]))
 
-	// Allocate a unique index within the usable range
-	index, err := allocators.AllocateInt(f, key, usableIPs)
-	if err != nil {
-		return "", fmt.Errorf("failed to allocate IP index from subnet %s: %w", cidr, err)
+	// Build a map of reserved IP indices for quick lookup
+	reservedIndices := make(map[int]bool)
+	if len(reservedIPs) > 0 {
+		for _, reservedIP := range reservedIPs {
+			ip := net.ParseIP(reservedIP)
+			if ip == nil {
+				return "", fmt.Errorf("invalid reserved IP: %s", reservedIP)
+			}
+
+			// Verify the IP is within the subnet
+			if !ipNet.Contains(ip) {
+				return "", fmt.Errorf("reserved IP %s is not within subnet %s", reservedIP, ipNet)
+			}
+
+			// Convert IP to index
+			index, err := ipToIndex(ipNet.IP, ip)
+			if err != nil {
+				return "", fmt.Errorf("failed to convert reserved IP %s to index: %w", reservedIP, err)
+			}
+
+			// Verify index is within usable range
+			if index < 1 || index > usableIPs {
+				return "", fmt.Errorf("reserved IP %s index %d is outside usable range [1, %d]", reservedIP, index, usableIPs)
+			}
+
+			reservedIndices[index] = true
+			framework.Logf("Marked IP %s (index %d) as reserved in subnet %s", reservedIP, index, ipNet)
+		}
 	}
 
-	// Register cleanup to deallocate
+	// Allocate a unique index within the usable range, retrying if we hit a reserved IP
+	var index int
+	var allocatedIndices []int
+	maxRetries := usableIPs * 2 // Reasonable retry limit
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		idx, err := allocators.AllocateInt(f, key, usableIPs)
+		if err != nil {
+			// Clean up any indices we allocated during retries
+			for _, allocIdx := range allocatedIndices {
+				allocators.DeallocateInt(f, key, allocIdx)
+			}
+			return "", fmt.Errorf("failed to allocate IP index from subnet %s: %w", cidr, err)
+		}
+
+		// Check if this index is reserved
+		if reservedIndices[idx] {
+			// This IP is reserved, keep it allocated (to prevent reuse) and try again
+			allocatedIndices = append(allocatedIndices, idx)
+			framework.Logf("Allocated index %d is reserved, retrying...", idx)
+			continue
+		}
+
+		// Found a non-reserved index
+		index = idx
+		break
+	}
+
+	if index == 0 {
+		// Clean up any indices we allocated during retries
+		for _, allocIdx := range allocatedIndices {
+			allocators.DeallocateInt(f, key, allocIdx)
+		}
+		return "", fmt.Errorf("failed to allocate non-reserved IP after %d attempts", maxRetries)
+	}
+
+	// Register cleanup to deallocate all indices (both the final one and any reserved ones we hit)
 	cleanup.AddCleanUpFn(func() error {
-		return allocators.DeallocateInt(f, key, index)
+		// Deallocate the final allocated index
+		if err := allocators.DeallocateInt(f, key, index); err != nil {
+			framework.Logf("Warning: failed to deallocate IP index %d: %v", index, err)
+		}
+		// Deallocate any reserved indices we allocated during retries
+		for _, allocIdx := range allocatedIndices {
+			if err := allocators.DeallocateInt(f, key, allocIdx); err != nil {
+				framework.Logf("Warning: failed to deallocate reserved IP index %d: %v", allocIdx, err)
+			}
+		}
+		return nil
 	})
 
 	// Convert index to IP address
@@ -110,6 +199,24 @@ func allocateIPFromCIDR(f *framework.Framework, cleanup infraapi.ContextCleanUp,
 	framework.Logf("AllocateIP: allocated %s from subnet %s (index %d)", allocatedIP, cidr, index)
 
 	return allocatedIP, nil
+}
+
+// ipToIndex converts an IP address to its index within the subnet.
+// The network address corresponds to index 0, the first usable IP to index 1, etc.
+func ipToIndex(baseIP, targetIP net.IP) (int, error) {
+	baseInt := new(big.Int).SetBytes(baseIP.To16())
+	targetInt := new(big.Int).SetBytes(targetIP.To16())
+
+	// Calculate the difference
+	diff := new(big.Int).Sub(targetInt, baseInt)
+
+	// Convert to int64 and return as index
+	index := diff.Int64()
+	if index < 0 {
+		return 0, fmt.Errorf("target IP is before base IP")
+	}
+
+	return int(index), nil
 }
 
 // indexToIP converts an allocation index to an IP address within the subnet.
