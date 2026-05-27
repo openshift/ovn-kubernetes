@@ -56,6 +56,8 @@ type config struct {
 	csrAcceptanceConditions    []csrapprover.CSRAcceptanceCondition
 	podAdmissionConditionFile  string
 	podAdmissionConditions     []ovnwebhook.PodAdmissionConditionOption
+	minTLSVersion              string
+	tlsCipherSuites            cli.StringSlice
 }
 
 var cliCfg config
@@ -260,6 +262,16 @@ func main() {
 			Name:        "pod-admission-conditions",
 			Usage:       "Configure additional pod validate admission conditions",
 			Destination: &cliCfg.podAdmissionConditionFile,
+		},
+		&cli.StringFlag{
+			Name:        "tls-min-version",
+			Usage:       "Minimum TLS version supported by the webhook server",
+			Destination: &cliCfg.minTLSVersion,
+		},
+		&cli.StringSliceFlag{
+			Name:        "tls-cipher-suites",
+			Usage:       "Comma-separated list of cipher suites for the webhook server",
+			Destination: &cliCfg.tlsCipherSuites,
 		},
 	}
 	ctx := context.Background()
