@@ -141,10 +141,13 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 		const (
 			duplicateIPv4 = "10.128.0.200/16"
 			duplicateIPv6 = "2014:100:200::200/60"
+			networkCIDRv4 = "10.128.0.0/16"
+			networkCIDRv6 = "2014:100:200::0/60"
 		)
 
 		type duplicateIPTestConfig struct {
-			podIP string
+			podIP        string
+			networkCIDRs string
 		}
 
 		createPodWithStaticIP := func(podName string, staticIPs []string) *v1.Pod {
@@ -229,7 +232,7 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				netConfig := &networkAttachmentConfigParams{
 					name:      "duplicate-ip-test-net",
 					topology:  "layer2",
-					cidr:      joinStrings("10.128.0.0/16", "2014:100:200::0/60"),
+					cidr:      config.networkCIDRs,
 					role:      "primary",
 					namespace: f.Namespace.Name,
 				}
@@ -275,10 +278,12 @@ var _ = Describe("Network Segmentation: Preconfigured Layer2 UDN", feature.Netwo
 				}, 30*time.Second, 5*time.Second).Should(Equal(v1.PodRunning))
 			},
 			Entry("IPv4 duplicate", duplicateIPTestConfig{
-				podIP: duplicateIPv4,
+				podIP:        duplicateIPv4,
+				networkCIDRs: networkCIDRv4,
 			}),
 			Entry("IPv6 duplicate", duplicateIPTestConfig{
-				podIP: duplicateIPv6,
+				podIP:        duplicateIPv6,
+				networkCIDRs: networkCIDRv6,
 			}),
 		)
 	})
