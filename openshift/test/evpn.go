@@ -47,8 +47,8 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 		const (
 			bgpASN = 64512
 
-		disruptiveBGPTimeout = 5 * time.Minute
-		dsRolloutTimeout     = 5 * time.Minute
+			disruptiveBGPTimeout = 5 * time.Minute
+			dsRolloutTimeout     = 5 * time.Minute
 
 			timeout    = 240 * time.Second
 			polling    = 1 * time.Second
@@ -62,7 +62,7 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			testBaseName = "evpnd"
 		)
 
-		f := e2e.NewTestFramework(testBaseName)
+		f := newTestFramework(testBaseName)
 
 		var (
 			targetWorkerNode string
@@ -121,8 +121,8 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 				return e2epod.DeletePodWithWait(context.Background(), f.ClientSet, otherPod)
 			})
 
-		    state := vpnTestState{
-			    EVPNDisruptiveState: EVPNDisruptiveState{
+			state := vpnTestState{
+				EVPNDisruptiveState: EVPNDisruptiveState{
 					Namespace:       ns,
 					TestPod:         testPod,
 					NetworkName:     networkName,
@@ -155,11 +155,11 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 		// BeforeEach: set up 3 EVPN networks
 		// -----------------------------------------------------------
 		ginkgo.BeforeEach(func() {
-			if !e2e.IsLocalGWModeEnabled() {
+			if !isLocalGWModeEnabled() {
 				ginkgo.Skip("EVPN tests require OVN local gateway mode (OVN_GATEWAY_MODE=local)")
 			}
 
-			ipFamilySet = sets.New(e2e.GetSupportedIPFamiliesSlice(f.ClientSet)...)
+			ipFamilySet = sets.New(getSupportedIPFamiliesSlice(f.ClientSet)...)
 
 			// Pick two worker nodes: one for test pods, one for other pods.
 			ginkgo.By("Selecting target and other worker nodes")
@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			targetWorkerNode = ""
 			otherWorkerNode = ""
 			for _, node := range allNodes.Items {
-				if e2e.IsControlPlaneNode(node) {
+				if isControlPlaneNode(node) {
 					continue
 				}
 				if targetWorkerNode == "" {
@@ -185,7 +185,7 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 
 			ictx := infraprovider.Get().NewTestContext()
 
-			frrVTEPIP, err := e2e.GetExternalFRRIP(ipFamilySet)
+			frrVTEPIP, err := getExternalFRRIP(ipFamilySet)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Create a single shared FRRConfiguration before setting up networks.
@@ -196,13 +196,13 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			).To(gomega.Succeed())
 
 			// Each network needs its own VTEP subnet to avoid CIDROverlap.
-			// RandomVTEPSubnets returns (IPv4, IPv6) CIDR strings — validate the family we use.
-			l3VtepV4, _ := e2e.RandomVTEPSubnets()
-			gomega.Expect(l3VtepV4).NotTo(gomega.BeEmpty(), "RandomVTEPSubnets IPv4 for L3 IP-VRF network")
-			l2VtepV4, _ := e2e.RandomVTEPSubnets()
-			gomega.Expect(l2VtepV4).NotTo(gomega.BeEmpty(), "RandomVTEPSubnets IPv4 for L2 MAC-VRF network")
-			l2l3VtepV4, _ := e2e.RandomVTEPSubnets()
-			gomega.Expect(l2l3VtepV4).NotTo(gomega.BeEmpty(), "RandomVTEPSubnets IPv4 for L2+L3 network")
+			// randomVTEPSubnets returns (IPv4, IPv6) CIDR strings — validate the family we use.
+			l3VtepV4, _ := randomVTEPSubnets()
+			gomega.Expect(l3VtepV4).NotTo(gomega.BeEmpty(), "randomVTEPSubnets IPv4 for L3 IP-VRF network")
+			l2VtepV4, _ := randomVTEPSubnets()
+			gomega.Expect(l2VtepV4).NotTo(gomega.BeEmpty(), "randomVTEPSubnets IPv4 for L2 MAC-VRF network")
+			l2l3VtepV4, _ := randomVTEPSubnets()
+			gomega.Expect(l2l3VtepV4).NotTo(gomega.BeEmpty(), "randomVTEPSubnets IPv4 for L2+L3 network")
 
 			// Three independent randomCUDNSubnets() draws can collide on /20 IPv4; Podman then
 			// rejects the second MAC-VRF bridge. Allocate disjoint CUDN pairs up front.
@@ -211,17 +211,17 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 
 			// --- Network 1: L3 IP-VRF ---
 			l3Name := testBaseName + "l3"
-			l3Spec := e2e.NewL3IPVRFNetworkSpec(ipFamilySet, cudnTriple[0][0], cudnTriple[0][1])
+			l3Spec := newL3IPVRFNetworkSpec(ipFamilySet, cudnTriple[0][0], cudnTriple[0][1])
 			l3State := setupNetwork(ictx, l3Name, l3Spec, []string{l3VtepV4}, frrVTEPIP)
 
 			// --- Network 2: L2 MAC-VRF ---
 			l2Name := testBaseName + "l2"
-			l2Spec := e2e.NewL2MACVRFNetworkSpec(ipFamilySet, cudnTriple[1][0], cudnTriple[1][1])
+			l2Spec := newL2MACVRFNetworkSpec(ipFamilySet, cudnTriple[1][0], cudnTriple[1][1])
 			l2State := setupNetwork(ictx, l2Name, l2Spec, []string{l2VtepV4}, frrVTEPIP)
 
 			// --- Network 3: L2 MAC-VRF + IP-VRF ---
 			l2l3Name := testBaseName + "ml"
-			l2l3Spec := e2e.NewL2MACVRFIPVRFNetworkSpec(ipFamilySet, cudnTriple[2][0], cudnTriple[2][1])
+			l2l3Spec := newL2MACVRFIPVRFNetworkSpec(ipFamilySet, cudnTriple[2][0], cudnTriple[2][1])
 			l2l3State := setupNetwork(ictx, l2l3Name, l2l3Spec, []string{l2l3VtepV4}, frrVTEPIP)
 
 			vpnStates = []vpnTestState{l3State, l2State, l2l3State}
@@ -240,13 +240,13 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 				infraapi.ExternalContainer{Name: serverName}, serverNetwork,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			return e2e.GetFirstIPStringOfFamily(family, []string{iface.IPv4, iface.IPv6})
+			return getFirstIPStringOfFamily(family, []string{iface.IPv4, iface.IPv6})
 		}
 
 		// getPodIP returns a pod's primary network IP for the given family.
 		getPodIP := func(pod *corev1.Pod, networkName string, family utilnet.IPFamily) string {
 			ginkgo.GinkgoHelper()
-			ip, err := e2e.GetPodAnnotationIPsForPrimaryNetworkByIPFamily(
+			ip, err := getPodAnnotationIPsForPrimaryNetworkByIPFamily(
 				f.ClientSet, pod.Namespace, pod.Name, networkName, family,
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -363,11 +363,11 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			// WaitForEVPNRouteConvergence polls "show bgp l2vpn evpn summary json" and
+			// waitForEVPNRouteConvergence polls "show bgp l2vpn evpn summary json" and
 			// requires both peer.State=="Established" AND bidirectional route exchange, so it
 			// covers both session establishment and convergence in one step.
 			ginkgo.By(fmt.Sprintf("[%s] Waiting for BGP EVPN sessions and route convergence", label))
-			convergenceErr := e2e.WaitForEVPNRouteConvergence(len(nodeList.Items), disruptiveBGPTimeout)
+			convergenceErr := waitForEVPNRouteConvergence(len(nodeList.Items), disruptiveBGPTimeout)
 			if convergenceErr != nil {
 				ginkgo.GinkgoLogr.Info("BGP EVPN sessions or routes not converged")
 				ginkgo.GinkgoLogr.Info("Inspect with: oc get frrconfiguration -n openshift-frr-k8s -o yaml")
@@ -478,7 +478,7 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			for i := range vpnStates {
 				state := &vpnStates[i]
 				podName := state.Namespace.Name + "-pod"
-				_ = e2e.DeletePodWithWaitByName(context.Background(), f.ClientSet, podName, state.Namespace.Name)
+				_ = deletePodWithWaitByName(context.Background(), f.ClientSet, podName, state.Namespace.Name)
 				state.TestPod = e2epod.CreateExecPodOrFail(
 					context.Background(), f.ClientSet, state.Namespace.Name, podName,
 					func(p *corev1.Pod) {
@@ -501,24 +501,24 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 
 			ginkgo.By("Waiting for ovnkube-node to be ready on " + targetWorkerNode)
 			gomega.Expect(
-				e2e.RestartOVNKubeNodePod(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), targetWorkerNode),
+				restartOVNKubeNodePod(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), targetWorkerNode),
 			).To(gomega.Succeed())
 
 			ginkgo.By("Waiting for ovnkube-node DaemonSet rollout after node restart")
 			gomega.Expect(
-				e2e.WaitForDaemonSetReady(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), "ovnkube-node", dsRolloutTimeout),
+				waitForDaemonSetReady(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), "ovnkube-node", dsRolloutTimeout),
 			).To(gomega.Succeed())
 
 			ginkgo.By("Waiting for FRR-K8s DaemonSet rollout after node restart")
 			gomega.Expect(
-				e2e.WaitForDaemonSetReady(f.ClientSet, deploymentconfig.Get().FRRK8sNamespace(), deploymentconfig.Get().FRRK8sDaemonSetName(), dsRolloutTimeout),
+				waitForDaemonSetReady(f.ClientSet, deploymentconfig.Get().FRRK8sNamespace(), deploymentconfig.Get().FRRK8sDaemonSetName(), dsRolloutTimeout),
 			).To(gomega.Succeed())
 
 			ginkgo.By("Re-adding VTEP loopback IPs lost during node reboot")
 			ictx := infraprovider.Get().NewTestContext()
 			for _, state := range vpnStates {
 				gomega.Expect(
-					e2e.EnsureVTEPLoopbackIPs(f, ictx, state.vtepSubnets),
+					ensureVTEPLoopbackIPs(f, ictx, state.vtepSubnets),
 				).To(gomega.Succeed())
 			}
 
@@ -534,17 +534,17 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			var workerNodeNames []string
 			for _, node := range nodeList.Items {
-				if !e2e.IsControlPlaneNode(node) {
+				if !isControlPlaneNode(node) {
 					workerNodeNames = append(workerNodeNames, node.Name)
 				}
 			}
 			gomega.Expect(
-				e2e.RestartOVNKubeNodePodsInParallel(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), workerNodeNames...),
+				restartOVNKubeNodePodsInParallel(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), workerNodeNames...),
 			).To(gomega.Succeed())
 
 			ginkgo.By("Waiting for ovnkube-node DaemonSet rollout to complete")
 			gomega.Expect(
-				e2e.WaitForDaemonSetReady(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), "ovnkube-node", dsRolloutTimeout),
+				waitForDaemonSetReady(f.ClientSet, deploymentconfig.Get().OVNKubernetesNamespace(), "ovnkube-node", dsRolloutTimeout),
 			).To(gomega.Succeed())
 
 			verifyConnectivityAndIsolation("After OVN-K restart")
@@ -556,12 +556,12 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			frrk8sNS := deploymentconfig.Get().FRRK8sNamespace()
 			ginkgo.By("Restarting FRR-K8s pods in " + frrk8sNS)
 			gomega.Expect(
-				e2e.RestartFRRK8sPods(f.ClientSet, frrk8sNS),
+				restartFRRK8sPods(f.ClientSet, frrk8sNS),
 			).To(gomega.Succeed())
 
 			ginkgo.By("Waiting for FRR-K8s DaemonSet rollout to complete")
 			gomega.Expect(
-				e2e.WaitForDaemonSetReady(f.ClientSet, frrk8sNS, deploymentconfig.Get().FRRK8sDaemonSetName(), dsRolloutTimeout),
+				waitForDaemonSetReady(f.ClientSet, frrk8sNS, deploymentconfig.Get().FRRK8sDaemonSetName(), dsRolloutTimeout),
 			).To(gomega.Succeed())
 
 			verifyConnectivityAndIsolation("After FRR-K8s restart")
@@ -575,21 +575,21 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 				disruptiveStates[i] = vpnStates[i].EVPNDisruptiveState
 			}
 
-		ginkgo.By("Destroying kernel state on external FRR (simulating router power-off)")
-		DestroyEVPNKernelStateOnFRR(disruptiveStates)
+			ginkgo.By("Destroying kernel state on external FRR (simulating router power-off)")
+			DestroyEVPNKernelStateOnFRR(disruptiveStates)
 
 			ginkgo.By("Restarting FRR daemons (simulating router power-on)")
-			gomega.Expect(e2e.RestartExternalFRRDaemons()).To(gomega.Succeed())
+			gomega.Expect(restartExternalFRRDaemons()).To(gomega.Succeed())
 
 			ginkgo.By("Waiting for FRR process to be ready")
-			gomega.Expect(e2e.WaitForExternalFRRProcessReady(2 * time.Minute)).To(gomega.Succeed())
+			gomega.Expect(waitForExternalFRRProcessReady(2 * time.Minute)).To(gomega.Succeed())
 
 			ginkgo.By("Re-applying transient kernel state on external FRR")
 			ictx := infraprovider.Get().NewTestContext()
 			gomega.Expect(ReapplyEVPNKernelStateOnFRR(ictx, ipFamilySet, disruptiveStates)).To(gomega.Succeed())
 
 			ginkgo.By("Waiting for FRR/zebra after bulk ip-link changes from re-apply")
-			gomega.Expect(e2e.WaitForExternalFRRProcessReady(time.Minute)).To(gomega.Succeed())
+			gomega.Expect(waitForExternalFRRProcessReady(time.Minute)).To(gomega.Succeed())
 
 			verifyConnectivityAndIsolation("After spine restart")
 		})
@@ -626,7 +626,7 @@ type EVPNDisruptiveState struct {
 	// after a container restart (bridges and VXLANs are lost on stop/start).
 	BridgeName   string
 	VxlanName    string
-	FrrVTEPIP    string // FRR's IP on the KIND primary network; used as VXLAN local IP
+	FrrVTEPIP    string // FRR's IP on the provider specific primary network; used as VXLAN local IP
 	MacVRFVNI    int
 	MacVRFVID    int
 	IpVRFName    string
@@ -695,7 +695,7 @@ func ReapplyEVPNKernelStateOnFRR(ictx infraapi.Context, ipFamilySet sets.Set[uti
 		hasIPVRF := state.NetworkSpec.EVPN != nil && state.NetworkSpec.EVPN.IPVRF != nil
 
 		ginkgo.GinkgoLogr.Info("Re-applying EVPN bridge/VXLAN on external FRR", "network", state.NetworkName)
-		if err := e2e.SetupEVPNBridgeOnExternalFRR(ictx, state.FrrVTEPIP, state.BridgeName, state.VxlanName); err != nil {
+		if err := SetupEVPNBridgeOnExternalFRR(ictx, state.FrrVTEPIP, state.BridgeName, state.VxlanName); err != nil {
 			return fmt.Errorf("failed to re-apply EVPN bridge for %q: %w", state.NetworkName, err)
 		}
 
@@ -712,7 +712,7 @@ func ReapplyEVPNKernelStateOnFRR(ictx infraapi.Context, ipFamilySet sets.Set[uti
 
 			newMACVID := randomVID()
 			ginkgo.GinkgoLogr.Info("Re-applying MAC-VRF on external FRR", "network", state.NetworkName, "vni", state.MacVRFVNI, "newVID", newMACVID)
-			if err := e2e.SetupMACVRFOnExternalFRR(ictx, state.MacVRFVNI, newMACVID, state.BridgeName, state.VxlanName); err != nil {
+			if err := SetupMACVRFOnExternalFRR(ictx, state.MacVRFVNI, newMACVID, state.BridgeName, state.VxlanName); err != nil {
 				return fmt.Errorf("failed to re-apply MAC-VRF for %q: %w", state.NetworkName, err)
 			}
 
@@ -742,7 +742,7 @@ func ReapplyEVPNKernelStateOnFRR(ictx infraapi.Context, ipFamilySet sets.Set[uti
 
 			newIPVID := randomVID()
 			ginkgo.GinkgoLogr.Info("Re-applying IP-VRF on external FRR", "network", state.NetworkName, "vni", state.IpVRFVNI, "newVID", newIPVID)
-			if err := e2e.SetupIPVRFOnExternalFRR(ictx, state.IpVRFName, state.IpVRFVNI, newIPVID, state.BridgeName, state.VxlanName); err != nil {
+			if err := SetupIPVRFOnExternalFRR(ictx, state.IpVRFName, state.IpVRFVNI, newIPVID, state.BridgeName, state.VxlanName); err != nil {
 				return fmt.Errorf("failed to re-apply IP-VRF for %q: %w", state.NetworkName, err)
 			}
 
@@ -756,7 +756,7 @@ func ReapplyEVPNKernelStateOnFRR(ictx infraapi.Context, ipFamilySet sets.Set[uti
 				}
 			}
 			frrIPs := []string{frrIPNetInf.IPv4, frrIPNetInf.IPv6}
-			if err := e2e.RestoreFRRIPv6AfterVRFAssignment(frr, frrIPNetInf.InfName, frrIPs, state.IpVRFSubnets); err != nil {
+			if err := RestoreFRRIPv6AfterVRFAssignment(frr, frrIPNetInf.InfName, frrIPs, state.IpVRFSubnets); err != nil {
 				return fmt.Errorf("failed to restore IPv6 addresses on FRR after VRF re-attach for %q: %w", state.NetworkName, err)
 			}
 		}
