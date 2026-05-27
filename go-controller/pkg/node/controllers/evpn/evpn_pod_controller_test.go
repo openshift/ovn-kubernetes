@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net"
 	"syscall"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -343,6 +345,149 @@ var _ = Describe("EVPN pod controller", func() {
 
 			Expect(ctrl.reconcilePod("test-ns/remote-pod")).To(Succeed())
 			nlMock.AssertNotCalled(GinkgoT(), "NeighSet", mock.Anything)
+		})
+
+		Context("during live migration", func() {
+			const (
+				vmName        = "test-vm"
+				sourceNode    = "source-node"
+				podAnnotation = `{"test-ns/test-nad":{"ip_addresses":["10.0.0.5/24"],"mac_address":"0a:58:0a:00:00:05","ip_address":"10.0.0.5/24"}}`
+			)
+
+			var (
+				netInfo     *multinetworkmocks.NetInfo
+				sviLink     netlink.Link
+				ovsPortLink netlink.Link
+			)
+
+			// newVirtLauncherPod builds a kubevirt virt-launcher pod with the
+			// labels and annotations needed to be recognized by
+			// DiscoverLiveMigrationStatus and the EVPN pod controller.
+			newVirtLauncherPod := func(name, nodeName string, creationOffset time.Duration, targetReady bool) *corev1.Pod {
+				annotations := map[string]string{
+					kubevirtv1.DomainAnnotation: vmName,
+					types.OvnPodAnnotationName:  podAnnotation,
+				}
+				if targetReady {
+					annotations[kubevirtv1.MigrationTargetReadyTimestamp] = "2024-01-01T00:00:00Z"
+				}
+				return &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:              name,
+						Namespace:         "test-ns",
+						UID:               k8stypes.UID(name + "-uid"),
+						Annotations:       annotations,
+						Labels:            map[string]string{kubevirtv1.AppLabel: "virt-launcher", kubevirtv1.VirtualMachineNameLabel: vmName},
+						CreationTimestamp: metav1.Time{Time: time.Now().Add(creationOffset)},
+					},
+					Spec:   corev1.PodSpec{NodeName: nodeName},
+					Status: corev1.PodStatus{Phase: corev1.PodRunning},
+				}
+			}
+
+			BeforeEach(func() {
+				netInfo = &multinetworkmocks.NetInfo{}
+				netInfo.On("EVPNVTEPName").Return("vtep1")
+				netInfo.On("EVPNMACVRFVID").Return(100)
+				netInfo.On("EVPNMACVRFVNI").Return(int32(10100))
+				netInfo.On("GetNetworkName").Return("mynet")
+				netInfo.On("GetNetworkID").Return(5)
+				netInfo.On("IsPrimaryNetwork").Return(true)
+				const nadKey = "test-ns/test-nad"
+				fakeNM.NADNetworks = map[string]util.NetInfo{nadKey: netInfo}
+				fakeNM.PrimaryNetworks = map[string]util.NetInfo{"test-ns": netInfo}
+
+				sviName := GetEVPNL2SVIName(netInfo)
+				ovsPortName := GetEVPNOVSPortName(netInfo)
+				sviLink = &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: sviName, Index: 10}}
+				ovsPortLink = &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: ovsPortName, Index: 20}}
+
+				nlMock.On("LinkByName", sviName).Return(sviLink, nil)
+				nlMock.On("LinkByName", ovsPortName).Return(ovsPortLink, nil)
+			})
+
+			It("does NOT program neighbors on target node before domain is ready", func() {
+				sourcePod := newVirtLauncherPod("virt-launcher-source", sourceNode, -time.Minute, false)
+				targetPod := newVirtLauncherPod("virt-launcher-target", nodeName, 0, false)
+				ctrl.podLister = newFakePodLister(sourcePod, targetPod)
+
+				Expect(ctrl.reconcilePod("test-ns/virt-launcher-target")).To(Succeed())
+
+				nlMock.AssertNotCalled(GinkgoT(), "NeighSet", mock.Anything)
+
+				By("verifying cache entry was created but neighbors were not programmed")
+				ctrl.podNeighLock.Lock()
+				_, exists := ctrl.podNeighbors["test-ns/virt-launcher-target"]
+				ctrl.podNeighLock.Unlock()
+				Expect(exists).To(BeTrue(), "cache entry should exist even though neighbors were deferred")
+			})
+
+			It("programs neighbors on target node after domain is ready", func() {
+				sourcePod := newVirtLauncherPod("virt-launcher-source", sourceNode, -time.Minute, false)
+				targetPod := newVirtLauncherPod("virt-launcher-target", nodeName, 0, true)
+				ctrl.podLister = newFakePodLister(sourcePod, targetPod)
+
+				nlMock.On("NeighSet", mock.Anything).Return(nil)
+
+				Expect(ctrl.reconcilePod("test-ns/virt-launcher-target")).To(Succeed())
+
+				mac, _ := net.ParseMAC("0a:58:0a:00:00:05")
+
+				By("verifying FDB entry was added on OVS port")
+				nlMock.AssertCalled(GinkgoT(), "NeighSet", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.LinkIndex == ovsPortLink.Attrs().Index &&
+						n.HardwareAddr.String() == mac.String() &&
+						n.Vlan == 100
+				}))
+
+				By("verifying neighbor entry was added on SVI")
+				nlMock.AssertCalled(GinkgoT(), "NeighSet", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.LinkIndex == sviLink.Attrs().Index &&
+						n.IP.Equal(net.ParseIP("10.0.0.5"))
+				}))
+			})
+
+			It("deletes neighbors on source node after target domain is ready", func() {
+				mac, _ := net.ParseMAC("0a:58:0a:00:00:05")
+				sourceKey := "test-ns/virt-launcher-source"
+
+				// Controller runs on source node for this test.
+				ctrl.nodeName = sourceNode
+
+				// Pre-seed cache as if source pod was previously reconciled.
+				ctrl.podNeighbors[sourceKey] = &neighEntries{
+					uid:         "virt-launcher-source-uid",
+					sviName:     GetEVPNL2SVIName(netInfo),
+					ovsPortName: GetEVPNOVSPortName(netInfo),
+					macvrfVID:   100,
+					ips:         []net.IP{net.ParseIP("10.0.0.5")},
+					mac:         mac,
+				}
+
+				sourcePod := newVirtLauncherPod("virt-launcher-source", sourceNode, -time.Minute, false)
+				targetPod := newVirtLauncherPod("virt-launcher-target", nodeName, 0, true)
+				ctrl.podLister = newFakePodLister(sourcePod, targetPod)
+
+				nlMock.On("NeighDel", mock.Anything).Return(nil)
+
+				Expect(ctrl.reconcilePod(sourceKey)).To(Succeed())
+
+				By("verifying FDB entry was deleted from OVS port")
+				nlMock.AssertCalled(GinkgoT(), "NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.LinkIndex == ovsPortLink.Attrs().Index &&
+						n.HardwareAddr.String() == mac.String()
+				}))
+
+				By("verifying neighbor entry was deleted from SVI")
+				nlMock.AssertCalled(GinkgoT(), "NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.LinkIndex == sviLink.Attrs().Index &&
+						n.IP.Equal(net.ParseIP("10.0.0.5"))
+				}))
+
+				By("verifying cache was cleared")
+				_, exists := ctrl.podNeighbors[sourceKey]
+				Expect(exists).To(BeFalse())
+			})
 		})
 	})
 })
