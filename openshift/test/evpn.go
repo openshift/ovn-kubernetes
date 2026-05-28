@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	ginkgo "github.com/onsi/ginkgo/v2"
@@ -33,13 +34,42 @@ import (
 )
 
 // vpnTestState holds the per-network state needed across setup, verification,
-// and disruption phases. It embeds EVPNDisruptiveState for the external FRR
-// kernel state re-apply logic and adds pods and metadata for connectivity tests.
+// and disruption phases for the OpenShift EVPN disruptive test suite.
 type vpnTestState struct {
-	EVPNDisruptiveState // TestPod: pinned to targetWorkerNode
-
+	// Kubernetes objects
+	Namespace   *corev1.Namespace
+	TestPod     *corev1.Pod // pinned to targetWorkerNode
 	otherPod    *corev1.Pod // on a different node (for pod-to-pod checks)
-	vtepSubnets []string    // VTEP CIDRs for re-adding loopback IPs after node reboot
+	NetworkName string
+	NetworkSpec *udnv1.NetworkSpec
+
+	// External server names — Docker/Podman containers outside the cluster created by
+	// setupMACVRFAgnhost / setupIPVRFAgnhost. Used in connectivity and isolation checks.
+	ExternalServers []string
+
+	// vtepSubnets are the VTEP CIDRs for re-adding loopback IPs after node reboot.
+	vtepSubnets []string
+
+	// Parameters for re-applying transient kernel state on the external FRR container
+	// after a container restart (bridges and VXLANs are lost on stop/start).
+	BridgeName string
+	VxlanName  string
+	FrrVTEPIP  string // FRR's IP on the provider specific primary network; used as VXLAN local IP
+	MacVRFVNI  int
+	MacVRFVID  int
+	// MacVRFFrrInterface is the FRR-side interface attached to the MAC-VRF bridge,
+	// recorded at setup time so re-apply does not need a post-VRF-deletion IPv6 lookup.
+	MacVRFFrrInterface string
+	IpVRFName          string
+	IpVRFVNI           int
+	IpVRFVID           int
+	// IpVRFFrrInterface is the FRR-side interface enslaved to the IP-VRF,
+	// recorded at setup time so re-apply does not need a post-VRF-deletion IPv6 lookup.
+	IpVRFFrrInterface string
+	// IpVRFFrrIPs are the FRR container's IPv4 and IPv6 addresses on the IP-VRF Docker
+	// network, recorded at setup time for restoreFRRIPv6AfterVRFAssignment during re-apply.
+	IpVRFFrrIPs  []string
+	IpVRFSubnets []string // subnets advertised by the IP-VRF agnhost
 }
 
 var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, and L2 MAC-VRF+IP-VRF",
@@ -102,6 +132,12 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					p.Spec.NodeName = targetWorkerNode
 				},
 			)
+			// Delete pod before CUDN/namespace cleanup so the UDN controller can remove
+			// its finalizer immediately, avoiding a burst of OVN reconciliation that
+			// slows the API server and causes subsequent cleanup calls to time out.
+			ictx.AddCleanUpFn(func() error {
+				return e2epod.DeletePodWithWait(context.Background(), f.ClientSet, testPod)
+			})
 
 			ginkgo.By("Creating other pod on " + otherWorkerNode + " for " + networkName)
 			otherPod := e2epod.CreateExecPodOrFail(
@@ -111,20 +147,21 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					p.Spec.NodeName = otherWorkerNode
 				},
 			)
+			ictx.AddCleanUpFn(func() error {
+				return e2epod.DeletePodWithWait(context.Background(), f.ClientSet, otherPod)
+			})
 
-		    state := vpnTestState{
-			    EVPNDisruptiveState: EVPNDisruptiveState{
-					Namespace:       ns,
-					TestPod:         testPod,
-					NetworkName:     networkName,
-					NetworkSpec:     networkSpec,
-					ExternalServers: servers,
-					BridgeName:      evpnBridgeName(networkName),
-					VxlanName:       evpnVxlanName(networkName),
-					FrrVTEPIP:       frrVTEPIP,
-				},
-				otherPod:    otherPod,
-				vtepSubnets: vtepSubnets,
+			state := vpnTestState{
+				Namespace:       ns,
+				TestPod:         testPod,
+				NetworkName:     networkName,
+				NetworkSpec:     networkSpec,
+				ExternalServers: servers,
+				BridgeName:      evpnBridgeName(networkName),
+				VxlanName:       evpnVxlanName(networkName),
+				FrrVTEPIP:       frrVTEPIP,
+				otherPod:        otherPod,
+				vtepSubnets:     vtepSubnets,
 			}
 
 			if networkSpec.EVPN != nil && networkSpec.EVPN.IPVRF != nil {
@@ -138,6 +175,26 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			state.MacVRFVID = extIDs.MacVRFVID
 			state.IpVRFVID = extIDs.IpVRFVID
 			state.IpVRFSubnets = extIDs.IpVRFSubnets
+
+			// Record the FRR-side interface names while both IPv4 and IPv6 are intact on the
+			// interfaces (IPv6 global addresses drop after VRF deletion, which would cause a
+			// re-lookup in reapplyEVPNKernelStateOnFRR to return an empty InfName).
+			frr := infraapi.ExternalContainer{Name: externalFRRName}
+			if networkSpec.EVPN != nil && networkSpec.EVPN.MACVRF != nil {
+				macNet, err := infraprovider.Get().GetNetwork(evpnMACVRFAgnhostName(networkName))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "get MAC-VRF docker network")
+				macInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(frr, macNet)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "get FRR interface for MAC-VRF")
+				state.MacVRFFrrInterface = macInf.InfName
+			}
+			if networkSpec.EVPN != nil && networkSpec.EVPN.IPVRF != nil {
+				ipNet, err := infraprovider.Get().GetNetwork(evpnIPVRFAgnhostName(networkName))
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "get IP-VRF docker network")
+				ipInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(frr, ipNet)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "get FRR interface for IP-VRF")
+				state.IpVRFFrrInterface = ipInf.InfName
+				state.IpVRFFrrIPs = []string{ipInf.IPv4, ipInf.IPv6}
+			}
 
 			return state
 		}
@@ -180,7 +237,6 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Create a single shared FRRConfiguration before setting up networks.
-			// This avoids repeated apply calls that could reset BGP sessions.
 			ginkgo.By("Creating shared FRRConfiguration for all EVPN networks")
 			frrConfigLabels := map[string]string{"network": testBaseName}
 			gomega.Expect(
@@ -196,19 +252,24 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			l2l3VtepV4, _ := e2e.RandomVTEPSubnets()
 			gomega.Expect(l2l3VtepV4).NotTo(gomega.BeEmpty(), "RandomVTEPSubnets IPv4 for L2+L3 network")
 
+			// Three independent randomCUDNSubnets() draws can collide on /20 IPv4; Podman then
+			// rejects the second MAC-VRF bridge. Allocate disjoint CUDN pairs up front.
+			cudnTriple, err := e2e.AllocDistinctEVPNCUDNSubnets(3)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			// --- Network 1: L3 IP-VRF ---
 			l3Name := testBaseName + "l3"
-			l3Spec := e2e.NewL3IPVRFNetworkSpec(ipFamilySet)
+			l3Spec := e2e.NewL3IPVRFNetworkSpec(ipFamilySet, cudnTriple[0][0], cudnTriple[0][1])
 			l3State := setupNetwork(ictx, l3Name, l3Spec, []string{l3VtepV4}, frrVTEPIP)
 
 			// --- Network 2: L2 MAC-VRF ---
 			l2Name := testBaseName + "l2"
-			l2Spec := e2e.NewL2MACVRFNetworkSpec(ipFamilySet)
+			l2Spec := e2e.NewL2MACVRFNetworkSpec(ipFamilySet, cudnTriple[1][0], cudnTriple[1][1])
 			l2State := setupNetwork(ictx, l2Name, l2Spec, []string{l2VtepV4}, frrVTEPIP)
 
 			// --- Network 3: L2 MAC-VRF + IP-VRF ---
 			l2l3Name := testBaseName + "ml"
-			l2l3Spec := e2e.NewL2MACVRFIPVRFNetworkSpec(ipFamilySet)
+			l2l3Spec := e2e.NewL2MACVRFIPVRFNetworkSpec(ipFamilySet, cudnTriple[2][0], cudnTriple[2][1])
 			l2l3State := setupNetwork(ictx, l2l3Name, l2l3Spec, []string{l2l3VtepV4}, frrVTEPIP)
 
 			vpnStates = []vpnTestState{l3State, l2State, l2l3State}
@@ -347,12 +408,16 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 		verifyConnectivityAndIsolation := func(label string) {
 			ginkgo.GinkgoHelper()
 
-			ginkgo.By(fmt.Sprintf("[%s] Verifying BGP EVPN sessions", label))
 			nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			bgpErr := e2e.WaitForExternalFRRBGPReady(len(nodeList.Items), disruptiveBGPTimeout)
-			if bgpErr != nil {
-				ginkgo.GinkgoLogr.Info("BGP EVPN sessions not established before assertions")
+
+			// WaitForEVPNRouteConvergence polls "show bgp l2vpn evpn summary json" and
+			// requires both peer.State=="Established" AND bidirectional route exchange, so it
+			// covers both session establishment and convergence in one step.
+			ginkgo.By(fmt.Sprintf("[%s] Waiting for BGP EVPN sessions and route convergence", label))
+			convergenceErr := e2e.WaitForEVPNRouteConvergence(len(nodeList.Items), disruptiveBGPTimeout)
+			if convergenceErr != nil {
+				ginkgo.GinkgoLogr.Info("BGP EVPN sessions or routes not converged")
 				ginkgo.GinkgoLogr.Info("Inspect with: oc get frrconfiguration -n openshift-frr-k8s -o yaml")
 				ginkgo.GinkgoLogr.Info("Inspect with: podman exec frr vtysh -c 'show bgp l2vpn evpn summary'")
 				if os.Getenv("EVPN_DEBUG_PAUSE_ON_FAILURE") == "true" {
@@ -360,17 +425,7 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					time.Sleep(10 * time.Minute)
 				}
 			}
-			gomega.Expect(bgpErr).NotTo(gomega.HaveOccurred())
-
-			ginkgo.By(fmt.Sprintf("[%s] Verifying EVPN VNIs are active", label))
-			disruptiveStates := make([]e2e.EVPNDisruptiveState, len(vpnStates))
-			for i := range vpnStates {
-				disruptiveStates[i] = vpnStates[i].EVPNDisruptiveState
-			}
-			gomega.Expect(e2e.VerifyEVPNVNIsActive(disruptiveStates)).To(gomega.Succeed())
-
-			ginkgo.By(fmt.Sprintf("[%s] Waiting for EVPN route convergence", label))
-			gomega.Expect(e2e.WaitForEVPNRouteConvergence(len(nodeList.Items), disruptiveBGPTimeout)).To(gomega.Succeed())
+			gomega.Expect(convergenceErr).NotTo(gomega.HaveOccurred())
 
 			for i := range vpnStates {
 				state := &vpnStates[i]
@@ -380,8 +435,8 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					}
 
 					// Check 1: Pod -> own external servers
-					ginkgo.By(fmt.Sprintf("[%s] Check 1: %s pod reaches its own external servers (IPv%s)",
-						label, state.NetworkName, familyStr(family)))
+					ginkgo.By(fmt.Sprintf("[%s] Check 1: %s pod reaches its own external servers (%v)",
+						label, state.NetworkName, family))
 					for _, serverName := range state.ExternalServers {
 						serverIP := getServerIP(serverName, family)
 						if serverIP == "" {
@@ -394,8 +449,8 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					}
 
 					// Check 2: External server -> pod
-					ginkgo.By(fmt.Sprintf("[%s] Check 2: external servers reach %s pod (IPv%s)",
-						label, state.NetworkName, familyStr(family)))
+					ginkgo.By(fmt.Sprintf("[%s] Check 2: external servers reach %s pod (%v)",
+						label, state.NetworkName, family))
 					for _, serverName := range state.ExternalServers {
 						serverIP := getServerIP(serverName, family)
 						if serverIP == "" {
@@ -406,8 +461,8 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					}
 
 					// Check 4: Pod cannot reach other networks' external servers
-					ginkgo.By(fmt.Sprintf("[%s] Check 4: %s pod cannot reach other VPNs' servers (IPv%s)",
-						label, state.NetworkName, familyStr(family)))
+					ginkgo.By(fmt.Sprintf("[%s] Check 4: %s pod cannot reach other VPNs' servers (%v)",
+						label, state.NetworkName, family))
 					for j := range vpnStates {
 						if i == j {
 							continue
@@ -421,10 +476,10 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 						}
 					}
 
-					// Check 5: Other networks' external servers cannot reach pod
-					ginkgo.By(fmt.Sprintf("[%s] Check 5: other VPNs' servers cannot reach %s pod (IPv%s)",
-						label, state.NetworkName, familyStr(family)))
-					podIP := getPodIP(state.TestPod, state.NetworkName, family)
+				// Check 5: Other networks' external servers cannot reach pod
+				ginkgo.By(fmt.Sprintf("[%s] Check 5: other VPNs' servers cannot reach %s pod (%v)",
+					label, state.NetworkName, family))
+				podIP := getPodIP(f.ClientSet, state.TestPod, state.NetworkName, family)
 					for j := range vpnStates {
 						if i == j {
 							continue
@@ -435,17 +490,17 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					}
 
 					// Check 6: Cluster node cannot reach pod
-					ginkgo.By(fmt.Sprintf("[%s] Check 6: cluster nodes cannot reach %s pod (IPv%s)",
-						label, state.NetworkName, familyStr(family)))
+					ginkgo.By(fmt.Sprintf("[%s] Check 6: cluster nodes cannot reach %s pod (%v)",
+						label, state.NetworkName, family))
 					testNodeCannotReach(targetWorkerNode, podIP)
 					if otherWorkerNode != targetWorkerNode {
 						testNodeCannotReach(otherWorkerNode, podIP)
 					}
 
-					// Check 7: Pod-to-pod same network (different node)
-					ginkgo.By(fmt.Sprintf("[%s] Check 7: pod-to-pod on %s (IPv%s)",
-						label, state.NetworkName, familyStr(family)))
-					otherPodIP := getPodIP(state.otherPod, state.NetworkName, family)
+				// Check 7: Pod-to-pod same network (different node)
+				ginkgo.By(fmt.Sprintf("[%s] Check 7: pod-to-pod on %s (%v)",
+					label, state.NetworkName, family))
+				otherPodIP := getPodIP(f.ClientSet, state.otherPod, state.NetworkName, family)
 					testPodToClientIP(state.TestPod, otherPodIP)
 					testPodToClientIP(state.otherPod, podIP)
 				}
@@ -563,13 +618,8 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 		ginkgo.It("recovers after spine restart", func() {
 			verifyConnectivityAndIsolation("Baseline")
 
-			disruptiveStates := make([]EVPNDisruptiveState, len(vpnStates))
-			for i := range vpnStates {
-				disruptiveStates[i] = vpnStates[i].EVPNDisruptiveState
-			}
-
-		ginkgo.By("Destroying kernel state on external FRR (simulating router power-off)")
-		DestroyEVPNKernelStateOnFRR(disruptiveStates)
+			ginkgo.By("Destroying kernel state on external FRR (simulating router power-off)")
+			gomega.Expect(destroyEVPNKernelStateOnFRR(vpnStates)).To(gomega.Succeed())
 
 			ginkgo.By("Restarting FRR daemons (simulating router power-on)")
 			gomega.Expect(e2e.RestartExternalFRRDaemons()).To(gomega.Succeed())
@@ -579,7 +629,7 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 
 			ginkgo.By("Re-applying transient kernel state on external FRR")
 			ictx := infraprovider.Get().NewTestContext()
-			gomega.Expect(ReapplyEVPNKernelStateOnFRR(ictx, disruptiveStates)).To(gomega.Succeed())
+			gomega.Expect(reapplyEVPNKernelStateOnFRR(ictx, vpnStates)).To(gomega.Succeed())
 
 			ginkgo.By("Waiting for FRR/zebra after bulk ip-link changes from re-apply")
 			gomega.Expect(e2e.WaitForExternalFRRProcessReady(time.Minute)).To(gomega.Succeed())
@@ -588,85 +638,55 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 		})
 	})
 
-// familyStr returns "4" or "6" for logging.
-func familyStr(family utilnet.IPFamily) string {
-	if family == utilnet.IPv6 {
-		return "6"
-	}
-	return "4"
-}
-
 // =============================================================================
 // EVPN Disruptive Test Helpers (OpenShift-specific)
 // =============================================================================
 
-// EVPNDisruptiveState holds all state needed to verify and re-setup a single EVPN VPN
-// after a disruptive action (FRR restart, node restart, OVN-K restart, FRR-K8s restart).
-// It stores both the Kubernetes objects and the external FRR kernel parameters so that
-// the FRR container's transient state can be re-applied without re-randomising VNI/VID.
-type EVPNDisruptiveState struct {
-	// Kubernetes objects
-	Namespace   *corev1.Namespace
-	TestPod     *corev1.Pod // pinned to a specific worker node
-	NetworkName string
-	NetworkSpec *udnv1.NetworkSpec
-
-	// External server names — Docker/Podman containers outside the cluster created by
-	// setupMACVRFAgnhost / setupIPVRFAgnhost. Used in connectivity and isolation checks.
-	ExternalServers []string
-
-	// Parameters for re-applying transient kernel state on the external FRR container
-	// after a container restart (bridges and VXLANs are lost on stop/start).
-	BridgeName   string
-	VxlanName    string
-	FrrVTEPIP    string // FRR's IP on the KIND primary network; used as VXLAN local IP
-	MacVRFVNI    int
-	MacVRFVID    int
-	IpVRFName    string
-	IpVRFVNI     int
-	IpVRFVID     int
-	IpVRFSubnets []string // subnets advertised by the IP-VRF agnhost
-}
-
 // destroyEVPNKernelStateOnFRR removes transient kernel objects (bridges, VXLANs, VRFs, SVIs)
 // from the external FRR container, simulating the loss of that state on a full container stop
-// or power cycle. Call before ReapplyEVPNKernelStateOnFRR when a real `docker stop`/restart of
-// the FRR container is not used. Per-link errors are only logged; missing devices are fine.
-func destroyEVPNKernelStateOnFRR(states []EVPNDisruptiveState) {
+// or power cycle. Call before reapplyEVPNKernelStateOnFRR when a real `docker stop`/restart of
+// the FRR container is not used. Returns an error if any deletion fails for a reason other than
+// the device already being absent (e.g. SSH/podman failure).
+func destroyEVPNKernelStateOnFRR(states []vpnTestState) error {
 	frr := infraapi.ExternalContainer{Name: externalFRRName}
 
 	for _, state := range states {
 		hasIPVRF := state.NetworkSpec.EVPN != nil && state.NetworkSpec.EVPN.IPVRF != nil
 
+		type delCmd struct {
+			label string
+			args  []string
+		}
+		cmds := []delCmd{}
 		if hasIPVRF {
-			vrfName := state.IpVRFName
 			sviName := evpnSVIName(state.BridgeName, state.IpVRFVID)
-			if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", sviName}); err != nil {
-				ginkgo.GinkgoLogr.Info("destroyEVPNKernelState: delete SVI failed (may not exist)", "svi", sviName, "err", err)
-			}
-			if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", vrfName}); err != nil {
-				ginkgo.GinkgoLogr.Info("destroyEVPNKernelState: delete VRF failed (may not exist)", "vrf", vrfName, "err", err)
-			}
+			cmds = append(cmds,
+				delCmd{"SVI", []string{"ip", "link", "del", sviName}},
+				delCmd{"VRF", []string{"ip", "link", "del", state.IpVRFName}},
+			)
 		}
+		cmds = append(cmds,
+			delCmd{"VXLAN", []string{"ip", "link", "del", state.VxlanName}},
+			delCmd{"bridge", []string{"ip", "link", "del", state.BridgeName}},
+		)
 
-		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", state.VxlanName}); err != nil {
-			ginkgo.GinkgoLogr.Info("destroyEVPNKernelState: delete VXLAN failed (may not exist)", "vxlan", state.VxlanName, "err", err)
-		}
-		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", state.BridgeName}); err != nil {
-			ginkgo.GinkgoLogr.Info("destroyEVPNKernelState: delete bridge failed (may not exist)", "bridge", state.BridgeName, "err", err)
+		for _, cmd := range cmds {
+			if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, cmd.args); err != nil {
+				if !strings.Contains(err.Error(), "Cannot find device") {
+					return fmt.Errorf("destroyEVPNKernelState: failed to delete %s %s: %w",
+						cmd.label, cmd.args[len(cmd.args)-1], err)
+				}
+				ginkgo.GinkgoLogr.Info("destroyEVPNKernelState: device already absent",
+					"type", cmd.label, "device", cmd.args[len(cmd.args)-1])
+			}
 		}
 
 		ginkgo.GinkgoLogr.Info("destroyEVPNKernelState: cleaned up kernel state", "network", state.NetworkName)
 	}
+	return nil
 }
 
-// DestroyEVPNKernelStateOnFRR removes bridges, VXLANs, VRFs, and SVIs from the external FRR
-// container; see destroyEVPNKernelStateOnFRR.
-func DestroyEVPNKernelStateOnFRR(states []EVPNDisruptiveState) {
-	destroyEVPNKernelStateOnFRR(states)
-}
-
-// ReapplyEVPNKernelStateOnFRR re-creates all transient Linux kernel objects (bridge,
+// reapplyEVPNKernelStateOnFRR re-creates all transient Linux kernel objects (bridge,
 // VXLAN, VRF, MAC-VRF VLAN entries, IP-VRF SVI) on the external FRR container for
 // every VPN in states.
 //
@@ -680,7 +700,7 @@ func DestroyEVPNKernelStateOnFRR(states []EVPNDisruptiveState) {
 //
 // VIDs (VLAN IDs) are re-randomised on each re-apply. VID is a purely FRR-local tag;
 // VXLAN encapsulation uses VNI (not VID), so a fresh VID is safe and correct.
-func ReapplyEVPNKernelStateOnFRR(ictx infraapi.Context, states []EVPNDisruptiveState) error {
+func reapplyEVPNKernelStateOnFRR(ictx infraapi.Context, states []vpnTestState) error {
 	frr := infraapi.ExternalContainer{Name: externalFRRName}
 
 	for _, state := range states {
@@ -688,69 +708,58 @@ func ReapplyEVPNKernelStateOnFRR(ictx infraapi.Context, states []EVPNDisruptiveS
 		hasIPVRF := state.NetworkSpec.EVPN != nil && state.NetworkSpec.EVPN.IPVRF != nil
 
 		ginkgo.GinkgoLogr.Info("Re-applying EVPN bridge/VXLAN on external FRR", "network", state.NetworkName)
-		if err := e2e.SetupEVPNBridgeOnExternalFRR(ictx, state.FrrVTEPIP, state.BridgeName, state.VxlanName); err != nil {
+		if err := setupEVPNBridgeOnExternalFRR(ictx, state.FrrVTEPIP, state.BridgeName, state.VxlanName); err != nil {
 			return fmt.Errorf("failed to re-apply EVPN bridge for %q: %w", state.NetworkName, err)
 		}
 
 		if hasMACVRF {
-			macVRFNetworkName := evpnMACVRFAgnhostName(state.NetworkName)
-			macVRFNet, err := infraprovider.Get().GetNetwork(macVRFNetworkName)
-			if err != nil {
-				return fmt.Errorf("failed to get MAC-VRF Docker network %q: %w", macVRFNetworkName, err)
-			}
-			frrMACNetInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(frr, macVRFNet)
-			if err != nil {
-				return fmt.Errorf("failed to get FRR interface on MAC-VRF network %q: %w", macVRFNetworkName, err)
-			}
-
 			newMACVID := randomVID()
 			ginkgo.GinkgoLogr.Info("Re-applying MAC-VRF on external FRR", "network", state.NetworkName, "vni", state.MacVRFVNI, "newVID", newMACVID)
-			if err := e2e.SetupMACVRFOnExternalFRR(ictx, state.MacVRFVNI, newMACVID, state.BridgeName, state.VxlanName); err != nil {
+			if err := setupMACVRFOnExternalFRR(ictx, state.MacVRFVNI, newMACVID, state.BridgeName, state.VxlanName); err != nil {
 				return fmt.Errorf("failed to re-apply MAC-VRF for %q: %w", state.NetworkName, err)
 			}
 
 			vidStr := fmt.Sprintf("%d", newMACVID)
 			frrCmds := [][]string{
-				{"ip", "link", "set", frrMACNetInf.InfName, "master", state.BridgeName},
-				{"bridge", "vlan", "add", "dev", frrMACNetInf.InfName, "vid", vidStr, "pvid", "untagged"},
-				{"ip", "link", "set", frrMACNetInf.InfName, "up"},
+				{"ip", "link", "set", state.MacVRFFrrInterface, "master", state.BridgeName},
+				{"bridge", "vlan", "add", "dev", state.MacVRFFrrInterface, "vid", vidStr, "pvid", "untagged"},
+				{"ip", "link", "set", state.MacVRFFrrInterface, "up"},
 			}
 			for _, cmd := range frrCmds {
 				if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, cmd); err != nil {
-					return fmt.Errorf("failed to re-attach FRR interface %q to MAC-VRF bridge: %w", frrMACNetInf.InfName, err)
+					return fmt.Errorf("failed to re-attach FRR interface %q to MAC-VRF bridge: %w", state.MacVRFFrrInterface, err)
 				}
 			}
 		}
 
 		if hasIPVRF {
-			ipVRFNetworkName := evpnIPVRFAgnhostName(state.NetworkName)
-			ipVRFNet, err := infraprovider.Get().GetNetwork(ipVRFNetworkName)
-			if err != nil {
-				return fmt.Errorf("failed to get IP-VRF Docker network %q: %w", ipVRFNetworkName, err)
-			}
-			frrIPNetInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(frr, ipVRFNet)
-			if err != nil {
-				return fmt.Errorf("failed to get FRR interface on IP-VRF network %q: %w", ipVRFNetworkName, err)
-			}
-
 			newIPVID := randomVID()
 			ginkgo.GinkgoLogr.Info("Re-applying IP-VRF on external FRR", "network", state.NetworkName, "vni", state.IpVRFVNI, "newVID", newIPVID)
-			if err := e2e.SetupIPVRFOnExternalFRR(ictx, state.IpVRFName, state.IpVRFVNI, newIPVID, state.BridgeName, state.VxlanName); err != nil {
+			if err := setupIPVRFOnExternalFRR(ictx, state.IpVRFName, state.IpVRFVNI, newIPVID, state.BridgeName, state.VxlanName); err != nil {
 				return fmt.Errorf("failed to re-apply IP-VRF for %q: %w", state.NetworkName, err)
 			}
 
 			frrCmds := [][]string{
-				{"ip", "link", "set", frrIPNetInf.InfName, "master", state.IpVRFName},
-				{"ip", "link", "set", frrIPNetInf.InfName, "up"},
+				{"ip", "link", "set", state.IpVRFFrrInterface, "master", state.IpVRFName},
+				{"ip", "link", "set", state.IpVRFFrrInterface, "up"},
 			}
 			for _, cmd := range frrCmds {
 				if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, cmd); err != nil {
-					return fmt.Errorf("failed to re-attach FRR interface %q to IP-VRF: %w", frrIPNetInf.InfName, err)
+					return fmt.Errorf("failed to re-attach FRR interface %q to IP-VRF: %w", state.IpVRFFrrInterface, err)
 				}
 			}
-			frrIPs := []string{frrIPNetInf.IPv4, frrIPNetInf.IPv6}
-			if err := e2e.RestoreFRRIPv6AfterVRFAssignment(frr, frrIPNetInf.InfName, frrIPs, state.IpVRFSubnets); err != nil {
-				return fmt.Errorf("failed to restore IPv6 addresses on FRR after VRF re-attach for %q: %w", state.NetworkName, err)
+			// Linux silently drops global IPv6 addresses from an interface when it is
+			// enslaved to a VRF device, so we must re-add them after re-attachment.
+			// IPv4 addresses are NOT affected by VRF enslavement and remain on the
+			// interface throughout, so no equivalent restore is needed for IPv4.
+			// On IPv4-only clusters there is nothing to restore
+			for _, ip := range state.IpVRFFrrIPs {
+				if utilnet.IsIPv6String(ip) {
+					if err := restoreFRRIPv6AfterVRFAssignment(frr, state.IpVRFFrrInterface, state.IpVRFFrrIPs, state.IpVRFSubnets); err != nil {
+						return fmt.Errorf("failed to restore IPv6 addresses on FRR after VRF re-attach for %q: %w", state.NetworkName, err)
+					}
+					break
+				}
 			}
 		}
 	}
