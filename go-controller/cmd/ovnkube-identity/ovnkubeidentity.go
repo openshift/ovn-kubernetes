@@ -34,6 +34,7 @@ import (
 	identitywebhook "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/cmd/ovnkube-identity/webhook"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/csrapprover"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovnwebhook"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tls"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
@@ -308,6 +309,11 @@ func main() {
 }
 
 func runWebhook(ctx context.Context, restCfg *rest.Config) error {
+	applyTLSOptions, err := tls.NewApplyConfigOptions(cliCfg.minTLSVersion, cliCfg.tlsCipherSuites.Value())
+	if err != nil {
+		return err
+	}
+
 	return identitywebhook.Run(ctx, restCfg, identitywebhook.Config{
 		EnableHybridOverlay:     cliCfg.enableHybridOverlay,
 		ExtraAllowedUsers:       cliCfg.extraAllowedUsers.Value(),
@@ -316,6 +322,7 @@ func runWebhook(ctx context.Context, restCfg *rest.Config) error {
 		CertDir:                 cliCfg.certDir,
 		Host:                    cliCfg.host,
 		Port:                    cliCfg.port,
+		ApplyTLSOptions:         applyTLSOptions,
 	})
 }
 
