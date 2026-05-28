@@ -277,7 +277,7 @@ func (ec ExternalContainer) IsValidPreCreateContainer() (bool, error) {
 	if ec.Image == "" {
 		errs = append(errs, errors.New("image is not set"))
 	}
-	if ec.Network.String() == "" {
+	if ec.Network != nil && ec.Network.String() == "" {
 		errs = append(errs, errors.New("network is not set"))
 	}
 	if len(errs) == 0 {
@@ -287,6 +287,9 @@ func (ec ExternalContainer) IsValidPreCreateContainer() (bool, error) {
 }
 
 func (ec ExternalContainer) IsValidPostCreate() (bool, error) {
+	if ec.Network == nil {
+		return true, nil
+	}
 	var errs []error
 	if ec.IPv4 == "" && ec.IPv6 == "" {
 		errs = append(errs, errors.New("provider did not populate an IPv4 or an IPv6 address"))
