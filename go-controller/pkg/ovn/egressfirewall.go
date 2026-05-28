@@ -287,21 +287,10 @@ func (oc *DefaultNetworkController) moveACLsToNamespacedPortGroups(existingEFNam
 	return err
 }
 
-func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {
-	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
-
+// buildEgressFirewallConstruct validates and builds an egressFirewall construct from the API object.
+// This ensures validation happens before any database modifications.
+func (oc *DefaultNetworkController) buildEgressFirewallConstruct(egressFirewall *egressfirewallapi.EgressFirewall) (*egressFirewall, error) {
 	ef := cloneEgressFirewall(egressFirewall)
-	ef.Lock()
-	defer ef.Unlock()
-	// egressFirewall may already exist, if previous add failed, cleanup
-	if _, loaded := oc.egressFirewalls.Load(egressFirewall.Namespace); loaded {
-		klog.Infof("Egress firewall in namespace %s already exists, cleanup", egressFirewall.Namespace)
-		err := oc.deleteEgressFirewall(egressFirewall)
-		if err != nil {
-			return fmt.Errorf("failed to cleanup existing egress firewall %s on add: %v", egressFirewall.Namespace, err)
-		}
-	}
-
 	var errorList []error
 	for i, egressFirewallRule := range egressFirewall.Spec.Egress {
 		// process Rules into egressFirewallRules for egressFirewall struct
@@ -315,12 +304,42 @@ func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfire
 			errorList = append(errorList, fmt.Errorf("cannot create EgressFirewall Rule to destination %s for namespace %s: %w",
 				egressFirewallRule.To.CIDRSelector, egressFirewall.Namespace, err))
 			continue
-
 		}
 		ef.egressRules = append(ef.egressRules, efr)
 	}
 	if len(errorList) > 0 {
-		return utilerrors.Join(errorList...)
+		return nil, utilerrors.Join(errorList...)
+	}
+	return ef, nil
+}
+
+func (oc *DefaultNetworkController) addEgressFirewall(egressFirewall *egressfirewallapi.EgressFirewall) error {
+	klog.Infof("Adding egressFirewall %s in namespace %s", egressFirewall.Name, egressFirewall.Namespace)
+
+	// Validate rules FIRST before making any database changes.
+	// This prevents a security gap where ACLs are deleted but validation fails,
+	// leaving the namespace without egress firewall protection.
+	ef, err := oc.buildEgressFirewallConstruct(egressFirewall)
+	if err != nil {
+		return err
+	}
+
+	return oc.addEgressFirewallWithConstruct(egressFirewall, ef)
+}
+
+// addEgressFirewallWithConstruct adds an egress firewall using a pre-validated construct.
+// This is used by the update path to avoid TOCTOU issues where validation could
+// change between the initial validation and the actual add.
+func (oc *DefaultNetworkController) addEgressFirewallWithConstruct(egressFirewall *egressfirewallapi.EgressFirewall, ef *egressFirewall) error {
+	ef.Lock()
+	defer ef.Unlock()
+	// egressFirewall may already exist, if previous add failed, cleanup
+	if _, loaded := oc.egressFirewalls.Load(egressFirewall.Namespace); loaded {
+		klog.Infof("Egress firewall in namespace %s already exists, cleanup", egressFirewall.Namespace)
+		err := oc.deleteEgressFirewall(egressFirewall)
+		if err != nil {
+			return fmt.Errorf("failed to cleanup existing egress firewall %s on add: %v", egressFirewall.Namespace, err)
+		}
 	}
 
 	pgName := oc.getNamespacePortGroupName(egressFirewall.Namespace)
