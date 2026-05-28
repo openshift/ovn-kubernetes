@@ -151,7 +151,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				var expectedNBData []libovsdbtest.TestData
 				if netInfo.hasEVPN {
 					// emulate address sets handled by other controllers, needed for EVPN SNATs
-					nodeIPsAS4, _ := buildEgressIPNodeAddressSets(nil)
+					nodeIPsAS4, _, err := buildClusterNodeIPsAddressSetsForNodes(nodes)
+					Expect(err).NotTo(HaveOccurred())
 					udnEnabledSvcAS4, _ := buildUDNEnabledSvcAddressSets(nil)
 					initialDB.NBData = append(
 						initialDB.NBData,
@@ -1403,6 +1404,20 @@ func (sni *userDefinedNetInfo) String() string {
 	return fmt.Sprintf("%q: %q", sni.netName, sni.hostsubnets)
 }
 
+func buildClusterNodeIPsAddressSetsForNodes(nodes []corev1.Node) (*nbdb.AddressSet, *nbdb.AddressSet, error) {
+	nodePtrs := make([]*corev1.Node, 0, len(nodes))
+	for i := range nodes {
+		nodePtrs = append(nodePtrs, &nodes[i])
+	}
+	v4NodeAddrs, v6NodeAddrs, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, nodePtrs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	nodeAddrs := append(v4NodeAddrs, v6NodeAddrs...)
+	nodeIPsAS4, nodeIPsAS6 := buildEgressIPNodeAddressSets(util.StringSlice(nodeAddrs))
+	return nodeIPsAS4, nodeIPsAS6, nil
+}
+
 func newNodeWithUserDefinedNetworks(nodeName string, nodeIPv4CIDR string, netInfos ...userDefinedNetInfo) (*corev1.Node, error) {
 	var nodeSubnetInfo []string
 	for _, info := range netInfos {
@@ -1543,7 +1558,7 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 	}
 	var udnSubnetMasqMatch string
 	if netInfo.Transport() == types.NetworkTransportEVPN {
-		nodeIPV4ASHashName, _ := addressset.GetHashNamesForAS(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName))
+		nodeIPV4ASHashName, _ := addressset.GetHashNamesForAS(getClusterNodeIPsAddrSetDbIDsForTest())
 		udnSubnetMasqMatch = fmt.Sprintf("ip4.dst == $%s", nodeIPV4ASHashName)
 	}
 	expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
@@ -1673,7 +1688,7 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("rtos-%s_%s", netInfo.GetNetworkName(), nodeName))
 		masqSNAT.Match = getMasqueradeManagementIPSNATMatch(util.IPAddrToHWAddr(managementPortIP(nodeSubnet)).String())
 		if hasEVPN {
-			nodeIPV4ASHashName, _ := addressset.GetHashNamesForAS(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName))
+			nodeIPV4ASHashName, _ := addressset.GetHashNamesForAS(getClusterNodeIPsAddrSetDbIDsForTest())
 			udnEnabledSvcV4ASHashName, _ := addressset.GetHashNamesForAS(udnenabledsvc.GetAddressSetDBIDs())
 			masqSNAT.Match += fmt.Sprintf(" && (ip4.dst == $%s || ip4.dst == $%s)", nodeIPV4ASHashName, udnEnabledSvcV4ASHashName)
 		}

@@ -126,7 +126,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 				var expectedNBData []libovsdbtest.TestData
 				if netInfo.hasEVPN {
 					// emulate address sets handled by other controllers, needed for EVPN SNATs
-					nodeIPsAS4, _ := buildEgressIPNodeAddressSets(nil)
+					nodeIPsAS4, _, err := buildClusterNodeIPsAddressSetsForNodes(nodes)
+					Expect(err).NotTo(HaveOccurred())
 					udnEnnabledSvcAS4, _ := buildUDNEnabledSvcAddressSets(nil)
 					initialDB.NBData = append(
 						initialDB.NBData,
@@ -1245,7 +1246,7 @@ func expectedLayer2EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	masqSNAT.Match = getMasqueradeManagementIPSNATMatch(util.IPAddrToHWAddr(managementPortIP(nodeSubnet)).String())
 	masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("trtos-%s", netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch)))
 	if netInfo.Transport() == ovntypes.NetworkTransportEVPN {
-		nodeIPV4ASHashName, _ := addressset.GetHashNamesForAS(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, ovntypes.DefaultNetworkName, ovntypes.DefaultNetworkControllerName))
+		nodeIPV4ASHashName, _ := addressset.GetHashNamesForAS(getClusterNodeIPsAddrSetDbIDsForTest())
 		udnEnabledSvcV4ASHashName, _ := addressset.GetHashNamesForAS(udnenabledsvc.GetAddressSetDBIDs())
 		masqSNAT.Match += fmt.Sprintf(" && (ip4.dst == $%s || ip4.dst == $%s)", nodeIPV4ASHashName, udnEnabledSvcV4ASHashName)
 	}
