@@ -143,6 +143,12 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve hypervisor node interface for machine network: %w", err)
 	}
+
+	// Configure firewall on hypervisor to allow VXLAN traffic (port 5789/udp)
+	if err := configureFirewallForVXLAN(sshRunner, ci.machineNetworkGwInfo.InfName); err != nil {
+		framework.Logf("Warning: failed to configure firewall for VXLAN: %v", err)
+	}
+
 	// Create ipvlan network based on IP family configuration
 	if ci.machineNetworkGwInfo.IPv4 != "" && ci.machineNetworkGwInfo.IPv6 != "" {
 		// Dual-stack configuration
@@ -173,6 +179,29 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 			Configs: []network.ContainerEngineNetworkConfig{{Subnet: ipvlanPrimaryNetIPv4, Gateway: ipvlanPrimaryNetIPv4Gateway}}}
 	}
 	return ci, nil
+}
+
+// configureFirewallForVXLAN configures firewall on hypervisor to allow VXLAN traffic.
+func configureFirewallForVXLAN(runner api.Runner, interfaceName string) error {
+	// Get the firewall zone of the interface
+	zone, err := runner.Run("firewall-cmd", "--get-zone-of-interface="+interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to get firewall zone for interface %s: %w", interfaceName, err)
+	}
+	zone = strings.TrimSpace(zone)
+
+	// Add port 5789/udp to the interface's zone
+	if _, err := runner.Run("firewall-cmd", "--zone="+zone, "--add-port=5789/udp", "--permanent"); err != nil {
+		return fmt.Errorf("failed to add firewall port 5789/udp to zone %s: %w", zone, err)
+	}
+
+	// Reload firewall to apply changes
+	if _, err := runner.Run("firewall-cmd", "--reload"); err != nil {
+		return fmt.Errorf("failed to reload firewall: %w", err)
+	}
+
+	framework.Logf("configured firewall for VXLAN: added port 5789/udp to zone %s on interface %s", zone, interfaceName)
+	return nil
 }
 
 // createIpvlanNetwork creates an ipvlan L3 network with the specified configuration.
