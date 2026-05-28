@@ -11,17 +11,13 @@ import (
 	"math/big"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
-	ginkgo "github.com/onsi/ginkgo/v2"
-	"github.com/onsi/gomega"
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	vtepclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
@@ -37,7 +33,6 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
-	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -92,6 +87,9 @@ import (
 // =============================================================================
 
 const (
+	// externalFRRContainerName is the name of the external FRR container
+	// created during KIND cluster setup with BGP enabled (./contrib/kind.sh -rae)
+	externalFRRContainerName = "frr"
 	// agnhostHTTPPort is the HTTP port for agnhost netexec
 	agnhostHTTPPort = 8080
 	// sharedNodeIPsVTEPName is the name of the shared VTEP CR used across
@@ -115,12 +113,12 @@ const (
 //   - vnifilter: Enable per-VLAN VNI mapping (SVD mode)
 //
 // Cleanup is automatically registered via ictx.AddCleanUpFn().
-func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridgeName, vxlanName string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+func SetupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridgeName, vxlanName string) error {
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 
 	// Idempotent: if the bridge already exists, skip creation.
 	if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "show", bridgeName}); err == nil {
-		framework.Logf("EVPN bridge %s already exists on %s, reusing", bridgeName, routerContainerName)
+		framework.Logf("EVPN bridge %s already exists on %s, reusing", bridgeName, externalFRRContainerName)
 		return nil
 	}
 
@@ -193,34 +191,32 @@ func setupEVPNBridgeOnExternalFRR(ictx infraapi.Context, frrVTEPIPAddress, bridg
 	// Idempotent: checks existence before deleting so multiple cleanups are safe
 	// (e.g. when shared bridge is cleaned up by first test, second finds it gone).
 	ictx.AddCleanUpFn(func() error {
-		frr := infraapi.ExternalContainer{Name: routerContainerName}
+		frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 
-		// Delete VXLAN device first (it's attached to the bridge).
-		// Tolerate "not found" / "does not exist" — device may have been
-		// removed already by DestroyEVPNKernelStateOnFRR or a container restart.
+		// Delete VXLAN device first (it's attached to the bridge)
 		_, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", vxlanName})
-		if err != nil && !strings.Contains(err.Error(), "Cannot find device") && !strings.Contains(err.Error(), "does not exist") && !strings.Contains(err.Error(), "not found") {
+		if err != nil {
 			return fmt.Errorf("failed to delete %s: %w", vxlanName, err)
 		}
 
 		// Delete bridge
 		_, err = infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", bridgeName})
-		if err != nil && !strings.Contains(err.Error(), "Cannot find device") && !strings.Contains(err.Error(), "does not exist") && !strings.Contains(err.Error(), "not found") {
+		if err != nil {
 			return fmt.Errorf("failed to delete %s: %w", bridgeName, err)
 		}
 
-		framework.Logf("EVPN bridge cleanup complete on %s", routerContainerName)
+		framework.Logf("EVPN bridge cleanup complete on %s", externalFRRContainerName)
 		return nil
 	})
 
-	framework.Logf("EVPN bridge setup complete on %s (%s + %s with local IP %s)", routerContainerName, bridgeName, vxlanName, frrVTEPIPAddress)
+	framework.Logf("EVPN bridge setup complete on %s (%s + %s with local IP %s)", externalFRRContainerName, bridgeName, vxlanName, frrVTEPIPAddress)
 	return nil
 }
 
 // setupVNIVIDMappingsOnExternalFRR sets up VLAN/VNI mappings for the given
 // bridge and vxlan interfaces
 func setupVNIVIDMappingsOnExternalFRR(vni, vid int, bridgeName, vxlanName string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 	vidStr := fmt.Sprintf("%d", vid)
 	vniStr := fmt.Sprintf("%d", vni)
 	commands := [][]string{
@@ -239,14 +235,14 @@ func setupVNIVIDMappingsOnExternalFRR(vni, vid int, bridgeName, vxlanName string
 		}
 	}
 
-	framework.Logf("VLAN/VNI mappings setup complete on %s (VNI %d, VID %d)", routerContainerName, vni, vid)
+	framework.Logf("VLAN/VNI mappings setup complete on %s (VNI %d, VID %d)", externalFRRContainerName, vni, vid)
 	return nil
 }
 
 // setupSVIOnExternalFRR sets up a SVI on the provided VLAN and VLAN aware
 // bridge and optionally attaches it to a VRF
 func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 	vidStr := fmt.Sprintf("%d", vid)
 	sviName := fmt.Sprintf("%s.%d", bridgeName, vid)
 
@@ -264,7 +260,7 @@ func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName s
 			return fmt.Errorf("failed to delete SVI %s: %v", sviName, err)
 		}
 
-		framework.Logf("SVI %s cleanup complete on %s (VID %d, VRF: %q)", sviName, routerContainerName, vid, vrfName)
+		framework.Logf("SVI %s cleanup complete on %s (VID %d, VRF: %q)", sviName, externalFRRContainerName, vid, vrfName)
 		return nil
 	})
 
@@ -291,7 +287,7 @@ func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName s
 		return fmt.Errorf("failed to bring up SVI %s: %w", sviName, err)
 	}
 
-	framework.Logf("SVI %s setup complete on %s (VID %d, VRF: %q)", sviName, routerContainerName, vid, vrfName)
+	framework.Logf("SVI %s setup complete on %s (VID %d, VRF: %q)", sviName, externalFRRContainerName, vid, vrfName)
 	return nil
 }
 
@@ -307,7 +303,7 @@ func setupSVIOnExternalFRR(ictx infraapi.Context, vid int, bridgeName, vrfName s
 //   - vid: VLAN ID for local bridging (e.g., 100)
 //   - bridgeName: name of the bridge device (e.g., "brevpn7a3f")
 //   - vxlanName: name of the VXLAN device (e.g., "vxevpn7a3f")
-func setupMACVRFOnExternalFRR(ictx infraapi.Context, vni, vid int, bridgeName, vxlanName string) error {
+func SetupMACVRFOnExternalFRR(ictx infraapi.Context, vni, vid int, bridgeName, vxlanName string) error {
 	err := setupVNIVIDMappingsOnExternalFRR(vni, vid, bridgeName, vxlanName)
 	if err != nil {
 		return fmt.Errorf("failed to configure VLAN/VNI mapping on bridge %s: %w", bridgeName, err)
@@ -318,7 +314,7 @@ func setupMACVRFOnExternalFRR(ictx infraapi.Context, vni, vid int, bridgeName, v
 		return fmt.Errorf("failed to configure SVI for VID %d: %w", vid, err)
 	}
 
-	framework.Logf("MAC-VRF setup complete on %s (VNI %d)", routerContainerName, vni)
+	framework.Logf("MAC-VRF setup complete on %s (VNI %d)", externalFRRContainerName, vni)
 	return nil
 }
 
@@ -336,8 +332,8 @@ func setupMACVRFOnExternalFRR(ictx infraapi.Context, vni, vid int, bridgeName, v
 //
 // Cleanup is automatically registered via ictx.AddCleanUpFn().
 // Note: VLAN/VNI mappings are cleaned up when bridgeName/vxlanName are deleted.
-func setupIPVRFOnExternalFRR(ictx infraapi.Context, vrfName string, vni, vid int, bridgeName, vxlanName string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+func SetupIPVRFOnExternalFRR(ictx infraapi.Context, vrfName string, vni, vid int, bridgeName, vxlanName string) error {
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 	vniStr := fmt.Sprintf("%d", vni)
 
 	// Create Linux VRF with routing table = VNI
@@ -371,7 +367,7 @@ func setupIPVRFOnExternalFRR(ictx infraapi.Context, vrfName string, vni, vid int
 			return fmt.Errorf("failed to delete FRR VRF definition %s: %v", vrfName, err)
 		}
 
-		framework.Logf("IP-VRF cleanup complete on %s (VNI %d)", routerContainerName, vni)
+		framework.Logf("IP-VRF cleanup complete on %s (VNI %d)", externalFRRContainerName, vni)
 		return nil
 	})
 
@@ -385,7 +381,7 @@ func setupIPVRFOnExternalFRR(ictx infraapi.Context, vrfName string, vni, vid int
 		return fmt.Errorf("failed to configure SVI for VID %d: %w", vid, err)
 	}
 
-	framework.Logf("IP-VRF setup complete on %s (VNI %d)", routerContainerName, vni)
+	framework.Logf("IP-VRF setup complete on %s (VNI %d)", externalFRRContainerName, vni)
 	return nil
 }
 
@@ -413,7 +409,7 @@ func vtyshCommand(args ...string) []string {
 // No cleanup is registered: these are shared cluster-level settings that must persist
 // across all parallel EVPN tests.
 func setupEVPNBGPOnExternalFRR(ictx infraapi.Context, asn int, neighborIPs []string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 
 	args := []string{"configure terminal", fmt.Sprintf("router bgp %d", asn), "address-family l2vpn evpn", "advertise-all-vni"}
 	for _, ip := range neighborIPs {
@@ -434,11 +430,11 @@ func setupEVPNBGPOnExternalFRR(ictx infraapi.Context, asn int, neighborIPs []str
 	// and must persist for the duration of the test suite.
 	// IP-VRF per-VRF BGP config is cleaned up by setupIPVRFBGPOnExternalFRR.
 	ictx.AddCleanUpFn(func() error {
-		framework.Logf("EVPN BGP cleanup complete on %s (no-op: global BGP settings are shared infrastructure)", routerContainerName)
+		framework.Logf("EVPN BGP cleanup complete on %s (no-op: global BGP settings are shared infrastructure)", externalFRRContainerName)
 		return nil
 	})
 
-	framework.Logf("EVPN BGP setup complete on %s (ASN %d, neighbors: %v)", routerContainerName, asn, neighborIPs)
+	framework.Logf("EVPN BGP setup complete on %s (ASN %d, neighbors: %v)", externalFRRContainerName, asn, neighborIPs)
 	return nil
 }
 
@@ -457,7 +453,7 @@ func setupEVPNBGPOnExternalFRR(ictx infraapi.Context, asn int, neighborIPs []str
 //
 // Cleanup is automatically registered via ictx.AddCleanUpFn().
 func setupIPVRFBGPOnExternalFRR(ictx infraapi.Context, vrfName string, asn, vni int, ipFamilies sets.Set[utilnet.IPFamily], subnets []string) error {
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 	rt := fmt.Sprintf("%d:%d", asn, vni)
 
 	// Build vtysh args
@@ -509,7 +505,7 @@ func setupIPVRFBGPOnExternalFRR(ictx infraapi.Context, vrfName string, asn, vni 
 	// the Linux VRF device, which triggers FRR to auto-cleanup the VRF config. In that case,
 	// these commands may fail - that's OK, we just log warnings and won't retry that.
 	ictx.AddCleanUpFn(func() error {
-		frr := infraapi.ExternalContainer{Name: routerContainerName}
+		frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 
 		_, err := infraprovider.Get().ExecExternalContainerCommand(frr, vtyshCommand(
 			"configure terminal", fmt.Sprintf("vrf %s", vrfName), fmt.Sprintf("no vni %d", vni), "exit-vrf", "end",
@@ -531,11 +527,11 @@ func setupIPVRFBGPOnExternalFRR(ictx infraapi.Context, vrfName string, asn, vni 
 		// Trying to delete the FRR VRF while the Linux VRF still has interfaces
 		// attached causes "Only inactive VRFs can be deleted" errors.
 
-		framework.Logf("IP-VRF BGP cleanup complete on %s (VRF %s)", routerContainerName, vrfName)
+		framework.Logf("IP-VRF BGP cleanup complete on %s (VRF %s)", externalFRRContainerName, vrfName)
 		return nil
 	})
 
-	framework.Logf("IP-VRF BGP setup complete on %s (VRF %s, ASN %d, VNI %d, RT %s, families %v)", routerContainerName, vrfName, asn, vni, rt, ipFamilies.UnsortedList())
+	framework.Logf("IP-VRF BGP setup complete on %s (VRF %s, ASN %d, VNI %d, RT %s, families %v)", externalFRRContainerName, vrfName, asn, vni, rt, ipFamilies.UnsortedList())
 	return nil
 }
 
@@ -584,7 +580,7 @@ func createEVPNExternalContainer(ictx infraapi.Context, container infraapi.Exter
 	}
 
 	// Step 3: Connect FRR to the network
-	_, err = ictx.AttachNetwork(network, routerContainerName)
+	_, err = ictx.AttachNetwork(network, externalFRRContainerName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect FRR to network %s: %w", networkName, err)
 	}
@@ -597,7 +593,7 @@ func createEVPNExternalContainer(ictx infraapi.Context, container infraapi.Exter
 	}
 
 	frrNetInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(
-		infraapi.ExternalContainer{Name: routerContainerName}, network)
+		infraapi.ExternalContainer{Name: externalFRRContainerName}, network)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get FRR network interface: %w", err)
 	}
@@ -647,6 +643,35 @@ func createEVPNExternalContainer(ictx infraapi.Context, container infraapi.Exter
 // MAC-VRF External Container Utilities
 // =============================================================================
 
+// secondToLastIP returns the second-to-last usable IP in the given subnet.
+// Using the high end of the range avoids collisions with both OVN IPAM
+// (which allocates from lower end onwards) and Docker IPAM (which allocates from lower end onwards).
+// This assumes OVN-K CUDN IPAM won't allocate IPs from the top of the subnet range
+// for pods in these e2e tests.
+// Example: "10.100.0.0/24" -> 10.100.0.253, "fd00:100::/64" -> fd00:100::ffff:ffff:ffff:fffe
+func secondToLastIP(ipNet *net.IPNet) net.IP {
+	// Compute broadcast: network OR inverted mask
+	broadcast := make(net.IP, len(ipNet.IP))
+	for i := range ipNet.IP {
+		broadcast[i] = ipNet.IP[i] | ^ipNet.Mask[i]
+	}
+	// Subtract 2 from broadcast to get second-to-last usable IP
+	result := make(net.IP, len(broadcast))
+	copy(result, broadcast)
+	borrow := byte(2)
+	for i := len(result) - 1; i >= 0 && borrow > 0; i-- {
+		diff := int(result[i]) - int(borrow)
+		if diff < 0 {
+			result[i] = byte(diff + 256)
+			borrow = 1
+		} else {
+			result[i] = byte(diff)
+			borrow = 0
+		}
+	}
+	return result
+}
+
 // getMACVRFAgnhostIPsFromSubnets derives MAC-VRF agnhost IPs from CUDN subnets.
 // For each subnet, it returns an IP with host portion set to the high end address.
 // Example: "10.100.0.0/16" -> "10.100.0.253/16", "fd00:100::/64" -> "fd00:100::ffff:ffff:ffff:fffe"
@@ -684,73 +709,28 @@ func getMACVRFAgnhostIPsFromSubnets(subnets []string) ([]string, error) {
 //   - vid: VLAN ID for the access port on the bridge (e.g., 100)
 //   - ipFamilies: Cluster IP family support (e.g., sets.New(utilnet.IPv4, utilnet.IPv6))
 //   - subnets: Subnets for the Docker network matching the CUDN (e.g., "10.100.0.0/16")
-//   - useProxyDockerNetwork: When true, the Docker network is created without explicit subnets
-//     (Docker picks a random unused range) and the container's IPs are reassigned
-//     afterward to match the CUDN subnets. This is needed when two MAC-VRF agnhosts
-//     share the same CUDN subnet because Docker rejects overlapping subnets. The Docker
-//     bridge still forwards L2 frames regardless of IP addressing.
-func setupMACVRFExternalContainer(ictx infraapi.Context, container infraapi.ExternalContainer, networkName, bridgeName string, vid int, ipFamilies sets.Set[utilnet.IPFamily], subnets []string, useProxyDockerNetwork bool) (*evpnContainerInfo, error) {
+func setupMACVRFExternalContainer(ictx infraapi.Context, container infraapi.ExternalContainer, networkName, bridgeName string, vid int, ipFamilies sets.Set[utilnet.IPFamily], subnets []string) (*evpnContainerInfo, error) {
 	// Derive container IPs from CUDN subnets
 	containerIPs, err := getMACVRFAgnhostIPsFromSubnets(subnets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive MAC-VRF container IPs from subnets: %w", err)
 	}
 
-	if !useProxyDockerNetwork {
-		ips4, ips6 := splitIPStringsByIPFamily(containerIPs)
-		if len(ips4) > 0 {
-			container.IPv4 = ips4[0]
-		}
-		if len(ips6) > 0 {
-			container.IPv6 = ips6[0]
-		}
+	ips4, ips6 := splitIPStringsByIPFamily(containerIPs)
+	if len(ips4) > 0 {
+		container.IPv4 = ips4[0]
+	}
+	if len(ips6) > 0 {
+		container.IPv6 = ips6[0]
 	}
 
-	var info *evpnContainerInfo
-	dockerSubnets := subnets
-	if useProxyDockerNetwork {
-		dockerSubnets = nil
-	}
-	info, err = createEVPNExternalContainer(ictx, container, networkName, ipFamilies, dockerSubnets)
+	info, err := createEVPNExternalContainer(ictx, container, networkName, ipFamilies, subnets)
 	if err != nil {
 		return nil, err
 	}
 
-	// When useProxyDockerNetwork is set, the network was created without explicit
-	// subnets, this lets Docker pick a random unused range, avoiding Docker rejecting a
-	// second network with the same CUDN CIDR. Then reassign the container's IPs
-	// to match the actual CUDN subnets.
-	if useProxyDockerNetwork {
-		shellCmds := []string{
-			fmt.Sprintf("ip addr flush dev %s", info.containerInterface),
-		}
-		// CreateNetwork infers IP family from the subnets passed to it; with nil
-		// subnets it creates an IPv4-only network, which disables IPv6 on the
-		// interface. Enable it so we can add IPv6 CUDN addresses.
-		if ipFamilies.Has(utilnet.IPv6) {
-			shellCmds = append(shellCmds,
-				fmt.Sprintf("sysctl -w net.ipv6.conf.%s.disable_ipv6=0", info.containerInterface))
-		}
-		for i, subnet := range subnets {
-			_, ipNet, parseErr := net.ParseCIDR(subnet)
-			if parseErr != nil {
-				return nil, fmt.Errorf("failed to parse CUDN subnet %s: %w", subnet, parseErr)
-			}
-			prefixLen, _ := ipNet.Mask.Size()
-			addr := fmt.Sprintf("%s/%d", containerIPs[i], prefixLen)
-			shellCmds = append(shellCmds,
-				fmt.Sprintf("ip addr add %s dev %s", addr, info.containerInterface))
-		}
-		if _, err := infraprovider.Get().ExecExternalContainerCommand(container,
-			[]string{"sh", "-c", strings.Join(shellCmds, " && ")}); err != nil {
-			return nil, fmt.Errorf("failed to reassign IPs on container %s (network %s): %w", container.Name, networkName, err)
-		}
-		info.containerIPs = containerIPs
-		framework.Logf("Reassigned container %s (network %s) IPs to CUDN IPs: %v", container.Name, networkName, containerIPs)
-	}
-
 	// Move FRR's interface to bridgeName and configure as access port
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 	vidStr := fmt.Sprintf("%d", vid)
 	sviName := fmt.Sprintf("%s.%d", bridgeName, vid)
 	frrCmds := [][]string{
@@ -800,6 +780,38 @@ func setupMACVRFExternalContainer(ictx infraapi.Context, container infraapi.Exte
 //   - vrfName: Name of the VRF to put FRR's interface in (must match setupIPVRFOnExternalFRR)
 //   - ipFamilies: Cluster IP family support (e.g., sets.New(utilnet.IPv4, utilnet.IPv6))
 //   - subnets: Subnets for the Docker network (e.g., "172.27.102.0/24" for IPv4, or both for dual-stack)
+//
+// restoreFRRIPv6AfterVRFAssignment re-adds any IPv6 addresses in frrIPs that belong to
+// one of the given subnets onto iface. Linux silently removes global IPv6 addresses when
+// an interface is enslaved to a VRF device; without those addresses FRR has no connected
+// route for the subnet and its BGP "network <prefix>" statement never fires, so OVN nodes
+// never receive the IPv6 EVPN Type-5 route. Uses "ip -6 addr replace" which is idempotent.
+func RestoreFRRIPv6AfterVRFAssignment(frr infraapi.ExternalContainer, iface string, frrIPs, subnets []string) error {
+	for _, frrIP := range frrIPs {
+		if !utilnet.IsIPv6String(frrIP) {
+			continue
+		}
+		for _, subnet := range subnets {
+			if !utilnet.IsIPv6CIDRString(subnet) {
+				continue
+			}
+			_, ipNet, err := net.ParseCIDR(subnet)
+			if err != nil || !ipNet.Contains(net.ParseIP(frrIP)) {
+				continue
+			}
+			ones, _ := ipNet.Mask.Size()
+			cidr := fmt.Sprintf("%s/%d", frrIP, ones)
+			if _, addErr := infraprovider.Get().ExecExternalContainerCommand(frr,
+				[]string{"ip", "-6", "addr", "replace", cidr, "dev", iface}); addErr != nil {
+				return fmt.Errorf("failed to restore IPv6 address %s on %s after VRF assignment: %w", cidr, iface, addErr)
+			}
+			framework.Logf("Restored IPv6 address %s on %s after VRF assignment (kernel drops global IPv6 on VRF enslavement)", cidr, iface)
+			break
+		}
+	}
+	return nil
+}
+
 func setupIPVRFExternalContainer(ictx infraapi.Context, container infraapi.ExternalContainer, networkName, vrfName string, vid int, ipFamilies sets.Set[utilnet.IPFamily], subnets ...string) (*evpnContainerInfo, error) {
 	info, err := createEVPNExternalContainer(ictx, container, networkName, ipFamilies, subnets)
 	if err != nil {
@@ -809,7 +821,7 @@ func setupIPVRFExternalContainer(ictx infraapi.Context, container infraapi.Exter
 	// Put FRR's interface in the VRF
 	// NOTE: keep_addr_on_down=1 is set at FRR container startup (in deploy_frr_external_container)
 	// to preserve IPv6 addresses during VRF assignment. See https://github.com/FRRouting/frr/issues/1666
-	frr := infraapi.ExternalContainer{Name: routerContainerName}
+	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 
 	frrCmds := [][]string{
 		{"ip", "link", "set", info.frrInterface, "master", vrfName},
@@ -819,6 +831,10 @@ func setupIPVRFExternalContainer(ictx infraapi.Context, container infraapi.Exter
 		if _, err = infraprovider.Get().ExecExternalContainerCommand(frr, cmd); err != nil {
 			return nil, fmt.Errorf("failed to assign %s to VRF %s: %w", info.frrInterface, vrfName, err)
 		}
+	}
+
+	if err := RestoreFRRIPv6AfterVRFAssignment(frr, info.frrInterface, info.frrIPs, subnets); err != nil {
+		return nil, err
 	}
 
 	// Set container's default routes via FRR (for each address family)
@@ -887,23 +903,21 @@ func createVTEP(f *framework.Framework, ictx infraapi.Context, name string, cidr
 		framework.Logf("VTEP created: %s (CIDRs: %v, Mode: %s)", name, cidrs, mode)
 	}
 
-	// Skip cleanup for the shared VTEP — it is reused across tests and
-	// never deleted (the cluster is ephemeral).
-	if name != sharedNodeIPsVTEPName {
-		ictx.AddCleanUpFn(func() error {
-			err := client.K8sV1().VTEPs().Delete(context.Background(), name, metav1.DeleteOptions{})
-			if err != nil && !apierrors.IsNotFound(err) {
-				return err
+	// Register cleanup: delete VTEP and wait until it's fully removed
+	ictx.AddCleanUpFn(func() error {
+		framework.Logf("VTEP cleanup: deleting %s", name)
+		err := client.K8sV1().VTEPs().Delete(context.Background(), name, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		return wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+			_, err := client.K8sV1().VTEPs().Get(ctx, name, metav1.GetOptions{})
+			if apierrors.IsNotFound(err) {
+				return true, nil
 			}
-			return wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-				_, err := client.K8sV1().VTEPs().Get(ctx, name, metav1.GetOptions{})
-				if apierrors.IsNotFound(err) {
-					return true, nil
-				}
-				return false, err
-			})
+			return false, err
 		})
-	}
+	})
 	return nil
 }
 
@@ -916,7 +930,7 @@ func vtepLoopbackHostCIDR(ip net.IP) string {
 	return fmt.Sprintf("%s/%d", ip.String(), pl)
 }
 
-// ensureVTEPLoopbackIPs seeds each node with a VTEP-reachable IP when the
+// EnsureVTEPLoopbackIPs seeds each node with a VTEP-reachable IP when the
 // VTEP CIDRs are custom subnets that don't overlap with the node's existing
 // InternalIPs. It allocates one IP per CIDR per node, adds it to the loopback
 // interface, and waits for it to appear in host-cidrs. Once the VTEP CR is
@@ -927,7 +941,7 @@ func vtepLoopbackHostCIDR(ip net.IP) string {
 //
 // When node IPs already fall within the VTEP CIDRs (e.g. VTEP CIDRs match the
 // node IP subnets) this is a no-op.
-func ensureVTEPLoopbackIPs(
+func EnsureVTEPLoopbackIPs(
 	f *framework.Framework,
 	ictx infraapi.Context,
 	vtepCIDRs []string,
@@ -1107,10 +1121,26 @@ func randomVNI() int32 {
 }
 
 // randomCUDNSubnets generates random non-overlapping CUDN subnets for parallel test isolation.
+// Uses /20 (4096 addresses) instead of /16 to allow randomizing both second and third octets,
+// giving ~4016 possible subnets within 10.0.0.0/8 while avoiding collisions with:
+//   - 10.88.0.0/16  (podman default network)
+//   - 10.96.0.0/16  (Kubernetes services)
+//   - 10.128.0.0/14 (default cluster network pod CIDRs)
+//   - 10.132.0.0/16 (UDN perf tests)
+//   - 10.243.0.0/16, 10.244.0.0/16 (pod CIDRs)
+//
+// Note: /20 supports up to 16 nodes with /24 per-node subnets for Layer3 topology.
+// This is sufficient for KIND e2e clusters.
+//
+// Returns IPv4 (/20) and IPv6 (/52) subnets.
 func randomCUDNSubnets() (ipv4, ipv6 string) {
+	// 4096 possible /20 subnets in 10.0.0.0/8 (256 second octets * 16 /20-aligned third octets)
+	// Exclude blocks overlapping known reservations (16 /20 blocks per second octet):
+	//   10.88, 10.96, 10.128-131 (10.128.0.0/14), 10.132, 10.243, 10.244 = 112 excluded → ~3952 usable
 	for {
 		second := randomN(256)
-		third := randomN(16) * 16
+		// 16 /20-aligned slots per second octet (256/16)
+		third := randomN(16) * 16 // 0, 16, 32, ..., 240
 		switch second {
 		case 88, 96, 128, 129, 130, 131, 132, 243, 244:
 			continue
@@ -1118,29 +1148,6 @@ func randomCUDNSubnets() (ipv4, ipv6 string) {
 		n := second*16 + third/16
 		return fmt.Sprintf("10.%d.%d.0/20", second, third), fmt.Sprintf("fd00:%x::/52", n)
 	}
-}
-
-func randomL3CUDNSubnets() []udnv1.Layer3Subnet {
-	cudnIPv4, cudnIPv6 := randomCUDNSubnets()
-	return []udnv1.Layer3Subnet{{CIDR: udnv1.CIDR(cudnIPv4)}, {CIDR: udnv1.CIDR(cudnIPv6)}}
-}
-
-func randomL2CUDNSubnets() udnv1.DualStackCIDRs {
-	cudnIPv4, cudnIPv6 := randomCUDNSubnets()
-	return udnv1.DualStackCIDRs{udnv1.CIDR(cudnIPv4), udnv1.CIDR(cudnIPv6)}
-}
-
-func randomIPVRFAgnhostSubnets() (ipv4, ipv6 string) {
-	n := randomN(8192)
-	third := n / 32
-	fourth := (n % 32) * 8
-	return fmt.Sprintf("172.27.%d.%d/29", third, fourth), fmt.Sprintf("fd01:%x::/112", n)
-}
-
-func randomVTEPSubnets() (ipv4, ipv6 string) {
-	second := randomN(62) + 66
-	third := randomN(256)
-	return fmt.Sprintf("100.%d.%d.0/24", second, third), fmt.Sprintf("fd02:%x%02x::/112", second, third)
 }
 
 // subnetOffsetIP returns an IP at the given offset from the base of the subnet.
@@ -1162,16 +1169,88 @@ func subnetOffsetIP(cidr string, offset int) string {
 	return ip.String()
 }
 
+// AllocDistinctEVPNCUDNSubnets returns n distinct (IPv4 /20, IPv6 /52) CUDN subnet pairs.
+// Each MAC-VRF EVPN network creates a Podman bridge using the IPv4 CUDN; pairs must use
+// disjoint IPv4 prefixes or Podman reports "subnet is already used on the host".
+func AllocDistinctEVPNCUDNSubnets(n int) ([][2]string, error) {
+	if n < 0 {
+		return nil, fmt.Errorf("AllocDistinctEVPNCUDNSubnets: negative n")
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	seen := sets.New[string]()
+	out := make([][2]string, 0, n)
+	for attempts := 0; len(out) < n; attempts++ {
+		if attempts >= 100000 {
+			return nil, fmt.Errorf("AllocDistinctEVPNCUDNSubnets: could not sample %d distinct /20 subnets after %d attempts", n, attempts)
+		}
+		v4, v6 := randomCUDNSubnets()
+		if seen.Has(v4) {
+			continue
+		}
+		seen.Insert(v4)
+		out = append(out, [2]string{v4, v6})
+	}
+	return out, nil
+}
+
+func randomL3CUDNSubnets() []udnv1.Layer3Subnet {
+	cudnIPv4, cudnIPv6 := randomCUDNSubnets()
+	return []udnv1.Layer3Subnet{{CIDR: udnv1.CIDR(cudnIPv4)}, {CIDR: udnv1.CIDR(cudnIPv6)}}
+}
+
+func randomL2CUDNSubnets() udnv1.DualStackCIDRs {
+	cudnIPv4, cudnIPv6 := randomCUDNSubnets()
+	return udnv1.DualStackCIDRs{udnv1.CIDR(cudnIPv4), udnv1.CIDR(cudnIPv6)}
+}
+
+// randomIPVRFAgnhostSubnets generates random IP-VRF agnhost subnets for parallel test isolation.
+// Uses /29 (8 IPs, 6 usable) which is sufficient for provider gateway + agnhost + FRR,
+// giving 8192 possible subnets within 172.27.0.0/16 to minimize collision probability.
+// The 172.27.0.0/16 space avoids collisions with:
+//   - 172.18.0.0/16 (KIND primary network)
+//   - 172.19.0.0/16 (XGW network)
+//   - 172.22.0.0/16 (MetalLB client network)
+//   - 172.26.0.0/16 (BGP server network)
+//
+// Returns IPv4 (/29) and IPv6 (/112) subnets.
+func randomIPVRFAgnhostSubnets() (ipv4, ipv6 string) {
+	// 8192 possible /29 subnets in 172.27.0.0/16
+	n := randomN(8192)
+	// 32 /29-aligned slots per third octet (256/8), so divide to get octet pair
+	third := n / 32
+	fourth := (n % 32) * 8
+	return fmt.Sprintf("172.27.%d.%d/29", third, fourth), fmt.Sprintf("fd01:%x::/112", n)
+}
+
+// RandomVTEPSubnets generates random VTEP subnets for parallel test isolation.
+// Uses /24 (254 usable IPs)
+// Randomizes both second and third octets within RFC 6598 shared address space
+// (100.64.0.0/10), giving 15,872 possible /24 subnets while avoiding:
+//   - 100.64.0.0/16 (default join subnet)
+//   - 100.65.0.0/16 (UDN primary join subnet)
+//
+// 100.88.0.0/16 (transit subnet) is NOT excluded because transit IPs are purely
+// internal to OVN's logical network and never appear on physical interfaces.
+// Safe second octets: 66-127 (62 values).
+// Returns IPv4 (/24) and IPv6 (/112) subnets.
+func RandomVTEPSubnets() (ipv4, ipv6 string) {
+	second := randomN(62) + 66 // 66-127
+	third := randomN(256)      // 0-255
+	return fmt.Sprintf("100.%d.%d.0/24", second, third), fmt.Sprintf("fd02:%x%02x::/112", second, third)
+}
+
 // =============================================================================
 // FRRConfiguration Utilities
 // =============================================================================
 
-func getExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
+func GetExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
 	kindNetwork, err := infraprovider.Get().PrimaryNetwork()
 	if err != nil {
 		return "", err
 	}
-	frrNetIf, err := infraprovider.Get().GetExternalContainerNetworkInterface(infraapi.ExternalContainer{Name: routerContainerName}, kindNetwork)
+	frrNetIf, err := infraprovider.Get().GetExternalContainerNetworkInterface(infraapi.ExternalContainer{Name: externalFRRContainerName}, kindNetwork)
 	if err != nil {
 		return "", err
 	}
@@ -1188,33 +1267,59 @@ func getExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
 	return externalFRRIP, nil
 }
 
-// createFRRConfiguration creates an FRRConfiguration CR for BGP peering with the external FRR.
+// GetExternalFRRIPs returns all IPs of the external FRR container that match the cluster's
+// IP families. Dual-stack returns both IPv4 and IPv6; single-stack returns one.
+func GetExternalFRRIPs(ipFamilySet sets.Set[utilnet.IPFamily]) ([]string, error) {
+	kindNetwork, err := infraprovider.Get().PrimaryNetwork()
+	if err != nil {
+		return nil, err
+	}
+	frrNetIf, err := infraprovider.Get().GetExternalContainerNetworkInterface(infraapi.ExternalContainer{Name: externalFRRContainerName}, kindNetwork)
+	if err != nil {
+		return nil, err
+	}
+	var ips []string
+	if ipFamilySet.Has(utilnet.IPv4) && frrNetIf.IPv4 != "" {
+		ips = append(ips, frrNetIf.IPv4)
+	}
+	if ipFamilySet.Has(utilnet.IPv6) && frrNetIf.IPv6 != "" {
+		ips = append(ips, frrNetIf.IPv6)
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("can't find external FRR IPs on kind network for families %v", ipFamilySet.UnsortedList())
+	}
+	return ips, nil
+}
+
+// CreateFRRConfiguration creates an FRRConfiguration CR for BGP peering with the external FRR.
 // This is used by RouteAdvertisements to determine which neighbors to advertise routes to.
 //
-// For EVPN L3 IP-VRF, we don't need toReceive because:
-// - External routes come via EVPN Type-5 and are imported via route-target matching in the VRF
-// - The FRRConfiguration just provides the BGP neighbor definition and label for RA selector
+// One neighbor entry using the spine's IPv4-preferred IP is sufficient for both single-stack
+// and dual-stack clusters. EVPN (l2vpn evpn AF) is address-family-agnostic: IPv4 and IPv6
+// VPN prefixes (Type-2/5 routes) are all carried over the single IPv4 BGP session managed
+// by OVN-K. frr-k8s's disableMP: true means frr-k8s won't configure any unicast AF for
+// this neighbor; OVN-K owns the l2vpn evpn AF activation directly on FRR.
+// No toReceive needed — EVPN routes come via l2vpn evpn, not unicast prefix filtering.
 //
 // Parameters:
 //   - ictx: Infrastructure context for cleanup registration
 //   - name: Name of the FRRConfiguration CR
 //   - namespace: Namespace for the FRRConfiguration (typically frr-k8s-system)
 //   - asn: BGP Autonomous System Number (e.g., 64512)
-//   - neighborIP: IP address of the external FRR to peer with
+//   - neighborIP: IPv4-preferred IP address of the external FRR spine
 //   - labels: Labels to apply to the FRRConfiguration (used by RouteAdvertisements selector)
 func CreateFRRConfiguration(ictx infraapi.Context,
 	name, namespace string,
 	asn int,
 	neighborIP string,
-	labels map[string]string) error {
-
+	labels map[string]string,
+) error {
 	// Build labels string for YAML
 	labelsYAML := ""
 	for k, v := range labels {
 		labelsYAML += fmt.Sprintf("    %s: %s\n", k, v)
 	}
 
-	// Generate FRRConfiguration YAML
 	// No toReceive needed - EVPN routes come via l2vpn evpn address-family
 	// and are imported via route-target matching in the VRF
 	yaml := fmt.Sprintf(`apiVersion: frrk8s.metallb.io/v1beta1
@@ -1283,12 +1388,30 @@ func populateExternalContainerIPs(c *infraapi.ExternalContainer, info *evpnConta
 }
 
 // EVPNExternalSetupIDs records VLAN IDs and IP-VRF subnets applied on the external FRR
-// during runEVPNNetworkAndServers. Merge into EVPNDisruptiveState so
-// DestroyEVPNKernelStateOnFRR deletes the correct IP-VRF SVI (bridgeName.IpVRFVID).
+// during runEVPNNetworkAndServers. Callers merge this into their disruptive state so
+// cleanup can delete the correct IP-VRF SVI (bridgeName.IpVRFVID).
 type EVPNExternalSetupIDs struct {
 	MacVRFVID    int
 	IpVRFVID     int
 	IpVRFSubnets []string
+}
+
+// nodeInternalIPsForEVPNSpinePeers returns all InternalIPs to configure as BGP neighbors on the
+// external FRR spine. frr-k8s establishes one BGP session per address family (one IPv4, one IPv6
+// neighbor in FRRConfiguration), so the spine must accept connections from both node IPv4 and IPv6
+// addresses on dual-stack clusters.
+func nodeInternalIPsForEVPNSpinePeers(nodeList *corev1.NodeList, ipFamilySet sets.Set[utilnet.IPFamily]) []string {
+	addrs := e2enode.CollectAddresses(nodeList, corev1.NodeInternalIP)
+	var filtered []string
+	for _, a := range addrs {
+		if utilnet.IsIPv4String(a) && ipFamilySet.Has(utilnet.IPv4) {
+			filtered = append(filtered, a)
+		} else if utilnet.IsIPv6String(a) && ipFamilySet.Has(utilnet.IPv6) {
+			filtered = append(filtered, a)
+		}
+	}
+	framework.Logf("nodeInternalIPsForEVPNSpinePeers: spine BGP peers (%d addresses): %v", len(filtered), filtered)
+	return filtered
 }
 
 // runEVPNNetworkAndServers sets up the full EVPN test infrastructure: bridge,
@@ -1298,19 +1421,14 @@ type EVPNExternalSetupIDs struct {
 //
 // The macVRFContainer and ipVRFContainer pointers are mutated: after creation
 // their IPv4/IPv6 fields are populated with the discovered container IPs.
-//
-// When macVRFUseProxyDockerNetwork is true, the MAC-VRF Docker network is created
-// without explicit subnets (Docker picks a random range) and the container's
-// IPs are reassigned afterward to match the CUDN subnets. This is needed when
-// two MAC-VRF containers share the same CUDN subnet because Docker rejects
-// overlapping subnets.
 func runEVPNNetworkAndServers(
 	f *framework.Framework,
 	ictx infraapi.Context,
 	testName string,
 	ipFamilySet sets.Set[utilnet.IPFamily],
 	networkSpec *udnv1.NetworkSpec,
-	bgpAlloc allocators.BGPAllocation,
+	ipVRFAgnhostSubnets []string,
+	vtepSubnets []string,
 	bgpASN int,
 	bridgeName string,
 	vxlanName string,
@@ -1319,7 +1437,6 @@ func runEVPNNetworkAndServers(
 	macVRFNetworkName string,
 	ipVRFContainer *infraapi.ExternalContainer,
 	ipVRFNetworkName string,
-	macVRFUseProxyDockerNetwork bool,
 	// frrConfigName is the name (and label value) for the FRRConfiguration CR.
 	// When empty (or omitted), defaults to testName — the upstream per-network default.
 	// Pass a shared base name to have multiple networks share one FRRConfiguration.
@@ -1329,8 +1446,8 @@ func runEVPNNetworkAndServers(
 	hasMACVRF := networkSpec.EVPN != nil && networkSpec.EVPN.MACVRF != nil
 	hasIPVRF := networkSpec.EVPN != nil && networkSpec.EVPN.IPVRF != nil
 
-	ipVRFAgnhostSubnets := matchCIDRStringsByIPFamilySet([]string{bgpAlloc.IPVRFSubnet, bgpAlloc.IPVRFSubnet6}, ipFamilySet)
-	vtepSubnets := matchCIDRStringsByIPFamilySet([]string{bgpAlloc.VTEPSubnet, bgpAlloc.VTEPSubnet6}, ipFamilySet)
+	ipVRFAgnhostSubnets = matchCIDRStringsByIPFamilySet(ipVRFAgnhostSubnets, ipFamilySet)
+	vtepSubnets = matchCIDRStringsByIPFamilySet(vtepSubnets, ipFamilySet)
 
 	// Extract subnets from networkSpec for MAC-VRF agnhost IP derivation
 	cudnSubnetsFromSpec := getNetworkSubnetsFromSpec(networkSpec)
@@ -1348,10 +1465,10 @@ func runEVPNNetworkAndServers(
 	if err != nil {
 		return EVPNExternalSetupIDs{}, fmt.Errorf("failed to list nodes: %w", err)
 	}
-	nodeIPs := e2enode.CollectAddresses(nodeList, corev1.NodeInternalIP)
+	nodeIPs := nodeInternalIPsForEVPNSpinePeers(nodeList, ipFamilySet)
 
 	framework.Logf("Setting up EVPN bridge on external FRR")
-	err = setupEVPNBridgeOnExternalFRR(ictx, externalFRRIP, bridgeName, vxlanName)
+	err = SetupEVPNBridgeOnExternalFRR(ictx, externalFRRIP, bridgeName, vxlanName)
 	if err != nil {
 		return EVPNExternalSetupIDs{}, err
 	}
@@ -1359,16 +1476,16 @@ func runEVPNNetworkAndServers(
 	var macVRFVID int
 	var ipVRFVID int
 	if hasMACVRF {
-		macVRFVID = bgpAlloc.MACVRFVID
-		framework.Logf("Allocated VIDs for external FRR: MAC-VRF VID=%d", macVRFVID)
+		macVRFVID = randomVID()
+		framework.Logf("Generated random VIDs for external FRR: MAC-VRF VID=%d", macVRFVID)
 		framework.Logf("Setting up MAC-VRF on external FRR")
-		err = setupMACVRFOnExternalFRR(ictx, int(networkSpec.EVPN.MACVRF.VNI), macVRFVID, bridgeName, vxlanName)
+		err = SetupMACVRFOnExternalFRR(ictx, int(networkSpec.EVPN.MACVRF.VNI), macVRFVID, bridgeName, vxlanName)
 		if err != nil {
 			return EVPNExternalSetupIDs{}, err
 		}
 
 		framework.Logf("Creating MAC-VRF external container")
-		macVRFInfo, err := setupMACVRFExternalContainer(ictx, *macVRFContainer, macVRFNetworkName, bridgeName, macVRFVID, ipFamilySet, cudnSubnetsFromSpec, macVRFUseProxyDockerNetwork)
+		macVRFInfo, err := setupMACVRFExternalContainer(ictx, *macVRFContainer, macVRFNetworkName, bridgeName, macVRFVID, ipFamilySet, cudnSubnetsFromSpec)
 		if err != nil {
 			return EVPNExternalSetupIDs{}, err
 		}
@@ -1384,10 +1501,13 @@ func runEVPNNetworkAndServers(
 	if hasIPVRF {
 		// Derive VRF name from VNI (unique per IP-VRF)
 		ipVRFName := fmt.Sprintf("vrf%d", networkSpec.EVPN.IPVRF.VNI)
-		ipVRFVID := bgpAlloc.IPVRFVID
-		framework.Logf("Allocated VIDs for external FRR: IP-VRF VID=%d", ipVRFVID)
+		ipVRFVID = randomVID()
+		for macVRFVID == ipVRFVID {
+			ipVRFVID = randomVID()
+		}
+		framework.Logf("Generated random VIDs for external FRR: IP-VRF VID=%d", ipVRFVID)
 		framework.Logf("Setting up IP-VRF on external FRR")
-		err = setupIPVRFOnExternalFRR(ictx, ipVRFName, int(networkSpec.EVPN.IPVRF.VNI), ipVRFVID, bridgeName, vxlanName)
+		err = SetupIPVRFOnExternalFRR(ictx, ipVRFName, int(networkSpec.EVPN.IPVRF.VNI), ipVRFVID, bridgeName, vxlanName)
 		if err != nil {
 			return EVPNExternalSetupIDs{}, err
 		}
@@ -1409,7 +1529,7 @@ func runEVPNNetworkAndServers(
 	}
 
 	framework.Logf("Ensuring VTEP loopback IPs on nodes")
-	err = ensureVTEPLoopbackIPs(f, ictx, vtepSubnets)
+	err = EnsureVTEPLoopbackIPs(f, ictx, vtepSubnets)
 	if err != nil {
 		return EVPNExternalSetupIDs{}, err
 	}
@@ -1459,49 +1579,16 @@ func runEVPNNetworkAndServers(
 	return ids, nil
 }
 
-// =============================================================================
-// EVPN Disruptive Test Helpers
-// =============================================================================
-
-// EVPNDisruptiveState holds all state needed to verify and re-setup a single EVPN VPN
-// after a disruptive action (FRR restart, node restart, OVN-K restart, FRR-K8s restart).
-// It stores both the Kubernetes objects and the external FRR kernel parameters so that
-// the FRR container's transient state can be re-applied without re-randomising VNI/VID.
-// Exported so that OpenShift-specific test files can create and pass state objects.
-type EVPNDisruptiveState struct {
-	// Kubernetes objects
-	Namespace   *corev1.Namespace
-	TestPod     *corev1.Pod // pinned to a specific worker node
-	NetworkName string
-	NetworkSpec *udnv1.NetworkSpec
-
-	// External server names — Docker/Podman containers outside the cluster created by
-	// setupMACVRFAgnhost / setupIPVRFAgnhost. Used in connectivity and isolation checks.
-	ExternalServers []string
-
-	// Parameters for re-applying transient kernel state on the external FRR container
-	// after a container restart (bridges and VXLANs are lost on stop/start).
-	BridgeName   string
-	VxlanName    string
-	FrrVTEPIP    string // FRR's IP on the KIND primary network; used as VXLAN local IP
-	MacVRFVNI    int
-	MacVRFVID    int
-	IpVRFName    string
-	IpVRFVNI     int
-	IpVRFVID     int
-	IpVRFSubnets []string // subnets advertised by the IP-VRF agnhost
-}
-
-// restartExternalFRRDaemons force-kills the main FRR child processes inside the
+// RestartExternalFRRDaemons force-kills the main FRR child processes inside the
 // out-of-cluster FRR container (bgpd, zebra, staticd, bfdd, mgmtd) and leaves watchfrr
 // and the container running. watchfrr then restarts the daemons, which reloads config
 // from /etc/frr/frr.conf (kept in sync with "write memory" during test setup).
 //
 // This is not a docker/podman stop/start: the IP on the kind network, and any Linux
 // network objects still present in the namespace, are not cleared by this call alone.
-// The disruptive "spine" test first calls DestroyEVPNKernelStateOnFRR to clear bridges/
-// VXLAN/VRF, then this function, then ReapplyEVPNKernelStateOnFRR to rebuild data plane.
-func restartExternalFRRDaemons() error {
+// The disruptive "spine" test first clears bridges/VXLAN/VRF kernel state, then calls
+// this function, then rebuilds data plane via ReapplyEVPNKernelStateOnFRR.
+func RestartExternalFRRDaemons() error {
 	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 
 	framework.Logf("Restarting FRR daemons inside %q (keeping container alive)", externalFRRContainerName)
@@ -1523,24 +1610,10 @@ func restartExternalFRRDaemons() error {
 	return nil
 }
 
-// evpnType2MACIPNLRI is the FRR/BGP print form of a Type-2 (MAC/IP) EVPN route NLRI.
-func evpnType2MACIPNLRI(mac, hostIP string, fam utilnet.IPFamily) string {
-	if fam == utilnet.IPv4 {
-		return fmt.Sprintf("[2]:[0]:[48]:[%s]:[32]:[%s]", mac, hostIP)
-	}
-	return fmt.Sprintf("[2]:[0]:[48]:[%s]:[128]:[%s]", mac, hostIP)
-}
-
-// evpnType3MulticastNLRI is the FRR/BGP print form of a Type-3 (Inclusive Multicast) EVPN route NLRI.
-func evpnType3MulticastNLRI(vtepIP string) string {
-	if utilnet.IsIPv6String(vtepIP) {
-		return fmt.Sprintf("[3]:[0]:[128]:[%s]", vtepIP)
-	}
-	return fmt.Sprintf("[3]:[0]:[32]:[%s]", vtepIP)
-// waitForExternalFRRProcessReady polls until the FRR process inside the external container
-// responds to "vtysh -c 'show version'". Used right after restartExternalFRRDaemons to
+// WaitForExternalFRRProcessReady polls until the FRR process inside the external container
+// responds to "vtysh -c 'show version'". Used right after RestartExternalFRRDaemons to
 // ensure FRR has fully started before attempting to re-apply kernel state or check BGP.
-func waitForExternalFRRProcessReady(timeout time.Duration) error {
+func WaitForExternalFRRProcessReady(timeout time.Duration) error {
 	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 	return wait.PollImmediate(3*time.Second, timeout, func() (bool, error) {
 		_, err := infraprovider.Get().ExecExternalContainerCommand(frr, vtyshCommand("show version"))
@@ -1552,161 +1625,10 @@ func waitForExternalFRRProcessReady(timeout time.Duration) error {
 	})
 }
 
-// destroyEVPNKernelStateOnFRR removes transient kernel objects (bridges, VXLANs, VRFs, SVIs)
-// from the external FRR container, simulating the loss of that state on a full container stop
-// or power cycle. Call before reapplyEVPNKernelStateOnFRR when a real `docker stop`/restart of
-// the FRR container is not used. Per-link errors are only logged; missing devices are fine.
-func destroyEVPNKernelStateOnFRR(states []EVPNDisruptiveState) {
-	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
 
-	for _, state := range states {
-		hasIPVRF := state.NetworkSpec.EVPN != nil && state.NetworkSpec.EVPN.IPVRF != nil
-
-		if hasIPVRF {
-			vrfName := state.IpVRFName
-			sviName := state.BridgeName + "." + fmt.Sprintf("%d", state.IpVRFVID)
-			if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", sviName}); err != nil {
-				framework.Logf("destroyEVPNKernelState: delete SVI %s: %v (may not exist)", sviName, err)
-			}
-			if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", vrfName}); err != nil {
-				framework.Logf("destroyEVPNKernelState: delete VRF %s: %v (may not exist)", vrfName, err)
-			}
-		}
-
-		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", state.VxlanName}); err != nil {
-			framework.Logf("destroyEVPNKernelState: delete VXLAN %s: %v (may not exist)", state.VxlanName, err)
-		}
-		if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, []string{"ip", "link", "del", state.BridgeName}); err != nil {
-			framework.Logf("destroyEVPNKernelState: delete bridge %s: %v (may not exist)", state.BridgeName, err)
-		}
-
-		framework.Logf("destroyEVPNKernelState: cleaned up kernel state for %q", state.NetworkName)
-	}
-}
-
-// DestroyEVPNKernelStateOnFRR removes bridges, VXLANs, VRFs, and SVIs from the external FRR
-// container; see destroyEVPNKernelStateOnFRR.
-func DestroyEVPNKernelStateOnFRR(states []EVPNDisruptiveState) {
-	destroyEVPNKernelStateOnFRR(states)
-}
-
-// reapplyEVPNKernelStateOnFRR re-creates all transient Linux kernel objects (bridge,
-// VXLAN, VRF, MAC-VRF VLAN entries, IP-VRF SVI) on the external FRR container for
-// every VPN in states.
-//
-// Background: docker restart destroys all kernel state inside the container's network
-// namespace (bridges, VXLANs, VRFs). Docker does reconnect FRR to all its Docker
-// networks on startup, so FRR's interfaces to the agnhost Docker networks are back
-// automatically — but they are no longer attached to the bridge or VRF.
-//
-// FRR's BGP config is NOT re-applied here — it was persisted via "write memory" and
-// is reloaded from /etc/frr/frr.conf on FRR startup.
-//
-// VIDs (VLAN IDs) are re-randomised on each re-apply. VID is a purely FRR-local tag;
-// VXLAN encapsulation uses VNI (not VID), so a fresh VID is safe and correct.
-func reapplyEVPNKernelStateOnFRR(ictx infraapi.Context, ipFamilySet sets.Set[utilnet.IPFamily], states []EVPNDisruptiveState) error {
-	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
-
-	for _, state := range states {
-		hasMACVRF := state.NetworkSpec.EVPN != nil && state.NetworkSpec.EVPN.MACVRF != nil
-		hasIPVRF := state.NetworkSpec.EVPN != nil && state.NetworkSpec.EVPN.IPVRF != nil
-
-		framework.Logf("Re-applying EVPN bridge/VXLAN on external FRR for network %q", state.NetworkName)
-		if err := setupEVPNBridgeOnExternalFRR(ictx, state.FrrVTEPIP, state.BridgeName, state.VxlanName); err != nil {
-			return fmt.Errorf("failed to re-apply EVPN bridge for %q: %w", state.NetworkName, err)
-		}
-
-		if hasMACVRF {
-			// MAC-VRF Docker network name follows the same convention used in
-			// configureNetworkWithInfra: networkName + "-macvrf-agnhost".
-			macVRFNetworkName := state.NetworkName + "-macvrf-agnhost"
-			macVRFNet, err := infraprovider.Get().GetNetwork(macVRFNetworkName)
-			if err != nil {
-				return fmt.Errorf("failed to get MAC-VRF Docker network %q: %w", macVRFNetworkName, err)
-			}
-			frrMACNetInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(frr, macVRFNet)
-			if err != nil {
-				return fmt.Errorf("failed to get FRR interface on MAC-VRF network %q: %w", macVRFNetworkName, err)
-			}
-
-			newMACVID := randomVID()
-			framework.Logf("Re-applying MAC-VRF (VNI %d, new VID %d) on external FRR for %q", state.MacVRFVNI, newMACVID, state.NetworkName)
-			if err := setupMACVRFOnExternalFRR(ictx, state.MacVRFVNI, newMACVID, state.BridgeName, state.VxlanName); err != nil {
-				return fmt.Errorf("failed to re-apply MAC-VRF for %q: %w", state.NetworkName, err)
-			}
-
-			// Re-attach FRR's interface to the bridge as an access port with the new VID.
-			// After docker restart, FRR is reconnected to the Docker network automatically,
-			// but the interface is no longer enslaved to the bridge.
-			vidStr := fmt.Sprintf("%d", newMACVID)
-			frrCmds := [][]string{
-				{"ip", "link", "set", frrMACNetInf.InfName, "master", state.BridgeName},
-				{"bridge", "vlan", "add", "dev", frrMACNetInf.InfName, "vid", vidStr, "pvid", "untagged"},
-				{"ip", "link", "set", frrMACNetInf.InfName, "up"},
-			}
-			for _, cmd := range frrCmds {
-				if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, cmd); err != nil {
-					return fmt.Errorf("failed to re-attach FRR interface %q to MAC-VRF bridge: %w", frrMACNetInf.InfName, err)
-				}
-			}
-		}
-
-		if hasIPVRF {
-			// IP-VRF Docker network name follows the same convention: networkName + "-ipvrf-agnhost".
-			ipVRFNetworkName := state.NetworkName + "-ipvrf-agnhost"
-			ipVRFNet, err := infraprovider.Get().GetNetwork(ipVRFNetworkName)
-			if err != nil {
-				return fmt.Errorf("failed to get IP-VRF Docker network %q: %w", ipVRFNetworkName, err)
-			}
-			frrIPNetInf, err := infraprovider.Get().GetExternalContainerNetworkInterface(frr, ipVRFNet)
-			if err != nil {
-				return fmt.Errorf("failed to get FRR interface on IP-VRF network %q: %w", ipVRFNetworkName, err)
-			}
-
-			newIPVID := randomVID()
-			framework.Logf("Re-applying IP-VRF (VNI %d, new VID %d) on external FRR for %q", state.IpVRFVNI, newIPVID, state.NetworkName)
-			if err := setupIPVRFOnExternalFRR(ictx, state.IpVRFName, state.IpVRFVNI, newIPVID, state.BridgeName, state.VxlanName); err != nil {
-				return fmt.Errorf("failed to re-apply IP-VRF for %q: %w", state.NetworkName, err)
-			}
-
-			// Re-attach FRR's interface to the VRF.
-			// Docker preserves the IP address assignment on the interface; moving it into
-			// the VRF makes those IPs accessible in the VRF routing table.
-			frrCmds := [][]string{
-				{"ip", "link", "set", frrIPNetInf.InfName, "master", state.IpVRFName},
-				{"ip", "link", "set", frrIPNetInf.InfName, "up"},
-			}
-			for _, cmd := range frrCmds {
-				if _, err := infraprovider.Get().ExecExternalContainerCommand(frr, cmd); err != nil {
-					return fmt.Errorf("failed to re-attach FRR interface %q to IP-VRF: %w", frrIPNetInf.InfName, err)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// waitForExternalFRRBGPReady polls until at least expectedNeighborCount EVPN BGP neighbors
-// on the external FRR container show state "Established". Used after any disruptive action
-// that may drop BGP sessions.
-func waitForExternalFRRBGPReady(expectedNeighborCount int, timeout time.Duration) error {
-	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
-	return wait.PollImmediate(5*time.Second, timeout, func() (bool, error) {
-		out, err := infraprovider.Get().ExecExternalContainerCommand(frr,
-			vtyshCommand("show bgp l2vpn evpn summary json"))
-		if err != nil {
-			framework.Logf("waitForExternalFRRBGPReady: vtysh error: %v", err)
-			return false, nil
-		}
-		established := strings.Count(out, `"state":"Established"`)
-		framework.Logf("waitForExternalFRRBGPReady: %d/%d neighbors Established", established, expectedNeighborCount)
-		return established >= expectedNeighborCount, nil
-	})
-}
-
-// restartFRRK8sPods deletes all pods in the frr-k8s-system namespace and waits for new
+// RestartFRRK8sPods deletes all pods in the frr-k8s-system namespace and waits for new
 // pods to be Running and Ready. Follows the same pattern as restartOVNKubeNodePod.
-func restartFRRK8sPods(clientset kubernetes.Interface, namespace string) error {
+func RestartFRRK8sPods(clientset kubernetes.Interface, namespace string) error {
 	ctx := context.TODO()
 	podList, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -1752,105 +1674,16 @@ func restartFRRK8sPods(clientset kubernetes.Interface, namespace string) error {
 	})
 }
 
-// verifyEVPNVNIsActive checks that every expected VNI from the given states appears in
-// the external FRR container's "show evpn vni json" output and that Zebra reports remote
-// reachability for that VNI:
-//   - L2 (MAC-VRF): require numRemoteVteps > 0 (remote VTEPs known from EVPN).
-//   - L3 (IP-VRF):   FRR's summary JSON sets numRemoteVteps to the string "n/a" (see
-//     zebra zl3vni_print_hash); we require numArpNd > 0 (next-hop / neighbor count in
-//     the L3 VNI table) instead.
-func verifyEVPNVNIsActive(states []EVPNDisruptiveState) error {
-	frr := infraapi.ExternalContainer{Name: externalFRRContainerName}
-	out, err := infraprovider.Get().ExecExternalContainerCommand(frr, vtyshCommand("show evpn vni json"))
-	if err != nil {
-		return fmt.Errorf("failed to run 'show evpn vni json': %w", err)
-	}
-
-	var table map[string]any
-	if err := json.Unmarshal([]byte(out), &table); err != nil {
-		return fmt.Errorf("parse 'show evpn vni json' output: %w; raw: %s", err, out)
-	}
-
-	for _, state := range states {
-		if state.NetworkSpec.EVPN == nil {
-			continue
-		}
-		for _, vni := range activeVNIsFromState(state) {
-			key := strconv.Itoa(vni)
-			raw, ok := table[key]
-			if !ok {
-				keys := make([]string, 0, len(table))
-				for k := range table {
-					keys = append(keys, k)
-				}
-				return fmt.Errorf("VNI %d for network %q not present in FRR EVPN VNI table (have keys %v); raw: %s",
-					vni, state.NetworkName, keys, out)
-			}
-			m, ok := raw.(map[string]any)
-			if !ok {
-				return fmt.Errorf("VNI %d for network %q: expected JSON object, got %T %v", vni, state.NetworkName, raw, raw)
-			}
-			typ, _ := m["type"].(string)
-			switch typ {
-			case "L2":
-				n := evpnJSONIntField(m, "numRemoteVteps")
-				if n < 1 {
-					return fmt.Errorf("VNI %d (L2) for network %q: want numRemoteVteps>=1, got %v (object=%v)",
-						vni, state.NetworkName, m["numRemoteVteps"], m)
-				}
-				framework.Logf("verifyEVPNVNIsActive: VNI %d (L2) numRemoteVteps=%d", vni, n)
-			case "L3":
-				// L3 summary: numRemoteVteps is the string "n/a", not a count.
-				n := evpnJSONIntField(m, "numArpNd")
-				if n < 1 {
-					return fmt.Errorf("VNI %d (L3) for network %q: want numArpNd>=1 (remote next-hops), got %v (object=%v)",
-						vni, state.NetworkName, m["numArpNd"], m)
-				}
-				framework.Logf("verifyEVPNVNIsActive: VNI %d (L3) numArpNd=%d", vni, n)
-			default:
-				return fmt.Errorf("VNI %d for network %q: unknown or missing type %q in %v", vni, state.NetworkName, typ, m)
-			}
-		}
-	}
-	return nil
-}
-
-// evpnJSONIntField returns a non-negative int from a FRR JSON object field. FRR encodes
-// small integers as JSON numbers (decoded as float64 in map[string]any).
-func evpnJSONIntField(m map[string]any, key string) int {
-	v, ok := m[key]
-	if !ok {
-		return 0
-	}
-	switch t := v.(type) {
-	case float64:
-		if t < 0 {
-			return 0
-		}
-		return int(t)
-	case int:
-		if t < 0 {
-			return 0
-		}
-		return t
-	case int64:
-		if t < 0 {
-			return 0
-		}
-		return int(t)
-	case string:
-		// e.g. numRemoteVteps "n/a" for L3 — not a count
-		return 0
-	default:
-		return 0
-	}
-}
-
-// waitForEVPNRouteConvergence polls the external FRR container until ALL Established
-// BGP neighbors have received EVPN routes (PfxRcd > 0 in "show bgp l2vpn evpn
-// summary json"). This ensures the EVPN data plane is fully converged before
-// running connectivity checks, avoiding false failures after disruptive actions.
-func waitForEVPNRouteConvergence(expectedNeighborCount int, timeout time.Duration) error {
+// WaitForEVPNRouteConvergence polls the external FRR container until ALL Established
+// BGP neighbors show bidirectional route exchange in "show bgp l2vpn evpn summary json":
+//   - PfxRcd > 0: FRR received EVPN routes FROM the OVN node (node→spine direction).
+//   - PfxSnt > 0: FRR sent EVPN routes TO the OVN node (spine→node direction).
+//
+// Checking both directions is important after disruptive events (e.g. node reboot):
+// PfxRcd alone can pass while FRR has not yet pushed its routes (e.g. IPv6 agnhost
+// subnets) back to the rebooted node's frr-k8s controller, causing IPv6 connectivity
+// checks to fail with a timeout even though the session is Established.
+func WaitForEVPNRouteConvergence(expectedNeighborCount int, timeout time.Duration) error {
 	type bgpNeighbor struct {
 		State  string `json:"state"`
 		PfxRcd int    `json:"pfxRcd"`
@@ -1865,64 +1698,46 @@ func waitForEVPNRouteConvergence(expectedNeighborCount int, timeout time.Duratio
 		out, err := infraprovider.Get().ExecExternalContainerCommand(frr,
 			vtyshCommand("show bgp l2vpn evpn summary json"))
 		if err != nil {
-			framework.Logf("waitForEVPNRouteConvergence: vtysh error: %v", err)
+			framework.Logf("WaitForEVPNRouteConvergence: vtysh error: %v", err)
 			return false, nil
 		}
 
 		var summary bgpSummary
 		if err := json.Unmarshal([]byte(out), &summary); err != nil {
-			framework.Logf("waitForEVPNRouteConvergence: JSON parse error: %v", err)
+			framework.Logf("WaitForEVPNRouteConvergence: JSON parse error: %v", err)
 			return false, nil
 		}
 
 		established := 0
-		withRoutes := 0
+		bidir := 0
 		for ip, peer := range summary.Peers {
 			if peer.State == "Established" {
 				established++
-				if peer.PfxRcd > 0 {
-					withRoutes++
-					framework.Logf("waitForEVPNRouteConvergence: neighbor %s Established pfxRcd=%d pfxSnt=%d", ip, peer.PfxRcd, peer.PfxSnt)
+				if peer.PfxRcd > 0 && peer.PfxSnt > 0 {
+					bidir++
+					framework.Logf("WaitForEVPNRouteConvergence: neighbor %s Established pfxRcd=%d pfxSnt=%d (bidirectional)", ip, peer.PfxRcd, peer.PfxSnt)
 				} else {
-					framework.Logf("waitForEVPNRouteConvergence: neighbor %s Established but pfxRcd=0 pfxSnt=%d (spine has not received routes FROM this node)", ip, peer.PfxSnt)
+					framework.Logf("WaitForEVPNRouteConvergence: neighbor %s Established pfxRcd=%d pfxSnt=%d (waiting for bidirectional exchange)", ip, peer.PfxRcd, peer.PfxSnt)
 				}
 			} else {
-				framework.Logf("waitForEVPNRouteConvergence: neighbor %s state=%s (not Established)", ip, peer.State)
+				framework.Logf("WaitForEVPNRouteConvergence: neighbor %s state=%s (not Established)", ip, peer.State)
 			}
 		}
 
-		framework.Logf("waitForEVPNRouteConvergence: %d/%d Established, %d/%d have sent EVPN routes to spine",
-			established, expectedNeighborCount, withRoutes, established)
-		return established >= expectedNeighborCount && withRoutes == established, nil
+		framework.Logf("WaitForEVPNRouteConvergence: %d/%d Established, %d/%d have bidirectional EVPN routes with spine",
+			established, expectedNeighborCount, bidir, expectedNeighborCount)
+		// On dual-stack clusters there are 2× sessions (one per IP family per node) but only
+		// the IPv4 sessions carry EVPN routes (OVN activates l2vpn evpn only on IPv4 sessions).
+		// Require at least expectedNeighborCount bidirectional sessions rather than ALL established
+		// ones, so the extra IPv6 sessions (Established but pfxRcd/pfxSnt == 0) don't block convergence.
+		return established >= expectedNeighborCount && bidir >= expectedNeighborCount, nil
 	})
 }
 
-// activeVNIsFromState returns all VNIs that should be active for the given state.
-func activeVNIsFromState(state EVPNDisruptiveState) []int {
-	var vnis []int
-	if state.NetworkSpec.EVPN == nil {
-		return vnis
-	}
-	if state.NetworkSpec.EVPN.MACVRF != nil {
-		vnis = append(vnis, int(state.NetworkSpec.EVPN.MACVRF.VNI))
-	}
-	if state.NetworkSpec.EVPN.IPVRF != nil {
-		vnis = append(vnis, int(state.NetworkSpec.EVPN.IPVRF.VNI))
-	}
-	return vnis
-}
-
-// =============================================================================
-// Exported wrappers — used by openshift/test/evpn.go for the OpenShift-specific
-// EVPN disruptive test. All symbols below are thin wrappers around the unexported
-// implementations above so that the openshift package can call them.
-// =============================================================================
-
 // NewL3IPVRFNetworkSpec returns a new Layer3 CUDN EVPN IP-VRF network specification
-// with randomly generated subnets and VNI, filtered to only include CIDRs for the
+// with the given CUDN subnets and a random VNI, filtered to only include CIDRs for the
 // IP families supported by the cluster. Used by the EVPN disruptive test setup.
-func NewL3IPVRFNetworkSpec(ipFamilySet sets.Set[utilnet.IPFamily]) *udnv1.NetworkSpec {
-	cudnIPv4, cudnIPv6 := randomCUDNSubnets()
+func NewL3IPVRFNetworkSpec(ipFamilySet sets.Set[utilnet.IPFamily], cudnIPv4, cudnIPv6 string) *udnv1.NetworkSpec {
 	var subnets []udnv1.Layer3Subnet
 	if ipFamilySet.Has(utilnet.IPv4) {
 		subnets = append(subnets, udnv1.Layer3Subnet{CIDR: udnv1.CIDR(cudnIPv4)})
@@ -1946,10 +1761,9 @@ func NewL3IPVRFNetworkSpec(ipFamilySet sets.Set[utilnet.IPFamily]) *udnv1.Networ
 }
 
 // NewL2MACVRFNetworkSpec returns a new Layer2 CUDN EVPN MAC-VRF network specification
-// with randomly generated subnets and VNI, filtered to only include CIDRs for the
+// with the given CUDN subnets and a random VNI, filtered to only include CIDRs for the
 // IP families supported by the cluster. Used by the EVPN disruptive test setup.
-func NewL2MACVRFNetworkSpec(ipFamilySet sets.Set[utilnet.IPFamily]) *udnv1.NetworkSpec {
-	cudnIPv4, cudnIPv6 := randomCUDNSubnets()
+func NewL2MACVRFNetworkSpec(ipFamilySet sets.Set[utilnet.IPFamily], cudnIPv4, cudnIPv6 string) *udnv1.NetworkSpec {
 	var subnets udnv1.DualStackCIDRs
 	if ipFamilySet.Has(utilnet.IPv4) {
 		subnets = append(subnets, udnv1.CIDR(cudnIPv4))
@@ -1991,6 +1805,10 @@ func SetupEVPNNetworkWithServers(
 	bgpASN int,
 	frrConfigName ...string,
 ) (*corev1.Namespace, []string, EVPNExternalSetupIDs, error) {
+	ipVRFAgnhostIPv4, ipVRFAgnhostIPv6 := randomIPVRFAgnhostSubnets()
+	ipVRFAgnhostSubnets := []string{ipVRFAgnhostIPv4, ipVRFAgnhostIPv6}
+	framework.Logf("Networks allocated for EVPN Agnhost servers: %v", ipVRFAgnhostSubnets)
+
 	if len(vtepSubnets) == 0 {
 		primaryNet, err := infraprovider.Get().PrimaryNetwork()
 		if err != nil {
@@ -2002,14 +1820,6 @@ func SetupEVPNNetworkWithServers(
 		}
 		vtepSubnets = []string{v4Subnet}
 	}
-	bgpAlloc, err := allocators.AllocateBGP(f, ictx)
-	if err != nil {
-		return nil, nil, EVPNExternalSetupIDs{}, fmt.Errorf("failed to allocate BGP resources: %w", err)
-	}
-	if len(vtepSubnets) > 0 {
-		bgpAlloc.VTEPSubnet = vtepSubnets[0]
-	}
-	bgpAlloc.VTEPSubnet6 = ""
 	framework.Logf("Networks used for EVPN VTEPs: %v", vtepSubnets)
 
 	macVRFAgnhostName := networkName + "-macvrf-agnhost"
@@ -2020,12 +1830,12 @@ func SetupEVPNNetworkWithServers(
 	macVRFContainer := infraapi.ExternalContainer{
 		Name:    macVRFAgnhostName,
 		Image:   images.AgnHost(),
-		CmdArgs: []string{"netexec", fmt.Sprintf("--http-port=%d", agnhostHTTPPort)},
+		CmdArgs: []string{"netexec", "--http-port=8080"},
 	}
 	ipVRFContainer := infraapi.ExternalContainer{
 		Name:    ipVRFAgnhostName,
 		Image:   images.AgnHost(),
-		CmdArgs: []string{"netexec", fmt.Sprintf("--http-port=%d", agnhostHTTPPort)},
+		CmdArgs: []string{"netexec", "--http-port=8080"},
 	}
 
 	// Determine the FRRConfiguration name to pass through.
@@ -2037,10 +1847,9 @@ func SetupEVPNNetworkWithServers(
 	}
 	extIDs, err := runEVPNNetworkAndServers(
 		f, ictx, networkName, ipFamilySet, networkSpec,
-		bgpAlloc, bgpASN,
+		ipVRFAgnhostSubnets, vtepSubnets, bgpASN,
 		"br"+networkName, "vx"+networkName, networkName+"-vtep",
 		&macVRFContainer, macVRFNetworkName, &ipVRFContainer, ipVRFNetworkName,
-		false,
 		fcName,
 	)
 	if err != nil {
@@ -2073,69 +1882,10 @@ func SetupEVPNNetworkWithServers(
 	return ns, servers, extIDs, nil
 }
 
-// GetExternalFRRIP returns the primary-network IP of the external FRR container,
-// choosing IPv4 or IPv6 according to ipFamilySet. Used to set FrrVTEPIP in EVPNDisruptiveState.
-func GetExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
-	return getExternalFRRIP(ipFamilySet)
-}
-
-// RestartExternalFRRDaemons force-restarts the FRR routing daemons inside the external
-// FRR container without stopping the container; see restartExternalFRRDaemons.
-func RestartExternalFRRDaemons() error { return restartExternalFRRDaemons() }
-
-// WaitForExternalFRRProcessReady polls until the FRR process inside the external container
-// is ready to accept vtysh commands.
-func WaitForExternalFRRProcessReady(timeout time.Duration) error {
-	return waitForExternalFRRProcessReady(timeout)
-}
-
-// ReapplyEVPNKernelStateOnFRR re-creates transient Linux kernel objects on the external FRR
-// container (bridges, VXLANs, VRFs) that are destroyed when the container is restarted.
-func ReapplyEVPNKernelStateOnFRR(ictx infraapi.Context, ipFamilySet sets.Set[utilnet.IPFamily], states []EVPNDisruptiveState) error {
-	return reapplyEVPNKernelStateOnFRR(ictx, ipFamilySet, states)
-}
-
-// WaitForExternalFRRBGPReady polls until at least expectedNeighborCount EVPN BGP
-// neighbors are in "Established" state on the external FRR container.
-func WaitForExternalFRRBGPReady(expectedNeighborCount int, timeout time.Duration) error {
-	return waitForExternalFRRBGPReady(expectedNeighborCount, timeout)
-}
-
-// WaitForEVPNRouteConvergence polls until ALL expectedNeighborCount Established
-// BGP neighbors have received EVPN routes from cluster nodes.
-func WaitForEVPNRouteConvergence(expectedNeighborCount int, timeout time.Duration) error {
-	return waitForEVPNRouteConvergence(expectedNeighborCount, timeout)
-}
-
-// RestartFRRK8sPods deletes all pods in the given namespace (typically frr-k8s-system)
-// and waits for new pods to become Running and Ready.
-func RestartFRRK8sPods(clientset kubernetes.Interface, namespace string) error {
-	return restartFRRK8sPods(clientset, namespace)
-}
-
-// VerifyEVPNVNIsActive runs "show evpn vni json" on the external FRR and checks that each
-// VNI from states is present. L2: numRemoteVteps >= 1. L3: numArpNd >= 1 (FRR L3 summary
-// sets numRemoteVteps to the string "n/a", not a VTEP count). Call after BGP/EVPN convergence.
-func VerifyEVPNVNIsActive(states []EVPNDisruptiveState) error {
-	return verifyEVPNVNIsActive(states)
-}
-
-// RandomVTEPSubnets returns randomly generated VTEP CIDR subnets (IPv4 /24 and IPv6 /112)
-// from the RFC 6598 shared address space, suitable for VTEP loopback IP allocation.
-func RandomVTEPSubnets() (string, string) { return randomVTEPSubnets() }
-
-// EnsureVTEPLoopbackIPs re-adds VTEP loopback IPs on all nodes for the given CIDRs.
-// Idempotent: skips IPs that are already assigned. Use after a node reboot to restore
-// the loopback IPs that are lost when the node restarts.
-func EnsureVTEPLoopbackIPs(f *framework.Framework, ictx infraapi.Context, vtepCIDRs []string) error {
-	return ensureVTEPLoopbackIPs(f, ictx, vtepCIDRs)
-}
-
 // NewL2MACVRFIPVRFNetworkSpec returns a new Layer2 CUDN EVPN network specification
-// with both MAC-VRF and IP-VRF configured, using randomly generated subnets and VNIs,
+// with both MAC-VRF and IP-VRF configured, using the given CUDN subnets and random VNIs,
 // filtered to only include CIDRs for the IP families supported by the cluster.
-func NewL2MACVRFIPVRFNetworkSpec(ipFamilySet sets.Set[utilnet.IPFamily]) *udnv1.NetworkSpec {
-	cudnIPv4, cudnIPv6 := randomCUDNSubnets()
+func NewL2MACVRFIPVRFNetworkSpec(ipFamilySet sets.Set[utilnet.IPFamily], cudnIPv4, cudnIPv6 string) *udnv1.NetworkSpec {
 	var subnets udnv1.DualStackCIDRs
 	if ipFamilySet.Has(utilnet.IPv4) {
 		subnets = append(subnets, udnv1.CIDR(cudnIPv4))
@@ -2159,6 +1909,22 @@ func NewL2MACVRFIPVRFNetworkSpec(ipFamilySet sets.Set[utilnet.IPFamily]) *udnv1.
 			},
 		},
 	}
+}
+
+// evpnType2MACIPNLRI is the FRR/BGP print form of a Type-2 (MAC/IP) EVPN route NLRI.
+func evpnType2MACIPNLRI(mac, hostIP string, fam utilnet.IPFamily) string {
+	if fam == utilnet.IPv4 {
+		return fmt.Sprintf("[2]:[0]:[48]:[%s]:[32]:[%s]", mac, hostIP)
+	}
+	return fmt.Sprintf("[2]:[0]:[48]:[%s]:[128]:[%s]", mac, hostIP)
+}
+
+// evpnType3MulticastNLRI is the FRR/BGP print form of a Type-3 (Inclusive Multicast) EVPN route NLRI.
+func evpnType3MulticastNLRI(vtepIP string) string {
+	if utilnet.IsIPv6String(vtepIP) {
+		return fmt.Sprintf("[3]:[0]:[128]:[%s]", vtepIP)
+	}
+	return fmt.Sprintf("[3]:[0]:[32]:[%s]", vtepIP)
 }
 
 // WaitForDaemonSetReady polls until a DaemonSet has all pods updated, ready, and
@@ -2185,42 +1951,3 @@ func WaitForDaemonSetReady(clientset kubernetes.Interface, namespace, name strin
 	})
 }
 
-// EVPNPodConnectsToHostname asserts that src can HTTP-reach dstIP and that the
-// response hostname equals expect. Uses generous timeouts suitable for post-disruption checks.
-func EVPNPodConnectsToHostname(src *corev1.Pod, dstIP, expect string) {
-	const (
-		evpnConnTimeout    = 240 * time.Second
-		evpnConnPolling    = 1 * time.Second
-		evpnCurlMaxTimeSec = 1
-		evpnNetexecPort    = 8080
-	)
-	ginkgo.GinkgoHelper()
-	hostname, err := e2epodoutput.RunHostCmdWithRetries(
-		src.Namespace,
-		src.Name,
-		fmt.Sprintf("curl --max-time %d -g -q -s http://%s/hostname", evpnCurlMaxTimeSec, net.JoinHostPort(dstIP, fmt.Sprintf("%d", evpnNetexecPort))),
-		evpnConnPolling,
-		evpnConnTimeout,
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Expect(hostname).To(gomega.Equal(expect))
-}
-
-// EVPNPodCannotConnect asserts that src consistently cannot HTTP-reach dstIP.
-// Uses short timeouts to verify isolation without making the test too slow.
-func EVPNPodCannotConnect(src *corev1.Pod, dstIP string) {
-	const (
-		evpnIsolTimeout    = 5 * time.Second
-		evpnIsolPolling    = 2 * time.Second
-		evpnCurlMaxTimeSec = 1
-		evpnNetexecPort    = 8080
-	)
-	ginkgo.GinkgoHelper()
-	gomega.Consistently(func(g gomega.Gomega) {
-		_, err := e2epodoutput.RunHostCmd(
-			src.Namespace,
-			src.Name,
-			fmt.Sprintf("curl --max-time %d -g -q -s http://%s/clientip", evpnCurlMaxTimeSec, net.JoinHostPort(dstIP, fmt.Sprintf("%d", evpnNetexecPort))),
-		)
-		g.Expect(err).To(gomega.HaveOccurred())
-	}).WithTimeout(evpnIsolTimeout).WithPolling(evpnIsolPolling).Should(gomega.Succeed())
