@@ -102,6 +102,12 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					p.Spec.NodeName = targetWorkerNode
 				},
 			)
+			// Delete pod before CUDN/namespace cleanup so the UDN controller can remove
+			// its finalizer immediately, avoiding a burst of OVN reconciliation that
+			// slows the API server and causes subsequent cleanup calls to time out.
+			ictx.AddCleanUpFn(func() error {
+				return e2epod.DeletePodWithWait(context.Background(), f.ClientSet, testPod)
+			})
 
 			ginkgo.By("Creating other pod on " + otherWorkerNode + " for " + networkName)
 			otherPod := e2epod.CreateExecPodOrFail(
@@ -111,6 +117,9 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					p.Spec.NodeName = otherWorkerNode
 				},
 			)
+			ictx.AddCleanUpFn(func() error {
+				return e2epod.DeletePodWithWait(context.Background(), f.ClientSet, otherPod)
+			})
 
 		    state := vpnTestState{
 			    EVPNDisruptiveState: EVPNDisruptiveState{
@@ -180,7 +189,6 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 			// Create a single shared FRRConfiguration before setting up networks.
-			// This avoids repeated apply calls that could reset BGP sessions.
 			ginkgo.By("Creating shared FRRConfiguration for all EVPN networks")
 			frrConfigLabels := map[string]string{"network": testBaseName}
 			gomega.Expect(
@@ -196,19 +204,24 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			l2l3VtepV4, _ := e2e.RandomVTEPSubnets()
 			gomega.Expect(l2l3VtepV4).NotTo(gomega.BeEmpty(), "RandomVTEPSubnets IPv4 for L2+L3 network")
 
+			// Three independent randomCUDNSubnets() draws can collide on /20 IPv4; Podman then
+			// rejects the second MAC-VRF bridge. Allocate disjoint CUDN pairs up front.
+			cudnTriple, err := e2e.AllocDistinctEVPNCUDNSubnets(3)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 			// --- Network 1: L3 IP-VRF ---
 			l3Name := testBaseName + "l3"
-			l3Spec := e2e.NewL3IPVRFNetworkSpec(ipFamilySet)
+			l3Spec := e2e.NewL3IPVRFNetworkSpec(ipFamilySet, cudnTriple[0][0], cudnTriple[0][1])
 			l3State := setupNetwork(ictx, l3Name, l3Spec, []string{l3VtepV4}, frrVTEPIP)
 
 			// --- Network 2: L2 MAC-VRF ---
 			l2Name := testBaseName + "l2"
-			l2Spec := e2e.NewL2MACVRFNetworkSpec(ipFamilySet)
+			l2Spec := e2e.NewL2MACVRFNetworkSpec(ipFamilySet, cudnTriple[1][0], cudnTriple[1][1])
 			l2State := setupNetwork(ictx, l2Name, l2Spec, []string{l2VtepV4}, frrVTEPIP)
 
 			// --- Network 3: L2 MAC-VRF + IP-VRF ---
 			l2l3Name := testBaseName + "ml"
-			l2l3Spec := e2e.NewL2MACVRFIPVRFNetworkSpec(ipFamilySet)
+			l2l3Spec := e2e.NewL2MACVRFIPVRFNetworkSpec(ipFamilySet, cudnTriple[2][0], cudnTriple[2][1])
 			l2l3State := setupNetwork(ictx, l2l3Name, l2l3Spec, []string{l2l3VtepV4}, frrVTEPIP)
 
 			vpnStates = []vpnTestState{l3State, l2State, l2l3State}
@@ -347,12 +360,16 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 		verifyConnectivityAndIsolation := func(label string) {
 			ginkgo.GinkgoHelper()
 
-			ginkgo.By(fmt.Sprintf("[%s] Verifying BGP EVPN sessions", label))
 			nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			bgpErr := e2e.WaitForExternalFRRBGPReady(len(nodeList.Items), disruptiveBGPTimeout)
-			if bgpErr != nil {
-				ginkgo.GinkgoLogr.Info("BGP EVPN sessions not established before assertions")
+
+			// WaitForEVPNRouteConvergence polls "show bgp l2vpn evpn summary json" and
+			// requires both peer.State=="Established" AND bidirectional route exchange, so it
+			// covers both session establishment and convergence in one step.
+			ginkgo.By(fmt.Sprintf("[%s] Waiting for BGP EVPN sessions and route convergence", label))
+			convergenceErr := e2e.WaitForEVPNRouteConvergence(len(nodeList.Items), disruptiveBGPTimeout)
+			if convergenceErr != nil {
+				ginkgo.GinkgoLogr.Info("BGP EVPN sessions or routes not converged")
 				ginkgo.GinkgoLogr.Info("Inspect with: oc get frrconfiguration -n openshift-frr-k8s -o yaml")
 				ginkgo.GinkgoLogr.Info("Inspect with: podman exec frr vtysh -c 'show bgp l2vpn evpn summary'")
 				if os.Getenv("EVPN_DEBUG_PAUSE_ON_FAILURE") == "true" {
@@ -360,17 +377,7 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 					time.Sleep(10 * time.Minute)
 				}
 			}
-			gomega.Expect(bgpErr).NotTo(gomega.HaveOccurred())
-
-			ginkgo.By(fmt.Sprintf("[%s] Verifying EVPN VNIs are active", label))
-			disruptiveStates := make([]e2e.EVPNDisruptiveState, len(vpnStates))
-			for i := range vpnStates {
-				disruptiveStates[i] = vpnStates[i].EVPNDisruptiveState
-			}
-			gomega.Expect(e2e.VerifyEVPNVNIsActive(disruptiveStates)).To(gomega.Succeed())
-
-			ginkgo.By(fmt.Sprintf("[%s] Waiting for EVPN route convergence", label))
-			gomega.Expect(e2e.WaitForEVPNRouteConvergence(len(nodeList.Items), disruptiveBGPTimeout)).To(gomega.Succeed())
+			gomega.Expect(convergenceErr).NotTo(gomega.HaveOccurred())
 
 			for i := range vpnStates {
 				state := &vpnStates[i]
