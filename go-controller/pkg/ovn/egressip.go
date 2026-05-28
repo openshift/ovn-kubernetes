@@ -24,7 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
-	listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -193,7 +192,7 @@ type EgressIPController struct {
 	// used as a locking mechanism to serialize egress IP processing on a per egress IP basis
 	// the order of locking should always be egressIPCache, then podAssignment, then nodeZoneState
 	egressIPCache *syncmap.SyncMap[bool]
-	// nodeUpdateMutex is used for three reasons:
+	// networkMutexes is used for three reasons:
 	// (1) to ensure safe handling of node ip address updates. VIP addresses are
 	// dynamic and might move across nodes.
 	// (2) used in ensureDefaultNoRerouteQoSRules function to ensure
@@ -201,7 +200,7 @@ type EgressIPController struct {
 	// at the same time by two different threads we end up creating duplicate
 	// QoS rules in database due to libovsdb cache race
 	// (3) to update nextHop during layer2 topology upgrade
-	nodeUpdateMutex *sync.Mutex
+	networkMutexes sync.Map
 	// podAssignment is a cache used for keeping track of which egressIP status
 	// has been set up for each pod. The key is defined by getPodKey
 	podAssignment *syncmap.SyncMap[*podAssignmentState]
@@ -249,7 +248,6 @@ func NewEIPController(
 		watchFactory:      watchFactory,
 		recorder:          recorder,
 		egressIPCache:     syncmap.NewSyncMap[bool](),
-		nodeUpdateMutex:   &sync.Mutex{},
 		podAssignment:     syncmap.NewSyncMap[*podAssignmentState](),
 		logicalPortCache:  portCache,
 		nodeZoneState:     syncmap.NewSyncMap[bool](),
@@ -272,6 +270,32 @@ func NewEIPController(
 		nadReconcilerConfig,
 	)
 	return e
+}
+
+// getNetworkMutex returns the mutex for a specific network, creating it if necessary.
+// This enables per-network locking for concurrent reconciliation of different networks.
+func (e *EgressIPController) getNetworkMutex(networkName string) *sync.Mutex {
+	// Try to load existing mutex
+	if mu, ok := e.networkMutexes.Load(networkName); ok {
+		return mu.(*sync.Mutex)
+	}
+
+	// Create new mutex
+	newMu := &sync.Mutex{}
+	actual, _ := e.networkMutexes.LoadOrStore(networkName, newMu)
+	return actual.(*sync.Mutex)
+}
+
+// lockNetwork acquires the mutex for a specific network.
+func (e *EgressIPController) lockNetwork(networkName string) {
+	mu := e.getNetworkMutex(networkName)
+	mu.Lock()
+}
+
+// unlockNetwork releases the mutex for a specific network.
+func (e *EgressIPController) unlockNetwork(networkName string) {
+	mu := e.getNetworkMutex(networkName)
+	mu.Unlock()
 }
 
 // main reconcile functions begin here
@@ -3560,34 +3584,64 @@ func createDefaultNoRerouteServicePolicies(nbClient libovsdbclient.Client, netwo
 	return nil
 }
 
+// ensureRouterPoliciesForNetwork is the optimized version of batched ops
+// It batches all operations for a single network into one transaction.
+// This method is called by l2 and l3 udn controllers on `addUpdateLocalNodeEvent`.
+// addressSetManager has its own internal locking for EnsureClusterNodeIPsAddressSet.
+// There are no overlapping resources among networks being handled by this method.
 func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo, node *corev1.Node) error {
-	e.nodeUpdateMutex.Lock()
-	defer e.nodeUpdateMutex.Unlock()
+	e.lockNetwork(ni.GetNetworkName())
+	defer e.unlockNetwork(ni.GetNetworkName())
+
 	subnetEntries := ni.Subnets()
 	subnets := util.GetAllClusterSubnetsFromEntries(subnetEntries)
 	if len(subnets) == 0 {
 		return nil
 	}
+
 	localNode, err := e.getALocalZoneNodeName()
 	if err != nil {
 		return err
 	}
+
 	routerName, err := getTopologyScopedRouterName(ni, localNode)
 	if err != nil {
 		return err
 	}
+
+	// Ensure cluster node address sets (shared cluster-wide resource)
 	clusterNodeIPsAddrSetDbIDs, err := e.addressSetManager.EnsureClusterNodeIPsAddressSet(addresssetmanager.ClusterNodeIPsEgressIPBackRef)
 	if err != nil {
 		return fmt.Errorf("failed to ensure cluster node IP address set for EgressIP: %w", err)
 	}
-	if err := InitClusterEgressPolicies(e.nbClient, e.addressSetFactory, ni, subnets, e.controllerName, routerName, clusterNodeIPsAddrSetDbIDs); err != nil {
-		return fmt.Errorf("failed to initialize networks cluster logical router egress policies for the default network: %v", err)
-	}
-	err = ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, ni.GetNetworkName(), routerName,
-		e.controllerName, listers.NewNodeLister(e.watchFactory.NodeInformer().GetIndexer()), e.v4, e.v6, clusterNodeIPsAddrSetDbIDs)
+
+	// Build all operations without committing
+	ops := []ovsdb.Operation{}
+
+	// 1. Initialize cluster egress policies (batched)
+	// These policies are network-scoped (shared by all nodes), not per-node
+	ops, err = initClusterEgressPoliciesOps(e.nbClient, e.addressSetFactory, ni, subnets, e.controllerName, routerName, clusterNodeIPsAddrSetDbIDs, ops)
 	if err != nil {
-		return fmt.Errorf("failed to ensure no reroute node policies for network %s: %v", ni.GetNetworkName(), err)
+		return fmt.Errorf("failed to build cluster egress policies ops for network %s: %v", ni.GetNetworkName(), err)
 	}
+
+	clusterNodesAddressSets, err := e.addressSetFactory.GetAddressSet(clusterNodeIPsAddrSetDbIDs)
+	if err != nil {
+		return fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
+	}
+
+	// 2. Ensure default no-reroute node policies (batched)
+	ops, err = ensureDefaultNoRerouteNodePoliciesOps(e.nbClient, e.addressSetFactory, ni.GetNetworkName(), routerName,
+		e.controllerName, e.v4, e.v6, clusterNodesAddressSets, ops)
+	if err != nil {
+		return fmt.Errorf("failed to build node policies ops for network %s: %v", ni.GetNetworkName(), err)
+	}
+
+	// Commit router and node policy operations under global per-network lock
+	if _, err := libovsdbops.TransactAndCheck(e.nbClient, ops); err != nil {
+		return fmt.Errorf("failed to commit batched policy operations for network %s: %v", ni.GetNetworkName(), err)
+	}
+
 	if ni.TopologyType() == types.Layer3Topology {
 		gatewayIPs, err := udn.GetGWRouterIPs(node, ni)
 		if err != nil {
@@ -3598,14 +3652,16 @@ func (e *EgressIPController) ensureRouterPoliciesForNetwork(ni util.NetInfo, nod
 			return fmt.Errorf("failed to create route to external for network %s: %v", ni.GetNetworkName(), err)
 		}
 	}
+
 	return nil
 }
 
 // updateNodeNextHop updates the next hop IP for reroute policies on the node's logical router.
 // Only used during layer2 topology upgrade to change gwIP to the transit routerIP
 func (e *EgressIPController) updateNodeNextHop(ni util.NetInfo, node *corev1.Node) error {
-	e.nodeUpdateMutex.Lock()
-	defer e.nodeUpdateMutex.Unlock()
+	e.lockNetwork(ni.GetNetworkName())
+	defer e.unlockNetwork(ni.GetNetworkName())
+
 	transitRouterInfo, err := getTransitRouterInfo(ni, node)
 	if err != nil {
 		return err
@@ -3652,8 +3708,8 @@ func (e *EgressIPController) updateNodeNextHop(ni util.NetInfo, node *corev1.Nod
 }
 
 func (e *EgressIPController) ensureSwitchPoliciesForNode(ni util.NetInfo, nodeName string) error {
-	e.nodeUpdateMutex.Lock()
-	defer e.nodeUpdateMutex.Unlock()
+	e.lockNetwork(ni.GetNetworkName())
+	defer e.unlockNetwork(ni.GetNetworkName())
 	ops, err := e.ensureDefaultNoReRouteQosRulesForNode(ni, nodeName, nil)
 	if err != nil {
 		return fmt.Errorf("failed to ensure no reroute QoS rules for node %s and network %s: %v", nodeName, ni.GetNetworkName(), err)
@@ -3754,28 +3810,35 @@ func createDefaultReRouteQoSRuleOps(nbClient libovsdbclient.Client, addressSetFa
 }
 
 func (e *EgressIPController) ensureDefaultNoRerouteQoSRules(nodeName string) error {
-	e.nodeUpdateMutex.Lock()
-	defer e.nodeUpdateMutex.Unlock()
+	e.lockNetwork(types.DefaultNetworkName)
+	defer e.unlockNetwork(types.DefaultNetworkName)
 	defaultNetInfo := e.networkManager.GetNetwork(types.DefaultNetworkName)
 	var ops []ovsdb.Operation
 	ops, err := e.ensureDefaultNoReRouteQosRulesForNode(defaultNetInfo, nodeName, ops)
 	if err != nil {
 		return fmt.Errorf("failed to process default network: %v", err)
 	}
+	if _, err := libovsdbops.TransactAndCheck(e.nbClient, ops); err != nil {
+		return fmt.Errorf("failed to ensure default network no reroute QoS rules, err: %v", err)
+	}
+
 	if err = e.networkManager.DoWithLock(func(network util.NetInfo) error {
 		if network.GetNetworkName() == types.DefaultNetworkName {
 			return nil
 		}
-		ops, err = e.ensureDefaultNoReRouteQosRulesForNode(network, nodeName, ops)
+		e.lockNetwork(network.GetNetworkName())
+		defer e.unlockNetwork(network.GetNetworkName())
+		var networkOps []ovsdb.Operation
+		networkOps, err = e.ensureDefaultNoReRouteQosRulesForNode(network, nodeName, networkOps)
 		if err != nil {
 			return fmt.Errorf("failed to process network %s: %v", network.GetNetworkName(), err)
+		}
+		if _, err := libovsdbops.TransactAndCheck(e.nbClient, networkOps); err != nil {
+			return fmt.Errorf("failed to ensure network %s no reroute QoS rules, err: %v", network.GetNetworkName(), err)
 		}
 		return nil
 	}); err != nil {
 		return fmt.Errorf("failed to ensure default no reroute QoS rules: %v", err)
-	}
-	if _, err := libovsdbops.TransactAndCheck(e.nbClient, ops); err != nil {
-		return fmt.Errorf("unable to add EgressIP QoS to switch, err: %v", err)
 	}
 	return nil
 }
@@ -3854,20 +3917,25 @@ func (e *EgressIPController) ensureDefaultNoReRouteQosRulesForNode(ni util.NetIn
 }
 
 func (e *EgressIPController) ensureDefaultNoRerouteNodePolicies() error {
-	e.nodeUpdateMutex.Lock()
-	defer e.nodeUpdateMutex.Unlock()
-	nodeLister := listers.NewNodeLister(e.watchFactory.NodeInformer().GetIndexer())
 	clusterNodeIPsAddrSetDbIDs, err := e.addressSetManager.EnsureClusterNodeIPsAddressSet(addresssetmanager.ClusterNodeIPsEgressIPBackRef)
 	if err != nil {
 		return fmt.Errorf("failed to ensure cluster node IP address set for EgressIP: %w", err)
 	}
+	clusterNodesAddressSets, err := e.addressSetFactory.GetAddressSet(clusterNodeIPsAddrSetDbIDs)
+	if err != nil {
+		return fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
+	}
+
 	// ensure default network is processed
+	e.lockNetwork(types.DefaultNetworkName)
+	defer e.unlockNetwork(types.DefaultNetworkName)
+
 	defaultNetInfo := e.networkManager.GetNetwork(types.DefaultNetworkName)
-	err = ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, defaultNetInfo.GetNetworkName(), defaultNetInfo.GetNetworkScopedClusterRouterName(),
-		e.controllerName, nodeLister, e.v4, e.v6, clusterNodeIPsAddrSetDbIDs)
+	err = ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, defaultNetInfo.GetNetworkName(), defaultNetInfo.GetNetworkScopedClusterRouterName(), e.controllerName, clusterNodesAddressSets, e.v4, e.v6)
 	if err != nil {
 		return fmt.Errorf("failed to ensure default no reroute policies for nodes for default network: %v", err)
 	}
+
 	if !isEgressIPForUDNSupported() {
 		return nil
 	}
@@ -3875,12 +3943,16 @@ func (e *EgressIPController) ensureDefaultNoRerouteNodePolicies() error {
 		if network.GetNetworkName() == types.DefaultNetworkName {
 			return nil
 		}
+		e.lockNetwork(network.GetNetworkName())
+		defer e.unlockNetwork(network.GetNetworkName())
+
 		routerName, err := e.getTopologyScopedLocalZoneRouterName(network)
 		if err != nil {
 			return err
 		}
+
 		err = ensureDefaultNoRerouteNodePolicies(e.nbClient, e.addressSetFactory, network.GetNetworkName(), routerName,
-			e.controllerName, nodeLister, e.v4, e.v6, clusterNodeIPsAddrSetDbIDs)
+			e.controllerName, clusterNodesAddressSets, e.v4, e.v6)
 		if err != nil {
 			return fmt.Errorf("failed to ensure default no reroute policies for nodes for network %s: %v", network.GetNetworkName(), err)
 		}
@@ -3897,27 +3969,11 @@ func (e *EgressIPController) ensureDefaultNoRerouteNodePolicies() error {
 // sample: 101 ip4.src == $a12749576804119081385 && ip4.dst == $a11079093880111560446 allow pkt_mark=1008
 // All node addresses are listed here to decide which IP family policies are required.
 func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	network, router, controller string, nodeLister listers.NodeLister, v4, v6 bool,
-	clusterNodeIPsAddrSetDbIDs *libovsdbops.DbObjectIDs) error {
-	nodes, err := nodeLister.List(labels.Everything())
-	if err != nil {
-		return fmt.Errorf("failed to list nodes: %v", err)
-	}
-	v4NodeAddrs, v6NodeAddrs, err := util.GetNodeAddresses(v4, v6, nodes...)
-	if err != nil {
-		return fmt.Errorf("failed to get node addresses: %v", err)
-	}
+	network, router, controller string, clusterNodesAddressSets addressset.AddressSet, v4, v6 bool) error {
+	ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS := clusterNodesAddressSets.GetASHashNames()
 
-	// all networks reference the same node IP address set
-	if clusterNodeIPsAddrSetDbIDs == nil {
-		return fmt.Errorf("cluster node IP address set DB IDs are required")
-	}
-	as, err := addressSetFactory.GetAddressSet(clusterNodeIPsAddrSetDbIDs)
-	if err != nil {
-		return fmt.Errorf("cannot ensure that addressSet %s exists %v", NodeIPAddrSetName, err)
-	}
-
-	ipv4ClusterNodeIPAS, ipv6ClusterNodeIPAS := as.GetASHashNames()
+	var as addressset.AddressSet
+	var err error
 	// fetch the egressIP pods address-set
 	dbIDs := getEgressIPAddrSetDbIDs(EgressIPServedPodsAddrSetName, network, controller)
 	if as, err = addressSetFactory.GetAddressSet(dbIDs); err != nil {
@@ -3934,7 +3990,7 @@ func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 
 	var matchV4, matchV6 string
 	// construct the policy match
-	if len(v4NodeAddrs) > 0 {
+	if v4 {
 		// if address set hash name is empty, the address set has yet to be created
 		if ipv4EgressIPServedPodsAS == "" || ipv4EgressServiceServedPodsAS == "" || ipv4ClusterNodeIPAS == "" {
 			return types.NewSuppressedError(fmt.Errorf("address set name(s) %s not found %q %q %q", as.GetName(), ipv4EgressServiceServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS))
@@ -3942,7 +3998,7 @@ func ensureDefaultNoRerouteNodePolicies(nbClient libovsdbclient.Client, addressS
 		matchV4 = fmt.Sprintf(`(ip4.src == $%s || ip4.src == $%s) && ip4.dst == $%s`,
 			ipv4EgressIPServedPodsAS, ipv4EgressServiceServedPodsAS, ipv4ClusterNodeIPAS)
 	}
-	if len(v6NodeAddrs) > 0 {
+	if v6 {
 		// if address set hash name is empty, the address set has yet to be created
 		if ipv6EgressIPServedPodsAS == "" || ipv6EgressServiceServedPodsAS == "" || ipv6ClusterNodeIPAS == "" {
 			return types.NewSuppressedError(fmt.Errorf("address set hash name(s) %s not found", as.GetName()))
