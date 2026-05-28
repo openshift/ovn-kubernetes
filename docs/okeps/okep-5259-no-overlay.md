@@ -827,6 +827,19 @@ priority            : 0
 type                : snat
 ```
 
+For advertised UDNs in shared gateway mode, conditional SNATs on the UDN cluster
+router use `allowed_ext_ips` instead of `match`. This keeps the destination
+constraint on the NAT while allowing northd to render the reverse conntrack flows
+needed by NodePort reply traffic. Since `allowed_ext_ips` accepts one
+address set, each destination address set uses a separate NAT row: one for
+cluster node IPs and one for UDN service ClusterIPs.
+
+A future improvement is to restore the original conditional SNAT and set
+`options:ct-commit-all=true` on the logical router. This is postponed in shared
+gateway mode because that is the gateway mode used by offloaded deployments, and
+the option is not fully offloadable yet. As explained in the next section,
+Local gateway mode already uses `ct-commit-all`, since that scenario is not offloaded.
+
 ##### Local Gateway Mode
 
 When `outboundSNAT` is disabled, the existing BGP feature behavior is preserved:
