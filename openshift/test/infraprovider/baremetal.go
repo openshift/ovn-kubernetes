@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -33,10 +34,25 @@ const (
 	externalFRRContainerName   = "frr"
 )
 
+const (
+	ipvlanPrimaryNetNameIPv4      = "ostestbm-ipvlan-v4"
+	ipvlanPrimaryNetNameIPv6      = "ostestbm-ipvlan-v6"
+	ipvlanPrimaryNetNameDualStack = "ostestbm-ipvlan-dual"
+	// Ipvlan uses separate subnet from machine network to avoid IP allocation conflicts
+	// Machine network: 192.168.111.0/24, Ipvlan network: 192.168.112.0/24
+	ipvlanPrimaryNetIPv4        = "192.168.112.0/24"
+	ipvlanPrimaryNetIPv4Gateway = "192.168.112.1"
+	// IPv6 subnet for ipvlan (fd2e:6f44:5dd8:c957::/120) is separate from
+	// machine network IPv6 subnet (fd2e:6f44:5dd8:c956::/120)
+	ipvlanPrimaryNetIPv6        = "fd2e:6f44:5dd8:c957::/120"
+	ipvlanPrimaryNetIPv6Gateway = "fd2e:6f44:5dd8:c957::1"
+)
+
 type baremetalInfra struct {
-	engine               *container.Engine
-	machineNetwork       api.Network           // contains subnet details about cluster machine network
-	machineNetworkGwInfo *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	engine                            *container.Engine
+	machineNetwork                    api.Network           // contains subnet details about cluster machine network
+	machineNetworkGwInfo              *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	primaryNetworkBackendForContainer api.Network           // ipvlan network which is a container network backend for cluster machine network
 }
 
 func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
@@ -88,7 +104,82 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve hypervisor node interface for machine network: %w", err)
 	}
+	// Create ipvlan network based on IP family configuration
+	if ci.machineNetworkGwInfo.IPv4 != "" && ci.machineNetworkGwInfo.IPv6 != "" {
+		// Dual-stack configuration
+		if err := createIpvlanNetwork(sshRunner, ipvlanPrimaryNetNameDualStack, ci.machineNetworkGwInfo.InfName,
+			ipvlanPrimaryNetIPv4, ipvlanPrimaryNetIPv4Gateway,
+			ipvlanPrimaryNetIPv6, ipvlanPrimaryNetIPv6Gateway); err != nil {
+			return nil, fmt.Errorf("failed to create dual-stack ipvlan container network for primary machine network: %w", err)
+		}
+		ci.primaryNetworkBackendForContainer = &network.ContainerEngineNetwork{NetName: ipvlanPrimaryNetNameDualStack,
+			Configs: []network.ContainerEngineNetworkConfig{
+				{Subnet: ipvlanPrimaryNetIPv4, Gateway: ipvlanPrimaryNetIPv4Gateway},
+				{Subnet: ipvlanPrimaryNetIPv6, Gateway: ipvlanPrimaryNetIPv6Gateway}}}
+	} else if ci.machineNetworkGwInfo.IPv6 != "" {
+		// IPv6-only configuration
+		if err := createIpvlanNetwork(sshRunner, ipvlanPrimaryNetNameIPv6, ci.machineNetworkGwInfo.InfName,
+			"", "", ipvlanPrimaryNetIPv6, ipvlanPrimaryNetIPv6Gateway); err != nil {
+			return nil, fmt.Errorf("failed to create IPv6 ipvlan container network for primary machine network: %w", err)
+		}
+		ci.primaryNetworkBackendForContainer = &network.ContainerEngineNetwork{NetName: ipvlanPrimaryNetNameIPv6,
+			Configs: []network.ContainerEngineNetworkConfig{{Subnet: ipvlanPrimaryNetIPv6, Gateway: ipvlanPrimaryNetIPv6Gateway}}}
+	} else if ci.machineNetworkGwInfo.IPv4 != "" {
+		// IPv4-only configuration
+		if err := createIpvlanNetwork(sshRunner, ipvlanPrimaryNetNameIPv4, ci.machineNetworkGwInfo.InfName,
+			ipvlanPrimaryNetIPv4, ipvlanPrimaryNetIPv4Gateway, "", ""); err != nil {
+			return nil, fmt.Errorf("failed to create IPv4 ipvlan container network for primary machine network: %w", err)
+		}
+		ci.primaryNetworkBackendForContainer = &network.ContainerEngineNetwork{NetName: ipvlanPrimaryNetNameIPv4,
+			Configs: []network.ContainerEngineNetworkConfig{{Subnet: ipvlanPrimaryNetIPv4, Gateway: ipvlanPrimaryNetIPv4Gateway}}}
+	}
 	return ci, nil
+}
+
+// createIpvlanNetwork creates an ipvlan L3 network with the specified configuration.
+// It checks if the network already exists to support idempotent initialization.
+// For IPv4-only, pass empty strings for v6Subnet and v6Gateway.
+// For IPv6-only, pass empty strings for v4Subnet and v4Gateway.
+func createIpvlanNetwork(runner api.Runner, networkName, parentInterface, v4Subnet, v4Gateway, v6Subnet, v6Gateway string) error {
+	// Check if network already exists (idempotency)
+	existingNets, err := runner.Run("podman", "network", "ls", "--format", "{{.Name}}")
+	if err != nil {
+		return fmt.Errorf("failed to list existing networks: %w", err)
+	}
+	if slices.Contains(strings.Split(strings.TrimSpace(existingNets), "\n"), networkName) {
+		framework.Logf("ipvlan network %s already exists, skipping creation", networkName)
+		return nil
+	}
+
+	// Build podman network create command
+	args := []string{"network", "create", "-d", "ipvlan"}
+
+	// Add IPv4 configuration if provided
+	if v4Subnet != "" {
+		args = append(args, fmt.Sprintf("--subnet=%s", v4Subnet))
+		args = append(args, fmt.Sprintf("--gateway=%s", v4Gateway))
+	}
+
+	// Add IPv6 configuration if provided
+	if v6Subnet != "" {
+		args = append(args, fmt.Sprintf("--subnet=%s", v6Subnet))
+		args = append(args, fmt.Sprintf("--gateway=%s", v6Gateway))
+		args = append(args, "--ipv6")
+	}
+
+	// Add ipvlan-specific options
+	args = append(args, "-o", fmt.Sprintf("parent=%s", parentInterface))
+	args = append(args, "-o", "mode=l3")
+	args = append(args, networkName)
+
+	// Create the network
+	if _, err := runner.Run("podman", args...); err != nil {
+		return fmt.Errorf("failed to create ipvlan network %s: %w", networkName, err)
+	}
+
+	framework.Logf("created ipvlan L3 network %s (parent: %s, v4: %s, v6: %s)",
+		networkName, parentInterface, v4Subnet, v6Subnet)
+	return nil
 }
 
 func (ci *baremetalInfra) GetNetwork(name string) (api.Network, error) {
@@ -147,6 +238,8 @@ func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.Ext
 				IPv4Prefix:  ci.machineNetworkGwInfo.IPv4Prefix,
 				IPv6Prefix:  ci.machineNetworkGwInfo.IPv6Prefix},
 			nil
+	} else if network.Name() == primaryNetworkName {
+		network = ci.primaryNetworkBackendForContainer
 	}
 	return ci.engine.GetNetworkInterface(container.Name, network.Name())
 }
@@ -158,6 +251,9 @@ func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testconte
 }
 
 func (ci *baremetalInfra) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
+	if container.Network.Name() == primaryNetworkName {
+		container.Network = ci.primaryNetworkBackendForContainer
+	}
 	return ci.engine.CreateExternalContainer(container)
 }
 
@@ -170,10 +266,16 @@ func (ci *baremetalInfra) CreateNetwork(name string, subnets ...string) (api.Net
 }
 
 func (ci *baremetalInfra) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
+	if network.Name() == primaryNetworkName {
+		return ci.engine.AttachNetwork(ci.primaryNetworkBackendForContainer, container)
+	}
 	return ci.engine.AttachNetwork(network, container)
 }
 
 func (ci *baremetalInfra) DetachNetwork(network api.Network, container string) error {
+	if network.Name() == primaryNetworkName {
+		return ci.engine.DetachNetwork(ci.primaryNetworkBackendForContainer, container)
+	}
 	return ci.engine.DetachNetwork(network, container)
 }
 
