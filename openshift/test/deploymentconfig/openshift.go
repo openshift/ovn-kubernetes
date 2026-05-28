@@ -31,10 +31,6 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 	return false, nil
 }
 
-const (
-	ovnpodNamespace = "openshift-ovn-kubernetes"
-)
-
 type openshift struct {
 	config           *rest.Config
 	primaryInterface string
@@ -47,8 +43,9 @@ func New(cfg *rest.Config) api.DeploymentConfig {
 // findPrimaryInterface queries ovs-vsctl on an ovnkube-node pod to find the
 // physical uplink port on br-ex. The physical NIC is the OVS port whose
 // interface type is "system".
-func findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeName string) (string, error) {
-	ovnkubeNodePods, err := kubeClient.CoreV1().Pods(ovnpodNamespace).List(context.Background(), metav1.ListOptions{
+func (m *openshift) findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeName string) (string, error) {
+	ovnNamespace := m.OVNKubernetesNamespace()
+	ovnkubeNodePods, err := kubeClient.CoreV1().Pods(ovnNamespace).List(context.Background(), metav1.ListOptions{
 		LabelSelector: "app=ovnkube-node",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})
@@ -59,7 +56,7 @@ func findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeName string) (st
 		return "", fmt.Errorf("failed to find ovnkube-node pod for node instance %s", nodeName)
 	}
 	ovnKubeNodePodName := ovnkubeNodePods.Items[0].Name
-	ports, err := e2epodoutput.RunHostCmd(ovnpodNamespace, ovnKubeNodePodName, "ovs-vsctl list-ports br-ex")
+	ports, err := e2epodoutput.RunHostCmd(ovnNamespace, ovnKubeNodePodName, "ovs-vsctl list-ports br-ex")
 	if err != nil {
 		return "", err
 	}
@@ -68,14 +65,14 @@ func findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeName string) (st
 		if port == "" {
 			continue
 		}
-		out, err := e2epodoutput.RunHostCmd(ovnpodNamespace, ovnKubeNodePodName, fmt.Sprintf("ovs-vsctl get Port %s Interfaces", port))
+		out, err := e2epodoutput.RunHostCmd(ovnNamespace, ovnKubeNodePodName, fmt.Sprintf("ovs-vsctl get Port %s Interfaces", port))
 		if err != nil {
 			return "", err
 		}
 		// remove brackets on list of interfaces
 		ifaces := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(out), "]"), "[")
 		for _, iface := range strings.Split(ifaces, ",") {
-			out, err := e2epodoutput.RunHostCmd(ovnpodNamespace, ovnKubeNodePodName, fmt.Sprintf("ovs-vsctl get Interface %s Type", strings.TrimSpace(iface)))
+			out, err := e2epodoutput.RunHostCmd(ovnNamespace, ovnKubeNodePodName, fmt.Sprintf("ovs-vsctl get Interface %s Type", strings.TrimSpace(iface)))
 			if err != nil {
 				return "", err
 			}
@@ -115,7 +112,7 @@ func (m *openshift) PrimaryInterfaceName() string {
 	if len(nodes.Items) == 0 {
 		panic("no nodes found in cluster")
 	}
-	iface, err := findPrimaryInterface(kubeClient, nodes.Items[0].Name)
+	iface, err := m.findPrimaryInterface(kubeClient, nodes.Items[0].Name)
 	if err != nil {
 		panic(fmt.Sprintf("failed to find primary interface: %v", err))
 	}
