@@ -4,13 +4,22 @@
 package allocator
 
 import (
-	"fmt"
 	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/kubernetes/fake"
 )
+
+// fakeCleanup is a test stub for ContextCleanUp interface
+type fakeCleanup struct {
+	cleanupFns []func() error
+}
+
+func (f *fakeCleanup) AddCleanUpFn(fn func() error) {
+	f.cleanupFns = append(f.cleanupFns, fn)
+}
 
 func TestIndexToIP(t *testing.T) {
 	tests := []struct {
@@ -173,61 +182,25 @@ func TestAllocateIPValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// We can't actually call allocateIPFromCIDR without a framework and cleanup,
-			// but we can test the CIDR parsing and validation logic
-			ip, ipNet, err := net.ParseCIDR(tt.cidr)
-			if tt.shouldError && tt.errorMsg == "failed to parse CIDR" {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err, "failed to parse CIDR")
+			// Call the real allocateIPFromCIDR with test stubs
+			fakeClient := fake.NewSimpleClientset()
+			cleanup := &fakeCleanup{}
 
-			// Validate IP family
-			if tt.isIPv6 {
-				if ip.To4() != nil {
-					assert.Contains(t, "expected IPv6 CIDR, got IPv4", tt.errorMsg)
-					return
+			ip, err := allocateIPFromCIDR(fakeClient, cleanup, tt.cidr, tt.isIPv6, nil)
+
+			if tt.shouldError {
+				require.Error(t, err)
+				if tt.errorMsg != "" {
+					assert.Contains(t, err.Error(), tt.errorMsg)
 				}
 			} else {
-				if ip.To4() == nil {
-					assert.Contains(t, "expected IPv4 CIDR, got IPv6", tt.errorMsg)
-					return
-				}
-			}
+				require.NoError(t, err)
+				// Verify allocated IP is valid
+				parsedIP := net.ParseIP(ip)
+				require.NotNil(t, parsedIP, "allocated IP should be valid")
 
-			// Calculate usable IPs
-			ones, bits := ipNet.Mask.Size()
-			hostBits := bits - ones
-
-			// Check for "too large" error
-			const maxHostBits = 10
-			if tt.shouldError && tt.errorMsg == "too large" {
-				assert.Greater(t, hostBits, maxHostBits)
-				return
-			}
-
-			// Check that hostBits is within acceptable range
-			if tt.shouldError && tt.errorMsg == "too large" {
-				assert.Greater(t, hostBits, maxHostBits)
-			} else if !tt.shouldError {
-				assert.LessOrEqual(t, hostBits, maxHostBits)
-			}
-
-			// Skip overflow calculations for large subnets
-			if hostBits > maxHostBits {
-				return
-			}
-
-			totalIPs := 1 << hostBits
-			usableIPs := totalIPs - 1
-			if !tt.isIPv6 {
-				usableIPs = totalIPs - 2
-			}
-
-			if tt.shouldError && tt.errorMsg == "no usable IPs" {
-				assert.LessOrEqual(t, usableIPs, 0)
-			} else if !tt.shouldError {
-				assert.Greater(t, usableIPs, 0)
+				// Verify cleanup function was registered
+				assert.NotEmpty(t, cleanup.cleanupFns, "cleanup function should be registered")
 			}
 		})
 	}
@@ -367,8 +340,7 @@ func TestIPToIndex(t *testing.T) {
 }
 
 func TestReservedIPValidation(t *testing.T) {
-	_, ipNet, err := net.ParseCIDR("192.168.1.0/24")
-	require.NoError(t, err)
+	const testCIDR = "192.168.1.0/24"
 
 	tests := []struct {
 		name        string
@@ -402,38 +374,23 @@ func TestReservedIPValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the validation logic from allocateIPFromCIDR
-			reservedIndices := make(map[int]bool)
+			// Call the real allocateIPFromCIDR with reserved IPs
+			fakeClient := fake.NewSimpleClientset()
+			cleanup := &fakeCleanup{}
 
-			var validationErr error
-			for _, reservedIP := range tt.reservedIPs {
-				ip := net.ParseIP(reservedIP)
-				if ip == nil {
-					validationErr = fmt.Errorf("invalid reserved IP: %s", reservedIP)
-					break
-				}
-
-				if !ipNet.Contains(ip) {
-					validationErr = fmt.Errorf("reserved IP %s is not within subnet %s", reservedIP, ipNet)
-					break
-				}
-
-				index, err := ipToIndex(ipNet.IP, ip)
-				if err != nil {
-					validationErr = fmt.Errorf("failed to convert reserved IP %s to index: %w", reservedIP, err)
-					break
-				}
-
-				reservedIndices[index] = true
-			}
+			ip, err := allocateIPFromCIDR(fakeClient, cleanup, testCIDR, false, tt.reservedIPs)
 
 			if tt.shouldError {
-				require.Error(t, validationErr)
+				require.Error(t, err)
 				if tt.errorMsg != "" {
-					assert.Contains(t, validationErr.Error(), tt.errorMsg)
+					assert.Contains(t, err.Error(), tt.errorMsg)
 				}
 			} else {
-				require.NoError(t, validationErr)
+				require.NoError(t, err)
+				// Verify allocated IP is valid and not in reserved list
+				parsedIP := net.ParseIP(ip)
+				require.NotNil(t, parsedIP, "allocated IP should be valid")
+				assert.NotContains(t, tt.reservedIPs, ip, "allocated IP should not be in reserved list")
 			}
 		})
 	}

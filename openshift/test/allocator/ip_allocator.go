@@ -12,6 +12,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
@@ -32,14 +33,14 @@ const (
 //
 //	ip, err := AllocateIP(f, cleanup, "192.168.1.0/24")
 //	// Returns an IP like "192.168.1.5" (skipping .0 and .255)
-func AllocateIP(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string) (string, error) {
-	return allocateIPFromCIDR(f, cleanup, cidr, false, nil)
+func AllocateIP(kubeClient kubernetes.Interface, cleanup infraapi.ContextCleanUp, cidr string) (string, error) {
+	return allocateIPFromCIDR(kubeClient, cleanup, cidr, false, nil)
 }
 
 // AllocateIPv6 allocates a unique IPv6 address from the given subnet CIDR.
 // Subnet size limits: The subnet must provide no more than 1024 IPs (e.g., /120 to /128).
-func AllocateIPv6(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string) (string, error) {
-	return allocateIPFromCIDR(f, cleanup, cidr, true, nil)
+func AllocateIPv6(kubeClient kubernetes.Interface, cleanup infraapi.ContextCleanUp, cidr string) (string, error) {
+	return allocateIPFromCIDR(kubeClient, cleanup, cidr, true, nil)
 }
 
 // AllocateIPWithReserved allocates a unique IP address from the given subnet CIDR,
@@ -51,19 +52,19 @@ func AllocateIPv6(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr 
 //	reserved := []string{"192.168.1.1", "192.168.1.254"}
 //	ip, err := AllocateIPWithReserved(f, cleanup, "192.168.1.0/24", reserved)
 //	// Returns an IP like "192.168.1.5" (skipping .0, .1, .254, and .255)
-func AllocateIPWithReserved(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string, reservedIPs []string) (string, error) {
-	return allocateIPFromCIDR(f, cleanup, cidr, false, reservedIPs)
+func AllocateIPWithReserved(kubeClient kubernetes.Interface, cleanup infraapi.ContextCleanUp, cidr string, reservedIPs []string) (string, error) {
+	return allocateIPFromCIDR(kubeClient, cleanup, cidr, false, reservedIPs)
 }
 
 // AllocateIPv6WithReserved allocates a unique IPv6 address from the given subnet CIDR,
 // excluding the specified reserved IPs from allocation.
-func AllocateIPv6WithReserved(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string, reservedIPs []string) (string, error) {
-	return allocateIPFromCIDR(f, cleanup, cidr, true, reservedIPs)
+func AllocateIPv6WithReserved(kubeClient kubernetes.Interface, cleanup infraapi.ContextCleanUp, cidr string, reservedIPs []string) (string, error) {
+	return allocateIPFromCIDR(kubeClient, cleanup, cidr, true, reservedIPs)
 }
 
 // allocateIPFromCIDR allocates an IP address from the given CIDR using AllocateInt.
 // If reservedIPs is provided, those IPs are avoided by retrying if allocated.
-func allocateIPFromCIDR(f *framework.Framework, cleanup infraapi.ContextCleanUp, cidr string, isIPv6 bool, reservedIPs []string) (string, error) {
+func allocateIPFromCIDR(kubeClient kubernetes.Interface, cleanup infraapi.ContextCleanUp, cidr string, isIPv6 bool, reservedIPs []string) (string, error) {
 	ip, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse CIDR %q: %w", cidr, err)
@@ -143,23 +144,20 @@ func allocateIPFromCIDR(f *framework.Framework, cleanup infraapi.ContextCleanUp,
 
 	// Allocate a unique index within the usable range, retrying if we hit a reserved IP
 	var index int
-	var allocatedIndices []int
 	maxRetries := usableIPs * 2 // Reasonable retry limit
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		idx, err := allocators.AllocateInt(f, key, usableIPs)
+		idx, err := allocators.AllocateInt(kubeClient, key, usableIPs)
 		if err != nil {
-			// Clean up any indices we allocated during retries
-			for _, allocIdx := range allocatedIndices {
-				allocators.DeallocateInt(f, key, allocIdx)
-			}
 			return "", fmt.Errorf("failed to allocate IP index from subnet %s: %w", cidr, err)
 		}
 
 		// Check if this index is reserved
 		if reservedIndices[idx] {
-			// This IP is reserved, keep it allocated (to prevent reuse) and try again
-			allocatedIndices = append(allocatedIndices, idx)
-			framework.Logf("Allocated index %d is reserved, retrying...", idx)
+			// This IP is reserved, deallocate it immediately and retry
+			if err := allocators.DeallocateInt(kubeClient, key, idx); err != nil {
+				return "", fmt.Errorf("failed to deallocate reserved index %d: %w", idx, err)
+			}
+			framework.Logf("Allocated index %d is reserved, deallocated and retrying...", idx)
 			continue
 		}
 
@@ -169,24 +167,13 @@ func allocateIPFromCIDR(f *framework.Framework, cleanup infraapi.ContextCleanUp,
 	}
 
 	if index == 0 {
-		// Clean up any indices we allocated during retries
-		for _, allocIdx := range allocatedIndices {
-			allocators.DeallocateInt(f, key, allocIdx)
-		}
 		return "", fmt.Errorf("failed to allocate non-reserved IP after %d attempts", maxRetries)
 	}
 
-	// Register cleanup to deallocate all indices (both the final one and any reserved ones we hit)
+	// Register cleanup to deallocate the allocated index
 	cleanup.AddCleanUpFn(func() error {
-		// Deallocate the final allocated index
-		if err := allocators.DeallocateInt(f, key, index); err != nil {
-			framework.Logf("Warning: failed to deallocate IP index %d: %v", index, err)
-		}
-		// Deallocate any reserved indices we allocated during retries
-		for _, allocIdx := range allocatedIndices {
-			if err := allocators.DeallocateInt(f, key, allocIdx); err != nil {
-				framework.Logf("Warning: failed to deallocate reserved IP index %d: %v", allocIdx, err)
-			}
+		if err := allocators.DeallocateInt(kubeClient, key, index); err != nil {
+			return fmt.Errorf("failed to deallocate IP index %d: %w", index, err)
 		}
 		return nil
 	})
