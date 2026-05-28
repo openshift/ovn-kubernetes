@@ -12,6 +12,10 @@ var labelToPrependLabelsMap = map[string][]string{
 	"Feature:EVPN": {
 		"FeatureGate:EVPN",
 	},
+	// Make NoOverlay tests to be added with gated label.
+	"Feature:NoOverlay": {
+		"FeatureGate:NoOverlayMode",
+	},
 }
 
 // getTestExtensionLabels returns labels that should be applied to all tests in this extension

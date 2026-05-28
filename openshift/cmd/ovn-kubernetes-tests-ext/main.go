@@ -39,6 +39,7 @@ var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
+	featureLabelNoOverlay           = "Feature:NoOverlay"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
 
@@ -65,11 +66,15 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Future feature-based filters can be added here
+	// No-Overlay tests: only include if no-overlay is enabled in the cluster
+	noOverlayEnabled := ocpInfra.CheckForNoOverlay()
+	if !noOverlayEnabled && spec.Labels.Has(featureLabelNoOverlay) {
+		return false
+	}
 
-	// FUP: not having to detect the environment, and just be able to
+	// TODO: not having to detect the environment, just be able to
 	// run what we want through the definition of the appropriate test
-	// suites
+	// suite. Additional feature-based filters can be added here.
 
 	return true
 }
@@ -115,7 +120,7 @@ func main() {
 		} else {
 			ocpInfra = infra
 			infraprovider.Set(ocpInfra)
-			deploymentconfig.Set(ocpdeploymentconfig.New())
+			deploymentconfig.Set(ocpdeploymentconfig.New(cfg))
 		}
 	}
 

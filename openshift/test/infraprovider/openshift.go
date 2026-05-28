@@ -149,6 +149,15 @@ func isLocalGatewayMode(network *operv1.Network) bool {
 		network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost
 }
 
+// CheckForNoOverlay checks if no-overlay transport mode is enabled on the cluster's
+// default network.
+func (o *OpenshiftInfraProvider) CheckForNoOverlay() bool {
+	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+		return false
+	}
+	return o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.Transport == operv1.TransportOptionNoOverlay
+}
+
 func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
 	if o.clusterInfra == nil {
 		panic("not implemented")
