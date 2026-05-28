@@ -54,8 +54,9 @@ import (
 const (
 	generateName = "ovnk-generated-"
 	fieldManager = "clustermanager-routeadvertisements-controller"
-	// evpnRawConfigPriority is set to an arbitrary value that still allows users to override EVPN config if needed.
-	evpnRawConfigPriority = 10
+	// rawConfigPriority is set to an arbitrary value that still allows users to
+	// override if needed.
+	rawConfigPriority = 10
 )
 
 var (
@@ -767,6 +768,10 @@ func (c *Controller) generateFRRConfiguration(
 ) (*frrtypes.FRRConfiguration, error) {
 	var routers []frrtypes.Router
 
+	// track neighbors and ASNs to generate raw config later on
+	vrfNeighbors := map[string][]string{}
+	vrfASNs := map[string]uint32{}
+
 	// go over the source routers
 	for i, router := range source.Spec.BGP.Routers {
 
@@ -911,6 +916,7 @@ func (c *Controller) generateFRRConfiguration(
 				}
 			}
 
+			vrfNeighbors[matchedVRF] = append(vrfNeighbors[matchedVRF], neighbor.Address)
 			targetRouter.Neighbors = append(targetRouter.Neighbors, neighbor)
 		}
 		if len(targetRouter.Neighbors) == 0 {
@@ -921,6 +927,7 @@ func (c *Controller) generateFRRConfiguration(
 		// append this router to the list of routers we will include in the
 		// generated FRR config and track its index as we might need to add
 		// imports to it
+		vrfASNs[matchedVRF] = router.ASN
 		routers = append(routers, targetRouter)
 		targetRouterIndex := len(routers) - 1
 
@@ -961,17 +968,16 @@ func (c *Controller) generateFRRConfiguration(
 			routers = append(routers, importRouter)
 		}
 	}
-	var globalRouterASN uint32
-	var neighbors []string
-	vrfASNs := map[string]uint32{}
 
-	if len(selectedNetworks.macVRFConfigs) > 0 || len(selectedNetworks.ipVRFConfigs) > 0 {
+	hasEVPN := len(selectedNetworks.macVRFConfigs) > 0 || len(selectedNetworks.ipVRFConfigs) > 0
+	if hasEVPN && vrfASNs[""] == 0 {
 		// Look for global router in the source FRRConfiguration, not in the filtered routers
 		for _, router := range source.Spec.BGP.Routers {
 			if router.VRF == "" { // default VRF
-				globalRouterASN = router.ASN
+				vrfASNs[""] = router.ASN
+				vrfNeighbors[""] = make([]string, 0, len(router.Neighbors))
 				for _, neighbor := range router.Neighbors {
-					neighbors = append(neighbors, neighbor.Address)
+					vrfNeighbors[""] = append(vrfNeighbors[""], neighbor.Address)
 				}
 				break
 			}
@@ -999,14 +1005,14 @@ func (c *Controller) generateFRRConfiguration(
 				}
 			}
 			// If not in current source, another source will handle it
-		} else if globalRouterASN > 0 {
+		} else if vrfASNs[""] > 0 {
 			// VRF router doesn't exist anywhere - create with global ASN
 			klog.Infof("Creating router for EVPN network %q VRF %q with ASN=%d, prefixes=%v",
-				cfg.NetworkName, cfg.VRFName, globalRouterASN, selectedNetworks.hostNetworkSubnets[cfg.NetworkName])
+				cfg.NetworkName, cfg.VRFName, vrfASNs[""], selectedNetworks.hostNetworkSubnets[cfg.NetworkName])
 			matchedNetworks.Insert(cfg.NetworkName)
-			vrfASNs[cfg.VRFName] = globalRouterASN
+			vrfASNs[cfg.VRFName] = vrfASNs[""]
 			routers = append(routers, frrtypes.Router{
-				ASN:      globalRouterASN,
+				ASN:      vrfASNs[""],
 				VRF:      cfg.VRFName,
 				Prefixes: selectedNetworks.hostNetworkSubnets[cfg.NetworkName],
 			})
@@ -1017,7 +1023,7 @@ func (c *Controller) generateFRRConfiguration(
 	// by the global router's EVPN raw config (advertise-all-vni) rather
 	// than by a VRF-specific router. Mark them as matched when a global
 	// router with neighbors is present.
-	if ra.Spec.TargetVRF == "auto" && globalRouterASN > 0 && len(neighbors) > 0 {
+	if ra.Spec.TargetVRF == "auto" && vrfASNs[""] > 0 && len(vrfNeighbors[""]) > 0 {
 		for _, cfg := range selectedNetworks.macVRFConfigs {
 			if !ipVRFNetworks.Has(cfg.NetworkName) {
 				matchedNetworks.Insert(cfg.NetworkName)
@@ -1035,7 +1041,7 @@ func (c *Controller) generateFRRConfiguration(
 	// router is not included even though it exists in the source (confirmed by globalRouterASN > 0 above).
 	// In that case we create a new default-VRF router from the source
 	// to carry the VTEP IPs.
-	if vtepIPs := selectedNetworks.vtepIPsByNode[nodeName]; len(vtepIPs) > 0 && globalRouterASN > 0 {
+	if vtepIPs := selectedNetworks.vtepIPsByNode[nodeName]; len(vtepIPs) > 0 && vrfASNs[""] > 0 {
 		// Build ToReceive prefix selectors from the VTEP CIDRs so each
 		// node accepts routes for all VTEP IPs within these ranges.
 		vtepReceiveSelectors := vtepCIDRPrefixSelectors(selectedNetworks.vtepCIDRs)
@@ -1115,15 +1121,14 @@ func (c *Controller) generateFRRConfiguration(
 		}
 	}
 
-	// Check if we have anything to generate: routers or EVPN raw config.
-	// EVPN raw config is generated when we have:
-	// - A global router (globalRouterASN > 0 && len(neighbors) > 0) for the global EVPN section
-	// - IP-VRF configs for VRF VNI and VRF EVPN sections
-	hasEVPNRawConfig := (globalRouterASN > 0 && len(neighbors) > 0) || len(selectedNetworks.ipVRFConfigs) > 0
-	if len(routers) == 0 && !hasEVPNRawConfig {
-		// we ended up with no routers and no EVPN raw config to generate, bail out
+	// Generate raw config, if any.
+	// TODO: once frr-k8s provides a typed API for this config, we can use that instead of raw config
+	rawConfig := generateRawConfig(selectedNetworks, vrfNeighbors, vrfASNs)
+	if len(routers) == 0 && rawConfig == "" {
+		// we ended up with no routers and no raw config to generate, bail out
 		return nil, nil
 	}
+
 	new := &frrtypes.FRRConfiguration{}
 	new.GenerateName = generateName
 	new.Namespace = source.Namespace
@@ -1146,16 +1151,10 @@ func (c *Controller) generateFRRConfiguration(
 			"kubernetes.io/hostname": nodeName,
 		},
 	}
-
-	// Generate EVPN raw config for the EVPN-specific parts.
-	// TODO: once frr-k8s provides a typed EVPN API, we can use that instead of raw config
-	if len(selectedNetworks.macVRFConfigs) > 0 || len(selectedNetworks.ipVRFConfigs) > 0 {
-		rawConfig := generateEVPNRawConfig(selectedNetworks, globalRouterASN, neighbors, vrfASNs)
-		if rawConfig != "" {
-			new.Spec.Raw = frrtypes.RawConfig{
-				Priority: evpnRawConfigPriority,
-				Config:   rawConfig,
-			}
+	if rawConfig != "" {
+		new.Spec.Raw = frrtypes.RawConfig{
+			Priority: rawConfigPriority,
+			Config:   rawConfig,
 		}
 	}
 

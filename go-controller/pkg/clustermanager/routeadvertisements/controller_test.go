@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +29,7 @@ import (
 	ctesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
@@ -258,16 +261,15 @@ func (tr testRouter) Router() frrapi.Router {
 }
 
 type testFRRConfig struct {
-	Name              string
-	Namespace         string
-	Generation        int
-	Labels            map[string]string
-	Annotations       map[string]string
-	Routers           []*testRouter
-	NodeSelector      map[string]string
-	OwnUpdate         bool
-	RawConfig         string
-	RawConfigPriority int
+	Name         string
+	Namespace    string
+	Generation   int
+	Labels       map[string]string
+	Annotations  map[string]string
+	Routers      []*testRouter
+	NodeSelector map[string]string
+	OwnUpdate    bool
+	RawConfig    string
 }
 
 func (tf testFRRConfig) FRRConfiguration() *frrapi.FRRConfiguration {
@@ -288,9 +290,13 @@ func (tf testFRRConfig) FRRConfiguration() *frrapi.FRRConfiguration {
 	for _, r := range tf.Routers {
 		f.Spec.BGP.Routers = append(f.Spec.BGP.Routers, r.Router())
 	}
-	if tf.RawConfig != "" {
-		f.Spec.Raw.Config = tf.RawConfig
-		f.Spec.Raw.Priority = tf.RawConfigPriority
+	rawConfig := tf.RawConfig
+	if rawConfig == "" {
+		rawConfig = tf.generateUnicastRawConfig()
+	}
+	if rawConfig != "" {
+		f.Spec.Raw.Config = rawConfig
+		f.Spec.Raw.Priority = rawConfigPriority
 	}
 	if tf.OwnUpdate {
 		f.ManagedFields = append(f.ManagedFields, metav1.ManagedFieldsEntry{
@@ -299,6 +305,34 @@ func (tf testFRRConfig) FRRConfiguration() *frrapi.FRRConfiguration {
 		})
 	}
 	return f
+}
+
+func (tf testFRRConfig) generateUnicastRawConfig() string {
+	var buf strings.Builder
+	routers := make(map[string]*testRouter, len(tf.Routers))
+	for _, r := range tf.Routers {
+		routers[r.VRF] = r
+	}
+	for _, vrf := range slices.Sorted(maps.Keys(routers)) {
+		r := routers[vrf]
+		if len(r.Neighbors) == 0 {
+			continue
+		}
+		if r.VRF == "" {
+			fmt.Fprintf(&buf, "router bgp %d\n", r.ASN)
+		} else {
+			fmt.Fprintf(&buf, "router bgp %d vrf %s\n", r.ASN, r.VRF)
+		}
+		for _, n := range r.Neighbors {
+			if utilnet.IsIPv6String(n.Address) {
+				fmt.Fprintf(&buf, " address-family ipv6 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Address)
+			} else {
+				fmt.Fprintf(&buf, " address-family ipv4 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Address)
+			}
+		}
+		buf.WriteString("exit\n!\n")
+	}
+	return buf.String()
 }
 
 type testEIP struct {
@@ -1250,11 +1284,13 @@ func TestController_reconcile(t *testing.T) {
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1295,11 +1331,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1340,11 +1378,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1403,11 +1443,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfigGlobal/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfigGlobal/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1427,10 +1469,9 @@ exit-vrf
 					},
 				},
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfigVRF/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfigVRF/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `vrf blue
  vni 2000
 exit-vrf
@@ -1553,11 +1594,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfigGlobal/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfigGlobal/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1614,11 +1657,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1680,11 +1725,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv6 unicast
+  neighbor fd00::1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor fd00::1 activate
   neighbor fd00::1 allowas-in origin
@@ -1780,11 +1827,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1793,6 +1842,12 @@ exit
    route-target import 65000:1000
    route-target export 65000:1000
   exit-vni
+ exit-address-family
+exit
+!
+router bgp 65000 vrf red
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
  exit-address-family
 exit
 !
@@ -1842,11 +1897,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1926,11 +1983,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node1"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node1"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node1"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node1"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -1959,11 +2018,13 @@ exit
 					},
 				},
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node2"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node2"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node2"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node2"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -2031,11 +2092,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -2115,11 +2178,13 @@ exit
 			expectAcceptedStatus: metav1.ConditionTrue,
 			expectFRRConfigs: []*testFRRConfig{
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node1"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node1"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node1"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node1"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
@@ -2148,11 +2213,13 @@ exit
 					},
 				},
 				{
-					Labels:            map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
-					Annotations:       map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node2"},
-					NodeSelector:      map[string]string{"kubernetes.io/hostname": "node2"},
-					RawConfigPriority: 10,
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node2"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node2"},
 					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor 192.168.1.1 allowas-in origin
+ exit-address-family
  address-family l2vpn evpn
   neighbor 192.168.1.1 activate
   neighbor 192.168.1.1 allowas-in origin
