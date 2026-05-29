@@ -39,7 +39,7 @@ import (
 func getPodAnnotations(fakeClient kubernetes.Interface, namespace, name string) string {
 	pod, err := fakeClient.CoreV1().Pods(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	return pod.Annotations[ovntypes.OvnPodAnnotationName]
+	return pod.Annotations[util.OvnPodAnnotationName]
 }
 
 func newNode(nodeName, nodeIPv4CIDR string) *corev1.Node {
@@ -367,7 +367,7 @@ func setPodAnnotations(podObj *corev1.Pod, testPod testPod) {
 	if podObj.Annotations == nil {
 		podObj.Annotations = map[string]string{}
 	}
-	podObj.Annotations[ovntypes.OvnPodAnnotationName] = testPod.getAnnotationsJson()
+	podObj.Annotations[util.OvnPodAnnotationName] = testPod.getAnnotationsJson()
 }
 
 func getDefaultNetExpectedPodsAndSwitches(pods []testPod, nodes []string) []libovsdbtest.TestData {
@@ -544,7 +544,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				_, ok := pod.Annotations[ovntypes.OvnPodAnnotationName]
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				gomega.Expect(ok).To(gomega.BeFalse())
 
 				// Assign it and perform the update
@@ -1748,7 +1748,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				_, ok := pod.Annotations[ovntypes.OvnPodAnnotationName]
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				gomega.Expect(ok).To(gomega.BeFalse())
 
 				err = fakeOvn.controller.WatchNamespaces()
@@ -2249,7 +2249,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 				pod, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(t.namespace).Get(context.TODO(), t.podName, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				_, ok := pod.Annotations[ovntypes.OvnPodAnnotationName]
+				_, ok := pod.Annotations[util.OvnPodAnnotationName]
 				gomega.Expect(ok).To(gomega.BeFalse())
 
 				err = fakeOvn.controller.WatchNamespaces()

@@ -157,14 +157,14 @@ func getPodAnnotationSecondary(namespace, nadName, ip string) string {
 
 func NewPodWithPrimaryNADIP(namespace, name, node, defaultNetworkIP, nadName, nadIP string) *corev1.Pod {
 	pod := NewPod(namespace, name, node, defaultNetworkIP)
-	pod.Annotations = map[string]string{types.OvnPodAnnotationName: fmt.Sprintf(`{%s,%s}`, getPodAnnotationDefault(defaultNetworkIP, true), getPodAnnotationPrimary(namespace, nadName, nadIP))}
+	pod.Annotations = map[string]string{util.OvnPodAnnotationName: fmt.Sprintf(`{%s,%s}`, getPodAnnotationDefault(defaultNetworkIP, true), getPodAnnotationPrimary(namespace, nadName, nadIP))}
 	return pod
 }
 
 func NewPodWithSecondaryNADIP(namespace, name, node, defaultNetworkIP, nadAndNetworkName, nadIP string) *corev1.Pod {
 	pod := NewPod(namespace, name, node, defaultNetworkIP)
 	pod.Annotations = map[string]string{
-		types.OvnPodAnnotationName:   fmt.Sprintf(`{%s,%s}`, getPodAnnotationDefault(defaultNetworkIP, false), getPodAnnotationSecondary(namespace, nadAndNetworkName, nadIP)),
+		util.OvnPodAnnotationName:    fmt.Sprintf(`{%s,%s}`, getPodAnnotationDefault(defaultNetworkIP, false), getPodAnnotationSecondary(namespace, nadAndNetworkName, nadIP)),
 		nadv1.NetworkAttachmentAnnot: nadAndNetworkName,
 	}
 	return pod

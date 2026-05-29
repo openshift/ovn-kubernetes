@@ -465,7 +465,7 @@ func podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 	}
 	// react to pod IP changes
 	return !reflect.DeepEqual(oldObj.Status, newObj.Status) ||
-		oldObj.Annotations[types.OvnPodAnnotationName] != newObj.Annotations[types.OvnPodAnnotationName] ||
+		oldObj.Annotations[util.OvnPodAnnotationName] != newObj.Annotations[util.OvnPodAnnotationName] ||
 		oldObj.Annotations[util.UDNOpenPortsAnnotationName] != newObj.Annotations[util.UDNOpenPortsAnnotationName]
 }
 

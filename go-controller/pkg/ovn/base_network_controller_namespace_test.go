@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -19,19 +19,19 @@ import (
 func TestBaseNetworkController_shouldWatchNamespaces(t *testing.T) {
 	tests := []struct {
 		name                                                 string
-		netCfg                                               *ovncnitypes.NetConf
+		netCfg                                               *ovntypes.NetConf
 		enableNetSeg, enableMultiNetPolicies, expectedReturn bool
 	}{
 		{
 			name: "should watch namespaces for default network",
-			netCfg: &ovncnitypes.NetConf{
+			netCfg: &ovntypes.NetConf{
 				NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName},
 			},
 			expectedReturn: true,
 		},
 		{
 			name: "should watch namespaces for primary network when network segmentation is enabled",
-			netCfg: &ovncnitypes.NetConf{
+			netCfg: &ovntypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "primary"},
 				Topology: types.Layer3Topology,
 				Role:     types.NetworkRolePrimary,
@@ -41,7 +41,7 @@ func TestBaseNetworkController_shouldWatchNamespaces(t *testing.T) {
 		},
 		{
 			name: "should watch namespaces for secondary network when multi NetworkPolicies are enabled",
-			netCfg: &ovncnitypes.NetConf{
+			netCfg: &ovntypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "secondary"},
 				Topology: types.Layer3Topology,
 				Role:     types.NetworkRoleSecondary,
@@ -51,7 +51,7 @@ func TestBaseNetworkController_shouldWatchNamespaces(t *testing.T) {
 		},
 		{
 			name: "should not watch namespaces for primary network when network segmentation is disabled",
-			netCfg: &ovncnitypes.NetConf{
+			netCfg: &ovntypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "primary"},
 				Topology: types.Layer3Topology,
 				Role:     types.NetworkRolePrimary,
@@ -60,7 +60,7 @@ func TestBaseNetworkController_shouldWatchNamespaces(t *testing.T) {
 		},
 		{
 			name: "should not watch namespaces for secondary network when multi NetworkPolicies is disabled",
-			netCfg: &ovncnitypes.NetConf{
+			netCfg: &ovntypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: "secondary"},
 				Topology: types.Layer3Topology,
 				Role:     types.NetworkRoleSecondary,

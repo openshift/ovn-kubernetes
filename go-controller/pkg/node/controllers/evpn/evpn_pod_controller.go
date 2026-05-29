@@ -50,7 +50,7 @@ func (c *Controller) podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 		if oldObj.Spec.NodeName != c.nodeName {
 			return false
 		}
-		oldAnnot = oldObj.Annotations[types.OvnPodAnnotationName]
+		oldAnnot = oldObj.Annotations[util.OvnPodAnnotationName]
 	}
 	if newObj != nil {
 		if newObj.Spec.NodeName != c.nodeName {
@@ -59,7 +59,7 @@ func (c *Controller) podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 		if util.PodCompleted(newObj) {
 			return true
 		}
-		newAnnot = newObj.Annotations[types.OvnPodAnnotationName]
+		newAnnot = newObj.Annotations[util.OvnPodAnnotationName]
 	}
 	return oldAnnot != newAnnot
 }

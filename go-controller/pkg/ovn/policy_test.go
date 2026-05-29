@@ -678,7 +678,7 @@ var _ = ginkgo.Describe("OVN NetworkPolicy Operations", func() {
 			if len(podLabels) > 0 {
 				knetPod.Labels = podLabels
 			}
-			knetPod.Annotations = map[string]string{types.OvnPodAnnotationName: fmt.Sprintf(`{"default":{"mac_address":"%s","ip_address":"%s/24","role":"infrastructure-locked"}}`, testPod.podMAC, testPod.podIP)}
+			knetPod.Annotations = map[string]string{util.OvnPodAnnotationName: fmt.Sprintf(`{"default":{"mac_address":"%s","ip_address":"%s/24","role":"infrastructure-locked"}}`, testPod.podMAC, testPod.podIP)}
 			if testPod.hostNetwork {
 				knetPod.Spec.HostNetwork = true
 			}

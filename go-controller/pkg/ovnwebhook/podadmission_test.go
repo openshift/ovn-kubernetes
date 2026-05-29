@@ -20,7 +20,6 @@ import (
 	listersv1 "k8s.io/client-go/listers/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -86,16 +85,16 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: "old"},
+					Annotations: map[string]string{util.OvnPodAnnotationName: "old"},
 				},
 			},
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: "new"},
+					Annotations: map[string]string{util.OvnPodAnnotationName: "new"},
 				},
 			},
-			expectedErr: fmt.Errorf("user %q is not allowed to set the following annotations on pod: %q: %v", "system:nodes:node", podName, []string{types.OvnPodAnnotationName}),
+			expectedErr: fmt.Errorf("user %q is not allowed to set the following annotations on pod: %q: %v", "system:nodes:node", podName, []string{util.OvnPodAnnotationName}),
 		},
 		{
 			name: "error out if the request is not in context",
@@ -128,14 +127,14 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
@@ -152,18 +151,18 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName + "bad": "old"},
+					Annotations: map[string]string{util.OvnPodAnnotationName + "bad": "old"},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName + "bad": "new"},
+					Annotations: map[string]string{util.OvnPodAnnotationName + "bad": "new"},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
-			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to set the following annotations on pod: %q: %v", nodeName, podName, []string{types.OvnPodAnnotationName + "bad"}),
+			expectedErr: fmt.Errorf("ovnkube-node on node: %q is not allowed to set the following annotations on pod: %q: %v", nodeName, podName, []string{util.OvnPodAnnotationName + "bad"}),
 		},
 		{
 			name: "ovnkube-node can modify OvnPodAnnotationName annotation on a pod",
@@ -181,14 +180,14 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
@@ -209,18 +208,18 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["10.10.10.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["10.10.10.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
-			expectedErr: fmt.Errorf("user: %q is not allowed to set %s on pod %q: 10.10.10.10/24 does not belong to %s node", userName, types.OvnPodAnnotationName, podName, nodeName),
+			expectedErr: fmt.Errorf("user: %q is not allowed to set %s on pod %q: 10.10.10.10/24 does not belong to %s node", userName, util.OvnPodAnnotationName, podName, nodeName),
 		},
 		{
 			name: "ovnkube-node cannot set an IP in the OvnPodAnnotationName annotation on host-networked pods",
@@ -244,11 +243,11 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName, HostNetwork: true},
 			},
-			expectedErr: fmt.Errorf("user: %q is not allowed to set %s on pod %q: the annotation is not allowed on host networked pods", userName, types.OvnPodAnnotationName, podName),
+			expectedErr: fmt.Errorf("user: %q is not allowed to set %s on pod %q: the annotation is not allowed on host networked pods", userName, util.OvnPodAnnotationName, podName),
 		},
 		{
 			name: "ovnkube-node can use an IP in OvnPodAnnotationName annotation that belongs to a different node in kubevirt live-migration",
@@ -273,7 +272,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["10.10.10.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`,
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["10.10.10.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`,
 						kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation: ""},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
@@ -351,7 +350,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			oldObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 					Labels:      map[string]string{"key": "old"},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
@@ -359,7 +358,7 @@ func TestPodAdmission_ValidateUpdate(t *testing.T) {
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 					Labels:      map[string]string{"key": "new"},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
@@ -472,14 +471,14 @@ func TestPodAdmission_ValidateUpdateExtraUsers(t *testing.T) {
 			oldObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.10/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName},
 			},
@@ -506,11 +505,11 @@ func TestPodAdmission_ValidateUpdateExtraUsers(t *testing.T) {
 			newObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        podName,
-					Annotations: map[string]string{types.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
+					Annotations: map[string]string{util.OvnPodAnnotationName: `{"default":{"ip_addresses":["192.168.0.5/24"],"mac_address":"0a:58:0a:80:00:05"}}`},
 				},
 				Spec: corev1.PodSpec{NodeName: nodeName, HostNetwork: true},
 			},
-			expectedErr: fmt.Errorf("user: %q is not allowed to set %s on pod %q: the annotation is not allowed on host networked pods", extraUser, types.OvnPodAnnotationName, podName),
+			expectedErr: fmt.Errorf("user: %q is not allowed to set %s on pod %q: the annotation is not allowed on host networked pods", extraUser, util.OvnPodAnnotationName, podName),
 		},
 	}
 

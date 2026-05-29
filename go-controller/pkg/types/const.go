@@ -263,8 +263,6 @@ const (
 	//		"l2-network-b":"10"}
 	// }",
 	UDNLayer2NodeGRLRPTunnelIDAnnotation = "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids"
-	// OvnPodAnnotationName is the constant string representing the POD annotation key
-	OvnPodAnnotationName = OvnK8sPrefix + "/pod-networks"
 
 	// different user-defined network topology types defined in CNI netconf
 	Layer3Topology   = "layer3"
