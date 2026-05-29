@@ -601,7 +601,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3": "[Disabled:Unimplemented]",
 
-	"BGP: When default podNetwork is advertised when a client ovnk pod is created can connect to an external server and another cluster node after toggling default network advertisement off and back on": "[Disabled:Unimplemented]",
+	"BGP: When default podNetwork is advertised when a client ovnk pod is created can connect to an external server and another cluster node after toggling default network advertisement off and back on": "[Disabled:Unimplemented][Serial]",
 
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created tests are run towards the external agnhost echo server": "[Disabled:Unimplemented]",
 
@@ -840,6 +840,14 @@ var AppendedAnnotations = map[string]string{
 	"EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations": "[Suite:openshift/conformance/parallel]",
 
 	"EVPN: VTEP API validations api-server should reject invalid VTEP updates Invalid VTEP update configurations": "[Suite:openshift/conformance/parallel]",
+
+	"EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, and L2 MAC-VRF+IP-VRF recovers after FRR-K8s restart": "[Serial][Suite:openshift/conformance/serial]",
+
+	"EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, and L2 MAC-VRF+IP-VRF recovers after OVN-K restart": "[Serial][Suite:openshift/conformance/serial]",
+
+	"EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, and L2 MAC-VRF+IP-VRF recovers after node restart": "[Serial][Suite:openshift/conformance/serial]",
+
+	"EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, and L2 MAC-VRF+IP-VRF recovers after spine restart": "[Serial][Suite:openshift/conformance/serial]",
 
 	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Disabled:Unimplemented]",
 
@@ -1569,7 +1577,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Node IP and MAC address migration when when MAC address changes when a nodeport service is configured Ensures flows are updated when MAC address changes": "[Disabled:Unimplemented]",
 
-	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup": "[Disabled:Unimplemented]",
+	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup": "[Disabled:Unimplemented][Serial]",
 
 	"OVS CPU affinity pinning can be enabled on specific nodes by creating enable_dynamic_cpu_affinity file": "[Disabled:Unimplemented]",
 
