@@ -196,12 +196,12 @@ var _ = ginkgo.Describe("EVPN: disruptive actions with L3 IP-VRF, L2 MAC-VRF, an
 			).To(gomega.Succeed())
 
 			// Each network needs its own VTEP subnet to avoid CIDROverlap.
-			// randomVTEPSubnets returns (IPv4, IPv6) CIDR strings — validate the family we use.
-			l3VtepV4, _ := randomVTEPSubnets()
+			// Only IPv4 VTEP is supported; randomVTEPSubnets returns an IPv4 /24.
+			l3VtepV4 := randomVTEPSubnets()
 			gomega.Expect(l3VtepV4).NotTo(gomega.BeEmpty(), "randomVTEPSubnets IPv4 for L3 IP-VRF network")
-			l2VtepV4, _ := randomVTEPSubnets()
+			l2VtepV4 := randomVTEPSubnets()
 			gomega.Expect(l2VtepV4).NotTo(gomega.BeEmpty(), "randomVTEPSubnets IPv4 for L2 MAC-VRF network")
-			l2l3VtepV4, _ := randomVTEPSubnets()
+			l2l3VtepV4 := randomVTEPSubnets()
 			gomega.Expect(l2l3VtepV4).NotTo(gomega.BeEmpty(), "randomVTEPSubnets IPv4 for L2+L3 network")
 
 			// Three independent randomCUDNSubnets() draws can collide on /20 IPv4; Podman then

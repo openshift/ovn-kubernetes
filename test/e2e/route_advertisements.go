@@ -2017,8 +2017,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			if networkType == cudnAdvertisedEVPNRandomVTEP {
 				// Random VTEP subnets: IPs are added to loopback by the test
 				// and discovered by the node-side EVPN controller automatically
-				vtepV4, _ := randomVTEPSubnets()
-				vtepSubnets = []string{vtepV4}
+				vtepSubnets = []string{randomVTEPSubnets()}
 			} else {
 				// KIND network subnet: node InternalIPs fall within this range,
 				// so the node-side controller can discover them via host-cidrs.
