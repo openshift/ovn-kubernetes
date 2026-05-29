@@ -225,7 +225,15 @@ func computeProbability(n, i int) string {
 
 func generateSkipMgmtForLocalEndpoints(svcPort kapi.ServicePort, externalIP string, localEndpoints []string) []nodeipt.Rule {
 	iptRules := make([]nodeipt.Rule, 0, len(localEndpoints))
-	for _, localEndpoint := range localEndpoints {
+
+	// Get IPv4 or IPv6 IPs, depending on the type of the service's external IP.
+	ipv4Destinations, ipv6Destinations := splitDestinationsByAddressFamily(localEndpoints)
+	destinations := ipv4Destinations
+	if utilnet.IsIPv6String(externalIP) {
+		destinations = ipv6Destinations
+	}
+
+	for _, localEndpoint := range destinations {
 		if len(localEndpoint) == 0 {
 			continue
 		}
@@ -246,8 +254,16 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 		// fetching endpointSlices error-ed out prior to reaching here so nothing to do
 		return iptRules
 	}
-	numLocalEndpoints := len(localEndpoints)
-	for i, ip := range localEndpoints {
+
+	// Get IPv4 or IPv6 IPs, depending on the type of the service's external IP.
+	ipv4Destinations, ipv6Destinations := splitDestinationsByAddressFamily(localEndpoints)
+	destinations := ipv4Destinations
+	if utilnet.IsIPv6String(externalIP) {
+		destinations = ipv6Destinations
+	}
+
+	numLocalEndpoints := len(destinations)
+	for i, ip := range destinations {
 		iptRules = append([]nodeipt.Rule{
 			{
 				Table: "nat",
@@ -267,6 +283,20 @@ func generateIPTRulesForLoadBalancersWithoutNodePorts(svcPort kapi.ServicePort, 
 		}, iptRules...)
 	}
 	return iptRules
+}
+
+func splitDestinationsByAddressFamily(endpoints []string) (ipv4Destinations []string, ipv6Destinations []string) {
+	ipv4Destinations = make([]string, 0, len(endpoints))
+	ipv6Destinations = make([]string, 0, len(endpoints))
+
+	for _, endpoint := range endpoints {
+		if utilnet.IsIPv6String(endpoint) {
+			ipv6Destinations = append(ipv6Destinations, endpoint)
+			continue
+		}
+		ipv4Destinations = append(ipv4Destinations, endpoint)
+	}
+	return ipv4Destinations, ipv6Destinations
 }
 
 // getExternalIPTRules returns the IPTable DNAT rules for a service of type LB or ExternalIP
