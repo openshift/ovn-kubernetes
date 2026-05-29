@@ -6942,6 +6942,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 
 				nodeSwitch.QOSRules = []string{"default-QoS-UUID"}
 
+				namespaceAddressSetv4, _ := buildNamespaceAddressSets(eipNamespace, []string{egressPodIP.String()})
+
 				egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
 				egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{egressPodIP.String()}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
 				egressNodeIPsASv4, _ := buildEgressIPNodeAddressSets([]string{node1IPv4})
@@ -7033,6 +7035,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					egressSVCServedPodsASv4,
 					egressIPServedPodsASv4,
 					egressNodeIPsASv4,
+					namespaceAddressSetv4,
 				}
 				podLSP := &nbdb.LogicalSwitchPort{
 					UUID:      util.GetLogicalPortName(egressPod1.Namespace, egressPod1.Name) + "-UUID",
@@ -7062,6 +7065,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nodeSwitch.Ports = []string{"k8s-" + node1.Name + "-UUID"} // remove the pod port
 				egressIPServedPodsASv4.Addresses = nil
+				namespaceAddressSetv4.Addresses = nil
 				expectedDatabaseStateWithoutPod := []libovsdbtest.TestData{
 					&nbdb.LogicalRouterPolicy{
 						Priority: types.DefaultNoRereoutePriority,
@@ -7129,6 +7133,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					egressSVCServedPodsASv4,
 					egressIPServedPodsASv4,
 					egressNodeIPsASv4,
+					namespaceAddressSetv4,
 				}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDatabaseStateWithoutPod))
 				// recreate pod with same name immediately; simulating handler race (pods v/s egressip) condition,
@@ -7317,6 +7322,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				egressSVCServedPodsASv4, _ := buildEgressServiceAddressSets(nil)
 				egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{oldEgressPodIP}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
 				egressNodeIPsASv4, _ := buildEgressIPNodeAddressSets([]string{node1IPv4})
+				namespaceAddressSetv4, _ := buildNamespaceAddressSets(eipNamespace, []string{egressPodIP.String()})
 
 				expectedDatabaseStatewithPod := []libovsdbtest.TestData{
 					podEIPSNAT,
@@ -7381,6 +7387,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					getDefaultQoSRule(false, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName),
 					egressSVCServedPodsASv4,
 					egressNodeIPsASv4,
+					namespaceAddressSetv4,
 					egressIPServedPodsASv4,
 				}
 				podLSP := &nbdb.LogicalSwitchPort{
@@ -7462,6 +7469,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 				podAddr = fmt.Sprintf("%s %s", podPortInfo.mac.String(), egressPodIP)
 				podLSP.Addresses = []string{podAddr}
 				podLSP.PortSecurity = []string{podAddr}
+				namespaceAddressSetv4.Addresses = []string{egressPodIP.String()}
 				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalDatabaseStatewithPod))
 				return nil
 			}
@@ -7738,6 +7746,8 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 					egressIPServedPodsASv4, _ := buildEgressIPServedPodsAddressSets([]string{egressPodIP[0].String()}, types.DefaultNetworkName, fakeOvn.controller.eIPC.controllerName)
 					egressNodeIPsASv4, _ := buildEgressIPNodeAddressSets([]string{node1IPv4, node2IPv4})
 
+					namespaceAddressSetv4, _ := buildNamespaceAddressSets(eipNamespace, []string{egressPodIP[0].String()})
+
 					expectedDatabaseStatewithPod := []libovsdbtest.TestData{
 						podEIPSNAT,
 						podReRoutePolicy,
@@ -7799,6 +7809,7 @@ var _ = ginkgo.Describe("OVN master EgressIP Operations cluster default network"
 						egressSVCServedPodsASv4,
 						egressIPServedPodsASv4,
 						egressNodeIPsASv4,
+						namespaceAddressSetv4,
 					}
 					podLSP := &nbdb.LogicalSwitchPort{
 						UUID:      util.GetLogicalPortName(egressPod1.Namespace, egressPod1.Name) + "-UUID",

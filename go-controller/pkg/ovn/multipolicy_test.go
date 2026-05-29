@@ -222,7 +222,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(false)
+		fakeOvn = NewFakeOVN(true)
 
 		gomegaFormatMaxLength = format.MaxLength
 		format.MaxLength = 0
@@ -360,6 +360,12 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 		err = fakeOvn.controller.WatchNetworkPolicy()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+		ocInfo, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
+		gomega.Expect(ok).To(gomega.BeTrue())
+		asf := ocInfo.asf
+		gomega.Expect(asf).NotTo(gomega.BeNil())
+		gomega.Expect(asf.ControllerName).To(gomega.Equal(getNetworkControllerName(userDefinedNetworkName)))
+
 		for _, ocInfo := range fakeOvn.userDefinedNetworkControllers {
 			if watchNodes {
 				if ocInfo.bnc.TopologyType() == ovntypes.Layer3Topology && config.OVNKubernetesFeature.EnableInterconnect {
@@ -431,6 +437,10 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					Get(context.TODO(), mpolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				ocInfo := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
+				ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
+				ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName2)
+
 				expectedData := getNamespaceWithSinglePolicyExpectedData(
 					newNetpolDataParams(policy).
 						withNetInfo(netInfo),
@@ -472,6 +482,7 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					_, err = fakeOvn.fakeClient.KubeClient.NetworkingV1().NetworkPolicies(networkPolicy.Namespace).
 						Get(context.TODO(), networkPolicy.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					fakeOvn.asf.ExpectAddressSetWithAddresses(namespaceName1, []string{nPodTest.podIP})
 
 					dataParams := newNetpolDataParams(networkPolicy).
 						withLocalPortUUIDs(nPodTest.portUUID).
@@ -495,8 +506,10 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 						Get(context.TODO(), mpolicy.Name, metav1.GetOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+					ocInfo := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
 					portInfo := nPodTest.getNetworkPortInfo(userDefinedNetworkName, nadNamespacedName)
 					gomega.Expect(portInfo).NotTo(gomega.BeNil())
+					ocInfo.asf.ExpectAddressSetWithAddresses(namespaceName1, []string{portInfo.podIP})
 
 					dataParams2 := newNetpolDataParams(networkPolicy).
 						withLocalPortUUIDs(portInfo.portUUID).
@@ -662,14 +675,15 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 					Get(context.TODO(), mpolicy.Name, metav1.GetOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				ocInfo := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
 				portInfo := nPodTest.getNetworkPortInfo(userDefinedNetworkName, nadNamespacedName)
 				gomega.Expect(portInfo).NotTo(gomega.BeNil())
+				ocInfo.asf.ExpectAddressSetWithAddresses(namespaceName1, []string{portInfo.podIP})
 
 				dataParams2 := newNetpolDataParams(networkPolicy).
 					withLocalPortUUIDs(portInfo.portUUID).
 					withTCPPeerPorts(portNum).
-					withNetInfo(netInfo).
-					withPeerIPs(portInfo.podIP)
+					withNetInfo(netInfo)
 				gressPolicyExpectedData2 := getPolicyData(dataParams2)
 				defaultDenyExpectedData2 := getDefaultDenyData(dataParams2)
 				initData := getUpdatedInitialDB([]testPod{nPodTest})
