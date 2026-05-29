@@ -2112,11 +2112,10 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			if networkType == cudnAdvertisedEVPNUnmanagedRandomVTEP {
 				// Random VTEP subnets: IPs are added to loopback by the test
 				// and discovered by the node-side EVPN controller automatically
-				vtepV4, _ := randomVTEPSubnets()
-				vtepSubnets = []string{vtepV4}
-				bridgeName = "br" + networkName
-				vxlanName = "vx" + networkName
-				vtepName = networkName + "-vtep"
+			vtepSubnets = []string{randomVTEPSubnets()}
+			bridgeName = "br" + networkName
+			vxlanName = "vx" + networkName
+			vtepName = networkName + "-vtep"
 			} else {
 				// Shared VTEP: created by the first test that needs it,
 				// subsequent calls are idempotent (no-op). Never deleted.
