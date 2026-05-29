@@ -259,7 +259,7 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		if netInfo.GetNetworkName() == types.DefaultNetworkName {
 			return testing.NewPod(namespace, name, node, podIP)
 		} else {
-			return testing.NewPodWithSecondaryNADIP(namespace, name, node, "10.244.0.2", netInfo.GetNetworkName(), podIP)
+			return testing.NewPodWithSecondaryNADIP(namespace, name, node, "10.244.0.2", netInfo.GetNetworkName(), netInfo.GetNetworkName(), podIP)
 		}
 	}
 

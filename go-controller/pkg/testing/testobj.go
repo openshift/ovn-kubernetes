@@ -161,11 +161,11 @@ func NewPodWithPrimaryNADIP(namespace, name, node, defaultNetworkIP, nadName, na
 	return pod
 }
 
-func NewPodWithSecondaryNADIP(namespace, name, node, defaultNetworkIP, nadAndNetworkName, nadIP string) *corev1.Pod {
+func NewPodWithSecondaryNADIP(namespace, name, node, defaultNetworkIP, nadName, networkName, nadIP string) *corev1.Pod {
 	pod := NewPod(namespace, name, node, defaultNetworkIP)
 	pod.Annotations = map[string]string{
-		util.OvnPodAnnotationName:    fmt.Sprintf(`{%s,%s}`, getPodAnnotationDefault(defaultNetworkIP, false), getPodAnnotationSecondary(namespace, nadAndNetworkName, nadIP)),
-		nadv1.NetworkAttachmentAnnot: nadAndNetworkName,
+		util.OvnPodAnnotationName:    fmt.Sprintf(`{%s,%s}`, getPodAnnotationDefault(defaultNetworkIP, false), getPodAnnotationSecondary(namespace, nadName, nadIP)),
+		nadv1.NetworkAttachmentAnnot: networkName,
 	}
 	return pod
 }
