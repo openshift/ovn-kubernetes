@@ -2624,7 +2624,9 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			vtepName := networkName + "-vtep"
 			// IPv6 VTEPs are not yet supported
 			bgpAlloc.VTEPSubnet6 = ""
-			if networkType != cudnAdvertisedEVPNUnmanagedRandomVTEP {
+			if networkType == cudnAdvertisedEVPNUnmanagedRandomVTEP {
+				bgpAlloc.VTEPSubnet = randomVTEPSubnets()
+			} else {
 				// KIND network subnet: node InternalIPs fall within this range,
 				// so the node-side controller can discover them via host-cidrs.
 				kindNetwork, err := infraprovider.Get().PrimaryNetwork()

@@ -932,21 +932,21 @@ func randomN(n int) int {
 	return int(r.Int64())
 }
 
-// randomVTEPSubnets generates random VTEP subnets for parallel test isolation.
-// Uses /24 (254 usable IPs)
-// Randomizes both second and third octets within RFC 6598 shared address space
-// (100.64.0.0/10), giving 15,872 possible /24 subnets while avoiding:
+// randomVTEPSubnets generates a random VTEP subnet for parallel test isolation.
+// Uses /24 (254 usable IPs) within RFC 6598 shared address space (100.64.0.0/10),
+// giving 15,872 possible /24 subnets while avoiding:
 //   - 100.64.0.0/16 (default join subnet)
 //   - 100.65.0.0/16 (UDN primary join subnet)
 //
 // 100.88.0.0/16 (transit subnet) is NOT excluded because transit IPs are purely
 // internal to OVN's logical network and never appear on physical interfaces.
 // Safe second octets: 66-127 (62 values).
-// Returns IPv4 (/24) and IPv6 (/112) subnets.
-func randomVTEPSubnets() (ipv4, ipv6 string) {
+//
+// Only IPv4 is returned: IPv6 VTEPs are not supported for EVPN transport.
+func randomVTEPSubnets() string {
 	second := randomN(62) + 66 // 66-127
 	third := randomN(256)      // 0-255
-	return fmt.Sprintf("100.%d.%d.0/24", second, third), fmt.Sprintf("fd02:%x%02x::/112", second, third)
+	return fmt.Sprintf("100.%d.%d.0/24", second, third)
 }
 
 func getExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
@@ -969,30 +969,6 @@ func getExternalFRRIP(ipFamilySet sets.Set[utilnet.IPFamily]) (string, error) {
 		return "", fmt.Errorf("can't find external FRR IP on kind network")
 	}
 	return externalFRRIP, nil
-}
-
-// getExternalFRRIPs returns all IPs of the external FRR container that match the cluster's
-// IP families. Dual-stack returns both IPv4 and IPv6; single-stack returns one.
-func getExternalFRRIPs(ipFamilySet sets.Set[utilnet.IPFamily]) ([]string, error) {
-	kindNetwork, err := infraprovider.Get().PrimaryNetwork()
-	if err != nil {
-		return nil, err
-	}
-	frrNetIf, err := infraprovider.Get().GetExternalContainerNetworkInterface(infraapi.ExternalContainer{Name: externalFRRContainerName}, kindNetwork)
-	if err != nil {
-		return nil, err
-	}
-	var ips []string
-	if ipFamilySet.Has(utilnet.IPv4) && frrNetIf.IPv4 != "" {
-		ips = append(ips, frrNetIf.IPv4)
-	}
-	if ipFamilySet.Has(utilnet.IPv6) && frrNetIf.IPv6 != "" {
-		ips = append(ips, frrNetIf.IPv6)
-	}
-	if len(ips) == 0 {
-		return nil, fmt.Errorf("can't find external FRR IPs on kind network for families %v", ipFamilySet.UnsortedList())
-	}
-	return ips, nil
 }
 
 // vtepLoopbackHostCIDR returns ip/prefix for loopback add/del and host-cidrs checks (/32 or /128).
