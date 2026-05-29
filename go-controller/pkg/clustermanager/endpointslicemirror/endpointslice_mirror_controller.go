@@ -24,7 +24,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
-	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -129,7 +128,7 @@ func NewController(
 	}
 
 	c.queue = workqueue.NewTypedRateLimitingQueueWithConfig(
-		controllerutil.DefaultRateLimiter[string](),
+		workqueue.NewTypedItemFastSlowRateLimiter[string](1*time.Second, 5*time.Second, 5),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: c.name},
 	)
 

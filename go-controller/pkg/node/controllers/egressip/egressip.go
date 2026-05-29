@@ -36,7 +36,6 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	ovnconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	eipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 	egressiplisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/listers/egressip/v1"
@@ -159,20 +158,20 @@ func NewController(k kube.Interface, eIPInformer egressipinformer.EgressIPInform
 		eIPLister:   eIPInformer.Lister(),
 		eIPInformer: eIPInformer.Informer(),
 		eIPQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			controller.DefaultRateLimiter[string](),
+			workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 			workqueue.TypedRateLimitingQueueConfig[string]{Name: "eipeip"},
 		),
 		nodeLister:        corelisters.NewNodeLister(nodeInformer.GetIndexer()),
 		namespaceLister:   namespaceInformer.Lister(),
 		namespaceInformer: namespaceInformer.Informer(),
 		namespaceQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			controller.DefaultRateLimiter[*corev1.Namespace](),
+			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Namespace](time.Second, 5*time.Second, 5),
 			workqueue.TypedRateLimitingQueueConfig[*corev1.Namespace]{Name: "eipnamespace"},
 		),
 		podLister:   podInformer.Lister(),
 		podInformer: podInformer.Informer(),
 		podQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			controller.DefaultRateLimiter[*corev1.Pod](),
+			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Pod](time.Second, 5*time.Second, 5),
 			workqueue.TypedRateLimitingQueueConfig[*corev1.Pod]{Name: "eippods"},
 		),
 		getActiveNetworkForNamespace: getActiveNetworkForNamespaceFn,

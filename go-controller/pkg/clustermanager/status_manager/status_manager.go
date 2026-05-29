@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager/zone_tracker"
@@ -77,6 +79,7 @@ func newStatusManager[T any](name string, informer cache.SharedIndexInformer,
 	controllerConfig := &controller.ControllerConfig[T]{
 		Informer:       informer,
 		Lister:         lister,
+		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		ObjNeedsUpdate: m.needsUpdate,
 		Reconcile:      m.updateStatus,
 		Threadiness:    1,
