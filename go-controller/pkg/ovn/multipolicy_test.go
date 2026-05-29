@@ -531,6 +531,104 @@ var _ = ginkgo.Describe("OVN MultiNetworkPolicy Operations", func() {
 			ginkgo.Entry("with allow ICMP network policy enabled", true),
 		)
 
+		ginkgo.DescribeTable("correctly adds and deletes pod IPs from secondary network namespace address set",
+			func(topology string, remote bool) {
+				app.Action = func(*cli.Context) error {
+					var err error
+
+					subnets := "10.1.0.0/16"
+					nodeSubnet := ""
+					if topology == ovntypes.Layer3Topology {
+						subnets = subnets + "/24"
+						nodeSubnet = "10.1.1.0/24"
+					}
+
+					setUserDefinedNetworkTestData(topology, subnets) // here I set network role if layer2
+
+					watchNodes := true
+					node := *newNode(nodeName, "192.168.126.202/24")
+
+					// set L3 specific node annotations
+					if topology == ovntypes.Layer3Topology {
+						node.Annotations, err = util.UpdateNodeHostSubnetAnnotation(
+							node.Annotations,
+							ovntest.MustParseIPNets(nodeSubnet),
+							userDefinedNetworkName,
+						)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					}
+
+					// flag node as remote and set IC specific annotations
+					if remote {
+						config.OVNKubernetesFeature.EnableInterconnect = true
+						node.Annotations["k8s.ovn.org/zone-name"] = "remote"
+						node.Annotations, err = util.UpdateNetworkIDAnnotation(node.Annotations, ovntypes.DefaultNetworkName, 0)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						if topology != ovntypes.LocalnetTopology {
+							node.Annotations, err = util.UpdateNetworkIDAnnotation(node.Annotations, userDefinedNetworkName, 2)
+							gomega.Expect(err).NotTo(gomega.HaveOccurred())
+						}
+					}
+
+					namespace1 := *ovntest.NewNamespace(namespaceName1)
+
+					config.EnableMulticast = false
+					startOvn(initialDB, watchNodes, []corev1.Node{node}, []corev1.Namespace{namespace1}, nil, nil,
+						[]nettypes.NetworkAttachmentDefinition{*nad}, []testPod{}, map[string]string{labelName: labelVal})
+
+					ocInfo := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
+
+					// check that the node zone is tracked as expected
+					if topology != ovntypes.LocalnetTopology {
+						_, isLocal := ocInfo.bnc.localZoneNodes.Load(node.Name)
+						gomega.Expect(isLocal).NotTo(gomega.Equal(remote))
+					}
+
+					ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
+
+					nPodTest := getTestPod(namespace1.Name, nodeName)
+					nPodTest.addNetwork(userDefinedNetworkName, nadNamespacedName, nodeSubnet, "", "", "10.1.1.1", "0a:58:0a:01:01:01", "secondary", 1, nil)
+					knetPod := ovntest.NewPod(nPodTest.namespace, nPodTest.podName, nPodTest.nodeName, nPodTest.podIP)
+					addPodNetwork(knetPod, nPodTest.udnPodInfos)
+					setPodAnnotations(knetPod, nPodTest)
+					nPodTest.populateLogicalSwitchCache(fakeOvn)
+					nPodTest.populateUserDefinedNetworkLogicalSwitchCache(ocInfo)
+
+					ginkgo.By("Creating a pod attached to the secondary network")
+					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(nPodTest.namespace).Create(context.TODO(), knetPod, metav1.CreateOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					if topology == ovntypes.Layer2Topology && remote {
+						// add the transit switch port bindings on behalf of ovn-controller
+						// so that the added pod is eventually processed successfully
+						transistSwitchPortName := util.GetUserDefinedNetworkLogicalPortName(nPodTest.namespace, nPodTest.podName, nadNamespacedName)
+						transistSwitchName := netInfo.GetNetworkScopedName(ovntypes.OVNLayer2Switch)
+						err = libovsdb.CreateTransitSwitchPortBindings(fakeOvn.sbClient, transistSwitchName, transistSwitchPortName)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					}
+
+					ocInfo.asf.EventuallyExpectAddressSetWithAddresses(namespaceName1, []string{"10.1.1.1"})
+
+					// Delete the pod
+					ginkgo.By("Deleting the pod")
+					err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(nPodTest.namespace).Delete(context.TODO(), nPodTest.podName, metav1.DeleteOptions{})
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					ocInfo.asf.EventuallyExpectEmptyAddressSetExist(namespaceName1)
+
+					return nil
+				}
+
+				err := app.Run([]string{app.Name})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			},
+			ginkgo.Entry("on local zone for layer3 topology", ovntypes.Layer3Topology, false),
+			ginkgo.Entry("on remote zone for layer3 topology", ovntypes.Layer3Topology, true),
+			ginkgo.Entry("on local zone for layer2 topology", ovntypes.Layer2Topology, false),
+			ginkgo.Entry("on remote zone for layer2 topology", ovntypes.Layer2Topology, true),
+			ginkgo.Entry("on local zone for localnet topology", ovntypes.LocalnetTopology, false),
+			ginkgo.Entry("on remote zone for localnet topology", ovntypes.LocalnetTopology, true),
+		)
+
 		ginkgo.It("correctly creates, updates and deletes multi network policies", func() {
 			app.Action = func(*cli.Context) error {
 				config.OVNKubernetesFeature.EnableStatelessNetPol = true
