@@ -151,14 +151,16 @@ func (r *RetryFramework) DoWithLock(key string, f func(key string)) {
 
 func (r *RetryFramework) initRetryObjWithAddBackoff(obj interface{}, lockedKey string, backoff time.Duration) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoff: backoff})
+	entry, loaded := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoff: backoff})
 	entry.timeStamp = time.Now()
 	entry.newObj = obj
 	if _, isPod := obj.(*corev1.Pod); isPod {
 		// for pods we want to retry indefinitely
 		entry.infiniteRetry = true
 	}
-	entry.failedAttempts = 0
+	if !loaded {
+		entry.failedAttempts = 0
+	}
 	entry.backoff = backoff
 	return entry
 }
@@ -171,7 +173,7 @@ func (r *RetryFramework) initRetryObjWithAdd(obj interface{}, lockedKey string) 
 
 // initRetryObjWithUpdate tracks objects that failed to be updated to potentially retry later
 func (r *RetryFramework) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey string) *retryObjEntry {
-	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoff: initialBackoff})
+	entry, loaded := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoff: initialBackoff})
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
 	entry.timeStamp = time.Now()
 	entry.newObj = newObj
@@ -180,7 +182,9 @@ func (r *RetryFramework) initRetryObjWithUpdate(oldObj, newObj interface{}, lock
 		entry.infiniteRetry = true
 	}
 	entry.config = oldObj
-	entry.failedAttempts = 0
+	if !loaded {
+		entry.failedAttempts = 0
+	}
 	return entry
 }
 
@@ -195,7 +199,7 @@ func (r *RetryFramework) initRetryObjWithDelete(obj interface{}, lockedKey strin
 
 func (r *RetryFramework) initRetryObjWithDeleteBackoff(obj interface{}, lockedKey string, config interface{}, noRetryAdd bool, backoff time.Duration) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoff: initialBackoff})
+	entry, loaded := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoff: initialBackoff})
 	entry.timeStamp = time.Now()
 	entry.oldObj = obj
 	if _, isPod := obj.(*corev1.Pod); isPod {
@@ -205,7 +209,9 @@ func (r *RetryFramework) initRetryObjWithDeleteBackoff(obj interface{}, lockedKe
 	if entry.config == nil {
 		entry.config = config
 	}
-	entry.failedAttempts = 0
+	if !loaded {
+		entry.failedAttempts = 0
+	}
 	if noRetryAdd {
 		// will not be retried for addition
 		entry.newObj = nil

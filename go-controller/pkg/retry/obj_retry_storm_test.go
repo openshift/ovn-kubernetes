@@ -70,11 +70,11 @@ func newTestService() *corev1.Service {
 	}
 }
 
-// TestFailedAttemptsResetOnReAdd demonstrates the retry storm bug:
-// when an informer update event fires for a service that is already failing,
-// initRetryObjWithAdd resets failedAttempts to 0, preventing MaxFailedAttempts
-// from ever being reached. The service retries indefinitely.
-func TestFailedAttemptsResetOnReAdd(t *testing.T) {
+// TestFailedAttemptsPreservedOnReAdd verifies that when an informer update
+// event fires for a service that is already failing, initRetryObjWithAdd
+// preserves the existing failedAttempts counter. The entry is correctly
+// dropped after MaxFailedAttempts even with update events between retries.
+func TestFailedAttemptsPreservedOnReAdd(t *testing.T) {
 	svc := newTestService()
 	handler := &alwaysFailHandler{
 		obj: svc,
@@ -102,51 +102,42 @@ func TestFailedAttemptsResetOnReAdd(t *testing.T) {
 		t.Fatalf("expected failedAttempts=1 after first retry, got %d", entry.failedAttempts)
 	}
 
-	// Simulate an informer update event: this calls initRetryObjWithAdd,
-	// which resets failedAttempts to 0. This is the bug.
+	// Simulate an informer update event: initRetryObjWithAdd must preserve
+	// failedAttempts for an already-existing entry.
 	rf.DoWithLock(key, func(k string) {
 		rf.initRetryObjWithAdd(svc, k)
 	})
 
 	entry, _ = GetRetryObj(key, rf)
-	if entry.failedAttempts != 0 {
-		t.Fatalf("expected failedAttempts=0 after re-add (demonstrating the bug), got %d",
+	if entry.failedAttempts != 1 {
+		t.Fatalf("expected failedAttempts=1 preserved after re-add, got %d",
 			entry.failedAttempts)
 	}
 
-	// Now simulate the full storm: retry + re-add in a loop, well past MaxFailedAttempts.
-	// The entry should never be dropped because each re-add resets the counter.
-	totalCycles := MaxFailedAttempts + 5
-	for i := 0; i < totalCycles; i++ {
-		// Clear backoff so resourceRetry doesn't skip due to timer.
+	// Simulate retry + update event cycles past MaxFailedAttempts.
+	// The entry should be dropped once MaxFailedAttempts is reached.
+	for i := 1; i < MaxFailedAttempts+5; i++ {
+		if !CheckRetryObj(key, rf) {
+			t.Logf("Fix confirmed: entry dropped after %d total failed attempts "+
+				"(MaxFailedAttempts=%d) despite update events between retries",
+				i, MaxFailedAttempts)
+			return
+		}
 		SetRetryObjWithNoBackoff(key, rf)
-
 		rf.resourceRetry(key, time.Now())
 
-		// Simulate the update event that arrives between retry sweeps.
-		rf.DoWithLock(key, func(k string) {
-			rf.initRetryObjWithAdd(svc, k)
-		})
+		// Simulate update event between retry sweeps.
+		if CheckRetryObj(key, rf) {
+			rf.DoWithLock(key, func(k string) {
+				rf.initRetryObjWithAdd(svc, k)
+			})
+		}
 	}
 
-	// The entry should still exist — MaxFailedAttempts was never reached
-	// because every update event reset failedAttempts to 0.
-	if !CheckRetryObj(key, rf) {
-		t.Fatalf("retry entry was dropped after %d cycles, but should have survived "+
-			"indefinitely due to failedAttempts reset (the retry storm bug)", totalCycles)
+	if CheckRetryObj(key, rf) {
+		t.Fatalf("entry should have been dropped after MaxFailedAttempts=%d "+
+			"even with update events between retries", MaxFailedAttempts)
 	}
-
-	// Verify AddResource was called on every cycle (no retries were skipped).
-	// 1 initial + totalCycles = total calls.
-	expectedCalls := 1 + totalCycles
-	if handler.addCalls != expectedCalls {
-		t.Fatalf("expected AddResource to be called %d times, got %d",
-			expectedCalls, handler.addCalls)
-	}
-
-	t.Logf("Bug confirmed: entry survived %d retry cycles (MaxFailedAttempts=%d) "+
-		"because update events reset failedAttempts to 0 each time",
-		totalCycles, MaxFailedAttempts)
 }
 
 // TestFailedAttemptsNotResetReachesMax is the control case: without update
