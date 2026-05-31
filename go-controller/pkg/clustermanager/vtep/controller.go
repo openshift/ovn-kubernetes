@@ -242,6 +242,19 @@ func (c *Controller) reconcileVTEP(key string) error {
 			reasonEVPNIPv6NotSupported, err.Error())
 	}
 
+	if err := c.validateManagedCIDRsAgainstNodeIPs(vtep); err != nil {
+		existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
+		if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonCIDROverlap || existingCond.Message != err.Error() {
+			vtepRef, refErr := reference.GetReference(vtepscheme.Scheme, vtep)
+			if refErr != nil {
+				return fmt.Errorf("failed to get object reference for VTEP %s: %w", vtep.Name, refErr)
+			}
+			c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonCIDROverlap, err.Error())
+		}
+		return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
+			reasonCIDROverlap, err.Error())
+	}
+
 	// When a VTEP transitions from Managed to Unmanaged, clean up the
 	// CM-written annotations and drop the allocator so the node-side
 	// controller can take over.
@@ -490,6 +503,56 @@ func (c *Controller) validateCIDRsAcrossVTEPs(vtep *vtepv1.VTEP) error {
 	return errors.Join(errs...)
 }
 
+// validateManagedCIDRsAgainstNodeIPs checks that a managed VTEP's CIDRs do
+// not overlap with any node's host IPs (from k8s.ovn.org/host-cidrs). If the
+// allocator hands out an IP that is already assigned to a node's primary
+// interface, two nodes would claim the same IP on the same L2 segment.
+// Unmanaged VTEPs are skipped because the user controls IP assignment.
+func (c *Controller) validateManagedCIDRsAgainstNodeIPs(vtep *vtepv1.VTEP) error {
+	if vtep.Spec.Mode != vtepv1.VTEPModeManaged {
+		return nil
+	}
+
+	vtepCIDRs, err := parseVTEPCIDRs(vtep)
+	if err != nil {
+		return err
+	}
+
+	nodes, err := c.nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	// We check every node because nodes can be on different subnets
+	// (multi-rack, multi-AZ). A VTEP CIDR might overlap with one
+	// subnet but not another, so we can't short-circuit after one node.
+	var overlapping []string
+	for _, node := range nodes {
+		hostCIDRStrs, err := util.ParseNodeHostCIDRs(node)
+		if err != nil {
+			continue
+		}
+		hostNets := make([]*net.IPNet, 0, hostCIDRStrs.Len())
+		for cidr := range hostCIDRStrs {
+			_, ipNet, err := net.ParseCIDR(cidr)
+			if err != nil {
+				continue
+			}
+			hostNets = append(hostNets, ipNet)
+		}
+		if util.NetworksOverlap(vtepCIDRs, hostNets) {
+			overlapping = append(overlapping, node.Name)
+		}
+	}
+
+	if len(overlapping) > 0 {
+		sort.Strings(overlapping)
+		return fmt.Errorf("managed VTEP CIDRs overlap with node host IPs on nodes: [%s]",
+			strings.Join(overlapping, ", "))
+	}
+	return nil
+}
+
 // requeueConflictingVTEPs re-queues VTEPs whose Accepted=False/CIDROverlap
 // condition message mentions the deleted VTEP by name, so they can
 // re-evaluate whether their conflicts are resolved.
@@ -540,8 +603,16 @@ func parseVTEPCIDRs(vtep *vtepv1.VTEP) ([]*net.IPNet, error) {
 
 // validateNodeVTEPIPs validates that every node has a VTEP IP entry in the
 // k8s.ovn.org/vteps annotation for this VTEP. For unmanaged mode, ovnkube-node
-// discovers IPs and writes the annotation; this controller only reads and
-// validates. The RA controller reads the same annotation when generating FRR
+// discovers IPs from local interfaces and writes the annotation; this
+// controller only checks that each node has a non-empty entry.
+//
+// We intentionally do not verify that the annotated IPs fall within the VTEP's
+// configured CIDRs. The node-side controller is the authority for unmanaged
+// VTEPs: it has visibility into local interfaces and filters out VIPs /
+// secondary addresses before writing the annotation. If the node writes an
+// out-of-range IP, that is a node-side misconfiguration, not something the CM
+// should reject — doing so would create a fight between the two controllers.
+// The RA controller reads the same annotation when generating FRR
 // configurations.
 func (c *Controller) validateNodeVTEPIPs(vtep *vtepv1.VTEP) error {
 	nodes, err := c.nodeLister.List(labels.Everything())
@@ -604,6 +675,13 @@ func (c *Controller) validateNodeVTEPIPs(vtep *vtepv1.VTEP) error {
 // stability — nodes keep the same VTEP IPs they had before the switch.
 // Out-of-range IPs (e.g. CIDRs changed before the switch) are skipped and
 // a fresh IP is allocated in step 2.
+//
+// User action required before switching to Managed: the user must remove
+// any VTEP IPs from custom dummy/loopback interfaces on the nodes. If
+// those IPs remain, they appear in k8s.ovn.org/host-cidrs and
+// validateManagedCIDRsAgainstNodeIPs will reject the VTEP with
+// CIDROverlap. The managed-mode node controller (evlo-* devices) handles
+// IP configuration automatically once the CM accepts the VTEP.
 func (c *Controller) handleManagedMode(vtep *vtepv1.VTEP) error {
 	allocator, err := c.getOrUpdateAllocator(vtep)
 	if err != nil {

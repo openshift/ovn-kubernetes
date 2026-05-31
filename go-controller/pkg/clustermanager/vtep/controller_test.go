@@ -1145,6 +1145,54 @@ var _ = ginkgo.Describe("VTEP Controller", func() {
 		})
 	})
 
+	ginkgo.Context("Managed VTEP CIDR vs node host IP validation", func() {
+		ginkgo.It("sets Accepted=False when managed VTEP CIDRs overlap with node host IPs", func() {
+			node := newNodeWithVTEPAnnotation("node-1", nil)
+			hostCIDRs, _ := json.Marshal([]string{"192.168.1.10/24"})
+			node.Annotations = map[string]string{util.OVNNodeHostCIDRs: string(hostCIDRs)}
+			vtep := newVTEP("vtep-host-overlap", vtepv1.VTEPModeManaged, "192.168.1.0/24")
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-host-overlap", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionFalse),
+				gomega.HaveField("Reason", gomega.Equal(reasonCIDROverlap)),
+				gomega.HaveField("Message", gomega.ContainSubstring("node-1")),
+			))
+		})
+
+		ginkgo.It("sets Accepted=True when managed VTEP CIDRs do not overlap with node host IPs", func() {
+			node := newNodeWithVTEPAnnotation("node-1", nil)
+			hostCIDRs, _ := json.Marshal([]string{"192.168.1.10/24"})
+			node.Annotations = map[string]string{util.OVNNodeHostCIDRs: string(hostCIDRs)}
+			vtep := newVTEP("vtep-no-host-overlap", vtepv1.VTEPModeManaged, "10.0.0.0/24")
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-no-host-overlap", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+
+		ginkgo.It("skips validation for unmanaged VTEPs", func() {
+			node := newNodeWithVTEPAnnotation("node-1", map[string][]string{"vtep-unmanaged-hostip": {"192.168.1.50"}})
+			hostCIDRs, _ := json.Marshal([]string{"192.168.1.10/24"})
+			node.Annotations[util.OVNNodeHostCIDRs] = string(hostCIDRs)
+			vtep := newVTEP("vtep-unmanaged-hostip", vtepv1.VTEPModeUnmanaged, "192.168.1.0/24")
+			start(vtep, node)
+
+			gomega.Eventually(func() (*metav1.Condition, error) {
+				return getVTEPCondition(fakeVTEP, "vtep-unmanaged-hostip", conditionTypeAccepted)
+			}).WithTimeout(5 * time.Second).Should(gomega.SatisfyAll(
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", gomega.Equal(reasonAllocated)),
+			))
+		})
+	})
+
 	ginkgo.Context("Unmanaged mode", func() {
 		ginkgo.It("sets Accepted=True with no nodes", func() {
 			vtep := newVTEP("unmanaged-no-nodes", vtepv1.VTEPModeUnmanaged, "100.64.0.0/24")
