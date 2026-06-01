@@ -84,7 +84,7 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 							if !strings.Contains(lowerLine, "token:") ||
 								(strings.Contains(lowerLine, "token:") && !strings.Contains(lowerLine, "token: ")) {
 								// This might be an actual token
-								if strings.Contains(lowerLine, "ey") || // JWT tokens start with "ey"
+								if strings.Contains(lowerLine, "eyj") || // JWT tokens start with "eyJ"
 									strings.Contains(lowerLine, "bearer ") {
 									podViolations++
 									break
