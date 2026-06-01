@@ -28,6 +28,7 @@ import (
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
@@ -1961,15 +1962,6 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		bgpASN = 64512
 	)
 
-	randomBGPPeerSubnets := func() (ipv4, ipv6 string) {
-		// 8192 possible /29 subnets in 172.36.0.0/16
-		n := randomN(8192)
-		// 32 /29-aligned slots per third octet (256/8), so divide to get octet pair
-		third := n / 32
-		fourth := (n % 32) * 8
-		return fmt.Sprintf("172.36.%d.%d/29", third, fourth), fmt.Sprintf("fc00:%x::/112", n)
-	}
-
 	// configuration helper to setup infra
 	configureNetworkWithInfra := func(
 		f *framework.Framework,
@@ -1979,21 +1971,20 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		networkName string,
 		networkType networkType,
 		networkSpec *udnv1.NetworkSpec,
+		bgpAlloc allocators.BGPAllocation,
 	) (*corev1.Namespace, []string) {
 		ginkgo.GinkgoHelper()
+
+		framework.Logf("Configuring the infra for network %s of type %s with allocations %#v", networkName, networkType, bgpAlloc)
 
 		var servers []string
 		switch networkType {
 		case cudnAdvertisedVRFLite:
-			ginkgo.By("Running a BGP network with an agnhost server")
+			ginkgo.By("Running an external BGP network")
 			agnhostName := networkName + "-vrflite-agnhost"
 			agnhostNetworkName := agnhostName
-			bgpPeerSubnetV4, bgpPeerSubnetV6 := randomBGPPeerSubnets()
-			bgpPeerCIDRs := []string{bgpPeerSubnetV4, bgpPeerSubnetV6}
-			framework.Logf("Networks allocated for VRF-Lite BGP peers: %v", bgpPeerCIDRs)
-			bgpServerSubnetV4, bgpServerSubnetV6 := randomIPVRFAgnhostSubnets()
-			bgpServerCIDRs := []string{bgpServerSubnetV4, bgpServerSubnetV6}
-			framework.Logf("Networks allocated for VRF-Lite Agnhost servers: %v", bgpServerCIDRs)
+			bgpPeerCIDRs := []string{bgpAlloc.BGPPeerSubnet, bgpAlloc.BGPPeerSubnet6}
+			bgpServerCIDRs := []string{bgpAlloc.IPVRFSubnet, bgpAlloc.IPVRFSubnet6}
 			gomega.Expect(
 				runBGPNetworkAndServer(
 					f,
@@ -2007,28 +1998,24 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				),
 			).To(gomega.Succeed())
 			servers = append(servers, agnhostName)
-		case cudnAdvertisedEVPN, cudnAdvertisedEVPNRandomVTEP:
-			ginkgo.By("Running a EVPN network with an agnhost server")
-			ipVRFAgnhostIPv4, ipVRFAgnhostIPv6 := randomIPVRFAgnhostSubnets()
-			ipVRFAgnhostSubnets := []string{ipVRFAgnhostIPv4, ipVRFAgnhostIPv6}
-			framework.Logf("Networks allocated for EVPN Agnhost servers: %v", ipVRFAgnhostSubnets)
+		case cudnAdvertisedEVPNUnmanagedSharedVTEP, cudnAdvertisedEVPNUnmanagedRandomVTEP:
+			ginkgo.By("Running an external EVPN network")
 
-			var vtepSubnets []string
-			if networkType == cudnAdvertisedEVPNRandomVTEP {
-				// Random VTEP subnets: IPs are added to loopback by the test
-				// and discovered by the node-side EVPN controller automatically
-				vtepV4, _ := randomVTEPSubnets()
-				vtepSubnets = []string{vtepV4}
-			} else {
+			bridgeName := "br" + networkName
+			vxlanName := "vx" + networkName
+			vtepName := networkName + "-vtep"
+			// IPv6 VTEPs are not yet supported
+			bgpAlloc.VTEPSubnet6 = ""
+			if networkType != cudnAdvertisedEVPNUnmanagedRandomVTEP {
 				// KIND network subnet: node InternalIPs fall within this range,
 				// so the node-side controller can discover them via host-cidrs.
 				kindNetwork, err := infraprovider.Get().PrimaryNetwork()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				kindV4Subnet, _, err := kindNetwork.IPv4IPv6Subnets()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				vtepSubnets = []string{kindV4Subnet}
+				bgpAlloc.VTEPSubnet = kindV4Subnet
+				vtepName = sharedNodeIPsVTEPName
 			}
-			framework.Logf("Networks used for EVPN VTEPs: %v", vtepSubnets)
 
 			macVRFContainer := infraapi.ExternalContainer{
 				Name:    networkName + "-macvrf-agnhost",
@@ -2049,9 +2036,11 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 					networkName,
 					ipFamilySet,
 					networkSpec,
-					ipVRFAgnhostSubnets,
-					vtepSubnets,
+					bgpAlloc,
 					bgpASN,
+					bridgeName,
+					vxlanName,
+					vtepName,
 					&macVRFContainer,
 					macVRFNetworkName,
 					&ipVRFContainer,
@@ -2066,7 +2055,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			}
 		}
 
-		ginkgo.By("Configuring the namespace and network")
+		ginkgo.By("Configuring the namespace and CUDN")
 		testNamespace, err := createNamespaceWithPrimaryNetworkOfType(f, ictx, testName, networkName, networkType, networkSpec)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -2224,68 +2213,68 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 	})
 
 	// define networks to test with
-	layer3NetworkSpecGen := func() *udnv1.NetworkSpec {
+	layer3NetworkSpecGen := func(udnIPv4, udnIPv6 string, _ allocators.BGPAllocation) *udnv1.NetworkSpec {
 		return &udnv1.NetworkSpec{
 			Topology: udnv1.NetworkTopologyLayer3,
 			Layer3: &udnv1.Layer3Config{
 				Role:    "Primary",
-				Subnets: randomL3CUDNSubnets(),
+				Subnets: []udnv1.Layer3Subnet{{CIDR: udnv1.CIDR(udnIPv4)}, {CIDR: udnv1.CIDR(udnIPv6)}},
 			},
 		}
 	}
-	layer2NetworkSpecGen := func() *udnv1.NetworkSpec {
+	layer2NetworkSpecGen := func(udnIPv4, udnIPv6 string, _ allocators.BGPAllocation) *udnv1.NetworkSpec {
 		return &udnv1.NetworkSpec{
 			Topology: udnv1.NetworkTopologyLayer2,
 			Layer2: &udnv1.Layer2Config{
 				Role:    "Primary",
-				Subnets: randomL2CUDNSubnets(),
+				Subnets: udnv1.DualStackCIDRs{udnv1.CIDR(udnIPv4), udnv1.CIDR(udnIPv6)},
 			},
 		}
 	}
-	layer2MACVRFNetworkSpecGen := func() *udnv1.NetworkSpec {
+	layer2MACVRFNetworkSpecGen := func(udnIPv4, udnIPv6 string, bgpAlloc allocators.BGPAllocation) *udnv1.NetworkSpec {
 		return &udnv1.NetworkSpec{
 			Topology: udnv1.NetworkTopologyLayer2,
 			Layer2: &udnv1.Layer2Config{
 				Role:    udnv1.NetworkRolePrimary,
-				Subnets: randomL2CUDNSubnets(),
+				Subnets: udnv1.DualStackCIDRs{udnv1.CIDR(udnIPv4), udnv1.CIDR(udnIPv6)},
 			},
 			Transport: udnv1.TransportOptionEVPN,
 			EVPN: &udnv1.EVPNConfig{
 				MACVRF: &udnv1.VRFConfig{
-					VNI: randomVNI(),
+					VNI: int32(bgpAlloc.MACVRFVNI),
 				},
 			},
 		}
 	}
-	layer2MACVRFIPVRFNetworkSpecGen := func() *udnv1.NetworkSpec {
+	layer2MACVRFIPVRFNetworkSpecGen := func(udnIPv4, udnIPv6 string, bgpAlloc allocators.BGPAllocation) *udnv1.NetworkSpec {
 		return &udnv1.NetworkSpec{
 			Topology: udnv1.NetworkTopologyLayer2,
 			Layer2: &udnv1.Layer2Config{
 				Role:    udnv1.NetworkRolePrimary,
-				Subnets: randomL2CUDNSubnets(),
+				Subnets: udnv1.DualStackCIDRs{udnv1.CIDR(udnIPv4), udnv1.CIDR(udnIPv6)},
 			},
 			Transport: udnv1.TransportOptionEVPN,
 			EVPN: &udnv1.EVPNConfig{
 				MACVRF: &udnv1.VRFConfig{
-					VNI: randomVNI(),
+					VNI: int32(bgpAlloc.MACVRFVNI),
 				},
 				IPVRF: &udnv1.VRFConfig{
-					VNI: randomVNI(),
+					VNI: int32(bgpAlloc.IPVRFVNI),
 				},
 			},
 		}
 	}
-	layer3IPVRFNetworkSpecGen := func() *udnv1.NetworkSpec {
+	layer3IPVRFNetworkSpecGen := func(udnIPv4, udnIPv6 string, bgpAlloc allocators.BGPAllocation) *udnv1.NetworkSpec {
 		return &udnv1.NetworkSpec{
 			Topology: udnv1.NetworkTopologyLayer3,
 			Layer3: &udnv1.Layer3Config{
 				Role:    udnv1.NetworkRolePrimary,
-				Subnets: randomL3CUDNSubnets(),
+				Subnets: []udnv1.Layer3Subnet{{CIDR: udnv1.CIDR(udnIPv4)}, {CIDR: udnv1.CIDR(udnIPv6)}},
 			},
 			Transport: udnv1.TransportOptionEVPN,
 			EVPN: &udnv1.EVPNConfig{
 				IPVRF: &udnv1.VRFConfig{
-					VNI: randomVNI(),
+					VNI: int32(bgpAlloc.IPVRFVNI),
 				},
 			},
 		}
@@ -2294,16 +2283,16 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 	networksToTest := []ginkgo.TableEntry{
 		ginkgo.Entry("Layer 3 CUDN VRF-Lite", cudnAdvertisedVRFLite, layer3NetworkSpecGen),
 		ginkgo.Entry("Layer 2 CUDN VRF-Lite", cudnAdvertisedVRFLite, layer2NetworkSpecGen),
-		ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF", feature.EVPN, cudnAdvertisedEVPN, layer3IPVRFNetworkSpecGen),
-		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF", feature.EVPN, cudnAdvertisedEVPN, layer2MACVRFNetworkSpecGen),
-		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF", feature.EVPN, cudnAdvertisedEVPN, layer2MACVRFIPVRFNetworkSpecGen),
-		ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer3IPVRFNetworkSpecGen),
-		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer2MACVRFNetworkSpecGen),
-		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer2MACVRFIPVRFNetworkSpecGen),
+		ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF shared VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedSharedVTEP, layer3IPVRFNetworkSpecGen),
+		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF shared VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedSharedVTEP, layer2MACVRFNetworkSpecGen),
+		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedSharedVTEP, layer2MACVRFIPVRFNetworkSpecGen),
+		ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer3IPVRFNetworkSpecGen),
+		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer2MACVRFNetworkSpecGen),
+		ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer2MACVRFIPVRFNetworkSpecGen),
 	}
 
 	ginkgo.DescribeTableSubtree("When the tested network is of type",
-		func(testedNetworkType networkType, networkSpecGen func() *udnv1.NetworkSpec) {
+		func(testedNetworkType networkType, networkSpecGen func(string, string, allocators.BGPAllocation) *udnv1.NetworkSpec) {
 			var testNamespace *corev1.Namespace
 			var testPod *corev1.Pod
 
@@ -2324,7 +2313,11 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			}
 
 			ginkgo.BeforeEach(func() {
-				networkSpec := networkSpecGen()
+				bgpAlloc, err := allocators.AllocateBGP(f, ictx)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				udnIPv4, udnIPv6 := bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6
+
+				networkSpec := networkSpecGen(udnIPv4, udnIPv6, bgpAlloc)
 				switch {
 				case networkSpec.Layer3 != nil:
 					networkSpec.Layer3.Subnets = matchL3SubnetsByIPFamilies(ipFamilySet, networkSpec.Layer3.Subnets...)
@@ -2340,6 +2333,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 					testNetworkName,
 					testedNetworkType,
 					networkSpec,
+					bgpAlloc,
 				)
 			})
 
@@ -2590,7 +2584,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 
 				ginkgo.Describe("When there is other network", func() {
 
-					nilNetworkSpecGen := func() *udnv1.NetworkSpec {
+					nilNetworkSpecGen := func(string, string, allocators.BGPAllocation) *udnv1.NetworkSpec {
 						return nil
 					}
 
@@ -2602,16 +2596,16 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						ginkgo.Entry("Layer 3 CUDN advertised", cudnAdvertised, layer3NetworkSpecGen),
 						ginkgo.Entry("Layer 2 UDN", udn, layer2NetworkSpecGen),
 						ginkgo.Entry("Layer 2 CUDN advertised", cudnAdvertised, layer2NetworkSpecGen),
-						ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF", feature.EVPN, cudnAdvertisedEVPN, layer3IPVRFNetworkSpecGen),
-						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF", feature.EVPN, cudnAdvertisedEVPN, layer2MACVRFNetworkSpecGen),
-						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF", feature.EVPN, cudnAdvertisedEVPN, layer2MACVRFIPVRFNetworkSpecGen),
-						ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer3IPVRFNetworkSpecGen),
-						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer2MACVRFNetworkSpecGen),
-						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNRandomVTEP, layer2MACVRFIPVRFNetworkSpecGen),
+						ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF shared VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedSharedVTEP, layer3IPVRFNetworkSpecGen),
+						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF shared VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedSharedVTEP, layer2MACVRFNetworkSpecGen),
+						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedSharedVTEP, layer2MACVRFIPVRFNetworkSpecGen),
+						ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer3IPVRFNetworkSpecGen),
+						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer2MACVRFNetworkSpecGen),
+						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer2MACVRFIPVRFNetworkSpecGen),
 					}
 
 					ginkgo.DescribeTableSubtree("Of type",
-						func(networkType networkType, otherNetworkSpecGen func() *udnv1.NetworkSpec) {
+						func(networkType networkType, otherNetworkSpecGen func(string, string, allocators.BGPAllocation) *udnv1.NetworkSpec) {
 							var otherNamespace *corev1.Namespace
 							var otherNetworkName string
 
@@ -2619,7 +2613,11 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 								otherNetworkName = testBaseName + "o"
 								otherNamespaceName := otherNetworkName
 
-								otherNetworkSpec := otherNetworkSpecGen()
+								otherBGPAlloc, err := allocators.AllocateBGP(f, ictx)
+								gomega.Expect(err).NotTo(gomega.HaveOccurred())
+								otherUDNIPv4, otherUDNIPv6 := otherBGPAlloc.UDNSubnet, otherBGPAlloc.UDNSubnet6
+
+								otherNetworkSpec := otherNetworkSpecGen(otherUDNIPv4, otherUDNIPv6, otherBGPAlloc)
 								switch {
 								case otherNetworkSpec == nil:
 									otherNetworkName = "default"
@@ -2637,6 +2635,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 									otherNamespaceName,
 									networkType,
 									otherNetworkSpec,
+									otherBGPAlloc,
 								)
 							})
 
@@ -3065,13 +3064,13 @@ func runBGPNetworkAndServer(
 type networkType string
 
 const (
-	defaultNetwork               networkType = "DEFAULT"
-	udn                          networkType = "UDN"
-	cudn                         networkType = "CUDN"
-	cudnAdvertised               networkType = "CUDN_ADVERTISED"
-	cudnAdvertisedVRFLite        networkType = "CUDN_ADVERTISED_VRFLITE"
-	cudnAdvertisedEVPN           networkType = "CUDN_ADVERTISED_EVPN"
-	cudnAdvertisedEVPNRandomVTEP networkType = "CUDN_ADVERTISED_EVPN_RANDOM_VTEP"
+	defaultNetwork                        networkType = "DEFAULT"
+	udn                                   networkType = "UDN"
+	cudn                                  networkType = "CUDN"
+	cudnAdvertised                        networkType = "CUDN_ADVERTISED"
+	cudnAdvertisedVRFLite                 networkType = "CUDN_ADVERTISED_VRFLITE"
+	cudnAdvertisedEVPNUnmanagedSharedVTEP networkType = "CUDN_ADVERTISED_EVPN_UNMANAGED_SHARED_VTEP"
+	cudnAdvertisedEVPNUnmanagedRandomVTEP networkType = "CUDN_ADVERTISED_EVPN_UNMANAGED_RANDOM_VTEP"
 )
 
 // createNamespaceWithPrimaryNetworkOfType helper function configures a
@@ -3094,7 +3093,7 @@ func createNamespaceWithPrimaryNetworkOfType(
 	case cudnAdvertised:
 		networkLabels = map[string]string{"advertise": networkName}
 		frrConfigurationLabels = map[string]string{"name": "receive-all"}
-	case cudnAdvertisedVRFLite, cudnAdvertisedEVPN, cudnAdvertisedEVPNRandomVTEP:
+	case cudnAdvertisedVRFLite, cudnAdvertisedEVPNUnmanagedSharedVTEP, cudnAdvertisedEVPNUnmanagedRandomVTEP:
 		targetVRF = networkName
 		networkLabels = map[string]string{"advertise": networkName}
 		frrConfigurationLabels = map[string]string{"network": networkName}

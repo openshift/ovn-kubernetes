@@ -1,22 +1,33 @@
 package infraprovider
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
+	allocator "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/allocator"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container/network"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/runner"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
@@ -33,10 +44,43 @@ const (
 	externalFRRContainerName   = "frr"
 )
 
+const (
+	ipvlanPrimaryNetNameIPv4      = "ostestbm-ipvlan-v4"
+	ipvlanPrimaryNetNameIPv6      = "ostestbm-ipvlan-v6"
+	ipvlanPrimaryNetNameDualStack = "ostestbm-ipvlan-dual"
+	// Ipvlan uses separate subnet from machine network to avoid IP allocation conflicts
+	// Machine network: 192.168.111.0/24, Ipvlan network: 192.168.112.0/24
+	ipvlanPrimaryNetIPv4        = "192.168.112.0/24"
+	ipvlanPrimaryNetIPv4Gateway = "192.168.112.1"
+	// IPv6 subnet for ipvlan (fd2e:6f44:5dd8:c957::/120) is separate from
+	// machine network IPv6 subnet (fd2e:6f44:5dd8:c956::/120)
+	ipvlanPrimaryNetIPv6        = "fd2e:6f44:5dd8:c957::/120"
+	ipvlanPrimaryNetIPv6Gateway = "fd2e:6f44:5dd8:c957::1"
+)
+
+const (
+	// VNI valid range is 1-16777215 (24-bit)
+	vniMax          = 16777215
+	infraNetworkKey = "ocp-infra-network"
+)
+
+// networkState contains state shared across baremetalInfra clones created by GetExternalContainerContextProvider.
+// All map access must be protected by the mutex.
+type networkState struct {
+	sync.Mutex                                                            // protects networkVNIMap and containerNetworkInterfaces
+	networkVNIMap              map[string]int                             // maps network name to VNI for VXLAN overlay networks
+	containerNetworkInterfaces map[string]map[string]api.NetworkInterface // containerName -> networkName -> interface info
+}
+
 type baremetalInfra struct {
-	engine               *container.Engine
-	machineNetwork       api.Network           // contains subnet details about cluster machine network
-	machineNetworkGwInfo *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	kubeClient                        kubernetes.Interface
+	testContext                       *testcontext.TestContext
+	engine                            *container.Engine
+	runner                            api.Runner            // SSH runner for executing commands on hypervisor
+	machineNetwork                    api.Network           // contains subnet details about cluster machine network
+	machineNetworkGwInfo              *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	primaryNetworkBackendForContainer api.Network           // ipvlan network which is a container network backend for cluster machine network
+	networkState                      *networkState         // shared state across clones
 }
 
 func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
@@ -48,6 +92,10 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	}
 	if sshRunner == nil {
 		return nil, nil
+	}
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve kubernetes client: %w", err)
 	}
 	configClient, err := configclient.NewForConfig(config)
 	if err != nil {
@@ -62,13 +110,20 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if infra.Spec.PlatformSpec.Type != configv1.BareMetalPlatformType {
 		return nil, nil
 	}
-	ci := &baremetalInfra{}
+	ci := &baremetalInfra{
+		kubeClient: kubeClient,
+		networkState: &networkState{
+			networkVNIMap:              make(map[string]int),
+			containerNetworkInterfaces: make(map[string]map[string]api.NetworkInterface),
+		},
+	}
 	// Verify SSH connectivity works
 	if _, err := sshRunner.Run("echo", "connection test"); err != nil {
 		return nil, fmt.Errorf("failed to check frr container status, connectivity check failed with hypervisor: %w", err)
 	}
 	// Initialize podman container engine
 	ci.engine = container.NewEngine("podman", sshRunner)
+	ci.runner = sshRunner
 	// just mimic machine network with ContainerEngineNetwork to make it
 	// compatibile with api.Network API.
 	machineNetwork := &network.ContainerEngineNetwork{NetName: primaryNetworkName}
@@ -88,7 +143,111 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve hypervisor node interface for machine network: %w", err)
 	}
+
+	// Configure firewall on hypervisor to allow VXLAN traffic (port 5789/udp)
+	if err := configureFirewallForVXLAN(sshRunner, ci.machineNetworkGwInfo.InfName); err != nil {
+		framework.Logf("Warning: failed to configure firewall for VXLAN: %v", err)
+	}
+
+	// Create ipvlan network based on IP family configuration
+	if ci.machineNetworkGwInfo.IPv4 != "" && ci.machineNetworkGwInfo.IPv6 != "" {
+		// Dual-stack configuration
+		if err := createIpvlanNetwork(sshRunner, ipvlanPrimaryNetNameDualStack, ci.machineNetworkGwInfo.InfName,
+			ipvlanPrimaryNetIPv4, ipvlanPrimaryNetIPv4Gateway,
+			ipvlanPrimaryNetIPv6, ipvlanPrimaryNetIPv6Gateway); err != nil {
+			return nil, fmt.Errorf("failed to create dual-stack ipvlan container network for primary machine network: %w", err)
+		}
+		ci.primaryNetworkBackendForContainer = &network.ContainerEngineNetwork{NetName: ipvlanPrimaryNetNameDualStack,
+			Configs: []network.ContainerEngineNetworkConfig{
+				{Subnet: ipvlanPrimaryNetIPv4, Gateway: ipvlanPrimaryNetIPv4Gateway},
+				{Subnet: ipvlanPrimaryNetIPv6, Gateway: ipvlanPrimaryNetIPv6Gateway}}}
+	} else if ci.machineNetworkGwInfo.IPv6 != "" {
+		// IPv6-only configuration
+		if err := createIpvlanNetwork(sshRunner, ipvlanPrimaryNetNameIPv6, ci.machineNetworkGwInfo.InfName,
+			"", "", ipvlanPrimaryNetIPv6, ipvlanPrimaryNetIPv6Gateway); err != nil {
+			return nil, fmt.Errorf("failed to create IPv6 ipvlan container network for primary machine network: %w", err)
+		}
+		ci.primaryNetworkBackendForContainer = &network.ContainerEngineNetwork{NetName: ipvlanPrimaryNetNameIPv6,
+			Configs: []network.ContainerEngineNetworkConfig{{Subnet: ipvlanPrimaryNetIPv6, Gateway: ipvlanPrimaryNetIPv6Gateway}}}
+	} else if ci.machineNetworkGwInfo.IPv4 != "" {
+		// IPv4-only configuration
+		if err := createIpvlanNetwork(sshRunner, ipvlanPrimaryNetNameIPv4, ci.machineNetworkGwInfo.InfName,
+			ipvlanPrimaryNetIPv4, ipvlanPrimaryNetIPv4Gateway, "", ""); err != nil {
+			return nil, fmt.Errorf("failed to create IPv4 ipvlan container network for primary machine network: %w", err)
+		}
+		ci.primaryNetworkBackendForContainer = &network.ContainerEngineNetwork{NetName: ipvlanPrimaryNetNameIPv4,
+			Configs: []network.ContainerEngineNetworkConfig{{Subnet: ipvlanPrimaryNetIPv4, Gateway: ipvlanPrimaryNetIPv4Gateway}}}
+	}
 	return ci, nil
+}
+
+// configureFirewallForVXLAN configures firewall on hypervisor to allow VXLAN traffic.
+func configureFirewallForVXLAN(runner api.Runner, interfaceName string) error {
+	// Get the firewall zone of the interface
+	zone, err := runner.Run("firewall-cmd", "--get-zone-of-interface="+interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to get firewall zone for interface %s: %w", interfaceName, err)
+	}
+	zone = strings.TrimSpace(zone)
+
+	// Add port 5789/udp to the interface's zone
+	if _, err := runner.Run("firewall-cmd", "--zone="+zone, "--add-port=5789/udp", "--permanent"); err != nil {
+		return fmt.Errorf("failed to add firewall port 5789/udp to zone %s: %w", zone, err)
+	}
+
+	// Reload firewall to apply changes
+	if _, err := runner.Run("firewall-cmd", "--reload"); err != nil {
+		return fmt.Errorf("failed to reload firewall: %w", err)
+	}
+
+	framework.Logf("configured firewall for VXLAN: added port 5789/udp to zone %s on interface %s", zone, interfaceName)
+	return nil
+}
+
+// createIpvlanNetwork creates an ipvlan L3 network with the specified configuration.
+// It checks if the network already exists to support idempotent initialization.
+// For IPv4-only, pass empty strings for v6Subnet and v6Gateway.
+// For IPv6-only, pass empty strings for v4Subnet and v4Gateway.
+func createIpvlanNetwork(runner api.Runner, networkName, parentInterface, v4Subnet, v4Gateway, v6Subnet, v6Gateway string) error {
+	// Check if network already exists (idempotency)
+	existingNets, err := runner.Run("podman", "network", "ls", "--format", "{{.Name}}")
+	if err != nil {
+		return fmt.Errorf("failed to list existing networks: %w", err)
+	}
+	if slices.Contains(strings.Split(strings.TrimSpace(existingNets), "\n"), networkName) {
+		framework.Logf("ipvlan network %s already exists, skipping creation", networkName)
+		return nil
+	}
+
+	// Build podman network create command
+	args := []string{"network", "create", "-d", "ipvlan"}
+
+	// Add IPv4 configuration if provided
+	if v4Subnet != "" {
+		args = append(args, fmt.Sprintf("--subnet=%s", v4Subnet))
+		args = append(args, fmt.Sprintf("--gateway=%s", v4Gateway))
+	}
+
+	// Add IPv6 configuration if provided
+	if v6Subnet != "" {
+		args = append(args, fmt.Sprintf("--subnet=%s", v6Subnet))
+		args = append(args, fmt.Sprintf("--gateway=%s", v6Gateway))
+		args = append(args, "--ipv6")
+	}
+
+	// Add ipvlan-specific options
+	args = append(args, "-o", fmt.Sprintf("parent=%s", parentInterface))
+	args = append(args, "-o", "mode=l3")
+	args = append(args, networkName)
+
+	// Create the network
+	if _, err := runner.Run("podman", args...); err != nil {
+		return fmt.Errorf("failed to create ipvlan network %s: %w", networkName, err)
+	}
+
+	framework.Logf("created ipvlan L3 network %s (parent: %s, v4: %s, v6: %s)",
+		networkName, parentInterface, v4Subnet, v6Subnet)
+	return nil
 }
 
 func (ci *baremetalInfra) GetNetwork(name string) (api.Network, error) {
@@ -147,18 +306,70 @@ func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.Ext
 				IPv4Prefix:  ci.machineNetworkGwInfo.IPv4Prefix,
 				IPv6Prefix:  ci.machineNetworkGwInfo.IPv6Prefix},
 			nil
+	} else if network.Name() == primaryNetworkName {
+		network = ci.primaryNetworkBackendForContainer
+		return ci.engine.GetNetworkInterface(container.Name, network.Name())
 	}
+
+	// Check if this is a VXLAN overlay network
+	ci.networkState.Lock()
+	netInterface, ok := ci.networkState.containerNetworkInterfaces[container.Name][network.Name()]
+	ci.networkState.Unlock()
+
+	if ok {
+		return netInterface, nil
+	}
+
+	// Fall back to engine for other networks
 	return ci.engine.GetNetworkInterface(container.Name, network.Name())
 }
 
 func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
 	ciWithTestContext := &baremetalInfra{
-		engine: ci.engine.WithTestContext(context)}
+		testContext:                       context,
+		engine:                            ci.engine.WithTestContext(context),
+		kubeClient:                        ci.kubeClient,
+		runner:                            ci.runner,
+		machineNetwork:                    ci.machineNetwork,
+		machineNetworkGwInfo:              ci.machineNetworkGwInfo,
+		primaryNetworkBackendForContainer: ci.primaryNetworkBackendForContainer,
+		networkState:                      ci.networkState, // Share the same state and mutex across clones
+	}
 	return ciWithTestContext
 }
 
 func (ci *baremetalInfra) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	return ci.engine.CreateExternalContainer(container)
+	var networkToBeAttached api.Network
+	if container.Network != nil && container.Network.Name() == primaryNetworkName {
+		container.Network = ci.primaryNetworkBackendForContainer
+	} else if container.Network != nil {
+		networkToBeAttached = container.Network
+		// for other networks, let's create container first and plump the network afterwards.
+		container.Network = nil
+	}
+	container, err := ci.engine.CreateExternalContainer(container)
+	if err != nil {
+		return container, err
+	}
+	if networkToBeAttached == nil {
+		return container, nil
+	}
+
+	// Attach VXLAN overlay network to container
+	netInterface, err := ci.attachVXLANNetwork(networkToBeAttached, container.Name)
+	if err != nil {
+		if delErr := ci.engine.DeleteExternalContainer(container); delErr != nil {
+			return container, fmt.Errorf("failed to attach network %s to container %s: %w (rollback delete failed: %v)",
+				networkToBeAttached.Name(), container.Name, err, delErr)
+		}
+		return container, fmt.Errorf("failed to attach network %s to container %s: %w", networkToBeAttached.Name(), container.Name, err)
+	}
+
+	// Assign allocated IPs to container
+	container.IPv4 = netInterface.IPv4
+	container.IPv6 = netInterface.IPv6
+
+	return container, nil
 }
 
 func (ci *baremetalInfra) DeleteExternalContainer(container api.ExternalContainer) error {
@@ -166,18 +377,212 @@ func (ci *baremetalInfra) DeleteExternalContainer(container api.ExternalContaine
 }
 
 func (ci *baremetalInfra) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	return ci.engine.CreateNetwork(name, subnets...)
+	vni, err := allocators.AllocateInt(ci.kubeClient, infraNetworkKey, vniMax)
+	if err != nil {
+		return nil, fmt.Errorf("VNI allocation failed for network %s: %w", name, err)
+	}
+	ci.testContext.AddCleanUpFn(func() error {
+		return allocators.DeallocateInt(ci.kubeClient, infraNetworkKey, vni)
+	})
+
+	// Parse subnets - expecting at most 2 subnets (IPv4 and/or IPv6)
+	var ipv4Subnet, ipv6Subnet string
+	var ipv4Gateway, ipv6Gateway string
+
+	for _, subnet := range subnets {
+		ip, ipNet, err := net.ParseCIDR(subnet)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse subnet %s: %w", subnet, err)
+		}
+		// Calculate gateway IP (first IP in subnet)
+		gateway := incrementIP(ipNet.IP)
+		prefixLen := maskBits(ipNet.Mask)
+		gatewayWithPrefix := fmt.Sprintf("%s/%d", gateway.String(), prefixLen)
+
+		if ip.To4() != nil {
+			ipv4Subnet = subnet
+			ipv4Gateway = gatewayWithPrefix
+		} else {
+			ipv6Subnet = subnet
+			ipv6Gateway = gatewayWithPrefix
+		}
+	}
+
+	// Get bridge and VXLAN interface names from VNI
+	bridgeName := vxlanBridgeName(vni)
+	vxlanName := vxlanInterfaceName(vni)
+
+	// Create Linux bridge
+	if _, err := ci.runner.Run("ip", "link", "add", bridgeName, "type", "bridge"); err != nil {
+		return nil, fmt.Errorf("failed to create bridge %s: %w", bridgeName, err)
+	}
+
+	// Configure IPv4 gateway on bridge if present
+	if ipv4Subnet != "" {
+		if _, err := ci.runner.Run("ip", "addr", "add", ipv4Gateway, "dev", bridgeName); err != nil {
+			ci.runner.Run("ip", "link", "delete", bridgeName)
+			return nil, fmt.Errorf("failed to add IPv4 address to bridge %s: %w", bridgeName, err)
+		}
+	}
+
+	// Configure IPv6 gateway on bridge if present
+	if ipv6Subnet != "" {
+		if _, err := ci.runner.Run("ip", "-6", "addr", "add", ipv6Gateway, "dev", bridgeName); err != nil {
+			ci.runner.Run("ip", "link", "delete", bridgeName)
+			return nil, fmt.Errorf("failed to add IPv6 address to bridge %s: %w", bridgeName, err)
+		}
+	}
+
+	// Bring up bridge
+	if _, err := ci.runner.Run("ip", "link", "set", bridgeName, "up"); err != nil {
+		ci.runner.Run("ip", "link", "delete", bridgeName)
+		return nil, fmt.Errorf("failed to bring up bridge %s: %w", bridgeName, err)
+	}
+
+	// Determine local VTEP IP (prefer IPv4 if available, otherwise IPv6)
+	localVTEP := ci.machineNetworkGwInfo.IPv4
+	if localVTEP == "" {
+		localVTEP = ci.machineNetworkGwInfo.IPv6
+	}
+
+	// Create VXLAN interface
+	vxlanArgs := []string{
+		"link", "add", vxlanName, "type", "vxlan",
+		"id", fmt.Sprintf("%d", vni),
+		"local", localVTEP,
+		"dstport", "5789",
+		"nolearning",
+		"dev", ci.machineNetworkGwInfo.InfName,
+	}
+	if _, err := ci.runner.Run("ip", vxlanArgs...); err != nil {
+		ci.runner.Run("ip", "link", "delete", bridgeName)
+		return nil, fmt.Errorf("failed to create VXLAN interface %s: %w", vxlanName, err)
+	}
+
+	// Attach VXLAN interface to bridge
+	if _, err := ci.runner.Run("ip", "link", "set", vxlanName, "master", bridgeName); err != nil {
+		ci.runner.Run("ip", "link", "delete", vxlanName)
+		ci.runner.Run("ip", "link", "delete", bridgeName)
+		return nil, fmt.Errorf("failed to attach VXLAN %s to bridge %s: %w", vxlanName, bridgeName, err)
+	}
+
+	// Bring up VXLAN interface
+	if _, err := ci.runner.Run("ip", "link", "set", vxlanName, "up"); err != nil {
+		ci.runner.Run("ip", "link", "delete", vxlanName)
+		ci.runner.Run("ip", "link", "delete", bridgeName)
+		return nil, fmt.Errorf("failed to bring up VXLAN interface %s: %w", vxlanName, err)
+	}
+
+	// Store VNI mapping for later use in network attachment
+	ci.networkState.Lock()
+	ci.networkState.networkVNIMap[name] = vni
+	ci.networkState.Unlock()
+
+	// Add cleanup for VXLAN and bridge
+	ci.testContext.AddCleanUpFn(func() error {
+		ci.runner.Run("ip", "link", "delete", vxlanName)
+		ci.runner.Run("ip", "link", "delete", bridgeName)
+		ci.networkState.Lock()
+		delete(ci.networkState.networkVNIMap, name)
+		ci.networkState.Unlock()
+		return nil
+	})
+
+	framework.Logf("created VXLAN overlay network %s (bridge: %s, vxlan: %s, vni: %d, local: %s, dev: %s)",
+		name, bridgeName, vxlanName, vni, localVTEP, ci.machineNetworkGwInfo.InfName)
+
+	// Build and return network object
+	vxlanNetwork := &network.ContainerEngineNetwork{NetName: name}
+	var configs []network.ContainerEngineNetworkConfig
+
+	if ipv4Subnet != "" {
+		// Extract gateway IP without prefix for the config
+		gateway := strings.Split(ipv4Gateway, "/")[0]
+		configs = append(configs, network.ContainerEngineNetworkConfig{
+			Subnet:  ipv4Subnet,
+			Gateway: gateway,
+		})
+	}
+
+	if ipv6Subnet != "" {
+		// Extract gateway IP without prefix for the config
+		gateway := strings.Split(ipv6Gateway, "/")[0]
+		configs = append(configs, network.ContainerEngineNetworkConfig{
+			Subnet:  ipv6Subnet,
+			Gateway: gateway,
+		})
+	}
+
+	vxlanNetwork.Configs = configs
+
+	return vxlanNetwork, nil
 }
 
-func (ci *baremetalInfra) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
-	return ci.engine.AttachNetwork(network, container)
+func (ci *baremetalInfra) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
+	if network.Name() == primaryNetworkName {
+		return ci.engine.AttachNetwork(ci.primaryNetworkBackendForContainer, instance)
+	}
+
+	// Try container attachment first by checking if we can get container PID
+	pidStr, err := ci.runner.Run("podman", "inspect", "-f", "{{.State.Pid}}", instance)
+	if err == nil && strings.TrimSpace(pidStr) != "" {
+		// It's a container
+		return ci.attachVXLANNetwork(network, instance)
+	}
+
+	// Fall back to node attachment
+	return ci.attachVXLANNetworkToNode(network, instance)
 }
 
-func (ci *baremetalInfra) DetachNetwork(network api.Network, container string) error {
-	return ci.engine.DetachNetwork(network, container)
+func (ci *baremetalInfra) DetachNetwork(network api.Network, instance string) error {
+	if network.Name() == primaryNetworkName {
+		return ci.engine.DetachNetwork(ci.primaryNetworkBackendForContainer, instance)
+	}
+
+	// Check if instance is a container by trying to get PID
+	_, err := ci.runner.Run("podman", "inspect", "-f", "{{.State.Pid}}", instance)
+	if err == nil {
+		// It's a container
+		return ci.detachVXLANNetwork(network.Name(), instance)
+	}
+
+	// Fall back to node detachment
+	return ci.detachVXLANNetworkFromNode(network.Name(), instance)
 }
 
 func (ci *baremetalInfra) DeleteNetwork(network api.Network) error {
+	// Check if this is a VXLAN overlay network
+	ci.networkState.Lock()
+	vni, ok := ci.networkState.networkVNIMap[network.Name()]
+	ci.networkState.Unlock()
+
+	if ok {
+		// Delete VXLAN overlay infrastructure
+		vxlanName := vxlanInterfaceName(vni)
+		bridgeName := vxlanBridgeName(vni)
+
+		// Delete VXLAN interface
+		if _, err := ci.runner.Run("ip", "link", "delete", vxlanName); err != nil {
+			framework.Logf("Warning: failed to delete VXLAN interface %s: %v", vxlanName, err)
+		}
+
+		// Delete bridge
+		if _, err := ci.runner.Run("ip", "link", "delete", bridgeName); err != nil {
+			framework.Logf("Warning: failed to delete bridge %s: %v", bridgeName, err)
+		}
+
+		// Remove from VNI map
+		ci.networkState.Lock()
+		delete(ci.networkState.networkVNIMap, network.Name())
+		ci.networkState.Unlock()
+
+		framework.Logf("deleted VXLAN overlay network %s (bridge: %s, vxlan: %s, vni: %d)",
+			network.Name(), bridgeName, vxlanName, vni)
+
+		return nil
+	}
+
+	// Not a VXLAN overlay network, delegate to engine
 	return ci.engine.DeleteNetwork(network)
 }
 
@@ -360,4 +765,525 @@ func ipInCIDR(ipStr, cidrStr string) (bool, error) {
 		return false, err
 	}
 	return ipNet.Contains(ip), nil
+}
+
+// incrementIP returns the next IP address by incrementing the given IP by 1.
+// This is used to calculate the gateway IP as the first usable IP in a subnet.
+func incrementIP(ip net.IP) net.IP {
+	result := make(net.IP, len(ip))
+	copy(result, ip)
+	for i := len(result) - 1; i >= 0; i-- {
+		result[i]++
+		if result[i] != 0 {
+			break
+		}
+	}
+	return result
+}
+
+// maskBits returns the number of bits set in the network mask.
+func maskBits(mask net.IPMask) int {
+	ones, _ := mask.Size()
+	return ones
+}
+
+// vxlanBridgeName returns the bridge name for a given VNI.
+// Bridge names are limited to 15 characters by Linux kernel.
+func vxlanBridgeName(vni int) string {
+	return fmt.Sprintf("tbr%d", vni)
+}
+
+// vxlanInterfaceName returns the VXLAN interface name for a given VNI.
+// Interface names are limited to 15 characters by Linux kernel.
+func vxlanInterfaceName(vni int) string {
+	return fmt.Sprintf("tvx%d", vni)
+}
+
+// vethHostName returns the host-side veth name (vh<hash><vni>, max 14 chars).
+func vethHostName(containerName string, vni int) string {
+	hash := containerNameHash(containerName)
+	return fmt.Sprintf("vh%s%d", hash, vni)
+}
+
+// vethContainerName returns the container-side veth name (vc<hash><vni>, max 14 chars).
+func vethContainerName(containerName string, vni int) string {
+	hash := containerNameHash(containerName)
+	return fmt.Sprintf("vc%s%d", hash, vni)
+}
+
+// containerNameHash returns a 4-character hex hash of the container name.
+func containerNameHash(name string) string {
+	h := sha256.Sum256([]byte(name))
+	return hex.EncodeToString(h[:])[:4]
+}
+
+// attachVXLANNetwork attaches a VXLAN overlay network to a container using veth pairs.
+// It allocates IPs from the network subnets (excluding gateway IPs), creates veth pair,
+// attaches host-side to bridge, moves container-side into container namespace, and configures routing.
+func (ci *baremetalInfra) attachVXLANNetwork(network api.Network, containerName string) (api.NetworkInterface, error) {
+	// Get VNI for this network
+	ci.networkState.Lock()
+	vni, ok := ci.networkState.networkVNIMap[network.Name()]
+	ci.networkState.Unlock()
+
+	if !ok {
+		return api.NetworkInterface{}, fmt.Errorf("VNI not found for network %s", network.Name())
+	}
+
+	// Get bridge name for this VNI
+	bridgeName := vxlanBridgeName(vni)
+
+	// Get veth interface names
+	vethHost := vethHostName(containerName, vni)
+	vethCont := vethContainerName(containerName, vni)
+
+	// Get container PID
+	pidStr, err := ci.runner.Run("podman", "inspect", "-f", "{{.State.Pid}}", containerName)
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get container PID for %s: %w", containerName, err)
+	}
+	containerPID := strings.TrimSpace(pidStr)
+
+	// Get network subnets
+	ipv4Subnet, ipv6Subnet, err := network.IPv4IPv6Subnets()
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get network subnets for %s: %w", network.Name(), err)
+	}
+
+	netInterface := api.NetworkInterface{InfName: vethCont}
+
+	// Allocate IPv4 address if IPv4 subnet exists
+	if ipv4Subnet != "" {
+		// Get gateway IP to reserve it
+		_, ipv4Net, err := net.ParseCIDR(ipv4Subnet)
+		if err != nil {
+			return api.NetworkInterface{}, fmt.Errorf("failed to parse IPv4 subnet %s: %w", ipv4Subnet, err)
+		}
+		gatewayIP := incrementIP(ipv4Net.IP).String()
+
+		// Allocate IP from subnet excluding gateway
+		allocatedIP, err := allocator.AllocateIPWithReserved(ci.kubeClient, ci.testContext, ipv4Subnet, []string{gatewayIP})
+		if err != nil {
+			return api.NetworkInterface{}, fmt.Errorf("failed to allocate IPv4 from %s: %w", ipv4Subnet, err)
+		}
+		netInterface.IPv4 = allocatedIP
+		netInterface.IPv4Gateway = gatewayIP
+		netInterface.IPv4Prefix = ipv4Subnet
+	}
+
+	// Allocate IPv6 address if IPv6 subnet exists
+	if ipv6Subnet != "" {
+		// Get gateway IP to reserve it
+		_, ipv6Net, err := net.ParseCIDR(ipv6Subnet)
+		if err != nil {
+			return api.NetworkInterface{}, fmt.Errorf("failed to parse IPv6 subnet %s: %w", ipv6Subnet, err)
+		}
+		gatewayIP := incrementIP(ipv6Net.IP).String()
+
+		// Allocate IP from subnet excluding gateway
+		allocatedIP, err := allocator.AllocateIPv6WithReserved(ci.kubeClient, ci.testContext, ipv6Subnet, []string{gatewayIP})
+		if err != nil {
+			return api.NetworkInterface{}, fmt.Errorf("failed to allocate IPv6 from %s: %w", ipv6Subnet, err)
+		}
+		netInterface.IPv6 = allocatedIP
+		netInterface.IPv6Gateway = gatewayIP
+		netInterface.IPv6Prefix = ipv6Subnet
+	}
+
+	// Create veth pair
+	if _, err := ci.runner.Run("ip", "link", "add", vethHost, "type", "veth", "peer", "name", vethCont); err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to create veth pair %s/%s: %w", vethHost, vethCont, err)
+	}
+
+	// Attach host-side veth to bridge
+	if _, err := ci.runner.Run("ip", "link", "set", vethHost, "master", bridgeName); err != nil {
+		ci.runner.Run("ip", "link", "delete", vethHost)
+		return api.NetworkInterface{}, fmt.Errorf("failed to attach %s to bridge %s: %w", vethHost, bridgeName, err)
+	}
+
+	// Bring up host-side veth
+	if _, err := ci.runner.Run("ip", "link", "set", vethHost, "up"); err != nil {
+		ci.runner.Run("ip", "link", "delete", vethHost)
+		return api.NetworkInterface{}, fmt.Errorf("failed to bring up %s: %w", vethHost, err)
+	}
+
+	// Move container-side veth into container namespace
+	if _, err := ci.runner.Run("ip", "link", "set", vethCont, "netns", containerPID); err != nil {
+		ci.runner.Run("ip", "link", "delete", vethHost)
+		return api.NetworkInterface{}, fmt.Errorf("failed to move %s to container namespace: %w", vethCont, err)
+	}
+
+	// Configure IPv4 address in container if allocated
+	if netInterface.IPv4 != "" {
+		_, ipv4Net, _ := net.ParseCIDR(ipv4Subnet)
+		prefixLen := maskBits(ipv4Net.Mask)
+		ipWithPrefix := fmt.Sprintf("%s/%d", netInterface.IPv4, prefixLen)
+		if _, err := ci.runner.Run("nsenter", "-t", containerPID, "-n", "ip", "addr", "add", ipWithPrefix, "dev", vethCont); err != nil {
+			ci.runner.Run("ip", "link", "delete", vethHost)
+			return api.NetworkInterface{}, fmt.Errorf("failed to configure IPv4 %s on %s: %w", ipWithPrefix, vethCont, err)
+		}
+	}
+
+	// Configure IPv6 address in container if allocated
+	if netInterface.IPv6 != "" {
+		_, ipv6Net, _ := net.ParseCIDR(ipv6Subnet)
+		prefixLen := maskBits(ipv6Net.Mask)
+		ipWithPrefix := fmt.Sprintf("%s/%d", netInterface.IPv6, prefixLen)
+		if _, err := ci.runner.Run("nsenter", "-t", containerPID, "-n", "ip", "addr", "add", ipWithPrefix, "dev", vethCont); err != nil {
+			ci.runner.Run("ip", "link", "delete", vethHost)
+			return api.NetworkInterface{}, fmt.Errorf("failed to configure IPv6 %s on %s: %w", ipWithPrefix, vethCont, err)
+		}
+	}
+
+	// Bring up container-side veth
+	if _, err := ci.runner.Run("nsenter", "-t", containerPID, "-n", "ip", "link", "set", vethCont, "up"); err != nil {
+		ci.runner.Run("ip", "link", "delete", vethHost)
+		return api.NetworkInterface{}, fmt.Errorf("failed to bring up %s in container: %w", vethCont, err)
+	}
+
+	// Bring up loopback
+	if _, err := ci.runner.Run("nsenter", "-t", containerPID, "-n", "ip", "link", "set", "lo", "up"); err != nil {
+		ci.runner.Run("ip", "link", "delete", vethHost)
+		return api.NetworkInterface{}, fmt.Errorf("failed to bring up loopback in container: %w", err)
+	}
+
+	// Add default routes via the veth interface
+	if netInterface.IPv4 != "" {
+		if _, err := ci.runner.Run("nsenter", "-t", containerPID, "-n", "ip", "-4", "route", "add", "default", "dev", vethCont); err != nil {
+			ci.runner.Run("ip", "link", "delete", vethHost)
+			return api.NetworkInterface{}, fmt.Errorf("failed to add IPv4 default route in container: %w", err)
+		}
+	}
+
+	if netInterface.IPv6 != "" {
+		if _, err := ci.runner.Run("nsenter", "-t", containerPID, "-n", "ip", "-6", "route", "add", "default", "dev", vethCont); err != nil {
+			ci.runner.Run("ip", "link", "delete", vethHost)
+			return api.NetworkInterface{}, fmt.Errorf("failed to add IPv6 default route in container: %w", err)
+		}
+	}
+
+	// Store network interface info for GetExternalContainerNetworkInterface
+	ci.networkState.Lock()
+	if ci.networkState.containerNetworkInterfaces[containerName] == nil {
+		ci.networkState.containerNetworkInterfaces[containerName] = make(map[string]api.NetworkInterface)
+	}
+	ci.networkState.containerNetworkInterfaces[containerName][network.Name()] = netInterface
+	ci.networkState.Unlock()
+
+	// Add cleanup to delete veth pair
+	ci.testContext.AddCleanUpFn(func() error {
+		if _, err := ci.runner.Run("ip", "link", "delete", vethHost); err != nil {
+			framework.Logf("Warning: failed to delete veth %s: %v", vethHost, err)
+		}
+		// Clean up stored interface info
+		ci.networkState.Lock()
+		if ci.networkState.containerNetworkInterfaces[containerName] != nil {
+			delete(ci.networkState.containerNetworkInterfaces[containerName], network.Name())
+			if len(ci.networkState.containerNetworkInterfaces[containerName]) == 0 {
+				delete(ci.networkState.containerNetworkInterfaces, containerName)
+			}
+		}
+		ci.networkState.Unlock()
+		return nil
+	})
+
+	framework.Logf("attached VXLAN network %s to container %s (veth: %s/%s, IPv4: %s, IPv6: %s)",
+		network.Name(), containerName, vethHost, vethCont, netInterface.IPv4, netInterface.IPv6)
+
+	return netInterface, nil
+}
+
+// detachVXLANNetwork detaches a VXLAN overlay network from a container by deleting the veth pair.
+func (ci *baremetalInfra) detachVXLANNetwork(networkName, containerName string) error {
+	ci.networkState.Lock()
+	vni, ok := ci.networkState.networkVNIMap[networkName]
+	ci.networkState.Unlock()
+
+	if !ok {
+		return fmt.Errorf("VNI not found for network %s", networkName)
+	}
+
+	// Delete veth pair
+	vethHost := vethHostName(containerName, vni)
+	if _, err := ci.runner.Run("ip", "link", "delete", vethHost); err != nil {
+		framework.Logf("Warning: failed to delete veth %s: %v", vethHost, err)
+	}
+
+	// Clean up stored interface info
+	ci.networkState.Lock()
+	if ci.networkState.containerNetworkInterfaces[containerName] != nil {
+		delete(ci.networkState.containerNetworkInterfaces[containerName], networkName)
+		if len(ci.networkState.containerNetworkInterfaces[containerName]) == 0 {
+			delete(ci.networkState.containerNetworkInterfaces, containerName)
+		}
+	}
+	ci.networkState.Unlock()
+
+	framework.Logf("detached VXLAN network %s from container %s", networkName, containerName)
+	return nil
+}
+
+// execNodeCommand executes a command on a k8s node using oc debug.
+func (ci *baremetalInfra) execNodeCommand(nodeName string, cmd []string) (string, error) {
+	if len(cmd) == 0 {
+		return "", fmt.Errorf("insufficient command arguments")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	cmd = append([]string{"debug", fmt.Sprintf("node/%s", nodeName), "--to-namespace=default",
+		"--", "chroot", "/host"}, cmd...)
+	ocDebugCmd := exec.CommandContext(ctx, "oc", cmd...)
+	var stdout, stderr bytes.Buffer
+	ocDebugCmd.Stdout = &stdout
+	ocDebugCmd.Stderr = &stderr
+
+	if err := ocDebugCmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to run command on node %s: %w, stderr: %s", nodeName, err, stderr.String())
+	}
+
+	return stdout.String(), nil
+}
+
+// getNodeMachineNetworkIPs retrieves all node's internal IPs (IPv4 and IPv6).
+func (ci *baremetalInfra) getNodeMachineNetworkIPs(nodeName string) (ipv4, ipv6 string, err error) {
+	node, err := ci.kubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get node %s: %w", nodeName, err)
+	}
+
+	// Get node's internal IPs
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == corev1.NodeInternalIP {
+			ip := net.ParseIP(addr.Address)
+			if ip == nil {
+				continue
+			}
+			if ip.To4() != nil {
+				ipv4 = addr.Address
+			} else {
+				ipv6 = addr.Address
+			}
+		}
+	}
+
+	if ipv4 == "" && ipv6 == "" {
+		return "", "", fmt.Errorf("no internal IP found for node %s", nodeName)
+	}
+
+	return ipv4, ipv6, nil
+}
+
+// attachVXLANNetworkToNode attaches a VXLAN overlay network to a k8s node.
+func (ci *baremetalInfra) attachVXLANNetworkToNode(network api.Network, nodeName string) (api.NetworkInterface, error) {
+	ci.networkState.Lock()
+	vni, ok := ci.networkState.networkVNIMap[network.Name()]
+	ci.networkState.Unlock()
+
+	if !ok {
+		return api.NetworkInterface{}, fmt.Errorf("VNI not found for network %s", network.Name())
+	}
+
+	vxlanName := vxlanInterfaceName(vni)
+
+	// Get all node IPs
+	nodeIPv4, nodeIPv6, err := ci.getNodeMachineNetworkIPs(nodeName)
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get node IPs for %s: %w", nodeName, err)
+	}
+
+	// Determine which IP family to use for VXLAN tunnel
+	// Prefer IPv4 if both hypervisor and node have it, otherwise use IPv6
+	var nodeIP, hypervisorVTEP string
+	if ci.machineNetworkGwInfo.IPv4 != "" && nodeIPv4 != "" {
+		// Use IPv4 for VXLAN tunnel
+		nodeIP = nodeIPv4
+		hypervisorVTEP = ci.machineNetworkGwInfo.IPv4
+	} else if ci.machineNetworkGwInfo.IPv6 != "" && nodeIPv6 != "" {
+		// Use IPv6 for VXLAN tunnel
+		nodeIP = nodeIPv6
+		hypervisorVTEP = ci.machineNetworkGwInfo.IPv6
+	} else {
+		return api.NetworkInterface{}, fmt.Errorf("no matching IP family between hypervisor and node %s (hypervisor: v4=%s v6=%s, node: v4=%s v6=%s)",
+			nodeName, ci.machineNetworkGwInfo.IPv4, ci.machineNetworkGwInfo.IPv6, nodeIPv4, nodeIPv6)
+	}
+
+	ipv4Subnet, ipv6Subnet, err := network.IPv4IPv6Subnets()
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get network subnets for %s: %w", network.Name(), err)
+	}
+
+	netInterface := api.NetworkInterface{InfName: vxlanName}
+
+	// Allocate IPv4 if present
+	if ipv4Subnet != "" {
+		_, ipv4Net, err := net.ParseCIDR(ipv4Subnet)
+		if err != nil {
+			return api.NetworkInterface{}, fmt.Errorf("failed to parse IPv4 subnet %s: %w", ipv4Subnet, err)
+		}
+		gatewayIP := incrementIP(ipv4Net.IP).String()
+
+		allocatedIP, err := allocator.AllocateIPWithReserved(ci.kubeClient, ci.testContext, ipv4Subnet, []string{gatewayIP})
+		if err != nil {
+			return api.NetworkInterface{}, fmt.Errorf("failed to allocate IPv4 from %s: %w", ipv4Subnet, err)
+		}
+		netInterface.IPv4 = allocatedIP
+		netInterface.IPv4Gateway = gatewayIP
+		netInterface.IPv4Prefix = ipv4Subnet
+	}
+
+	// Allocate IPv6 if present
+	if ipv6Subnet != "" {
+		_, ipv6Net, err := net.ParseCIDR(ipv6Subnet)
+		if err != nil {
+			return api.NetworkInterface{}, fmt.Errorf("failed to parse IPv6 subnet %s: %w", ipv6Subnet, err)
+		}
+		gatewayIP := incrementIP(ipv6Net.IP).String()
+
+		allocatedIP, err := allocator.AllocateIPv6WithReserved(ci.kubeClient, ci.testContext, ipv6Subnet, []string{gatewayIP})
+		if err != nil {
+			return api.NetworkInterface{}, fmt.Errorf("failed to allocate IPv6 from %s: %w", ipv6Subnet, err)
+		}
+		netInterface.IPv6 = allocatedIP
+		netInterface.IPv6Gateway = gatewayIP
+		netInterface.IPv6Prefix = ipv6Subnet
+	}
+
+	// Add FDB entry on hypervisor
+	if _, err := ci.runner.Run("bridge", "fdb", "append", "00:00:00:00:00:00", "dev", vxlanName, "dst", nodeIP); err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to add FDB entry on hypervisor for node %s: %w", nodeName, err)
+	}
+
+	// Create VXLAN on node
+	createVxlanCmd := []string{"ip", "link", "add", vxlanName, "type", "vxlan",
+		"id", fmt.Sprintf("%d", vni),
+		"local", nodeIP,
+		"dstport", "5789",
+		"nolearning"}
+	if _, err := ci.execNodeCommand(nodeName, createVxlanCmd); err != nil {
+		ci.runner.Run("bridge", "fdb", "del", "00:00:00:00:00:00", "dev", vxlanName, "dst", nodeIP)
+		return api.NetworkInterface{}, fmt.Errorf("failed to create VXLAN interface on node %s: %w", nodeName, err)
+	}
+
+	// Add FDB entry on node
+	addFdbCmd := []string{"bridge", "fdb", "append", "00:00:00:00:00:00", "dev", vxlanName, "dst", hypervisorVTEP}
+	if _, err := ci.execNodeCommand(nodeName, addFdbCmd); err != nil {
+		ci.execNodeCommand(nodeName, []string{"ip", "link", "delete", vxlanName})
+		ci.runner.Run("bridge", "fdb", "del", "00:00:00:00:00:00", "dev", vxlanName, "dst", nodeIP)
+		return api.NetworkInterface{}, fmt.Errorf("failed to add FDB entry on node %s: %w", nodeName, err)
+	}
+
+	// Bring up VXLAN on node
+	bringUpCmd := []string{"ip", "link", "set", vxlanName, "up"}
+	if _, err := ci.execNodeCommand(nodeName, bringUpCmd); err != nil {
+		ci.execNodeCommand(nodeName, []string{"ip", "link", "delete", vxlanName})
+		ci.runner.Run("bridge", "fdb", "del", "00:00:00:00:00:00", "dev", vxlanName, "dst", nodeIP)
+		return api.NetworkInterface{}, fmt.Errorf("failed to bring up VXLAN on node %s: %w", nodeName, err)
+	}
+
+	// Configure IPv4 on node
+	if netInterface.IPv4 != "" {
+		_, ipv4Net, _ := net.ParseCIDR(ipv4Subnet)
+		prefixLen := maskBits(ipv4Net.Mask)
+		ipWithPrefix := fmt.Sprintf("%s/%d", netInterface.IPv4, prefixLen)
+		addIPCmd := []string{"ip", "addr", "add", ipWithPrefix, "dev", vxlanName}
+		if _, err := ci.execNodeCommand(nodeName, addIPCmd); err != nil {
+			ci.execNodeCommand(nodeName, []string{"ip", "link", "delete", vxlanName})
+			ci.runner.Run("bridge", "fdb", "del", "00:00:00:00:00:00", "dev", vxlanName, "dst", nodeIP)
+			return api.NetworkInterface{}, fmt.Errorf("failed to configure IPv4 on node %s: %w", nodeName, err)
+		}
+	}
+
+	// Configure IPv6 on node
+	if netInterface.IPv6 != "" {
+		_, ipv6Net, _ := net.ParseCIDR(ipv6Subnet)
+		prefixLen := maskBits(ipv6Net.Mask)
+		ipWithPrefix := fmt.Sprintf("%s/%d", netInterface.IPv6, prefixLen)
+		addIPCmd := []string{"ip", "addr", "add", ipWithPrefix, "dev", vxlanName}
+		if _, err := ci.execNodeCommand(nodeName, addIPCmd); err != nil {
+			ci.execNodeCommand(nodeName, []string{"ip", "link", "delete", vxlanName})
+			ci.runner.Run("bridge", "fdb", "del", "00:00:00:00:00:00", "dev", vxlanName, "dst", nodeIP)
+			return api.NetworkInterface{}, fmt.Errorf("failed to configure IPv6 on node %s: %w", nodeName, err)
+		}
+	}
+
+	// Store interface info
+	ci.networkState.Lock()
+	if ci.networkState.containerNetworkInterfaces[nodeName] == nil {
+		ci.networkState.containerNetworkInterfaces[nodeName] = make(map[string]api.NetworkInterface)
+	}
+	ci.networkState.containerNetworkInterfaces[nodeName][network.Name()] = netInterface
+	ci.networkState.Unlock()
+
+	// Add cleanup
+	ci.testContext.AddCleanUpFn(func() error {
+		ci.execNodeCommand(nodeName, []string{"ip", "link", "delete", vxlanName})
+		ci.runner.Run("bridge", "fdb", "del", "00:00:00:00:00:00", "dev", vxlanName, "dst", nodeIP)
+		ci.networkState.Lock()
+		if ci.networkState.containerNetworkInterfaces[nodeName] != nil {
+			delete(ci.networkState.containerNetworkInterfaces[nodeName], network.Name())
+			if len(ci.networkState.containerNetworkInterfaces[nodeName]) == 0 {
+				delete(ci.networkState.containerNetworkInterfaces, nodeName)
+			}
+		}
+		ci.networkState.Unlock()
+		return nil
+	})
+
+	framework.Logf("attached VXLAN network %s to node %s (vxlan: %s, VTEP: %s<->%s, IPv4: %s, IPv6: %s)",
+		network.Name(), nodeName, vxlanName, hypervisorVTEP, nodeIP, netInterface.IPv4, netInterface.IPv6)
+
+	return netInterface, nil
+}
+
+// detachVXLANNetworkFromNode detaches a VXLAN overlay network from a k8s node.
+func (ci *baremetalInfra) detachVXLANNetworkFromNode(networkName, nodeName string) error {
+	ci.networkState.Lock()
+	vni, ok := ci.networkState.networkVNIMap[networkName]
+	ci.networkState.Unlock()
+
+	if !ok {
+		return fmt.Errorf("VNI not found for network %s", networkName)
+	}
+
+	vxlanName := vxlanInterfaceName(vni)
+
+	// Get node IPs to determine which was used for VXLAN tunnel
+	nodeIPv4, nodeIPv6, err := ci.getNodeMachineNetworkIPs(nodeName)
+	if err != nil {
+		framework.Logf("Warning: failed to get node IPs for %s: %v", nodeName, err)
+	}
+
+	// Determine which IP was used (same logic as attachment: prefer IPv4)
+	var nodeIP string
+	if ci.machineNetworkGwInfo.IPv4 != "" && nodeIPv4 != "" {
+		nodeIP = nodeIPv4
+	} else if ci.machineNetworkGwInfo.IPv6 != "" && nodeIPv6 != "" {
+		nodeIP = nodeIPv6
+	}
+
+	// Delete VXLAN on node
+	if _, err := ci.execNodeCommand(nodeName, []string{"ip", "link", "delete", vxlanName}); err != nil {
+		framework.Logf("Warning: failed to delete VXLAN on node %s: %v", nodeName, err)
+	}
+
+	// Delete FDB entry on hypervisor
+	if nodeIP != "" {
+		if _, err := ci.runner.Run("bridge", "fdb", "del", "00:00:00:00:00:00", "dev", vxlanName, "dst", nodeIP); err != nil {
+			framework.Logf("Warning: failed to delete FDB entry on hypervisor: %v", err)
+		}
+	}
+
+	// Clean up stored interface info
+	ci.networkState.Lock()
+	if ci.networkState.containerNetworkInterfaces[nodeName] != nil {
+		delete(ci.networkState.containerNetworkInterfaces[nodeName], networkName)
+		if len(ci.networkState.containerNetworkInterfaces[nodeName]) == 0 {
+			delete(ci.networkState.containerNetworkInterfaces, nodeName)
+		}
+	}
+	ci.networkState.Unlock()
+
+	framework.Logf("detached VXLAN network %s from node %s", networkName, nodeName)
+	return nil
 }
