@@ -583,7 +583,15 @@ align_metallb_pool_with_ip_family() {
 }
 
 install_metallb() {
-  local metallb_version=v0.15.3
+  # MetalLB v0.15.3 generated BGPPeer CRDs with ASN fields such as
+  # myASN, peerASN, and localASN marked as format: int32 even though
+  # the schema allowed the full 4-byte ASN range up to 4294967295.
+  # Kubernetes 1.36 rejects that schema.
+  #
+  # MetalLB v0.16.1 contains the official ASN schema fixes for those
+  # fields, so use the released upstream CRDs.
+  local metallb_version=v0.16.1
+  local metallb_upstream_frr_image=quay.io/frrouting/frr:10.5.3
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
@@ -602,21 +610,22 @@ install_metallb() {
     'kind_path = os.path.join(build_path, "kind")' \
     'kind_path = "kind"'
 
-  # MetalLB v0.15.3 still pins its in-cluster FRR speaker containers to 10.4.1.
-  # Keep the pinned upstream string for patching, but replace the actual
-  # deployed image so CI exercises the same FRR build as the rest of our BGP
-  # setup and coredump debugging.
+  # MetalLB v0.16.1 manifests reference FRR 10.5.3. CI uses
+  # FRR_DEPLOYED_IMAGE for BGP tests, so replace that exact upstream value in
+  # the MetalLB manifests. Matching the exact upstream value is intentional
+  # because if a future MetalLB release changes its FRR image, this script
+  # should fail instead of silently leaving MetalLB on an unexpected FRR version.
   replace_in_file_or_exit \
     config/frr/speaker-patch.yaml \
-    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${metallb_upstream_frr_image}" \
     "${FRR_DEPLOYED_IMAGE}"
   replace_in_file_or_exit \
     config/manifests/metallb-frr.yaml \
-    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${metallb_upstream_frr_image}" \
     "${FRR_DEPLOYED_IMAGE}"
   replace_in_file_or_exit \
     charts/metallb/values.yaml \
-    "tag: ${FRR_K8S_UPSTREAM_FRR_IMAGE##*:}" \
+    "tag: ${metallb_upstream_frr_image##*:}" \
     "tag: ${FRR_DEPLOYED_IMAGE##*:}"
 
   pip install -r dev-env/requirements.txt
@@ -632,6 +641,17 @@ install_metallb() {
     ip_family="ipv4"
     ipv6_network=""
   fi
+  # The dev-env BGP backend is selected with -b. MetalLB v0.16.1 can default
+  # that path to frr-k8s, which runs FRR through in-cluster frr-k8s resources
+  # instead of the standalone dev-env container named frr. The service and
+  # network-segmentation e2e setup below still connects clientnet to that frr
+  # container and relies on its external routes. Keep -b frr explicit so this
+  # Kubernetes 1.36 compatibility update only changes the MetalLB release and
+  # does not also change the BGP datapath used by those tests.
+  #
+  # TODO: Move this path to frr-k8s in a separate change after validating the
+  # service and network-segmentation e2e setup against the in-cluster frr-k8s
+  # backend.
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
   GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
 
@@ -1481,14 +1501,21 @@ install_frr_k8s() {
   sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
 
-  # clone_frr() patches hack/demo/demo.sh for the external FRR container. This
-  # path applies config/all-in-one/frr-k8s.yaml, which also contains an FRR
-  # image for the in-cluster frr-k8s daemonset. Patch that manifest separately
-  # so both the external FRR container and the in-cluster frr-k8s daemonset run
-  # the FRR image selected for these BGP lanes. The expected source image is
-  # kept in FRR_K8S_ALL_IN_ONE_UPSTREAM_FRR_IMAGE so the replacement fails if a
-  # future frr-k8s update changes the manifest image and this override needs to
-  # be reviewed again.
+  # The BGP lanes run two FRR containers:
+  # 1. The external FRR test router from hack/demo/demo.sh. clone_frr()
+  #    patches that image to FRR_EXTERNAL_DEMO_IMAGE.
+  # 2. The in-cluster frr-k8s daemonset from config/all-in-one/frr-k8s.yaml.
+  #    The replacement below patches that image to FRR_K8S_FRR_IMAGE.
+  #
+  # In regular PR e2e lanes where nobody sets a custom FRR_K8S_FRR_IMAGE
+  # environment variable, both image variables resolve to FRR_DEPLOYED_IMAGE,
+  # so both containers use the same FRR build. FRR_K8S_FRR_IMAGE remains
+  # overrideable for tests that intentionally need a different in-cluster
+  # daemonset image.
+  #
+  # Match the manifest's current upstream image exactly. If the pinned frr-k8s
+  # manifest changes its FRR image, replace_in_file_or_exit will fail and force
+  # this override to be reviewed.
   replace_in_file_or_exit \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml \
     "${FRR_K8S_ALL_IN_ONE_UPSTREAM_FRR_IMAGE}" \
