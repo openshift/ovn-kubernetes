@@ -48,6 +48,7 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 		g.By("Checking logs from each ovnkube-node pod for token exposure")
 		totalViolations := 0
 		failedPods := []string{}
+		skippedPods := []string{}
 
 		for _, pod := range pods.Items {
 			// Get logs from ovnkube-controller container
@@ -59,8 +60,10 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 			req := clientset.CoreV1().Pods("openshift-ovn-kubernetes").GetLogs(pod.Name, logOptions)
 			logs, err := req.DoRaw(ctx)
 
-			// If logs can't be retrieved, skip this pod
+			// If logs can't be retrieved, record and skip this pod
 			if err != nil {
+				g.GinkgoWriter.Printf("Warning: could not retrieve logs for pod %s: %v\n", pod.Name, err)
+				skippedPods = append(skippedPods, pod.Name)
 				continue
 			}
 
@@ -97,6 +100,12 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 				failedPods = append(failedPods, pod.Name)
 			}
 		}
+
+		// Ensure at least some pods were scanned
+		scannedCount := len(pods.Items) - len(skippedPods)
+		o.Expect(scannedCount).To(o.BeNumerically(">", 0),
+			"Could not retrieve logs from any pod - all %d pods skipped: %v",
+			len(pods.Items), skippedPods)
 
 		// Assert no tokens were found
 		o.Expect(totalViolations).To(o.Equal(0),
