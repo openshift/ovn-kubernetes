@@ -179,7 +179,7 @@ func (h *nodeEventHandler) AddResource(obj interface{}, _ bool) error {
 		node := obj.(*corev1.Node)
 		// if it's our node that is changing, then nothing to do as we dont add our own IP to the nftables rules
 		if node.Name == h.nc.name {
-			if config.OvnKubeNode.Mode != types.NodeModeDPU {
+			if config.IsModeDPUHost() || config.IsModeFull() {
 				if util.NodeDontSNATSubnetAnnotationExist(node) {
 					err := managementport.UpdateNoSNATSubnetsSets(node, util.ParseNodeDontSNATSubnetsList)
 					if err != nil {
@@ -216,16 +216,16 @@ func (h *nodeEventHandler) AddResource(obj interface{}, _ bool) error {
 func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
 	switch h.objType {
 	case factory.NamespaceExGwType:
-		// If interconnect is disabled OR interconnect is running in single-zone-mode,
-		// the ovnkube-master is responsible for patching ICNI managed namespaces with
-		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
-		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
-		// directly on the ovnkube-controller code to avoid an extra namespace annotation
+		// This handler runs in single-zone deployments (default zone), where
+		// ovnkube-controller patches the "k8s.ovn.org/external-gw-pod-ips"
+		// namespace annotation and ovnkube-node reacts here to flush conntrack on
+		// every node. In multi-zone interconnect, ovnkube-controller flushes
+		// conntrack directly and this annotation is not used.
 		node, err := h.nc.watchFactory.GetNode(h.nc.name)
 		if err != nil {
 			return fmt.Errorf("error retrieving node %s: %v", h.nc.name, err)
 		}
-		if !config.OVNKubernetesFeature.EnableInterconnect || util.GetNodeZone(node) == types.OvnDefaultZone {
+		if util.GetNodeZone(node) == types.OvnDefaultZone {
 			newNs := newObj.(*corev1.Namespace)
 			return h.nc.syncConntrackForExternalGateways(newNs)
 		}
@@ -243,7 +243,7 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 
 		// if it's our node that is changing, then nothing to do as we dont add our own IP to the nftables rules
 		if newNode.Name == h.nc.name {
-			if config.OvnKubeNode.Mode != types.NodeModeDPU && !reflect.DeepEqual(oldNode.Annotations, newNode.Annotations) {
+			if (config.IsModeDPUHost() || config.IsModeFull()) && !reflect.DeepEqual(oldNode.Annotations, newNode.Annotations) {
 				// if node's dont SNAT subnet annotation changed sync nftables
 				if util.NodeDontSNATSubnetAnnotationChanged(oldNode, newNode) {
 					err := managementport.UpdateNoSNATSubnetsSets(newNode, util.ParseNodeDontSNATSubnetsList)
@@ -269,7 +269,7 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 			return nil
 		}
 
-		if config.OvnKubeNode.Mode != types.NodeModeDPU && util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
+		if (config.IsModeDPUHost() || config.IsModeFull()) && util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			// remote node that is changing
 			// Use GetNodeAddresses to get new node IPs
 			newIPsv4, newIPsv6, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, newNode)
@@ -330,7 +330,7 @@ func (h *nodeEventHandler) DeleteResource(obj, _ interface{}) error {
 
 	case factory.NodeType:
 		h.nc.deleteNode(obj.(*corev1.Node))
-		if config.OvnKubeNode.Mode != types.NodeModeDPU {
+		if config.IsModeDPUHost() || config.IsModeFull() {
 			_ = managementport.UpdateNoSNATSubnetsSets(obj.(*corev1.Node), func(_ *corev1.Node) ([]string, error) {
 				return []string{}, nil
 			})
