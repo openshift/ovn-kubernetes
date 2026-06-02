@@ -36,6 +36,21 @@ import (
 
 var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 
+var otpBlockingTests = []string{
+	"Add OVN flow count metric",
+	"Record update to cache versus port binding",
+	"Add mechanism to record duration for k8 kinds",
+}
+
+func isOTPBlocking(name string) bool {
+	for _, title := range otpBlockingTests {
+		if strings.Contains(name, title) {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
