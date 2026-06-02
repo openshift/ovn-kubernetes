@@ -92,7 +92,7 @@ func (mp *managementPortRepresentor) checkRepresentorPortHealth() error {
 		// Get management port representor by name
 		link, err := util.GetNetLinkOps().LinkByName(mp.repDevName)
 		if err != nil {
-			return fmt.Errorf("failed to get link device %s: %w", mp.repDevName, err)
+			klog.Fatalf("Can't find neither renamed management port %s nor original representor device %s: %v, inconsistent state, crashing to recover with fresh start", mp.ifName, mp.repDevName, err)
 		}
 		err = bringupManagementPortLink(types.DefaultNetworkName, link, nil, mp.ifName, config.Default.MTU)
 		if err != nil {
