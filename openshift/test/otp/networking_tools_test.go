@@ -3,6 +3,7 @@ package otp
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 
 	g "github.com/onsi/ginkgo/v2"
@@ -337,15 +338,10 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 			return src.Status.Phase == corev1.PodRunning && dst.Status.Phase == corev1.PodRunning
 		}, 60, 5).Should(o.BeTrue(), "Pods did not reach Running state")
 
-		src, err := clientset.CoreV1().Pods(traceNS).Get(ctx, "src-pod", metav1.GetOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-		dst, err := clientset.CoreV1().Pods(traceNS).Get(ctx, "dst-pod", metav1.GetOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
 		g.By("Running ovnkube-trace from src to dst pod")
 		output, err := runOVNKubeTrace(ctx, clientset, config,
-			traceNS, "src-pod", src.Status.PodIP,
-			traceNS, "dst-pod", dst.Status.PodIP,
+			traceNS, "src-pod",
+			traceNS, "dst-pod",
 			"tcp", "8080")
 		o.Expect(err).NotTo(o.HaveOccurred())
 
@@ -416,15 +412,10 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 			return src.Status.Phase == corev1.PodRunning && dst.Status.Phase == corev1.PodRunning
 		}, 60, 5).Should(o.BeTrue(), "Pods did not reach Running state")
 
-		src, err := clientset.CoreV1().Pods(traceNS).Get(ctx, "src-pod", metav1.GetOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-		dst, err := clientset.CoreV1().Pods(traceNS).Get(ctx, "dst-hostnet-pod", metav1.GetOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
 		g.By("Running ovnkube-trace from overlay pod to host-network pod")
 		output, err := runOVNKubeTrace(ctx, clientset, config,
-			traceNS, "src-pod", src.Status.PodIP,
-			traceNS, "dst-hostnet-pod", dst.Status.HostIP,
+			traceNS, "src-pod",
+			traceNS, "dst-hostnet-pod",
 			"tcp", "22")
 		o.Expect(err).NotTo(o.HaveOccurred())
 
@@ -443,7 +434,7 @@ func int64Ptr(i int64) *int64 {
 
 // runOVNKubeTrace executes ovnkube-trace in an ovnkube-node pod
 func runOVNKubeTrace(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config,
-	srcNS, srcPod, srcIP, dstNS, dstPod, dstIP, protocol, port string) (string, error) {
+	srcNS, srcPod, dstNS, dstPod, protocol, port string) (string, error) {
 
 	// Find an ovnkube-node pod
 	pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
@@ -453,7 +444,7 @@ func runOVNKubeTrace(ctx context.Context, clientset *kubernetes.Clientset, confi
 		return "", err
 	}
 	if len(pods.Items) == 0 {
-		return "", err
+		return "", fmt.Errorf("no ovnkube-node pods found in openshift-ovn-kubernetes namespace")
 	}
 
 	nodePod := pods.Items[0].Name
