@@ -784,6 +784,8 @@ if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ] && [ "${DPU_MODE}" != "host" ]; th
   fi
 fi
 
+restart_dpu_sim_system_deployments_after_ovnk
+
 # IPsec pods need the signer-ca ConfigMap and signed CSRs before they can roll out.
 # The ovn-ipsec DaemonSet is created by the helm chart (tags.ovn-ipsec=true), install_ipsec
 # handles the CA creation and CSR signing (manifest apply is skipped when helm owns the DS).

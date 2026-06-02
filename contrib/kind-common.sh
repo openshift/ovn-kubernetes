@@ -768,15 +768,21 @@ wait_for_ovn_daemonset() {
   fi
 }
 
-# kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
-# DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
-# Next, it waits for ovnkube-control-plane pods to post "Ready" when that deployment is part of the mode.
-# Last, it will do the same with all pods in the kube-system namespace.
+# kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6,
+# unless KIND_HELM_OVN_TIMEOUT is set. It will first wait for all DaemonSets to
+# complete with kubectl rollout. This command will block until all pods of the
+# DS are actually up. Next, it waits for ovnkube-control-plane pods to post
+# "Ready" when that deployment is part of the mode. Last, it will do the same
+# with all pods in the kube-system namespace.
 kubectl_wait_pods() {
   # IPv6 cluster seems to take a little longer to come up, so extend the wait time.
-  OVN_TIMEOUT=300
+  OVN_TIMEOUT=${KIND_HELM_OVN_TIMEOUT:-300}
+  if ! [[ "${OVN_TIMEOUT}" =~ ^[0-9]+$ ]]; then
+    echo "Invalid KIND_HELM_OVN_TIMEOUT: ${OVN_TIMEOUT}"
+    exit 1
+  fi
   if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    OVN_TIMEOUT=480
+    OVN_TIMEOUT=${KIND_HELM_OVN_TIMEOUT:-480}
   fi
 
   # We will make sure that we timeout all commands at current seconds + the desired timeout.
@@ -806,7 +812,6 @@ kubectl_wait_pods() {
   fi
 
   restart_dpu_sim_multus_after_ovnk
-  restart_dpu_sim_system_deployments_after_ovnk
 
   timeout=$(calculate_timeout ${endtime})
   if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=${timeout}s ; then
@@ -1289,16 +1294,23 @@ deploy_frr_external_container() {
   fi
   if [ "${OCI_BIN}" == "podman" ]; then
     # frr-k8s' demo script prefers docker when both docker and podman are
-    # installed. Keep it on the same runtime as kind-helm.sh so later podman
-    # operations can find the external frr container.
-    local docker_wrapper_dir
-    docker_wrapper_dir=$(mktemp -d)
-    ln -s "$(command -v podman)" "${docker_wrapper_dir}/docker"
-    PATH="${docker_wrapper_dir}:${PATH}" ./demo.sh
-    rm -rf "${docker_wrapper_dir}"
-  else
-    ./demo.sh
+    # installed. Force its podman path, and avoid its host-network fallback
+    # because podman cannot later attach a host-network container to bgpnet.
+    replace_in_file_or_exit \
+      ./demo.sh \
+      'CLI=docker' \
+      'CLI=podman'
+    replace_in_file_or_exit \
+      ./demo.sh \
+      'CLI_BR_NET_BY_SUBNET_FN="docker_get_br_net_by_subnet"' \
+      'CLI_BR_NET_BY_SUBNET_FN="podman_get_br_net_by_subnet"'
+    sed -i '/^pushd \.\/frr\/ && {/i\
+if [ "$CLI" = "podman" ]; then\
+    NETWORK=${FRR_K8S_DEMO_NETWORK:-kind}\
+fi\
+' ./demo.sh
   fi
+  ./demo.sh
   popd || exit 1
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     # Enable IPv6 forwarding in FRR
