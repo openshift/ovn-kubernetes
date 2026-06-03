@@ -28,6 +28,7 @@ import (
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	udnclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	ovnutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
@@ -2303,6 +2304,80 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 		switch networkType {
 		case cudnAdvertisedVRFLite:
 			ginkgo.By("Attaching the BGP peer network to the CUDN VRF")
+			const (
+				vrfLiteInfraTimeout = 60 * time.Second
+				vrfLiteInfraPolling = time.Second
+			)
+			waitForNodeLink := func(nodeName, linkName string) {
+				ginkgo.GinkgoHelper()
+				gomega.Eventually(func() error {
+					_, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "link", "show", "dev", linkName})
+					return err
+				}).WithTimeout(vrfLiteInfraTimeout).WithPolling(vrfLiteInfraPolling).Should(
+					gomega.Succeed(),
+					"expected link %q to exist on node %q",
+					linkName,
+					nodeName,
+				)
+			}
+			waitForNodePatchPort := func(nodeName string) {
+				ginkgo.GinkgoHelper()
+				scopedNodeName := ovnutil.GetUserDefinedNetworkPrefix(types.CUDNPrefix+networkName) + nodeName
+				patchPortName := ovnutil.GetPatchPortName(deploymentconfig.Get().ExternalBridgeName(), scopedNodeName)
+				gomega.Eventually(func() error {
+					pods, err := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(context.Background(), metav1.ListOptions{
+						LabelSelector: "app=ovnkube-node",
+						FieldSelector: "spec.nodeName=" + nodeName,
+					})
+					if err != nil {
+						return err
+					}
+					if len(pods.Items) == 0 {
+						return fmt.Errorf("failed to find ovnkube-node pod on node %q", nodeName)
+					}
+					command := fmt.Sprintf("ovs-vsctl --timeout=15 get Interface %s ofport", patchPortName)
+					output, err := e2epodoutput.RunHostCmd(pods.Items[0].Namespace, pods.Items[0].Name, command)
+					if err != nil {
+						return fmt.Errorf("failed to get ofport for patch port %q on node %q: %w", patchPortName, nodeName, err)
+					}
+					ofPort := strings.TrimSpace(output)
+					if ofPort == "" || ofPort == "[]" || ofPort == "-1" {
+						return fmt.Errorf("patch port %q on node %q has no valid ofport: %q", patchPortName, nodeName, ofPort)
+					}
+					return nil
+				}).WithTimeout(vrfLiteInfraTimeout).WithPolling(vrfLiteInfraPolling).Should(
+					gomega.Succeed(),
+					"expected patch port for network %q on node %q to have a valid ofport",
+					networkName,
+					nodeName,
+				)
+			}
+			attachInterfaceToVRF := func(nodeName string, iface infraapi.NetworkInterface) {
+				ginkgo.GinkgoHelper()
+				gomega.Eventually(func() error {
+					// This is idempotent when the interface is already attached to the VRF.
+					if _, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "link", "set", "dev", iface.InfName, "master", networkName}); err != nil {
+						return err
+					}
+					output, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "-o", "link", "show", "dev", iface.InfName})
+					if err != nil {
+						return err
+					}
+					fields := strings.Fields(output)
+					for idx := 0; idx < len(fields)-1; idx++ {
+						if fields[idx] == "master" && fields[idx+1] == networkName {
+							return nil
+						}
+					}
+					return fmt.Errorf("interface %q on node %q is not attached to VRF %q: %s", iface.InfName, nodeName, networkName, output)
+				}).WithTimeout(vrfLiteInfraTimeout).WithPolling(vrfLiteInfraPolling).Should(
+					gomega.Succeed(),
+					"expected interface %q on node %q to be attached to VRF %q",
+					iface.InfName,
+					nodeName,
+					networkName,
+				)
+			}
 			nodeList, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			network, err := infraprovider.Get().GetNetwork(networkName)
@@ -2310,14 +2385,16 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			for _, node := range nodeList.Items {
 				iface, err := infraprovider.Get().GetK8NodeNetworkInterface(node.Name, network)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				vrfLiteNodeInterfaces[node.Name] = iface
+				waitForNodeLink(node.Name, iface.InfName)
+				waitForNodeLink(node.Name, networkName)
+				waitForNodePatchPort(node.Name)
 				if ipFamilySet.Has(utilnet.IPv6) {
 					// prevent the IPv6 address of the interface from being removed when attaching to VRF
 					_, err = infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"sysctl", "-w", "net.ipv6.conf." + iface.InfName + ".keep_addr_on_down=1"})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				}
-				_, err = infraprovider.Get().ExecK8NodeCommand(node.Name, []string{"ip", "link", "set", "dev", iface.InfName, "master", networkName})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				attachInterfaceToVRF(node.Name, iface)
+				vrfLiteNodeInterfaces[node.Name] = iface
 			}
 		}
 
