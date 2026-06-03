@@ -365,7 +365,9 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			initObj = entry.oldObj
 		}
 
-		klog.Infof("%s: retry object setup: %s %s", r.name, r.ResourceHandler.ObjType, objKey)
+		if entry.failedAttempts > 0 {
+			klog.Infof("%s: retry object setup: %s %s (failed attempts: %d)", r.name, r.ResourceHandler.ObjType, objKey, entry.failedAttempts)
+		}
 
 		if entry.newObj != nil {
 			// get the latest version of the object from the informer;
@@ -429,7 +431,9 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 
 			// create new object if needed
 			if entry.newObj != nil {
-				klog.Infof("%s: adding new object: %s %s", r.name, r.ResourceHandler.ObjType, objKey)
+				if entry.failedAttempts > 0 {
+					klog.Infof("%s: adding new object: %s %s (failed attempts: %d)", r.name, r.ResourceHandler.ObjType, objKey, entry.failedAttempts)
+				}
 				if !r.ResourceHandler.IsResourceScheduled(entry.newObj) {
 					// unscheduled resources (pods) will be retried again later we do not track these as failures, and should not retry.
 					// we should avoid queuing objects to the retry handler that are not scheduled. Thus treat this as an error.
