@@ -21,6 +21,7 @@ import (
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
+	ovntls "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tls"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -30,8 +31,9 @@ type MetricServerOptions struct {
 	BindAddress string
 
 	// TLS configuration
-	CertFile string
-	KeyFile  string
+	CertFile        string
+	KeyFile         string
+	ApplyTLSOptions ovntls.ApplyConfigOptions
 
 	// Feature flags
 	EnableOVSMetrics           bool
@@ -221,6 +223,11 @@ func (s *MetricServer) Run(stopChan <-chan struct{}) {
 					return &cert, nil
 				},
 			}
+
+			if s.opts.ApplyTLSOptions != nil {
+				s.opts.ApplyTLSOptions(s.server.TLSConfig)
+			}
+
 			listenAndServe = func() error { return s.server.ListenAndServeTLS("", "") }
 		}
 
