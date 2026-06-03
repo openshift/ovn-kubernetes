@@ -1230,6 +1230,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		config.Gateway.NodeportEnable = true
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+		Expect(configureAdvertisedUDNIsolationNFTables()).To(Succeed())
 		ifAddrs := ovntest.MustParseIPNets(v4NodeIP, v6NodeIP)
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1619,6 +1620,39 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			Expect(*routes[9].Dst).To(Equal(*ovntest.MustParseIPNet("::/0"))) // cluster subnet route
 			Expect(routes[9].Priority).To(Equal(4278198272))
 			Expect(routes[9].Type).To(Equal(unix.RTN_UNREACHABLE))
+			return nil
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
+	})
+
+	ovntest.OnSupportedPlatformsIt("should create a route import VRF in DPU mode", func() {
+		config.OvnKubeNode.Mode = types.NodeModeDPU
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+			},
+		}
+		nad := ovntest.GenerateNAD(netName, "rednad", "greenamespace",
+			types.Layer3Topology, "100.128.0.0/16/24", types.NetworkRolePrimary)
+		ovntest.AnnotateNADWithNetworkID(netID, nad)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = testNS.Do(func(ns.NetNS) error {
+			defer GinkgoRecover()
+			ofm := getDummyOpenflowManager()
+			udnGateway, err := NewUserDefinedNetworkGateway(netInfo, node, nil, nil, vrf, nil, &gateway{openflowManager: ofm})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(udnGateway.ensureDPUVRF()).To(Succeed())
+
+			vrfLink, err := util.GetNetLinkOps().LinkByName(util.GetNetworkVRFName(netInfo))
+			Expect(err).NotTo(HaveOccurred())
+			vrfDevice, ok := vrfLink.(*netlink.Vrf)
+			Expect(ok).To(BeTrue())
+			Expect(vrfDevice.Table).To(Equal(uint32(dpuUDNVRFRouteTableID(netInfo.GetNetworkID()))))
+			Expect(vrfLink.Attrs().MasterIndex).To(Equal(0))
+			Expect(udnGateway.vrfTableId).To(Equal(dpuUDNVRFRouteTableID(netInfo.GetNetworkID())))
 			return nil
 		})
 		Expect(err).NotTo(HaveOccurred())
