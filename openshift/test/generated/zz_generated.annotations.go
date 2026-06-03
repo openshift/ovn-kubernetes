@@ -1199,6 +1199,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after succeeded live migration": "[Disabled:Unimplemented]",
 
+	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should start multiple VMs with same hostname": "[Disabled:Unimplemented]",
+
 	"Load Balancer Service Tests with MetalLB Should ensure connectivity works on an external service when mtu changes in intermediate node": "[Disabled:Unimplemented]",
 
 	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and backend pods are also egressIP served pods": "[Disabled:Unimplemented]",
@@ -1495,6 +1497,18 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer3 UDN": "[Disabled:Unimplemented]",
 
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork add bad subnet should not cause change on existing NAD": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork add subnet not affecting existing node subnet assignment": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork can perform east/west traffic between nodes on different CIDR L3 primary network": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork add bad subnet should not cause change on existing NAD": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork add subnet not affecting existing node subnet assignment": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork can perform east/west traffic between nodes on different CIDR L3 primary network": "[Suite:openshift/conformance/parallel]",
+
 	"Network Segmentation pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network with custom network": "[Disabled:Unimplemented]",
 
 	"Network Segmentation pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Disabled:Unimplemented]",
@@ -1521,6 +1535,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
 
+	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
+
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, localnet": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, no-overlay, valid": "[Disabled:Unimplemented]",
@@ -1530,6 +1546,8 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, evpn": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
+
+	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid mtu": "[Disabled:Unimplemented]",
 
@@ -1771,11 +1789,11 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e control plane should provide Internet connection continuously when all ovnkube-control-plane pods are killed": "[Disabled:Unimplemented]",
 
-	"e2e control plane should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane": "[Disabled:Unimplemented]",
+	"e2e control plane should provide Internet connection continuously when all pods are killed on node running leader instance of ovnkube-control-plane": "[Disabled:Unimplemented]",
 
 	"e2e control plane should provide Internet connection continuously when ovnkube-node pod is killed": "[Disabled:Unimplemented]",
 
-	"e2e control plane should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed": "[Disabled:Unimplemented]",
+	"e2e control plane should provide Internet connection continuously when pod running leader instance of ovnkube-control-plane is killed": "[Disabled:Unimplemented]",
 
 	"e2e control plane should provide connection to external host by DNS name from a pod": "[Disabled:Unimplemented]",
 
