@@ -25,6 +25,7 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 )
 
@@ -386,6 +387,98 @@ func getCNCAnnotations(cncName string) (map[string]string, error) {
 		return nil, err
 	}
 	return annotations, nil
+}
+
+func getCNCNetworkIDForTopology(cncName, topology string) string {
+	prefix := strings.ToLower(topology) + "_"
+	var networkID string
+	Eventually(func(g Gomega) {
+		annotations, err := getCNCAnnotations(cncName)
+		g.Expect(err).NotTo(HaveOccurred())
+		subnetAnnotation := annotations[ovnNetworkConnectSubnetAnnotation]
+		var subnets map[string]cncAnnotationSubnet
+		g.Expect(json.Unmarshal([]byte(subnetAnnotation), &subnets)).To(Succeed())
+
+		foundID := ""
+		for owner := range subnets {
+			if strings.HasPrefix(owner, prefix) {
+				foundID = strings.TrimPrefix(owner, prefix)
+				break
+			}
+		}
+		g.Expect(foundID).NotTo(BeEmpty(), "CNC %s should have a %s owner key", cncName, topology)
+		networkID = foundID
+	}, 60*time.Second, 2*time.Second).Should(Succeed())
+	return networkID
+}
+
+func getNodeIDAnnotation(cs clientset.Interface, nodeName string) string {
+	node, err := cs.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	nodeID := node.Annotations["k8s.ovn.org/node-id"]
+	Expect(nodeID).NotTo(BeEmpty(), "node %s should have k8s.ovn.org/node-id annotation", nodeName)
+	return nodeID
+}
+
+func findOVNNBDBPod(cs clientset.Interface, ovnNamespace string) (*corev1.Pod, error) {
+	pods, err := cs.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{LabelSelector: "ovn-db-pod=true"})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list OVN DB pods: %w", err)
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		for _, container := range pod.Spec.Containers {
+			if container.Name == "nb-ovsdb" {
+				return pod, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no running OVN DB pod with nb-ovsdb container found in namespace %s", ovnNamespace)
+}
+
+func runOVNNBCTL(f *framework.Framework, cs clientset.Interface, args ...string) (string, error) {
+	ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+	dbPod, err := findOVNNBDBPod(cs, ovnNamespace)
+	if err != nil {
+		return "", err
+	}
+	cmd := append([]string{"ovn-nbctl"}, args...)
+	stdout, stderr, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, dbPod.Name, "nb-ovsdb", cmd...)
+	if err != nil {
+		return stdout, fmt.Errorf("failed running ovn-nbctl %v on %s/%s: %w, stderr: %s", args, ovnNamespace, dbPod.Name, err, stderr)
+	}
+	return strings.TrimSpace(stdout), nil
+}
+
+func findCNCNodeOVNObjects(f *framework.Framework, cs clientset.Interface, table, columns, cncName, networkID, nodeID string) (string, error) {
+	return runOVNNBCTL(f, cs,
+		"--data=bare",
+		"--no-heading",
+		"--columns="+columns,
+		"find", table,
+		fmt.Sprintf("external_ids:k8s.ovn.org/name=%s", cncName),
+		fmt.Sprintf("external_ids:network-id=%s", networkID),
+		fmt.Sprintf("external_ids:node-id=%s", nodeID),
+	)
+}
+
+func verifyCNCNodeOVNObjects(f *framework.Framework, cs clientset.Interface, cncName, networkID, nodeID string, expectPresent bool) {
+	Eventually(func(g Gomega) {
+		ports, err := findCNCNodeOVNObjects(f, cs, "Logical_Router_Port", "name", cncName, networkID, nodeID)
+		g.Expect(err).NotTo(HaveOccurred())
+		routes, err := findCNCNodeOVNObjects(f, cs, "Logical_Router_Static_Route", "ip_prefix,nexthop", cncName, networkID, nodeID)
+		g.Expect(err).NotTo(HaveOccurred())
+		if expectPresent {
+			g.Expect(ports).NotTo(BeEmpty(), "expected CNC %s L3 router ports for network ID %s node ID %s", cncName, networkID, nodeID)
+			g.Expect(routes).NotTo(BeEmpty(), "expected CNC %s L3 static routes for network ID %s node ID %s", cncName, networkID, nodeID)
+			return
+		}
+		g.Expect(ports).To(BeEmpty(), "expected CNC %s L3 router ports for network ID %s node ID %s to be removed", cncName, networkID, nodeID)
+		g.Expect(routes).To(BeEmpty(), "expected CNC %s L3 static routes for network ID %s node ID %s to be removed", cncName, networkID, nodeID)
+	}, 60*time.Second, 2*time.Second).Should(Succeed())
 }
 
 // getCNCTunnelID gets CNC tunnel ID from annotations
@@ -2489,6 +2582,18 @@ var _ = Describe("ClusterNetworkConnect OVN-Kubernetes Controller", feature.Netw
 		return "other"
 	}
 
+	// checkPingConnectivity checks ICMP reachability from one pod to an IP.
+	// It uses ping6 for IPv6 destinations.
+	checkPingConnectivity := func(fromNamespace, fromPodName, toIP string) error {
+		pingCmd := "ping"
+		if ip := net.ParseIP(toIP); ip != nil && ip.To4() == nil {
+			pingCmd = "ping6"
+		}
+		_, err := e2ekubectl.RunKubectl(fromNamespace, "exec", fromPodName, "--",
+			pingCmd, "-c", "3", "-W", "2", toIP)
+		return err
+	}
+
 	// verifyCrossNetworkConnectivity verifies connectivity from a set of pods to another set
 	// Supports dual-stack by testing all IPs for each pod
 	// Uses Eventually for expected success
@@ -2983,6 +3088,123 @@ var _ = Describe("ClusterNetworkConnect OVN-Kubernetes Controller", feature.Netw
 		})
 	})
 
+	Context("Dynamic UDN allocation", func() {
+		const nodeHostnameKey = "kubernetes.io/hostname"
+
+		It("should connect cross-node L3 and L2 UDN pods through CNC when dynamic UDN allocation is enabled", func() {
+			if !isDynamicUDNEnabled() {
+				Skip("test requires DYNAMIC_UDN_ALLOCATION=true")
+			}
+
+			testID := rand.String(5)
+			cncName := generateCNCName()
+			l3UDNName := "blue-udn"
+			l2UDNName := "green-udn"
+			l3Namespace := fmt.Sprintf("blue-ns-%s", testID)
+			l2Namespace := fmt.Sprintf("green-ns-%s", testID)
+			udnLabel := map[string]string{"cnc-test": testID}
+
+			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(nodes.Items)).To(BeNumerically(">=", 2), "test requires at least 2 schedulable nodes")
+			node1Name, node2Name := nodes.Items[0].Name, nodes.Items[1].Name
+
+			var l3PodNode1, l3PodNode2, l2Pod *corev1.Pod
+
+			DeferCleanup(func() {
+				deleteCNC(cncName)
+				if l3PodNode1 != nil {
+					_ = cs.CoreV1().Pods(l3PodNode1.Namespace).Delete(context.Background(), l3PodNode1.Name, metav1.DeleteOptions{})
+				}
+				if l3PodNode2 != nil {
+					_ = cs.CoreV1().Pods(l3PodNode2.Namespace).Delete(context.Background(), l3PodNode2.Name, metav1.DeleteOptions{})
+				}
+				if l2Pod != nil {
+					_ = cs.CoreV1().Pods(l2Pod.Namespace).Delete(context.Background(), l2Pod.Name, metav1.DeleteOptions{})
+				}
+				deleteUDN(l3Namespace, l3UDNName)
+				deleteUDN(l2Namespace, l2UDNName)
+				deleteNamespace(cs, l3Namespace)
+				deleteNamespace(cs, l2Namespace)
+			})
+
+			By("Creating two UDN namespaces selected by the same CNC")
+			createUDNNamespaceWithName(cs, l3Namespace, udnLabel)
+			createUDNNamespaceWithName(cs, l2Namespace, udnLabel)
+
+			By("Creating the L3 and L2 UDNs")
+			createLayer3PrimaryUDNWithSubnets(cs, l3Namespace, l3UDNName, "10.140.0.0/16", "2014:100:600::0/60")
+			createLayer2PrimaryUDNWithSubnets(cs, l2Namespace, l2UDNName, "10.141.0.0/16", "2014:100:700::0/60")
+
+			By("Waiting for both UDNs to be ready")
+			Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, l3Namespace, l3UDNName), 60*time.Second, time.Second).Should(Succeed())
+			Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, l2Namespace, l2UDNName), 60*time.Second, time.Second).Should(Succeed())
+
+			By("Creating the CNC before either node becomes active for the selected UDNs")
+			createOrUpdateCNC(cs, cncName, nil, udnLabel)
+
+			By("Verifying the CNC selected both UDNs")
+			verifyCNCHasBothAnnotations(cncName)
+			verifyCNCSubnetAnnotationNetworkCount(cncName, 2)
+			l3NetworkID := getCNCNetworkIDForTopology(cncName, "layer3")
+			node1ID := getNodeIDAnnotation(cs, node1Name)
+			node2ID := getNodeIDAnnotation(cs, node2Name)
+
+			By(fmt.Sprintf("Creating an L3 pod on %s", node1Name))
+			l3PodNode1Config := httpServerPodConfig("blue-pod-node1", l3Namespace)
+			l3PodNode1Config.nodeSelector = map[string]string{nodeHostnameKey: node1Name}
+			l3PodNode1 = runUDNPod(cs, l3Namespace, l3PodNode1Config, nil)
+
+			By(fmt.Sprintf("Creating a second L3 pod on %s", node2Name))
+			l3PodNode2Config := httpServerPodConfig("blue-pod-node2", l3Namespace)
+			l3PodNode2Config.nodeSelector = map[string]string{nodeHostnameKey: node2Name}
+			l3PodNode2 = runUDNPod(cs, l3Namespace, l3PodNode2Config, nil)
+
+			By(fmt.Sprintf("Creating an L2 pod on %s", node2Name))
+			l2PodConfig := httpServerPodConfig("green-pod", l2Namespace)
+			l2PodConfig.nodeSelector = map[string]string{nodeHostnameKey: node2Name}
+			l2Pod = runUDNPod(cs, l2Namespace, l2PodConfig, nil)
+
+			l3PodNode1IPs := getPrimaryNetworkPodIPs(l3Namespace, l3PodNode1.Name, l3UDNName)
+			l3PodNode2IPs := getPrimaryNetworkPodIPs(l3Namespace, l3PodNode2.Name, l3UDNName)
+			l2PodIPs := getPrimaryNetworkPodIPs(l2Namespace, l2Pod.Name, l2UDNName)
+
+			By("Verifying the cross-node L3 and L2 pods can ping each other through the CNC")
+			for _, l2PodIP := range l2PodIPs {
+				Eventually(func() error {
+					return checkPingConnectivity(l3PodNode1.Namespace, l3PodNode1.Name, l2PodIP)
+				}, 30*time.Second, 2*time.Second).Should(Succeed(),
+					fmt.Sprintf("expected %s/%s to ping %s", l3PodNode1.Namespace, l3PodNode1.Name, l2PodIP))
+			}
+			for _, l3PodIP := range l3PodNode1IPs {
+				Eventually(func() error {
+					return checkPingConnectivity(l2Pod.Namespace, l2Pod.Name, l3PodIP)
+				}, 30*time.Second, 2*time.Second).Should(Succeed(),
+					fmt.Sprintf("expected %s/%s to ping %s", l2Pod.Namespace, l2Pod.Name, l3PodIP))
+			}
+
+			By("Verifying CNC created L3 node-specific OVN state for both active L3 nodes")
+			verifyCNCNodeOVNObjects(f, cs, cncName, l3NetworkID, node1ID, true)
+			verifyCNCNodeOVNObjects(f, cs, cncName, l3NetworkID, node2ID, true)
+
+			By(fmt.Sprintf("Deleting the L3 pod on %s to make that node inactive for the L3 UDN", node1Name))
+			Expect(deletePodWithWait(context.Background(), cs, l3PodNode1)).To(Succeed())
+			l3PodNode1 = nil
+
+			By("Verifying the remaining L3 pod is still reachable through the CNC")
+			for _, l3PodIP := range l3PodNode2IPs {
+				Eventually(func() error {
+					return checkPingConnectivity(l2Pod.Namespace, l2Pod.Name, l3PodIP)
+				}, 30*time.Second, 2*time.Second).Should(Succeed(),
+					fmt.Sprintf("expected %s/%s to ping remaining L3 pod IP %s", l2Pod.Namespace, l2Pod.Name, l3PodIP))
+			}
+
+			By("Verifying CNC removed L3 node-specific OVN state for the inactive node only")
+			verifyCNCNodeOVNObjects(f, cs, cncName, l3NetworkID, node1ID, false)
+			verifyCNCNodeOVNObjects(f, cs, cncName, l3NetworkID, node2ID, true)
+		})
+	})
+
 	// Multiple CNCs with overlapping network selection.
 	// Tests validate behavior when multiple CNCs exist in the cluster with
 	// overlapping or identical network selections, covering pod connectivity,
@@ -3274,9 +3496,6 @@ var _ = Describe("ClusterNetworkConnect OVN-Kubernetes Controller", feature.Netw
 		   7. Delete CNC-2, verify all services isolated
 		*/
 		It("should maintain non-transitive service connectivity when a network is selected by multiple CNCs", func() {
-			if isDynamicUDNEnabled() {
-				Skip("Service connectivity with dynamic UDN allocation is not yet supported, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5963")
-			}
 			// Same topology as above but with ServiceNetwork enabled:
 			// CNC-1: blue + red, CNC-2: blue + green
 			// Verify service VIPs work cross-network and survive CNC-1 deletion
@@ -3514,9 +3733,6 @@ var _ = Describe("ClusterNetworkConnect OVN-Kubernetes Controller", feature.Netw
 		   7. Delete CNC-2, verify all services isolated
 		*/
 		It("should maintain service connectivity when both CNCs select the exact same networks", func() {
-			if isDynamicUDNEnabled() {
-				Skip("Service connectivity with dynamic UDN allocation is not yet supported, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5963")
-			}
 			// Both CNCs select the same 2 networks with ServiceNetwork
 			// Deleting one CNC should not break the other's service connectivity
 
@@ -3778,9 +3994,6 @@ var _ = Describe("ClusterNetworkConnect OVN-Kubernetes Controller", feature.Netw
 		}
 
 		BeforeEach(func() {
-			if isDynamicUDNEnabled() {
-				Skip("Service connectivity with dynamic UDN allocation is not yet supported, see https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5963")
-			}
 			// Get 2 schedulable nodes for cross-node testing
 			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
 			Expect(err).NotTo(HaveOccurred())
