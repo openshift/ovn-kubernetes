@@ -436,10 +436,28 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 	for _, subnet := range networkLocalSubnets {
 		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) || config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) {
 			ip := udng.GetNodeManagementIP(subnet)
-			var err error
-			var exists bool
-			if exists, err = util.LinkAddrExist(mpLink, ip); err == nil && !exists {
-				err = util.LinkAddrAdd(mpLink, ip, 0, 0, 0)
+			addrFlags := 0
+			if udng.useNoPrefixRouteManagementPortIPs() {
+				// In local gateway no-overlay mode, ingress to local UDN pods
+				// must go through OVN, so prevent Linux from creating a
+				// connected route that bypasses the UDN cluster router.
+				addrFlags = unix.IFA_F_NOPREFIXROUTE
+			}
+			existingIP, err := util.LinkAddrGetIPNet(mpLink, ip.IP)
+			if err != nil {
+				return fmt.Errorf("failed to find management port IP from subnet %s on netdevice %s for network %s, err: %v",
+					subnet, mpLink.Attrs().Name, udng.GetNetworkName(), err)
+			}
+			if existingIP != nil && existingIP.String() != ip.String() {
+				err = util.LinkAddrDel(mpLink, existingIP)
+				if err != nil {
+					return fmt.Errorf("failed to delete stale management port IP %s from netdevice %s for network %s, err: %v",
+						existingIP, mpLink.Attrs().Name, udng.GetNetworkName(), err)
+				}
+				existingIP = nil
+			}
+			if existingIP == nil {
+				err = util.LinkAddrAdd(mpLink, ip, addrFlags, 0, 0)
 			}
 			if err != nil {
 				return fmt.Errorf("failed to add management port IP from subnet %s to netdevice %s for network %s, err: %v",
@@ -448,6 +466,12 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 		}
 	}
 	return nil
+}
+
+func (udng *UserDefinedNetworkGateway) useNoPrefixRouteManagementPortIPs() bool {
+	return config.Gateway.Mode == config.GatewayModeLocal &&
+		udng.TopologyType() == types.Layer3Topology &&
+		udng.Transport() == types.NetworkTransportNoOverlay
 }
 
 // computeRoutesForUDN returns a list of routes programmed into a given UDN's VRF
@@ -516,6 +540,8 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 	//   169.254.0.3 via 100.100.1.1 dev ovn-k8s-mp1
 	// For Layer3 networks add the cluster subnet route
 	//   100.100.0.0/16 via 100.100.1.1 dev ovn-k8s-mp1
+	// Local-gateway no-overlay Layer3 uses the node-local subnet instead:
+	//   100.100.1.0/24 via 100.100.1.1 dev ovn-k8s-mp1
 	networkLocalSubnets, err := udng.getLocalSubnets()
 	if err != nil {
 		return nil, err
@@ -524,6 +550,17 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 		gwIP := udng.GetNodeGatewayIP(localSubnet)
 		if gwIP == nil {
 			return nil, fmt.Errorf("unable to find gateway IP for network %s, subnet: %s", udng.GetNetworkName(), localSubnet)
+		}
+		if udng.useNoPrefixRouteManagementPortIPs() {
+			// The management port address uses noprefixroute in local gateway
+			// no-overlay mode. Add a host route to the UDN gateway before
+			// installing routes through it.
+			retVal = append(retVal, netlink.Route{
+				LinkIndex: mpLink.Attrs().Index,
+				Dst:       util.GetIPNetFullMaskFromIP(gwIP.IP),
+				Scope:     netlink.SCOPE_LINK,
+				Table:     udng.vrfTableId,
+			})
 		}
 		etpLocalMasqueradeIP := config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP
 		if utilnet.IsIPv6CIDR(localSubnet) {
@@ -539,6 +576,15 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 			Table: udng.vrfTableId,
 		})
 		if udng.NetInfo.TopologyType() == types.Layer3Topology {
+			if udng.useNoPrefixRouteManagementPortIPs() {
+				retVal = append(retVal, netlink.Route{
+					LinkIndex: mpLink.Attrs().Index,
+					Dst:       localSubnet,
+					Gw:        gwIP.IP,
+					Table:     udng.vrfTableId,
+				})
+				continue
+			}
 			for _, clusterSubnet := range udng.Subnets() {
 				if clusterSubnet.CIDR.Contains(gwIP.IP) {
 					retVal = append(retVal, netlink.Route{
