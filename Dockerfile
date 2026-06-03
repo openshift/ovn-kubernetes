@@ -76,6 +76,24 @@ LABEL io.k8s.display-name="ovn kubernetes" \
       io.openshift.tags="openshift" \
       maintainer="Tim Rozet <trozet@redhat.com>"
 
+# Copy and install custom OVS/OVN RPMs.
+RUN mkdir -p /root/fdp/
+COPY *fdp.*.rpm /root/fdp/
+RUN dnf install -y dnf
+RUN dnf clean all && dnf makecache
+RUN set -e; \
+    remove_pkgs=""; \
+    if ls /root/fdp/*openvswitch*.rpm 1>/dev/null 2>&1; then \
+        remove_pkgs="$remove_pkgs $(rpm -qa --qf '%{NAME}\n' '*openvswitch*' | grep -v 'selinux')"; \
+    fi; \
+    if ls /root/fdp/*ovn*.rpm 1>/dev/null 2>&1; then \
+        remove_pkgs="$remove_pkgs $(rpm -qa --qf '%{NAME}\n' '*ovn*')"; \
+    fi; \
+    dnf remove --noautoremove -y $remove_pkgs && \
+    dnf install -y /root/fdp/*.rpm && \
+    dnf clean all && \
+    rm -rf /root/fdp/
+
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
 
