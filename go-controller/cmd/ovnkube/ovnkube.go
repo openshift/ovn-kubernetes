@@ -335,8 +335,10 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 			KeyFile:     config.Metrics.NodeServerPrivKey,
 			EnablePprof: config.Metrics.EnablePprof,
 			// Use default registry so existing metric registrations keep working.
-			Registerer: prometheus.DefaultRegisterer,
+			Registerer:      prometheus.DefaultRegisterer,
+			ApplyTLSOptions: config.TLS.ApplyOptions,
 		}
+
 		metrics.StartMetricsServer(opts, ctx.Done(), ovnKubeStartWg)
 	}
 
@@ -624,6 +626,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				EnableOVNNorthdMetrics:     true,
 				EnableOVNDBMetrics:         true,
 				OVSDBClient:                ovsClient,
+				ApplyTLSOptions:            config.TLS.ApplyOptions,
 			}
 
 			if combineMetricsEndpoints(runMode) {

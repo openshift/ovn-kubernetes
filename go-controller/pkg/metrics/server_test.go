@@ -6,10 +6,12 @@ package metrics
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -166,6 +168,95 @@ var _ = Describe("MetricServer", func() {
 			Eventually(onFatalInvoked).Within(5 * time.Second).Should(BeClosed())
 		})
 	})
+
+	When("TLS is enabled", func() {
+		BeforeEach(func() {
+			// Create temporary cert and key files
+			var err error
+			t.opts.CertFile, t.opts.KeyFile, err = ovntest.CreateTestCertificateFiles()
+			Expect(err).NotTo(HaveOccurred())
+
+			DeferCleanup(func() {
+				_ = os.Remove(t.opts.CertFile)
+				_ = os.Remove(t.opts.KeyFile)
+			})
+		})
+
+		Context("with no applied TLS config options", func() {
+			It("should default to TLS 1.2", func() {
+				t.testTLSHandshake(tls.VersionTLS12, nil, func(g Gomega, state tls.ConnectionState, err error) {
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(state.Version).To(BeNumerically("==", tls.VersionTLS12))
+				})
+			})
+
+			It("should reject TLS 1.1 and earlier", func() {
+				t.testTLSHandshake(tls.VersionTLS11, nil, func(g Gomega, _ tls.ConnectionState, err error) {
+					g.Expect(err).To(HaveOccurred())
+					g.Expect(err.Error()).To(Or(
+						ContainSubstring("protocol version"),
+						ContainSubstring("handshake failure"),
+						ContainSubstring("tls: no supported versions"),
+					))
+				})
+			})
+		})
+
+		Context("with applied TLS ciphers", func() {
+			BeforeEach(func() {
+				t.opts.ApplyTLSOptions = func(tlsConfig *tls.Config) {
+					tlsConfig.MinVersion = tls.VersionTLS12
+					// Configure server to explicitly NOT accept ChaCha20-Poly1305
+					// Only accept AES-based cipher suites
+					tlsConfig.CipherSuites = []uint16{
+						tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+						tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, // Required for HTTP/2
+					}
+				}
+			})
+
+			It("should accept allowed cipher suites", func() {
+				// Client offers an AES cipher suite that the server explicitly allows
+				t.testTLSHandshake(tls.VersionTLS12, []uint16{
+					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				}, func(g Gomega, state tls.ConnectionState, err error) {
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(state.CipherSuite).To(Equal(tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256))
+				})
+			})
+
+			It("should reject disallowed cipher suites", func() {
+				// Client offers ONLY ChaCha20-Poly1305, which server explicitly excludes so handshake should fail.
+				t.testTLSHandshake(tls.VersionTLS12, []uint16{
+					tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+				}, func(g Gomega, _ tls.ConnectionState, err error) {
+					g.Expect(err).To(HaveOccurred())
+					g.Expect(err.Error()).To(ContainSubstring("handshake failure"))
+				})
+			})
+		})
+
+		Context("with applied TLS minimum version", func() {
+			BeforeEach(func() {
+				t.opts.ApplyTLSOptions = func(tlsConfig *tls.Config) {
+					tlsConfig.MinVersion = tls.VersionTLS13
+				}
+			})
+
+			It("should reject versions below the minimum", func() {
+				for clientVersion := tls.VersionTLS11; clientVersion <= tls.VersionTLS12; clientVersion++ {
+					t.testTLSHandshake(clientVersion, nil, func(g Gomega, _ tls.ConnectionState, err error) {
+						g.Expect(err).To(HaveOccurred())
+						g.Expect(err.Error()).To(Or(
+							ContainSubstring("protocol version"),
+							ContainSubstring("handshake failure"),
+							ContainSubstring("tls: no supported versions"),
+						))
+					})
+				}
+			})
+		})
+	})
 })
 
 type metricsTestDriver struct {
@@ -273,6 +364,28 @@ func newMetricsTestDriver() *metricsTestDriver {
 	})
 
 	return t
+}
+
+func (t *metricsTestDriver) testTLSHandshake(clientVersion int, clientCipherSuites []uint16, verify func(Gomega, tls.ConnectionState, error)) {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+		MinVersion:         uint16(clientVersion),
+		MaxVersion:         uint16(clientVersion),
+		CipherSuites:       clientCipherSuites,
+	}
+
+	Eventually(func(g Gomega) {
+		conn, err := tls.Dial("tcp", t.opts.BindAddress, tlsConfig)
+		if err != nil {
+			verify(g, tls.ConnectionState{}, err)
+			return
+		}
+		defer conn.Close()
+
+		state := conn.ConnectionState()
+		g.Expect(state.HandshakeComplete).To(BeTrue())
+		verify(g, state, err)
+	}).Within(5 * time.Second).Should(Succeed())
 }
 
 func setupAppFs() {
