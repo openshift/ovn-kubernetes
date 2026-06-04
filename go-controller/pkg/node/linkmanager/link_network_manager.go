@@ -175,21 +175,25 @@ func (c *Controller) syncLinkLocked(link netlink.Link) error {
 // syncLink handles link updates
 // It MUST be called with the controller locked
 func (c *Controller) syncLink(link netlink.Link) error {
+	linkName := link.Attrs().Name
+	wantedAddresses, found := c.store[linkName]
+	if !found {
+		return nil
+	}
 	if c.linkHandlerFunc != nil {
 		if err := c.linkHandlerFunc(link); err != nil {
-			klog.Errorf("Failed to execute link handler function on link: %s, error: %v", link.Attrs().Name, err)
+			klog.Errorf("Failed to execute link handler function on link: %s, error: %v", linkName, err)
 		}
 	}
-	linkName := link.Attrs().Name
 	// get all addresses associated with the link depending on which IP families we support
 	foundAddresses, err := util.GetFilteredInterfaceAddrs(link, c.ipv4Enabled, c.ipv6Enabled)
 	if err != nil {
+		if errors.Is(err, unix.ENODEV) {
+			klog.V(5).Infof("Link manager: link %q was removed, cleaning up store entry", linkName)
+			delete(c.store, linkName)
+			return nil
+		}
 		return fmt.Errorf("failed to get address from link %q: %w", linkName, err)
-	}
-	wantedAddresses, found := c.store[linkName]
-	// we don't manage this link therefore we don't need to add any addresses
-	if !found {
-		return nil
 	}
 	// add addresses we want that are not found on the link
 	for _, addressWanted := range wantedAddresses {
