@@ -1273,7 +1273,7 @@ func (c *Controller) cleanupUDNEnabledServiceRoute(state *networkState, key stri
 }
 
 func (c *Controller) configureUDNEnabledServiceRoute(state *networkState, service *corev1.Service) error {
-	klog.Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, state.netInfo.GetNetworkName())
+	klog.V(5).Infof("Configuring UDN enabled service route for service %s/%s in network: %s", service.Namespace, service.Name, state.netInfo.GetNetworkName())
 
 	extIDs := map[string]string{
 		types.NetworkExternalID:           state.netInfo.GetNetworkName(),
