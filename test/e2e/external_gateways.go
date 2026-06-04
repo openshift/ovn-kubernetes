@@ -743,7 +743,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				}, 10).Should(gomega.Equal(podConnEntriesWithMACLabelsSet))
 				gomega.Expect(pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)).To(gomega.Equal(totalPodConnEntries))
 
-				ginkgo.By("Remove first external gateway pod's routing-namespace annotation")
+				ginkgo.By("Update first external gateway pod's labels so it no longer matches the policy")
 				p := getGatewayPod(f, servingNamespace, gatewayPodName1)
 				p.Labels = map[string]string{"name": gatewayPodName1}
 				updatePod(f, p)
@@ -760,10 +760,10 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				gomega.Expect(pokeConntrackEntries(nodeName, addresses.srcPodIP, protocol, nil)).To(gomega.Equal(totalPodConnEntries))
 				checkAPBExternalRouteStatus(defaultPolicyName)
 			},
-				ginkgo.Entry("IPV4 udp + pod annotation update", &addressesv4, "udp", GatewayUpdate),
-				ginkgo.Entry("IPV4 tcp + pod annotation update", &addressesv4, "tcp", GatewayUpdate),
-				ginkgo.Entry("IPV6 udp + pod annotation update", &addressesv6, "udp", GatewayUpdate),
-				ginkgo.Entry("IPV6 tcp + pod annotation update", &addressesv6, "tcp", GatewayUpdate),
+				ginkgo.Entry("IPV4 udp + pod label update", &addressesv4, "udp", GatewayUpdate),
+				ginkgo.Entry("IPV4 tcp + pod label update", &addressesv4, "tcp", GatewayUpdate),
+				ginkgo.Entry("IPV6 udp + pod label update", &addressesv6, "udp", GatewayUpdate),
+				ginkgo.Entry("IPV6 tcp + pod label update", &addressesv6, "tcp", GatewayUpdate),
 				ginkgo.Entry("IPV4 udp + pod deletion timestamp", &addressesv4, "udp", GatewayDeletionTimestamp),
 				ginkgo.Entry("IPV4 tcp + pod deletion timestamp", &addressesv4, "tcp", GatewayDeletionTimestamp),
 				ginkgo.Entry("IPV6 udp + pod deletion timestamp", &addressesv6, "udp", GatewayDeletionTimestamp),

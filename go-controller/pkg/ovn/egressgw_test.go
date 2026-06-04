@@ -445,6 +445,58 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			}
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 		})
+		ginkgo.It("deletes the BFD entry along with the external gateway route on pod deletion", func() {
+			app.Action = func(*cli.Context) error {
+				config.Gateway.Mode = config.GatewayModeShared
+				podNsName := ktypes.NamespacedName{Namespace: namespaceName, Name: "myPod"}
+				bfdUUID := "bfd-1-UUID"
+				fakeOvn.startWithDBSetup(
+					libovsdbtest.TestSetup{
+						NBData: []libovsdbtest.TestData{
+							&nbdb.BFD{
+								UUID:        bfdUUID,
+								LogicalPort: "rtoe-GR_node1",
+								DstIP:       "9.0.0.1",
+							},
+							&nbdb.LogicalRouterStaticRoute{
+								UUID:       "static-route-1-UUID",
+								IPPrefix:   "10.128.1.3/32",
+								Nexthop:    "9.0.0.1",
+								BFD:        &bfdUUID,
+								Options:    map[string]string{"ecmp_symmetric_reply": "true"},
+								OutputPort: &logicalRouterPort,
+								Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+							},
+							&nbdb.LogicalRouter{
+								UUID:         "GR_node1-UUID",
+								Name:         "GR_node1",
+								StaticRoutes: []string{"static-route-1-UUID"},
+							},
+						},
+					},
+				)
+				injectNode(fakeOvn)
+				err := fakeOvn.controller.externalGatewayRouteInfo.CreateOrLoad(podNsName, func(routeInfo *apbroute.RouteInfo) error {
+					routeInfo.PodExternalRoutes["10.128.1.3"] = map[string]string{"9.0.0.1": "GR_node1"}
+					return nil
+				})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// Both the ECMP route and its now-dangling BFD row must be removed.
+				finalNB := []libovsdbtest.TestData{
+					&nbdb.LogicalRouter{
+						UUID:         "GR_node1-UUID",
+						Name:         "GR_node1",
+						StaticRoutes: []string{},
+					},
+				}
+				err = fakeOvn.controller.deleteGWRoutesForPod(podNsName, []*net.IPNet{{IP: net.ParseIP("10.128.1.3")}})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(finalNB))
+				return nil
+			}
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+
 	})
 
 	ginkgo.Context("SNAT on gateway router operations", func() {
