@@ -1318,20 +1318,28 @@ func exGatewayPodsAnnotationsChanged(oldNs, newNs *corev1.Namespace) bool {
 func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 	namespaces, err := nc.watchFactory.GetNamespaces()
 	if err != nil {
-		klog.Errorf("Unable to get pods from informer: %v", err)
+		klog.Errorf("Unable to get namespaces from informer: %v", err)
 	}
 	for _, namespace := range namespaces {
-		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
-		if foundExternalGatewayPodIPsAnnotation {
-			pods, err := nc.watchFactory.GetPods(namespace.Name)
-			if err != nil {
-				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
-			}
-			if len(pods) > 0 || err != nil {
-				// we only need to proceed if there is at least one pod in this namespace on this node
-				// OR if we couldn't fetch the pods for some reason at this juncture
-				_ = nc.syncConntrackForExternalGateways(namespace)
-			}
+		// Only namespaces targeted by an AdminPolicyBasedExternalRoute can have
+		// external-gateway ECMP conntrack entries to reconcile (the legacy
+		// routing-external-gws annotation is no longer supported).
+		gatewayIPs, err := nc.apbExternalRouteNodeController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespace.Name)
+		if err != nil {
+			klog.Errorf("Unable to retrieve gateway IPs for Admin Policy Based External Route objects for namespace %s: %v", namespace.Name, err)
+			continue
+		}
+		if gatewayIPs.Len() == 0 {
+			continue
+		}
+		pods, err := nc.watchFactory.GetPods(namespace.Name)
+		if err != nil {
+			klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
+		}
+		if len(pods) > 0 || err != nil {
+			// we only need to proceed if there is at least one pod in this namespace on this node
+			// OR if we couldn't fetch the pods for some reason at this juncture
+			_ = nc.syncConntrackForExternalGateways(namespace)
 		}
 	}
 }
@@ -1341,9 +1349,8 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	if err != nil {
 		return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects: %w", err)
 	}
-	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
-	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
-
+	// ARP for the gateway IPs' MACs to form an allowlist; conntrack entries whose
+	// destination MAC is no longer valid (e.g. after a gateway MAC change) are removed.
 	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*corev1.Pod, error) {
 		return nc.watchFactory.GetPods(newNs.Name)
 	})
