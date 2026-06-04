@@ -475,20 +475,12 @@ func (r *RetryFramework) iterateRetryResources() {
 		return
 	}
 	now := time.Now()
-	wg := &sync.WaitGroup{}
 
-	// Process the above list of objects that need retry by holding the lock for each one of them.
 	klog.V(5).Infof("%s: going to retry %v resource setup for %d objects: %s", r.name, r.ResourceHandler.ObjType, len(entriesKeys), entriesKeys)
 
 	for _, entryKey := range entriesKeys {
-		wg.Add(1)
-		go func(entryKey string) {
-			defer wg.Done()
-			r.resourceRetry(entryKey, now)
-		}(entryKey)
+		r.resourceRetry(entryKey, now)
 	}
-	klog.V(5).Infof("%s: waiting for all the %s retry setup to complete in iterateRetryResources", r.name, r.ResourceHandler.ObjType)
-	wg.Wait()
 	klog.V(5).Infof("%s: function iterateRetryResources for %s ended (in %v)", r.name, r.ResourceHandler.ObjType, time.Since(now))
 }
 
