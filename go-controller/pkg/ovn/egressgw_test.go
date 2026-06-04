@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ktypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
@@ -383,6 +384,69 @@ var _ = ginkgo.Describe("OVN Egress Gateway Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 	})
+	ginkgo.Context("external gateway route cleanup on pod and namespace deletion", func() {
+		seedRoute := func() ktypes.NamespacedName {
+			podNsName := ktypes.NamespacedName{Namespace: namespaceName, Name: "myPod"}
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalRouterStaticRoute{
+							UUID:       "static-route-1-UUID",
+							IPPrefix:   "10.128.1.3/32",
+							Nexthop:    "9.0.0.1",
+							Options:    map[string]string{"ecmp_symmetric_reply": "true"},
+							OutputPort: &logicalRouterPort,
+							Policy:     &nbdb.LogicalRouterStaticRoutePolicySrcIP,
+						},
+						&nbdb.LogicalRouter{
+							UUID:         "GR_node1-UUID",
+							Name:         "GR_node1",
+							StaticRoutes: []string{"static-route-1-UUID"},
+						},
+					},
+				},
+			)
+			injectNode(fakeOvn)
+			// Seed the shared route cache as if the APB controller had programmed an
+			// external-gateway ECMP route for this pod.
+			err := fakeOvn.controller.externalGatewayRouteInfo.CreateOrLoad(podNsName, func(routeInfo *apbroute.RouteInfo) error {
+				routeInfo.PodExternalRoutes["10.128.1.3"] = map[string]string{"9.0.0.1": "GR_node1"}
+				return nil
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			return podNsName
+		}
+		routeDeletedNB := []libovsdbtest.TestData{
+			&nbdb.LogicalRouter{
+				UUID:         "GR_node1-UUID",
+				Name:         "GR_node1",
+				StaticRoutes: []string{},
+			},
+		}
+		ginkgo.It("deletes external gateway ECMP routes for a pod with no matching policy", func() {
+			app.Action = func(*cli.Context) error {
+				config.Gateway.Mode = config.GatewayModeShared
+				podNsName := seedRoute()
+				err := fakeOvn.controller.deleteGWRoutesForPod(podNsName, []*net.IPNet{{IP: net.ParseIP("10.128.1.3")}})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(routeDeletedNB))
+				return nil
+			}
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+		ginkgo.It("deletes external gateway ECMP routes when the namespace is removed", func() {
+			app.Action = func(*cli.Context) error {
+				config.Gateway.Mode = config.GatewayModeShared
+				seedRoute()
+				err := fakeOvn.controller.deleteGWRoutesForNamespace(namespaceName, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(routeDeletedNB))
+				return nil
+			}
+			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
+		})
+	})
+
 	ginkgo.Context("SNAT on gateway router operations", func() {
 		ginkgo.It("add/delete SNAT per pod on gateway router", func() {
 			app.Action = func(*cli.Context) error {
