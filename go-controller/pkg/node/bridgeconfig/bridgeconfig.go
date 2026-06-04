@@ -582,7 +582,7 @@ func getIntfName(gatewayIntf string) (string, error) {
 func bridgedGatewayNodeSetup(ovsClient libovsdbclient.Client, nodeName, bridgeName, physicalNetworkName string) (string, error) {
 	// IPv6 forwarding is enabled globally
 	if config.IPv4Mode {
-		err := util.SetforwardingModeForInterface(bridgeName)
+		err := util.SetForwardingModeForInterface(bridgeName)
 		if err != nil {
 			return "", err
 		}

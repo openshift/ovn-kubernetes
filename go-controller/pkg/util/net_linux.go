@@ -1010,8 +1010,8 @@ func ipAddrExistsAtInterface(ipAddr net.IP, iface net.Interface) (bool, error) {
 	return false, nil
 }
 
-// SetforwardingModeForInterface update the forwarding options for the specified interface
-func SetforwardingModeForInterface(ifName string) error {
+// SetForwardingModeForInterface updates the forwarding options for the specified interface
+func SetForwardingModeForInterface(ifName string) error {
 	// we use forward slash as path separator to allow dotted interfaceName e.g. foo.200
 	stdout, stderr, err := RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/forwarding=1", ifName))
 	// systctl output enforces dot as path separator
