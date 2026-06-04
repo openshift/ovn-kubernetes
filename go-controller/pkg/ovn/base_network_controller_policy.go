@@ -648,7 +648,7 @@ func (bnc *BaseNetworkController) getNewLocalPolicyPorts(np *networkPolicy,
 // getExistingLocalPolicyPorts will find and return port info for every given pod obj, that is present in np.localPods.
 func (bnc *BaseNetworkController) getExistingLocalPolicyPorts(np *networkPolicy,
 	objs ...interface{}) (policyPortsToUUIDs map[string]string, policyPortUUIDs []string, err error) {
-	klog.Infof("Processing NetworkPolicy %s/%s to delete %d local pods...", np.namespace, np.name, len(objs))
+	klog.V(5).Infof("Processing NetworkPolicy %s/%s to delete %d local pods...", np.namespace, np.name, len(objs))
 
 	policyPortUUIDs = []string{}
 	policyPortsToUUIDs = map[string]string{}
@@ -1082,7 +1082,7 @@ func (bnc *BaseNetworkController) createNetworkPolicy(policy *knet.NetworkPolicy
 				}
 			}
 		}
-		klog.Infof("Policy %s added to peer address sets %v", npKey, np.peerAddressSets)
+		klog.V(5).Infof("Policy %s added to peer address sets %v", npKey, np.peerAddressSets)
 
 		// 3. Add policy to default deny port group
 		// Pods are not added to default deny port groups yet, this is just a preparation step
@@ -1187,7 +1187,7 @@ func (bnc *BaseNetworkController) setupGressPolicy(np *networkPolicy, gp *gressP
 // ports from Kubernetes NetworkPolicy objects using OVN Port Groups
 // if addNetworkPolicy fails, create or delete operation can be retried
 func (bnc *BaseNetworkController) addNetworkPolicy(policy *knet.NetworkPolicy) error {
-	klog.Infof("Adding network policy %s for network %s", getPolicyKey(policy), bnc.GetNetworkName())
+	klog.V(5).Infof("Adding network policy %s for network %s", getPolicyKey(policy), bnc.GetNetworkName())
 	if !bnc.IsUserDefinedNetwork() && config.Metrics.EnableScaleMetrics {
 		start := time.Now()
 		defer func() {
@@ -1240,7 +1240,7 @@ func (bnc *BaseNetworkController) addNetworkPolicy(policy *knet.NetworkPolicy) e
 	if err != nil {
 		return fmt.Errorf("failed to create Network Policy %s: %v", npKey, err)
 	}
-	klog.Infof("Create network policy %s resources completed, update namespace loglevel", npKey)
+	klog.V(5).Infof("Create network policy %s resources completed, update namespace loglevel", npKey)
 
 	// 3. lock namespace
 	nsInfo, nsUnlock = bnc.getNamespaceLocked(policy.Namespace, false)
@@ -1338,7 +1338,7 @@ func (bnc *BaseNetworkController) deleteNetworkPolicy(policy *knet.NetworkPolicy
 // that information.
 func (bnc *BaseNetworkController) cleanupNetworkPolicy(np *networkPolicy) error {
 	npKey := np.getKey()
-	klog.Infof("Cleaning up network policy %s", npKey)
+	klog.V(5).Infof("Cleaning up network policy %s", npKey)
 	np.Lock()
 	defer np.Unlock()
 

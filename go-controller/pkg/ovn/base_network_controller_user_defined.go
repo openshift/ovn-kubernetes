@@ -333,7 +333,7 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s/%s] addLogicalPort for NAD key %s took %v, libovsdb time %v",
+		klog.V(5).Infof("[%s/%s] addLogicalPort for NAD key %s took %v, libovsdb time %v",
 			pod.Namespace, pod.Name, nadKey, time.Since(start), libovsdbExecuteTime)
 	}()
 
@@ -479,7 +479,7 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 		}
 
 		// pod has a network managed by this controller
-		klog.Infof("Deleting pod: %s for network %s, NAD key: %s", podDesc, bsnc.GetNetworkName(), nadKey)
+		klog.V(5).Infof("Deleting pod: %s for network %s, NAD key: %s", podDesc, bsnc.GetNetworkName(), nadKey)
 
 		// handle remote pod clean up but only do this one time
 		if !bsnc.hasPodLogicalPort(pod) && !alreadyProcessed {
@@ -709,11 +709,11 @@ func (bsnc *BaseUserDefinedNetworkController) addPodToNamespaceForUserDefinedNet
 
 // AddNamespaceForUserDefinedNetwork creates corresponding addressset in ovn db for User Defined Network
 func (bsnc *BaseUserDefinedNetworkController) AddNamespaceForUserDefinedNetwork(ns *corev1.Namespace) error {
-	klog.Infof("[%s] adding namespace for network %s", ns.Name, bsnc.GetNetworkName())
+	klog.V(5).Infof("[%s] adding namespace for network %s", ns.Name, bsnc.GetNetworkName())
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-		klog.Infof("[%s] adding namespace took %v for network %s", ns.Name, time.Since(start), bsnc.GetNetworkName())
+		klog.V(5).Infof("[%s] adding namespace took %v for network %s", ns.Name, time.Since(start), bsnc.GetNetworkName())
 	}()
 
 	_, nsUnlock, err := bsnc.ensureNamespaceLockedForUserDefinedNetwork(ns.Name, false, ns)
@@ -733,11 +733,11 @@ func (bsnc *BaseUserDefinedNetworkController) ensureNamespaceLockedForUserDefine
 
 func (bsnc *BaseUserDefinedNetworkController) updateNamespaceForUserDefinedNetwork(old, newer *corev1.Namespace) error {
 	var errors []error
-	klog.Infof("[%s] updating namespace for network %s", old.Name, bsnc.GetNetworkName())
+	klog.V(5).Infof("[%s] updating namespace for network %s", old.Name, bsnc.GetNetworkName())
 
 	nsInfo, nsUnlock := bsnc.getNamespaceLocked(old.Name, false)
 	if nsInfo == nil {
-		klog.Warningf("Update event for unknown namespace %q", old.Name)
+		klog.V(5).Infof("Update event for unknown namespace %q", old.Name)
 		return nil
 	}
 	defer nsUnlock()

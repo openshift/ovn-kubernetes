@@ -487,7 +487,7 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 	}
 
 	portName := bnc.GetLogicalPortName(pod, nadKey)
-	klog.Infof("[%s] creating logical port %s for pod on switch %s", podDesc, portName, switchName)
+	klog.V(5).Infof("[%s] creating logical port %s for pod on switch %s", podDesc, portName, switchName)
 
 	var addresses []string
 	lspExist := false
