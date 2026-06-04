@@ -38,10 +38,9 @@ import (
 // This is the image used for the containers acting as externalgateways, built
 // out from the e2e/images/Dockerfile.frr dockerfile
 const (
-	externalContainerImage          = "quay.io/trozet/ovnkbfdtest:0.3"
-	externalGatewayPodIPsAnnotation = "k8s.ovn.org/external-gw-pod-ips"
-	defaultPolicyName               = "default-route-policy"
-	anyLink                         = "any"
+	externalContainerImage = "quay.io/trozet/ovnkbfdtest:0.3"
+	defaultPolicyName      = "default-route-policy"
+	anyLink                = "any"
 )
 
 // GatewayRemovalType defines ways to remove pod as external gateway
