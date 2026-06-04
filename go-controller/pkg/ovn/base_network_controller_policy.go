@@ -894,9 +894,10 @@ func (bnc *BaseNetworkController) addLocalPodHandler(policy *knet.NetworkPolicy,
 
 	// Add all local pods in a syncFunction to minimize db ops.
 	syncFunc := func(objs []interface{}) error {
-		// ignore returned error, since any pod that wasn't properly handled will be retried individually.
-		_ = bnc.handleLocalPodSelectorAddFunc(np, objs...)
-		return nil
+		// Return error so WatchFactory retries the sync.
+		// handleLocalPodSelectorAddFunc is idempotent: pods already
+		// stored in np.localPods are skipped via getNewLocalPolicyPorts.
+		return bnc.handleLocalPodSelectorAddFunc(np, objs...)
 	}
 	retryLocalPods := bnc.newNetpolRetryFramework(
 		factory.LocalPodSelectorType,

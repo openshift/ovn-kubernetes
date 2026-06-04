@@ -597,7 +597,16 @@ func getAllUpdatableFields(model model.Model) []interface{} {
 	case *nbdb.LogicalSwitchPort:
 		return []interface{}{&t.Addresses, &t.Type, &t.TagRequest, &t.Options, &t.PortSecurity}
 	case *nbdb.PortGroup:
-		return []interface{}{&t.ACLs, &t.Ports, &t.ExternalIDs}
+		fields := []interface{}{&t.ACLs, &t.ExternalIDs}
+		// Only include Ports when explicitly set (non-nil). Callers like
+		// createNetworkPolicy pass nil Ports via BuildPortGroup and rely on
+		// a separate local-pod handler to populate them. Including a nil
+		// Ports here would generate an OVSDB Update that clears existing
+		// port membership, breaking traffic until pods are re-added.
+		if t.Ports != nil {
+			fields = append(fields, &t.Ports)
+		}
+		return fields
 	default:
 		panic(fmt.Sprintf("getAllUpdatableFields: unknown model %T", t))
 	}
