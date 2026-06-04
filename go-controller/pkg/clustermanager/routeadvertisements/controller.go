@@ -853,16 +853,16 @@ func (c *Controller) generateFRRConfiguration(
 				continue
 			}
 
-			// If MultiProtocol is enabled (default) then a BGP session carries
-			// prefixes of both IPv4 and IPv6 families. Our problem is that with
-			// an IPv4 session, FRR can incorrectly pick the masquerade IPv6
-			// address (instead of the real address) as next hop for IPv6
-			// prefixes and that won't work. Note that with a dedicated IPv6
-			// session that can't happen since FRR will use the same address
-			// that was used to establish the session. Let's enforce the use of
-			// DisableMP for now.
-			if !neighbor.DisableMP {
-				return nil, fmt.Errorf("%w: DisableMP==false not supported, seen on FRRConfiguration %s/%s neighbor %s",
+			// If the dual-stack address family is enabled then a BGP session
+			// carries prefixes of both IPv4 and IPv6 families. Our problem is
+			// that with an IPv4 session, FRR can incorrectly pick the
+			// masquerade IPv6 address (instead of the real address) as next
+			// hop for IPv6 prefixes and that won't work. Note that with a
+			// dedicated IPv6 session that can't happen since FRR will use the
+			// same address that was used to establish the session. Enforce
+			// address-family-specific sessions for now.
+			if neighbor.DualStackAddressFamily {
+				return nil, fmt.Errorf("%w: DualStackAddressFamily==true not supported, seen on FRRConfiguration %s/%s neighbor %s",
 					errConfig,
 					source.Namespace,
 					source.Name,
@@ -1077,8 +1077,13 @@ func (c *Controller) generateFRRConfiguration(
 				vtepRouter.Prefixes = vtepIPs
 				vtepRouter.Neighbors = nil // will rebuild below
 				for _, neighbor := range router.Neighbors {
-					if !neighbor.DisableMP {
-						continue
+					if neighbor.DualStackAddressFamily {
+						return nil, fmt.Errorf("%w: DualStackAddressFamily==true not supported, seen on FRRConfiguration %s/%s neighbor %s",
+							errConfig,
+							source.Namespace,
+							source.Name,
+							neighbor.Address,
+						)
 					}
 					isIPV6 := utilnet.IsIPv6String(neighbor.Address)
 					filteredVTEPIPs := util.MatchAllIPNetsStringFamily(isIPV6, vtepIPs)

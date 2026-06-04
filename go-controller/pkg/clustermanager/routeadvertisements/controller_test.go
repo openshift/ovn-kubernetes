@@ -187,20 +187,19 @@ type testPrefixSelector struct {
 }
 
 type testNeighbor struct {
-	ASN       uint32
-	Address   string
-	DisableMP *bool
-	Advertise []string
-	NextHopV4 string
-	NextHopV6 string
-	Receive   []testPrefixSelector
+	ASN                    uint32
+	Address                string
+	DualStackAddressFamily *bool
+	Advertise              []string
+	NextHopV4              string
+	NextHopV6              string
+	Receive                []testPrefixSelector
 }
 
 func (tn testNeighbor) Neighbor() frrapi.Neighbor {
 	n := frrapi.Neighbor{
-		ASN:       tn.ASN,
-		Address:   tn.Address,
-		DisableMP: true,
+		ASN:     tn.ASN,
+		Address: tn.Address,
 		ToAdvertise: frrapi.Advertise{
 			Allowed: frrapi.AllowedOutPrefixes{
 				Mode:     frrapi.AllowRestricted,
@@ -212,8 +211,8 @@ func (tn testNeighbor) Neighbor() frrapi.Neighbor {
 			},
 		},
 	}
-	if tn.DisableMP != nil {
-		n.DisableMP = *tn.DisableMP
+	if tn.DualStackAddressFamily != nil {
+		n.DualStackAddressFamily = *tn.DualStackAddressFamily
 	}
 	if len(tn.Receive) > 0 {
 		prefixSelectors := make([]frrapi.PrefixSelector, 0, len(tn.Receive))
@@ -1150,7 +1149,7 @@ func TestController_reconcile(t *testing.T) {
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
-			name: "fails to reconcile if DisableMP is unset",
+			name: "fails to reconcile if dual-stack address family is set",
 			ra:   &testRA{Name: "ra", AdvertisePods: true},
 			frrConfigs: []*testFRRConfig{
 				{
@@ -1158,7 +1157,7 @@ func TestController_reconcile(t *testing.T) {
 					Namespace: frrNamespace,
 					Routers: []*testRouter{
 						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100", DisableMP: ptr.To(false)},
+							{ASN: 1, Address: "1.0.0.100", DualStackAddressFamily: ptr.To(true)},
 						}},
 					},
 				},
@@ -1715,6 +1714,38 @@ exit
 				},
 			},
 			expectNADAnnotations: map[string]map[string]string{"blue6": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "fails to reconcile EVPN target VRF when cloned default-VRF neighbor has dual-stack address family set",
+			ra:   &testRA{Name: "ra", TargetVRF: "red", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1", DualStackAddressFamily: ptr.To(true)},
+						}},
+						{ASN: 65000, VRF: "red", Prefixes: []string{"10.1.0.0/16"}, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"),
+					Topology: "layer2", Subnet: "10.1.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNVTEPName: "my-vtep", EVPNMACVRFVNI: 1000, EVPNMACVRFRouteTarget: "65000:1000"},
+			},
+			vteps: []*vtepv1.VTEP{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "my-vtep"},
+					Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/16"}},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}", VTEPIPs: map[string][]string{"my-vtep": {"100.64.0.1"}}}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
 			name: "advertises VTEP IP /32 in default-VRF router prefixes for EVPN MAC-VRF with target VRF",
