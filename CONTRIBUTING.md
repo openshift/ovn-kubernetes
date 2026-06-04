@@ -76,10 +76,9 @@ The best way to reach us with a question when contributing is to ask on:
 
 ## Pull Request Lifecycle
 
-1. When you open a PR a maintainer will automatically be assigned for review
+1. When you open a PR a reviewer will automatically be assigned. This need not be a maintainer.
 2. Make sure that your PR is passing CI - if you need help with failing checks please feel free to ask!
-3. Once it is passing all CI checks, a maintainer will review your PR and you may be asked to make changes.
-4. When you have received at least one approval from a maintainer, that maintainer will merge your PR.
+3. Once the assigned reviewer approves (+1), a maintainer (see `MAINTAINERS.md` for the current list) will review and merge your PR. You may be asked to make additional changes by maintainer post reviewer's approval.
 
 In some cases, other changes may conflict with your PR. If this happens, you will get notified by a comment in the issue that your PR requires a rebase, and the `needs-rebase` label will be applied. Once a rebase has been performed, this label will be automatically removed.
 
@@ -196,6 +195,8 @@ make test
 * All modular changes must be accompanied by new unit tests if they don't exist already.
 
 * All functional changes and new features must be accompanied by extensive end-to-end test coverage
+
+* Documentation updates are required when user-facing behavior changes
 
 ## AI Guidelines
 
