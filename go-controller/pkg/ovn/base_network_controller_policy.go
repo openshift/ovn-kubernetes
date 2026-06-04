@@ -1299,6 +1299,9 @@ func (bnc *BaseNetworkController) buildNetworkPolicyACLs(np *networkPolicy, aclL
 // It only uses Namespace and Name from given network policy
 func (bnc *BaseNetworkController) deleteNetworkPolicy(policy *knet.NetworkPolicy) error {
 	npKey := getPolicyKey(policy)
+	if _, ok := bnc.networkPolicies.Load(npKey); !ok {
+		return nil
+	}
 	klog.Infof("Deleting network policy %s", npKey)
 	if config.Metrics.EnableScaleMetrics {
 		start := time.Now()
