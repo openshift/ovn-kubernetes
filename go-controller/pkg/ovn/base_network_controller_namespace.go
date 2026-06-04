@@ -46,15 +46,6 @@ type namespaceInfo struct {
 	// Namespace can take oc.networkPolicies key Lock while holding nsInfo lock, the opposite should never happen.
 	relatedNetworkPolicies map[string]bool
 
-	// routingExternalGWs is a slice of net.IP containing the values parsed from
-	// annotation k8s.ovn.org/routing-external-gws
-	routingExternalGWs gatewayInfo
-
-	// routingExternalPodGWs contains a map of all pods serving as exgws as well as their
-	// exgw IPs
-	// key is <namespace>_<pod name>
-	routingExternalPodGWs map[string]gatewayInfo
-
 	multicastEnabled bool
 
 	// If not empty, then it has to be set to a logging a severity level, e.g. "notice", "alert", etc
@@ -239,8 +230,6 @@ func (bnc *BaseNetworkController) ensureNamespaceLockedCommon(ns string, readOnl
 		nsInfo = &namespaceInfo{
 			relatedNetworkPolicies: map[string]bool{},
 			multicastEnabled:       false,
-			routingExternalPodGWs:  make(map[string]gatewayInfo),
-			routingExternalGWs:     gatewayInfo{gws: sets.New[string](), bfdEnabled: false},
 		}
 		// we are creating nsInfo and going to set it in namespaces map
 		// so safe to hold the lock while we create and add it
