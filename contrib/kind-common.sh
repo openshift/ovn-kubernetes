@@ -1445,8 +1445,7 @@ destroy_bgp() {
 install_frr_k8s_crds() {
   echo "Installing frr-k8s CRDs ..."
   clone_frr
-  kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/frrk8s.metallb.io_frrconfigurations.yaml
-  kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/frrk8s.metallb.io_frrnodestates.yaml
+  kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/
 }
 
 install_frr_k8s() {

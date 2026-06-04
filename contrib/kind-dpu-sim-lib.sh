@@ -109,9 +109,33 @@ install_frr_k8s_host_api_crds() {
   host_kubeconfig=$(frr_k8s_host_kubeconfig)
   ensure_frr_k8s_namespace "${host_kubeconfig}"
   kubectl --kubeconfig "${host_kubeconfig}" apply \
-    -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/frrk8s.metallb.io_frrconfigurations.yaml
-  kubectl --kubeconfig "${host_kubeconfig}" apply \
-    -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/frrk8s.metallb.io_frrnodestates.yaml
+    -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/
+  ensure_frr_k8s_host_api_rbac "${host_kubeconfig}"
+}
+
+ensure_frr_k8s_host_api_rbac() {
+  local host_kubeconfig=$1
+
+  local frr_rbac_dir="${FRR_TMP_DIR}/frr-k8s/config/rbac"
+  local host_rbac_dir="${FRR_TMP_DIR}/frr-k8s/config/host-api-rbac"
+  mkdir -p "${host_rbac_dir}"
+  cp \
+    "${frr_rbac_dir}/service_account.yaml" \
+    "${frr_rbac_dir}/role.yaml" \
+    "${frr_rbac_dir}/secrets_role.yaml" \
+    "${frr_rbac_dir}/role_binding.yaml" \
+    "${host_rbac_dir}/"
+  cat > "${host_rbac_dir}/kustomization.yaml" <<'EOF'
+namespace: frr-k8s-system
+namePrefix: frr-k8s-
+resources:
+- service_account.yaml
+- role.yaml
+- secrets_role.yaml
+- role_binding.yaml
+EOF
+
+  kubectl --kubeconfig "${host_kubeconfig}" apply -k "${host_rbac_dir}"
 }
 
 create_frr_k8s_remote_kubeconfig_secret() {
@@ -151,6 +175,10 @@ configure_frr_k8s_remote_daemonsets() {
     fi
     ds_name="frr-k8s-daemon-${safe_name:0:45}"
     echo "Creating remote frr-k8s daemonset ${ds_name}: host node ${host_node}, DPU node ${dpu_node}"
+    # These DaemonSets run in the DPU cluster. Only the FRR-K8S
+    # controller container uses the host API so it watches host
+    # FRRConfiguration objects with the host node name. Keep frr-status
+    # on the DPU API because it reports the local daemon pod status.
     jq \
       --arg name "${ds_name}" \
       --arg host_node "${host_node}" \
@@ -162,10 +190,11 @@ configure_frr_k8s_remote_daemonsets() {
        | .spec.selector.matchLabels["dpu-sim.ovn.org/frr-host-node"] = $host_node
        | .spec.template.metadata.labels["dpu-sim.ovn.org/frr-remote"] = "true"
        | .spec.template.metadata.labels["dpu-sim.ovn.org/frr-host-node"] = $host_node
+       | .spec.template.metadata.annotations["kubectl.kubernetes.io/default-container"] = "controller"
        | .spec.template.spec.nodeSelector = {"kubernetes.io/hostname": $dpu_node}
-       | (.spec.template.spec.containers[] | select(.name == "frr-k8s").args) |= ((. // []) | map(if startswith("--node-name=") then "--node-name=" + $host_node else . end))
-       | (.spec.template.spec.containers[] | select(.name == "frr-k8s").env) |= ((. // []) + [{"name":"KUBECONFIG","value":"/var/run/host-kubeconfig/kubeconfig"}])
-       | (.spec.template.spec.containers[] | select(.name == "frr-k8s").volumeMounts) |= ((. // []) + [{"name":"host-kubeconfig","mountPath":"/var/run/host-kubeconfig","readOnly":true}])
+       | (.spec.template.spec.containers[] | select(.name == "frr-k8s" or .name == "controller").args) |= ((. // []) | map(if startswith("--node-name=") then "--node-name=" + $host_node else . end))
+       | (.spec.template.spec.containers[] | select(.name == "frr-k8s" or .name == "controller").env) |= ((. // []) + [{"name":"KUBECONFIG","value":"/var/run/host-kubeconfig/kubeconfig"}])
+       | (.spec.template.spec.containers[] | select(.name == "frr-k8s" or .name == "controller").volumeMounts) |= ((. // []) + [{"name":"host-kubeconfig","mountPath":"/var/run/host-kubeconfig","readOnly":true}])
        | .spec.template.spec.volumes = ((.spec.template.spec.volumes // []) + [{"name":"host-kubeconfig","secret":{"secretName":"frr-k8s-host-kubeconfig"}}])' \
       "${source_json}" | kubectl apply -f -
   done
