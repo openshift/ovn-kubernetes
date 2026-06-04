@@ -315,7 +315,7 @@ func setupManagementPortIPFamilyConfig(link netlink.Link, mpcfg *managementPortC
 
 	// IPv6 forwarding is enabled globally
 	if protocol == iptables.ProtocolIPv4 {
-		err := util.SetforwardingModeForInterface(types.K8sMgmtIntfName)
+		err := util.SetForwardingModeForInterface(types.K8sMgmtIntfName)
 		if err != nil {
 			klog.Warning(err)
 		}
