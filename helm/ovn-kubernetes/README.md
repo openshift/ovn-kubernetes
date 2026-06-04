@@ -64,7 +64,7 @@ false
 ""
 </pre>
 </td>
-			<td>Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws</td>
+			<td>Whether to disable SNAT of egress traffic in namespaces with external gateways configured via AdminPolicyBasedExternalRoute CRs</td>
 		</tr>
 		<tr>
 			<td>global.dockerConfigSecret</td>

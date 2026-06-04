@@ -1312,8 +1312,7 @@ func exGatewayPodsAnnotationsChanged(oldNs, newNs *corev1.Namespace) bool {
 	// In reality we only care about exgw pod deletions, however since the list of IPs is not expected to change
 	// that often, let's check for *any* changes to these annotations compared to their previous state and trigger
 	// the logic for checking if we need to delete any conntrack entries
-	return (oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]) ||
-		(oldNs.Annotations[util.RoutingExternalGWsAnnotation] != newNs.Annotations[util.RoutingExternalGWsAnnotation])
+	return oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]
 }
 
 func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
@@ -1322,9 +1321,8 @@ func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 		klog.Errorf("Unable to get pods from informer: %v", err)
 	}
 	for _, namespace := range namespaces {
-		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
 		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
-		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
+		if foundExternalGatewayPodIPsAnnotation {
 			pods, err := nc.watchFactory.GetPods(namespace.Name)
 			if err != nil {
 				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
@@ -1345,7 +1343,6 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	}
 	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
 	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
-	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
 
 	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*corev1.Pod, error) {
 		return nc.watchFactory.GetPods(newNs.Name)
