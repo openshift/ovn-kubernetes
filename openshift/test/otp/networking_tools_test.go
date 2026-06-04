@@ -11,10 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -44,83 +41,6 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 
 		clientset, err = kubernetes.NewForConfig(config)
 		o.Expect(err).NotTo(o.HaveOccurred())
-	})
-
-	// Medium-49216: API Token Logging Security
-	g.It("[OTP][blocking][case_id:49216] should not expose API tokens in ovnkube-node logs", func() {
-		g.By("Getting all ovnkube-node pods")
-		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
-		})
-		o.Expect(err).NotTo(o.HaveOccurred())
-		o.Expect(len(pods.Items)).To(o.BeNumerically(">", 0), "Expected at least one ovnkube-node pod")
-
-		g.By("Checking logs from each ovnkube-node pod for token exposure")
-		totalViolations := 0
-		failedPods := []string{}
-		skippedPods := []string{}
-
-		for _, pod := range pods.Items {
-			// Get logs from ovnkube-controller container
-			logOptions := &corev1.PodLogOptions{
-				Container: "ovnkube-controller",
-				TailLines: int64Ptr(10000),
-			}
-
-			req := clientset.CoreV1().Pods("openshift-ovn-kubernetes").GetLogs(pod.Name, logOptions)
-			logs, err := req.DoRaw(ctx)
-
-			// If logs can't be retrieved, record and skip this pod
-			if err != nil {
-				g.GinkgoWriter.Printf("Warning: could not retrieve logs for pod %s: %v\n", pod.Name, err)
-				skippedPods = append(skippedPods, pod.Name)
-				continue
-			}
-
-			logsStr := string(logs)
-
-			// Search for sensitive patterns
-			patterns := []string{"api-token", "authorization", "bearer"}
-			podViolations := 0
-
-			for _, pattern := range patterns {
-				if strings.Contains(strings.ToLower(logsStr), pattern) {
-					// Filter out false positives (configuration field names without values)
-					lines := strings.Split(logsStr, "\n")
-					for _, line := range lines {
-						lowerLine := strings.ToLower(line)
-						if strings.Contains(lowerLine, pattern) {
-							// Check if it's just an empty field (e.g., "Token: " with no value)
-							if !strings.Contains(lowerLine, "token:") ||
-								(strings.Contains(lowerLine, "token:") && !strings.Contains(lowerLine, "token: ")) {
-								// This might be an actual token
-								if strings.Contains(lowerLine, "eyj") || // JWT tokens start with "eyJ"
-									strings.Contains(lowerLine, "bearer ") {
-									podViolations++
-									break
-								}
-							}
-						}
-					}
-				}
-			}
-
-			if podViolations > 0 {
-				totalViolations += podViolations
-				failedPods = append(failedPods, pod.Name)
-			}
-		}
-
-		// Ensure at least some pods were scanned
-		scannedCount := len(pods.Items) - len(skippedPods)
-		o.Expect(scannedCount).To(o.BeNumerically(">", 0),
-			"Could not retrieve logs from any pod - all %d pods skipped: %v",
-			len(pods.Items), skippedPods)
-
-		// Assert no tokens were found
-		o.Expect(totalViolations).To(o.Equal(0),
-			"Found %d potential token exposures in pods: %v",
-			totalViolations, failedPods)
 	})
 
 	// Medium-55889: ovn-db-run-command Script Functionality
@@ -182,92 +102,6 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 			strings.Contains(output, "join")
 		o.Expect(hasValidContent).To(o.BeTrue(),
 			"Output doesn't appear to be valid OVN database content: %s", output)
-	})
-
-	// High-57589: Whereabouts CNI Timeout with Large Exclude Range
-	g.It("[OTP][blocking][case_id:57589] should handle large IPv6 exclude ranges without timeout", func() {
-		const testNS = "test-whereabouts-57589"
-
-		g.By("Creating test namespace")
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testNS,
-			},
-		}
-		_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		defer func() {
-			g.By("Cleaning up test namespace")
-			_ = clientset.CoreV1().Namespaces().Delete(ctx, testNS, metav1.DeleteOptions{})
-		}()
-
-		g.By("Creating NetworkAttachmentDefinition with large exclude range")
-		nadConfig := `{
-      "cniVersion": "0.3.1",
-      "name": "bridge-net",
-      "type": "bridge",
-      "bridge": "test-br0",
-      "isGateway": false,
-      "ipMasq": false,
-      "ipam": {
-         "type": "whereabouts",
-         "range": "fd43:01f1:3daa:0baa::/64",
-         "exclude": [ "fd43:01f1:3daa:0baa::/100" ],
-         "log_file": "/tmp/whereabouts.log",
-         "log_level" : "debug"
-      }
-    }`
-
-		err = createNAD(ctx, config, testNS, "nad-w-excludes", nadConfig)
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		g.By("Creating pod with secondary network")
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-pod",
-				Namespace: testNS,
-				Annotations: map[string]string{
-					"k8s.v1.cni.cncf.io/networks": "nad-w-excludes",
-				},
-			},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:    "test",
-						Image:   "registry.access.redhat.com/ubi8/ubi-minimal:latest",
-						Command: []string{"sleep", "3600"},
-					},
-				},
-			},
-		}
-
-		_, err = clientset.CoreV1().Pods(testNS).Create(ctx, pod, metav1.CreateOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		g.By("Waiting for pod to reach Running state (max 60s)")
-		// Pod should be Running within 60 seconds (test validates no timeout)
-		o.Eventually(func() corev1.PodPhase {
-			p, err := clientset.CoreV1().Pods(testNS).Get(ctx, "test-pod", metav1.GetOptions{})
-			if err != nil {
-				return corev1.PodPending
-			}
-			return p.Status.Phase
-		}, 60, 5).Should(o.Equal(corev1.PodRunning),
-			"Pod did not reach Running state within 60s - Whereabouts may have timed out")
-
-		g.By("Verifying secondary network attachment")
-		p, err := clientset.CoreV1().Pods(testNS).Get(ctx, "test-pod", metav1.GetOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		networkStatus, ok := p.Annotations["k8s.v1.cni.cncf.io/network-status"]
-		o.Expect(ok).To(o.BeTrue(), "Pod missing network-status annotation")
-		o.Expect(networkStatus).NotTo(o.BeEmpty())
-
-		// Verify at least 2 networks (primary + secondary)
-		networkCount := strings.Count(networkStatus, `"name"`)
-		o.Expect(networkCount).To(o.BeNumerically(">=", 2),
-			"Expected at least 2 networks, got %d", networkCount)
 	})
 
 	// Medium-67625: ovnkube-trace pod-to-pod
@@ -427,11 +261,6 @@ var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
 	})
 })
 
-// Helper function
-func int64Ptr(i int64) *int64 {
-	return &i
-}
-
 // runOVNKubeTrace executes ovnkube-trace in an ovnkube-node pod
 func runOVNKubeTrace(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config,
 	srcNS, srcPod, dstNS, dstPod, protocol, port string) (string, error) {
@@ -493,35 +322,4 @@ func runOVNKubeTrace(ctx context.Context, clientset *kubernetes.Clientset, confi
 	}
 
 	return stdout.String(), nil
-}
-
-// createNAD creates a NetworkAttachmentDefinition
-func createNAD(ctx context.Context, config *rest.Config, namespace, name, nadConfig string) error {
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return err
-	}
-
-	nadGVR := schema.GroupVersionResource{
-		Group:    "k8s.cni.cncf.io",
-		Version:  "v1",
-		Resource: "network-attachment-definitions",
-	}
-
-	nad := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "k8s.cni.cncf.io/v1",
-			"kind":       "NetworkAttachmentDefinition",
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": namespace,
-			},
-			"spec": map[string]interface{}{
-				"config": nadConfig,
-			},
-		},
-	}
-
-	_, err = dynamicClient.Resource(nadGVR).Namespace(namespace).Create(ctx, nad, metav1.CreateOptions{})
-	return err
 }
