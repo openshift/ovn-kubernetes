@@ -24,6 +24,7 @@ concurrency:
 env:
   DPU_SIM_REF: main
   OVN_KUBERNETES_PATH: ${{ github.workspace }}/ovn-kubernetes
+  KIND_EXPERIMENTAL_PROVIDER: docker
 
 jobs:
   kind-dpu-offload:
