@@ -69,6 +69,24 @@ resolve_kind_provider() {
   exit 1
 }
 
+cleanup_bgp_artifacts() {
+  local provider=$1
+
+  if ! command -v "${provider}" >/dev/null 2>&1; then
+    return
+  fi
+
+  if "${provider}" ps -a --format '{{.Names}}' | grep -Eq '^bgpserver$'; then
+    "${provider}" rm -f bgpserver
+  fi
+  if "${provider}" ps -a --format '{{.Names}}' | grep -Eq '^frr$'; then
+    "${provider}" rm -f frr
+  fi
+  if "${provider}" network ls --format '{{.Name}}' | grep -Eq '^bgpnet$'; then
+    "${provider}" network rm bgpnet || true
+  fi
+}
+
 DPU_SIM_PATH=$(resolve_dpu_sim_path)
 KIND_EXPERIMENTAL_PROVIDER=$(resolve_kind_provider)
 export KIND_EXPERIMENTAL_PROVIDER
@@ -153,6 +171,8 @@ install_ovnk_host() {
 install_ovnk_dpu() {
   # shellcheck disable=SC1090
   source "${FRR_ENV}"
+  export DPU_SIM_GATEWAY_NETWORK
+  export DPU_SIM_GATEWAY_SUBNET
 
   pushd "${OVN_KUBERNETES_PATH}"
   ./contrib/kind-helm.sh \
@@ -189,6 +209,8 @@ fi
 echo "Using KIND_EXPERIMENTAL_PROVIDER=${KIND_EXPERIMENTAL_PROVIDER}"
 echo "Using KIND_HELM_OVN_TIMEOUT=${KIND_HELM_OVN_TIMEOUT}"
 echo "Using BGP_SERVER_NET_SUBNET_IPV4=${BGP_SERVER_NET_SUBNET_IPV4}"
+
+cleanup_bgp_artifacts "${KIND_EXPERIMENTAL_PROVIDER}"
 
 pushd "${DPU_SIM_PATH}"
 ./bin/dpu-sim \

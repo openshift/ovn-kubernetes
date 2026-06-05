@@ -1312,6 +1312,9 @@ fi\
   fi
   ./demo.sh
   popd || exit 1
+  if frr_k8s_remote_enabled && [ -n "${DPU_SIM_GATEWAY_NETWORK:-}" ]; then
+    configure_dpu_sim_frr_gateway_peers
+  fi
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     # Enable IPv6 forwarding in FRR
     $OCI_BIN exec frr sysctl -w net.ipv6.conf.all.forwarding=1
@@ -1498,10 +1501,15 @@ wait_for_frr_k8s() {
     kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
     return
   fi
-  local ds
+  local ds found=false
   for ds in $(kubectl -n frr-k8s-system get daemonset -l dpu-sim.ovn.org/frr-remote=true -o name); do
+    found=true
     kubectl rollout status -n frr-k8s-system "${ds}" --timeout 2m
   done
+  if [ "${found}" != true ]; then
+    echo "No local or remote FRR-K8S daemonsets were found in namespace frr-k8s-system" >&2
+    return 1
+  fi
 }
 
 apply_frr_k8s_receive_config() {
@@ -1509,6 +1517,9 @@ apply_frr_k8s_receive_config() {
   # exchange routes
   pushd "${FRR_TMP_DIR}"/frr-k8s/hack/demo/configs || exit 1
   sed 's/mode: all/mode: filtered/g' receive_all.yaml > receive_filtered.yaml
+  if frr_k8s_remote_enabled && [ -n "${DPU_SIM_GATEWAY_NETWORK:-}" ]; then
+    configure_dpu_sim_frr_receive_config receive_filtered.yaml
+  fi
   # Allow receiving the bgp external server's prefix
   sed -i '/mode: filtered/a\            prefixes:\n            - prefix: '"${BGP_SERVER_NET_SUBNET_IPV4}"'' receive_filtered.yaml
   # If IPv6 is enabled, add the IPv6 prefix as well

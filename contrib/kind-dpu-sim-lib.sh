@@ -87,6 +87,117 @@ frr_k8s_host_kubeconfig() {
   printf '%s' "${FRR_K8S_HOST_KUBECONFIG:-${FRR_K8S_REMOTE_KUBECONFIG}}"
 }
 
+dpu_sim_container_network_ipv4() {
+  local container=$1
+  local network=$2
+
+  $OCI_BIN inspect "${container}" | jq -r --arg network "${network}" \
+    '.[0].NetworkSettings.Networks[$network].IPAddress // empty'
+}
+
+configure_dpu_sim_frr_gateway_peers() {
+  if ! frr_k8s_remote_enabled; then
+    return
+  fi
+  if [ -z "${DPU_SIM_GATEWAY_NETWORK:-}" ]; then
+    return
+  fi
+
+  echo "Connecting external FRR to DPU gateway network ${DPU_SIM_GATEWAY_NETWORK}"
+  if ! $OCI_BIN network inspect "${DPU_SIM_GATEWAY_NETWORK}" >/dev/null 2>&1; then
+    echo "DPU simulator gateway network does not exist: ${DPU_SIM_GATEWAY_NETWORK}" >&2
+    exit 1
+  fi
+  if [ -z "$(dpu_sim_container_network_ipv4 frr "${DPU_SIM_GATEWAY_NETWORK}")" ]; then
+    $OCI_BIN network connect "${DPU_SIM_GATEWAY_NETWORK}" frr
+  fi
+
+  DPU_SIM_FRR_IPV4=$(dpu_sim_container_network_ipv4 frr "${DPU_SIM_GATEWAY_NETWORK}")
+  if [ -z "${DPU_SIM_FRR_IPV4}" ]; then
+    echo "Failed to determine external FRR IP on ${DPU_SIM_GATEWAY_NETWORK}" >&2
+    exit 1
+  fi
+  echo "External FRR DPU gateway network IPv4: ${DPU_SIM_FRR_IPV4}"
+
+  local -a node_ips=()
+  local -a pairs=()
+  local pair dpu_node node_ip
+  IFS=',' read -ra pairs <<< "${FRR_K8S_REMOTE_NODE_MAP}"
+  for pair in "${pairs[@]}"; do
+    dpu_node="${pair#*=}"
+    node_ip=$(dpu_sim_container_network_ipv4 "${dpu_node}" "${DPU_SIM_GATEWAY_NETWORK}")
+    if [ -z "${node_ip}" ]; then
+      echo "Failed to determine ${dpu_node} IP on ${DPU_SIM_GATEWAY_NETWORK}" >&2
+      exit 1
+    fi
+    node_ips+=("${node_ip}")
+  done
+
+  local attempts=0 daemon_status
+  while ! daemon_status=$($OCI_BIN exec frr vtysh -c "show daemons" 2>&1); do
+    if (( ++attempts > 30 )); then
+      echo "error: FRR daemons did not become ready after 30 attempts"
+      echo "last daemon status: $daemon_status"
+      exit 1
+    fi
+    sleep 1
+  done
+
+  local vtysh_cmds=(-c "configure terminal" -c "router bgp 64512")
+  for node_ip in "${node_ips[@]}"; do
+    vtysh_cmds+=(-c "neighbor ${node_ip} remote-as 64512")
+  done
+  vtysh_cmds+=(-c "address-family ipv4 unicast")
+  for node_ip in "${node_ips[@]}"; do
+    vtysh_cmds+=(-c "neighbor ${node_ip} activate")
+    vtysh_cmds+=(-c "neighbor ${node_ip} route-reflector-client")
+  done
+  vtysh_cmds+=(-c "exit-address-family" -c "end" -c "write memory")
+  $OCI_BIN exec frr vtysh "${vtysh_cmds[@]}"
+}
+
+configure_dpu_sim_frr_receive_config() {
+  local receive_config=$1
+
+  if ! frr_k8s_remote_enabled; then
+    return
+  fi
+  if [ -z "${DPU_SIM_GATEWAY_NETWORK:-}" ]; then
+    return
+  fi
+
+  DPU_SIM_FRR_IPV4=${DPU_SIM_FRR_IPV4:-$(dpu_sim_container_network_ipv4 frr "${DPU_SIM_GATEWAY_NETWORK}")}
+  if [ -z "${DPU_SIM_FRR_IPV4}" ]; then
+    echo "Failed to determine external FRR IP on ${DPU_SIM_GATEWAY_NETWORK}" >&2
+    exit 1
+  fi
+  sed -i -E "s/(address: )[0-9.]+/\\1${DPU_SIM_FRR_IPV4}/g" "${receive_config}"
+
+  local filtered
+  filtered=$(mktemp)
+  awk '
+    function indentation(line) {
+      match(line, /[^ ]/)
+      return RSTART ? RSTART - 1 : length(line)
+    }
+    skip && indentation($0) <= skip_indent && $0 !~ /^[[:space:]]*$/ {
+      skip = 0
+    }
+    !skip && $0 ~ /^[[:space:]]*- address: / {
+      addr = $0
+      sub(/^[[:space:]]*- address: /, "", addr)
+      gsub(/"/, "", addr)
+      if (addr ~ /:/) {
+        skip = 1
+        skip_indent = indentation($0)
+        next
+      }
+    }
+    !skip { print }
+  ' "${receive_config}" > "${filtered}"
+  mv "${filtered}" "${receive_config}"
+}
+
 ensure_frr_k8s_namespace() {
   local kubeconfig=${1:-}
   local kubectl_cmd=(kubectl)

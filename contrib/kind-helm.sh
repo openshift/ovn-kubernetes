@@ -653,8 +653,8 @@ check_dependencies
 parse_args "$@"
 set_default_params
 if [ "${DPU_MODE}" == "dpu" ] && [ "${ENABLE_ROUTE_ADVERTISEMENTS}" == true ]; then
-  if [[ -z "${FRR_K8S_REMOTE_KUBECONFIG:-}" || -z "${FRR_K8S_HOST_KUBECONFIG:-}" || -z "${FRR_K8S_REMOTE_NODE_MAP:-}" ]]; then
-    echo "DPU mode with route advertisements requires --frr-k8s-remote-kubeconfig, --frr-k8s-host-kubeconfig, and --frr-k8s-remote-node-map" >&2
+  if [[ -z "${FRR_K8S_REMOTE_KUBECONFIG:-}" || -z "${FRR_K8S_REMOTE_NODE_MAP:-}" ]]; then
+    echo "DPU mode with route advertisements requires --frr-k8s-remote-kubeconfig and --frr-k8s-remote-node-map" >&2
     exit 1
   fi
   validate_frr_k8s_remote
