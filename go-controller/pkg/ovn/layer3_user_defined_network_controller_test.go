@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,8 @@ import (
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	zoneic "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -49,6 +52,8 @@ type userDefinedNetInfo struct {
 	allowPersistentIPs bool
 	ipamClaimReference string
 	hasEVPN            bool
+	transport          string // e.g., types.NetworkTransportNoOverlay
+	outboundSNAT       string // e.g., types.NoOverlaySNATEnabled
 }
 
 const (
@@ -82,7 +87,8 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(true)
+		useFakeAddressSets := false
+		fakeOvn = NewFakeOVN(useFakeAddressSets)
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
@@ -143,6 +149,20 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 					Expect(err).NotTo(HaveOccurred())
 					testNode2.Annotations["k8s.ovn.org/zone-name"] = "blah"
 					nodes = append(nodes, *testNode2)
+				}
+
+				var expectedNBData []libovsdbtest.TestData
+				if netInfo.hasEVPN {
+					// emulate address sets handled by other controllers, needed for EVPN SNATs
+					nodeIPsAS4, _, err := buildClusterNodeIPsAddressSetsForNodes(nodes)
+					Expect(err).NotTo(HaveOccurred())
+					udnEnabledSvcAS4, _ := buildUDNEnabledSvcAddressSets(nil)
+					initialDB.NBData = append(
+						initialDB.NBData,
+						nodeIPsAS4,
+						udnEnabledSvcAS4,
+					)
+					expectedNBData = append(expectedNBData, nodeIPsAS4, udnEnabledSvcAS4)
 				}
 
 				fakeOvn.startWithDBSetup(
@@ -250,15 +270,13 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 					defaultNetExpectations = append(defaultNetExpectations, ingressPG)
 					defaultNetExpectations = append(defaultNetExpectations, defaultDenyExpectedData...)
 				}
-				Eventually(fakeOvn.nbClient).WithTimeout(5 * time.Second).Should(
-					libovsdbtest.HaveData(
-						append(
-							defaultNetExpectations,
-							newUserDefinedNetworkExpectationMachine(
-								fakeOvn,
-								[]testPod{podInfo},
-								expectationOptions...,
-							).expectedLogicalSwitchesAndPorts(nodeName)...)))
+				By("asserting the OVN entities provisioned in the NBDB are the expected ones")
+				expectedNBData = append(expectedNBData, defaultNetExpectations...)
+				expectedNBData = append(
+					expectedNBData,
+					newUserDefinedNetworkExpectationMachine(fakeOvn, []testPod{podInfo}, expectationOptions...).expectedLogicalSwitchesAndPorts(nodeName)...,
+				)
+				Eventually(fakeOvn.nbClient).WithTimeout(5 * time.Second).Should(libovsdbtest.HaveData(expectedNBData))
 
 				return nil
 			}
@@ -1221,6 +1239,334 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 	})
 })
 
+var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
+	var (
+		fakeOvn *FakeOVN
+	)
+
+	BeforeEach(func() {
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		fakeOvn = NewFakeOVN(false)
+	})
+
+	AfterEach(func() {
+		fakeOvn.shutdown()
+	})
+
+	// Test 1: Verify SNAT with exempted_ext_ips is created on ovn_cluster_router in LOCAL gateway mode
+	It("creates SNAT with exempted address set in local gateway mode on ovn-cluster-router", func() {
+		// Step 1: Set config.Gateway.Mode = config.GatewayModeLocal
+		By("Step 1: Setting up LOCAL gateway mode configuration")
+		config.Gateway.Mode = config.GatewayModeLocal
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16" // Broader subnet to accommodate network ID 2
+
+		app := cli.NewApp()
+		app.Name = "test"
+		app.Flags = config.Flags
+
+		// Step 2: Create a Layer3 CUDN with no-overlay transport and outboundSNAT enabled
+		By("Step 2: Creating Layer3 CUDN with no-overlay transport and outboundSNAT enabled")
+		cudnNetInfo := userDefinedNetInfo{
+			netName:        userDefinedNetworkName,
+			nadName:        namespacedName(ns, nadName),
+			topology:       types.Layer3Topology,
+			clustersubnets: "10.100.0.0/16",
+			hostsubnets:    "10.100.1.0/24",
+			isPrimary:      true,
+			transport:      types.NetworkTransportNoOverlay,
+			outboundSNAT:   string(types.NoOverlaySNATEnabled),
+		}
+
+		app.Action = func(*cli.Context) error {
+			// Create NAD with no-overlay transport and outboundSNAT enabled
+			netConf := cudnNetInfo.netconf()
+
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netConf)
+			Expect(err).NotTo(HaveOccurred())
+
+			n := newUDNNamespace(ns)
+			const nodeIPv4CIDR = "192.168.126.202/24"
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR, cudnNetInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			podInfo := dummyTestPod(ns, cudnNetInfo)
+
+			By("Starting fakeOvn with database setup (without node initially)")
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitch{Name: nodeName},
+					},
+				},
+				&corev1.NamespaceList{Items: []corev1.Namespace{*n}},
+				&corev1.NodeList{Items: []corev1.Node{}}, // Empty - will add node after watch starts
+				&corev1.PodList{Items: []corev1.Pod{*newMultiHomedPod(podInfo, cudnNetInfo)}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+			)
+			podInfo.populateLogicalSwitchCache(fakeOvn)
+
+			// Step 3: Initialize the CUDN controller
+			By("Step 3: Initializing CUDN controller")
+			fexec := util.GetExec().(*testing.FakeExec)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group",
+			})
+			fullL3UDNController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
+			Expect(fullL3UDNController).ToNot(BeNil())
+			Expect(fullL3UDNController.init()).To(Succeed())
+
+			userDefinedNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
+			Expect(ok).To(BeTrue())
+
+			userDefinedNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
+			podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
+
+			// Step 4: Start watching nodes to trigger addUpdateLocalNodeEvent()
+			By("Starting node watch on L3 UDN controller")
+			Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
+
+			By("Adding node to trigger addUpdateLocalNodeEvent()")
+			// Add the node AFTER starting the watch so the watch catches the ADD event
+			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), testNode, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			By("Node created successfully")
+
+			// Wait for node processing to complete
+			By("Waiting for NAT entries to be created on ovn_cluster_router")
+			Eventually(func() error {
+				// Step 5: Query the OVN NB database to find NAT entries on the CUDN's ovn_cluster_router
+				clusterRouterName := userDefinedNetController.bnc.GetNetworkScopedClusterRouterName()
+
+				lr := &nbdb.LogicalRouter{Name: clusterRouterName}
+				lr, err = libovsdbops.GetLogicalRouter(fakeOvn.nbClient, lr)
+				if err != nil {
+					return fmt.Errorf("failed to get logical router %s: %v", clusterRouterName, err)
+				}
+
+				if len(lr.Nat) == 0 {
+					return fmt.Errorf("no NAT entries found on router %s", clusterRouterName)
+				}
+
+				// Step 6: Verify NAT entries have exempted_ext_ips set
+				foundSNATWithExemption := false
+				for _, natUUID := range lr.Nat {
+					nat := &nbdb.NAT{UUID: natUUID}
+					nat, err = libovsdbops.GetNAT(fakeOvn.nbClient, nat)
+					if err != nil {
+						continue
+					}
+
+					if nat.Type == nbdb.NATTypeSNAT && nat.ExemptedExtIPs != nil && *nat.ExemptedExtIPs != "" {
+						foundSNATWithExemption = true
+
+						// Get the address set to verify UUID and contents
+						dbIDs := libovsdbops.NewDbObjectIDs(
+							libovsdbops.AddressSetNoOverlaySNATExemption,
+							userDefinedNetController.bnc.controllerName,
+							map[libovsdbops.ExternalIDKey]string{
+								libovsdbops.ObjectNameKey: "no-overlay-snat-exemption",
+								libovsdbops.NetworkKey:    userDefinedNetworkName,
+							},
+						)
+						as, err := fakeOvn.controller.addressSetFactory.GetAddressSet(dbIDs)
+						if err != nil {
+							return fmt.Errorf("failed to get address set: %v", err)
+						}
+
+						// Verify the NAT's ExemptedExtIPs field contains the actual address set UUID
+						v4UUID, v6UUID := as.GetASUUID()
+						expectedUUID := v4UUID // For IPv4 mode
+						if config.IPv6Mode && !config.IPv4Mode {
+							expectedUUID = v6UUID
+						}
+						if *nat.ExemptedExtIPs != expectedUUID {
+							return fmt.Errorf("NAT ExemptedExtIPs (%s) does not match address set UUID (%s)",
+								*nat.ExemptedExtIPs, expectedUUID)
+						}
+
+						// Verify the address set contains both cluster subnet and node host IP
+						ipv4Addrs, ipv6Addrs := as.GetAddresses()
+						allAddrs := append(ipv4Addrs, ipv6Addrs...)
+						expectedAddrs := []string{"10.100.0.0/16", "192.168.126.202"}
+						for _, expectedAddr := range expectedAddrs {
+							if !slices.Contains(allAddrs, expectedAddr) {
+								return fmt.Errorf("address set does not contain %s, has: %v", expectedAddr, allAddrs)
+							}
+						}
+						break
+					}
+				}
+
+				if !foundSNATWithExemption {
+					return fmt.Errorf("no SNAT with ExemptedExtIPs found on router %s", clusterRouterName)
+				}
+
+				return nil
+			}).WithTimeout(5 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
+
+			return nil
+		}
+
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+
+	// Test 2: Verify SNAT with exempted_ext_ips is created on GR_<node> in SHARED gateway mode
+	It("creates SNAT with exempted address set in shared gateway mode on gateway router", func() {
+		// Step 1: Set config.Gateway.Mode = config.GatewayModeShared
+		config.Gateway.Mode = config.GatewayModeShared
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16" // Broader subnet to accommodate network ID 2
+
+		app := cli.NewApp()
+		app.Name = "test"
+		app.Flags = config.Flags
+
+		// Step 2: Create a Layer3 CUDN with no-overlay transport and outboundSNAT enabled
+		cudnNetInfo := userDefinedNetInfo{
+			netName:        userDefinedNetworkName,
+			nadName:        namespacedName(ns, nadName),
+			topology:       types.Layer3Topology,
+			clustersubnets: "10.100.0.0/16",
+			hostsubnets:    "10.100.1.0/24",
+			isPrimary:      true,
+			transport:      types.NetworkTransportNoOverlay,
+			outboundSNAT:   string(types.NoOverlaySNATEnabled),
+		}
+
+		app.Action = func(*cli.Context) error {
+			// Create NAD with no-overlay transport and outboundSNAT enabled
+			netConf := cudnNetInfo.netconf()
+
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netConf)
+			Expect(err).NotTo(HaveOccurred())
+
+			n := newUDNNamespace(ns)
+			const nodeIPv4CIDR = "192.168.126.202/24"
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR, cudnNetInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			podInfo := dummyTestPod(ns, cudnNetInfo)
+
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitch{Name: nodeName},
+					},
+				},
+				&corev1.NamespaceList{Items: []corev1.Namespace{*n}},
+				&corev1.NodeList{Items: []corev1.Node{}}, // Empty - will add node after watch starts
+				&corev1.PodList{Items: []corev1.Pod{*newMultiHomedPod(podInfo, cudnNetInfo)}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+			)
+			podInfo.populateLogicalSwitchCache(fakeOvn)
+
+			// Step 3: Initialize the CUDN controller
+			fexec := util.GetExec().(*testing.FakeExec)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group",
+			})
+			fullL3UDNController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
+			Expect(fullL3UDNController).ToNot(BeNil())
+			Expect(fullL3UDNController.init()).To(Succeed())
+
+			userDefinedNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
+			Expect(ok).To(BeTrue())
+
+			userDefinedNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
+			podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
+
+			// Step 4: Create and advertise a pod on the CUDN to trigger gateway SNAT creation
+			By("Starting node watch on L3 UDN controller for shared gateway mode")
+			Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
+			Expect(userDefinedNetController.bnc.WatchPods()).To(Succeed())
+
+			By("Adding node to trigger gateway creation with SNAT+exemption")
+			// Add the node AFTER starting the watch so the watch catches the ADD event
+			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), testNode, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			By("Node created, gateway should be initialized")
+
+			// Wait for pod and gateway processing to complete
+			Eventually(func() error {
+				// Step 5: Query the OVN NB database to find NAT entries on GR_<nodeName>
+				gwRouterName := userDefinedNetController.bnc.GetNetInfo().GetNetworkScopedGWRouterName(nodeName)
+				lr := &nbdb.LogicalRouter{Name: gwRouterName}
+				lr, err = libovsdbops.GetLogicalRouter(fakeOvn.nbClient, lr)
+				if err != nil {
+					return fmt.Errorf("failed to get gateway router %s: %v", gwRouterName, err)
+				}
+
+				if len(lr.Nat) == 0 {
+					return fmt.Errorf("no NAT entries found on gateway router %s", gwRouterName)
+				}
+
+				// Step 6: Verify NAT entries have exempted_ext_ips set
+				foundSNATWithExemption := false
+				for _, natUUID := range lr.Nat {
+					nat := &nbdb.NAT{UUID: natUUID}
+					nat, err = libovsdbops.GetNAT(fakeOvn.nbClient, nat)
+					if err != nil {
+						continue
+					}
+
+					if nat.Type == nbdb.NATTypeSNAT && nat.ExemptedExtIPs != nil && *nat.ExemptedExtIPs != "" {
+						foundSNATWithExemption = true
+
+						// Get the address set to verify UUID and contents
+						dbIDs := libovsdbops.NewDbObjectIDs(
+							libovsdbops.AddressSetNoOverlaySNATExemption,
+							userDefinedNetController.bnc.controllerName,
+							map[libovsdbops.ExternalIDKey]string{
+								libovsdbops.ObjectNameKey: "no-overlay-snat-exemption",
+								libovsdbops.NetworkKey:    userDefinedNetController.bnc.GetNetworkName(),
+							},
+						)
+						as, err := fakeOvn.controller.addressSetFactory.GetAddressSet(dbIDs)
+						if err != nil {
+							return fmt.Errorf("failed to get address set: %v", err)
+						}
+
+						// Verify the NAT's ExemptedExtIPs field contains the actual address set UUID
+						v4UUID, v6UUID := as.GetASUUID()
+						expectedUUID := v4UUID // For IPv4 mode
+						if config.IPv6Mode && !config.IPv4Mode {
+							expectedUUID = v6UUID
+						}
+						if *nat.ExemptedExtIPs != expectedUUID {
+							return fmt.Errorf("NAT ExemptedExtIPs (%s) does not match address set UUID (%s)",
+								*nat.ExemptedExtIPs, expectedUUID)
+						}
+
+						// Verify the address set contains both cluster subnet and node host IP
+						ipv4Addrs, ipv6Addrs := as.GetAddresses()
+						allAddrs := append(ipv4Addrs, ipv6Addrs...)
+						expectedAddrs := []string{"10.100.0.0/16", "192.168.126.202"}
+						for _, expectedAddr := range expectedAddrs {
+							if !slices.Contains(allAddrs, expectedAddr) {
+								return fmt.Errorf("address set does not contain %s, has: %v", expectedAddr, allAddrs)
+							}
+						}
+						break
+					}
+				}
+
+				if !foundSNATWithExemption {
+					return fmt.Errorf("no SNAT with ExemptedExtIPs found on gateway router %s", gwRouterName)
+				}
+
+				return nil
+			}).WithTimeout(10 * time.Second).WithPolling(200 * time.Millisecond).Should(Succeed())
+
+			return nil
+		}
+
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+})
+
 func newPodWithPrimaryUDN(
 	nodeName, nodeSubnet, nodeMgtIP, nodeGWIP, podName, podIPs, podMAC, namespace string,
 	primaryUDNConfig userDefinedNetInfo,
@@ -1322,6 +1668,12 @@ func (sni *userDefinedNetInfo) netconf() *ovncnitypes.NetConf {
 	if sni.hasEVPN {
 		netconf.Transport = types.NetworkTransportEVPN
 	}
+	if sni.transport != "" {
+		netconf.Transport = sni.transport
+	}
+	if sni.outboundSNAT != "" {
+		netconf.OutboundSNAT = sni.outboundSNAT
+	}
 
 	return netconf
 }
@@ -1387,6 +1739,20 @@ func dummyPrimaryLayer3EVPNCUDN(clustersubnets, hostsubnets string) userDefinedN
 // This util is returning a network-name/hostSubnet for the node's node-subnets annotation
 func (sni *userDefinedNetInfo) String() string {
 	return fmt.Sprintf("%q: %q", sni.netName, sni.hostsubnets)
+}
+
+func buildClusterNodeIPsAddressSetsForNodes(nodes []corev1.Node) (*nbdb.AddressSet, *nbdb.AddressSet, error) {
+	nodePtrs := make([]*corev1.Node, 0, len(nodes))
+	for i := range nodes {
+		nodePtrs = append(nodePtrs, &nodes[i])
+	}
+	v4NodeAddrs, v6NodeAddrs, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, nodePtrs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	nodeAddrs := append(v4NodeAddrs, v6NodeAddrs...)
+	nodeIPsAS4, nodeIPsAS6 := buildEgressIPNodeAddressSets(util.StringSlice(nodeAddrs))
+	return nodeIPsAS4, nodeIPsAS6, nil
 }
 
 func newNodeWithUserDefinedNetworks(nodeName string, nodeIPv4CIDR string, netInfos ...userDefinedNetInfo) (*corev1.Node, error) {
@@ -1527,8 +1893,13 @@ func expectedGWRouterPlusNATAndStaticRoutes(
 		expectedGRStaticRoute(staticRoute2, ipv4DefaultRoute, nextHopIP, nil, &staticRouteOutputPort, netInfo),
 		expectedGRStaticRoute(staticRoute3, masqSubnet, nextHopMasqIP, nil, &staticRouteOutputPort, netInfo),
 	}
+	var udnSubnetMasqMatch string
+	if netInfo.Transport() == types.NetworkTransportEVPN {
+		nodeIPV4ASHashName, _ := addressset.GetHashNamesForAS(getClusterNodeIPsAddrSetDbIDsForTest())
+		udnSubnetMasqMatch = fmt.Sprintf("ip4.dst == $%s", nodeIPV4ASHashName)
+	}
 	expectedEntities = append(expectedEntities, newNATEntry(nat1, dummyMasqueradeIP().IP.String(), gwRouterJoinIPAddress().IP.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
-	expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyMasqueradeIP().IP.String(), netInfo.Subnets()[0].CIDR.String(), standardNonDefaultNetworkExtIDs(netInfo), ""))
+	expectedEntities = append(expectedEntities, newNATEntry(nat2, dummyMasqueradeIP().IP.String(), netInfo.Subnets()[0].CIDR.String(), standardNonDefaultNetworkExtIDs(netInfo), udnSubnetMasqMatch))
 	return expectedEntities
 }
 
@@ -1608,13 +1979,18 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 	clusterRouterExternalIDs := standardNonDefaultNetworkExtIDs(netInfo)
 	clusterRouterExternalIDs["k8s-cluster-router"] = "yes"
 
+	clusterRouterOptions := map[string]string{"always_learn_from_arp_request": "false"}
+	if config.Gateway.Mode == config.GatewayModeLocal {
+		clusterRouterOptions["ct-commit-all"] = "true"
+	}
+
 	clusterRouter := &nbdb.LogicalRouter{
 		Name:        clusterRouterName,
 		UUID:        clusterRouterName + "-UUID",
 		Ports:       []string{rtosLRPUUID},
 		ExternalIDs: clusterRouterExternalIDs,
 		Copp:        ptr.To(string(coppUUID)),
-		Options:     map[string]string{"always_learn_from_arp_request": "false"},
+		Options:     clusterRouterOptions,
 	}
 
 	expectedEntities := []libovsdbtest.TestData{
@@ -1651,8 +2027,13 @@ func expectedLayer3EgressEntities(netInfo util.NetInfo, gwConfig util.L3GatewayC
 		rtojLRPUUID := rtojLRPName + "-UUID"
 		nodeIP := gwConfig.IPAddresses[0].IP.String()
 		masqSNAT := newNATEntry(masqSNATUUID1, "169.254.169.14", nodeSubnet.String(), standardNonDefaultNetworkExtIDs(netInfo), "")
-		masqSNAT.Match = getMasqueradeManagementIPSNATMatch(util.IPAddrToHWAddr(managementPortIP(nodeSubnet)).String())
 		masqSNAT.LogicalPort = ptr.To(fmt.Sprintf("rtos-%s_%s", netInfo.GetNetworkName(), nodeName))
+		masqSNAT.Match = getMasqueradeManagementIPSNATMatch(util.IPAddrToHWAddr(managementPortIP(nodeSubnet)).String())
+		if hasEVPN {
+			nodeIPV4ASHashName, _ := addressset.GetHashNamesForAS(getClusterNodeIPsAddrSetDbIDsForTest())
+			udnEnabledSvcV4ASHashName, _ := addressset.GetHashNamesForAS(udnenabledsvc.GetAddressSetDBIDs())
+			masqSNAT.Match += fmt.Sprintf(" && (ip4.dst == $%s || ip4.dst == $%s)", nodeIPV4ASHashName, udnEnabledSvcV4ASHashName)
+		}
 		expectedEntities = append(expectedEntities,
 			&nbdb.LogicalRouterPort{
 				UUID:        rtojLRPUUID,

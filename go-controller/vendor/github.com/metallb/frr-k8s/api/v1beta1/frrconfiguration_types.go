@@ -40,6 +40,10 @@ type FRRConfigurationSpec struct {
 
 // RawConfig is a snippet of raw frr configuration that gets appended to the
 // rendered configuration.
+//
+// WARNING: The RawConfig feature is UNSUPPORTED and intended ONLY FOR EXPERIMENTATION.
+// It should not be used in production environments. This feature is provided as-is without any
+// guarantees of stability, compatibility, or support. Use at your own risk.
 type RawConfig struct {
 	// Priority is the order with this configuration is appended to the
 	// bottom of the rendered configuration. A higher value means the
@@ -55,7 +59,7 @@ type RawConfig struct {
 type BGPConfig struct {
 	// Routers is the list of routers we want FRR to configure (one per VRF).
 	// +optional
-	Routers []Router `json:"routers"`
+	Routers []Router `json:"routers,omitempty"`
 	// BFDProfiles is the list of bfd profiles to be used when configuring the neighbors.
 	// +optional
 	BFDProfiles []BFDProfile `json:"bfdProfiles,omitempty"`
@@ -66,6 +70,7 @@ type Router struct {
 	// ASN is the AS number to use for the local end of the session.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=4294967295
+	// +kubebuilder:validation:Format=int64
 	ASN uint32 `json:"asn"`
 	// ID is the BGP router ID
 	// +optional
@@ -98,6 +103,7 @@ type Neighbor struct {
 	// ASN and DynamicASN are mutually exclusive and one of them must be specified.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=4294967295
+	// +kubebuilder:validation:Format=int64
 	// +optional
 	ASN uint32 `json:"asn,omitempty"`
 
@@ -191,8 +197,10 @@ type Neighbor struct {
 	// +optional
 	ToReceive Receive `json:"toReceive,omitempty"`
 
-	// To set if we want to disable MP BGP that will separate IPv4 and IPv6 route exchanges into distinct BGP sessions.
-	// Deprecated: DisableMP is deprecated in favor of dualStackAddressFamily.
+	// DisableMP is no longer used and has no effect.
+	// Use DualStackAddressFamily instead to enable the neighbor for both IPv4 and IPv6 address families.
+	//
+	// Deprecated: This field is ignored. Use DualStackAddressFamily instead.
 	// +optional
 	// +kubebuilder:default:=false
 	DisableMP bool `json:"disableMP,omitempty"`
@@ -202,6 +210,18 @@ type Neighbor struct {
 	// +optional
 	// +kubebuilder:default:=false
 	DualStackAddressFamily bool `json:"dualStackAddressFamily,omitempty"`
+
+	// LocalASN allows advertising a different AS number to the peer using BGP's
+	// local-as feature. When set, FRR will advertise this ASN to the peer
+	// via "neighbor <peer> local-as <ASN> no-prepend replace-as", overriding
+	// the router-level ASN for this specific session.
+	// Note: this field is only applicable to eBGP sessions (where the peer ASN differs
+	// from the router ASN). Setting it on an iBGP session is rejected.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=4294967295
+	// +kubebuilder:validation:Format=int64
+	LocalASN uint32 `json:"localASN,omitempty"`
 }
 
 // Advertise represents a list of prefixes to advertise to the given neighbor.
@@ -211,6 +231,11 @@ type Advertise struct {
 	// Allowed is is the list of prefixes allowed to be propagated to
 	// this neighbor. They must match the prefixes defined in the router.
 	Allowed AllowedOutPrefixes `json:"allowed,omitempty"`
+
+	// NextHop sets the BGP next-hop address to advertise with prefixes
+	// sent to this neighbor.
+	// +optional
+	NextHop NextHop `json:"nextHop,omitempty"`
 
 	// PrefixesWithLocalPref is a list of prefixes that are associated to a local
 	// preference when being advertised. The prefixes associated to a given local pref
@@ -223,6 +248,19 @@ type Advertise struct {
 	// must be in the prefixes allowed to be advertised.
 	// +optional
 	PrefixesWithCommunity []CommunityPrefixes `json:"withCommunity,omitempty"`
+}
+
+// NextHop sets the BGP next-hop address for advertised prefixes.
+type NextHop struct {
+	// IPv4 is the next-hop address to advertise with IPv4 prefixes.
+	// +optional
+	// +kubebuilder:validation:Format=ipv4
+	IPv4 string `json:"ipv4,omitempty"`
+
+	// IPv6 is the next-hop address to advertise with IPv6 prefixes.
+	// +optional
+	// +kubebuilder:validation:Format=ipv6
+	IPv6 string `json:"ipv6,omitempty"`
 }
 
 // Receive represents a list of prefixes to receive from the given neighbor.
