@@ -134,6 +134,7 @@ set_common_default_params() {
   ADVERTISED_UDN_ISOLATION_MODE=${ADVERTISED_UDN_ISOLATION_MODE:-strict}
   BGP_SERVER_NET_SUBNET_IPV4=${BGP_SERVER_NET_SUBNET_IPV4:-172.26.0.0/16}
   BGP_SERVER_NET_SUBNET_IPV6=${BGP_SERVER_NET_SUBNET_IPV6:-fc00:f853:ccd:e796::/64}
+  BGP_SERVER_HOST_PORT=${BGP_SERVER_HOST_PORT:-18080}
   OVN_OBSERV_ENABLE=${OVN_OBSERV_ENABLE:-false}
   OVN_EMPTY_LB_EVENTS=${OVN_EMPTY_LB_EVENTS:-false}
   OVN_NETWORK_QOS_ENABLE=${OVN_NETWORK_QOS_ENABLE:-false}
@@ -1154,8 +1155,10 @@ get_kubevirt_release_url() {
     echo "$kubevirt_release_url"
 }
 
-readonly FRR_K8S_VERSION=v0.0.21
+readonly FRR_K8S_VERSION=v0.0.0-20260603082256-b43efcb206be
+readonly FRR_K8S_GIT_REF=b43efcb206be
 readonly FRR_K8S_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.1
+readonly FRR_K8S_ALL_IN_ONE_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.3
 readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.6.0
 # Override to test newer FRR builds in the in-cluster frr-k8s daemonset
 # without changing the pinned frr-k8s release.
@@ -1167,13 +1170,20 @@ clone_frr() {
   [ -d "$FRR_TMP_DIR" ] || {
     mkdir -p "$FRR_TMP_DIR" && trap 'rm -rf $FRR_TMP_DIR' EXIT
     pushd "$FRR_TMP_DIR" || exit 1
-    git clone --depth 1 --branch $FRR_K8S_VERSION https://github.com/metallb/frr-k8s
+    git clone --no-tags --single-branch --branch main https://github.com/metallb/frr-k8s
+    pushd frr-k8s
+    git checkout --detach "$FRR_K8S_GIT_REF"
+    popd
 
     # Download the patches
     curl -Ls https://github.com/jcaamano/frr-k8s/archive/refs/heads/ovnk-bgp-v0.0.21.tar.gz | tar xzvf - frr-k8s-ovnk-bgp-v0.0.21/patches --strip-components 1
 
     # Change into the cloned repo directory before applying patches
     pushd frr-k8s
+    # The OVN-K demo patch was authored before upstream bumped the demo
+    # image. Normalize that context before applying the patch; the image is
+    # bumped to FRR_EXTERNAL_DEMO_IMAGE below.
+    sed -i 's|quay.io/frrouting/frr:10.4.3|quay.io/frrouting/frr:9.1.0|g' hack/demo/demo.sh
     git apply ../patches/*
 
     # The upstream frr-k8s demo.sh hardcodes quay.io/frrouting/frr:9.1.0,
@@ -1207,7 +1217,7 @@ deploy_frr_external_container() {
   clone_frr
  
   pushd "$FRR_TMP_DIR" || exit 1
-  run_kubectl apply -f frr-k8s/charts/frr-k8s/charts/crds/templates/frrk8s.metallb.io_frrconfigurations.yaml
+  run_kubectl apply -f frr-k8s/charts/frr-k8s/charts/crds/templates/
   popd || exit 1
  
   # apply the demo which will deploy an external FRR container that the cluster
@@ -1306,7 +1316,7 @@ deploy_bgp_external_server() {
   $OCI_BIN network rm -f bgpnet
   $OCI_BIN network create --subnet="${BGP_SERVER_NET_SUBNET_IPV4}" ${ipv6_network} --driver bridge bgpnet
   $OCI_BIN network connect bgpnet frr
-  $OCI_BIN run  --cap-add NET_ADMIN --user 0  -d --network bgpnet  --rm  --name bgpserver -p 8080:8080  registry.k8s.io/e2e-test-images/agnhost:2.45 netexec
+  $OCI_BIN run  --cap-add NET_ADMIN --user 0  -d --network bgpnet  --rm  --name bgpserver -p "${BGP_SERVER_HOST_PORT}:8080"  registry.k8s.io/e2e-test-images/agnhost:2.45 netexec
   # let's make the bgp external server have its default route towards FRR router so that we don't need to add routes during tests back to the pods in the
   # cluster for return traffic
   local bgp_network_frr_v4 bgp_network_frr_v6 kind_network_frr_v4 kind_network_frr_v6
@@ -1390,7 +1400,7 @@ install_frr_k8s() {
 
   replace_in_file_or_exit \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml \
-    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${FRR_K8S_ALL_IN_ONE_UPSTREAM_FRR_IMAGE}" \
     "${FRR_K8S_FRR_IMAGE}"
 
   if [ "${bgp_port}" -ne 0 ]; then
