@@ -3,6 +3,8 @@
 
 package api
 
+import corev1 "k8s.io/api/core/v1"
+
 // Config represents a deployment configuration flag queryable by E2E tests.
 // This interface replaces direct ENV variable checks, which don't work for all providers
 // (some use CRDs, ConfigMaps, or other mechanisms).
@@ -25,4 +27,10 @@ type DeploymentConfig interface {
 	// IsConfigurationEnabled checks whether a specific configuration flag is enabled in the deployment.
 	IsConfigurationEnabled(config Config) bool
 	NBDBContainerName() string
+	// ProviderSubnetCIDR returns the effective routable subnet CIDR for a node's
+	// primary network. Providers implement this according to how they advertise
+	// subnet information — for example, Kind clusters read node-primary-ifaddr
+	// directly, while cloud providers may use a separate annotation that reflects
+	// the actual routable subnet.
+	ProviderSubnetCIDR(node *corev1.Node, isIPv6 bool) (string, error)
 }
