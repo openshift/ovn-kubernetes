@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build linux
 // +build linux
 
@@ -229,14 +232,16 @@ func NicToBridge(iface string) (string, error) {
 	}
 
 	bridge := GetBridgeName(iface)
-	stdout, stderr, err := RunOVSVsctl(
+	ovsArgs := []string{
 		"--", "--may-exist", "add-br", bridge,
 		"--", "br-set-external-id", bridge, "bridge-id", bridge,
 		"--", "br-set-external-id", bridge, "bridge-uplink", iface,
 		"--", "set", "bridge", bridge, "fail-mode=standalone",
 		fmt.Sprintf("other_config:hwaddr=%s", ifaceLink.Attrs().HardwareAddr),
 		"--", "--may-exist", "add-port", bridge, iface,
-		"--", "set", "port", iface, "other-config:transient=true")
+		"--", "set", "port", iface, "other-config:transient=true",
+	}
+	stdout, stderr, err := RunOVSVsctl(ovsArgs...)
 	if err != nil {
 		klog.Errorf("Failed to create OVS bridge, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
 		return "", err

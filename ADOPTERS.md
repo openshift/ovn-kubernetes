@@ -11,5 +11,6 @@
 ## Projects
 
 1. Submariner([Uses OVN-Kubernetes CNI for Multicluster Networking](https://submariner.io/getting-started/architecture/networkplugin-syncer/ovn-kubernetes/))
+2. [KubeStellar Console](https://console.kubestellar.io) (Provides a [guided install mission for OVN-Kubernetes](https://console.kubestellar.io/missions/install-ovn-kubernetes) via an open-source Kubernetes dashboard with AI-assisted operations)
 
 If your organization or project uses OVN-Kubernetes, please file a PR and update this list. Say hi on Slack too!

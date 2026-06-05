@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package util
 
 import (
@@ -49,8 +52,6 @@ import (
 // values.)
 
 const (
-	// OvnPodAnnotationName is the constant string representing the POD annotation key
-	OvnPodAnnotationName = "k8s.ovn.org/pod-networks"
 	// DefNetworkAnnotation is the pod annotation for the cluster-wide active network
 	DefNetworkAnnotation = "v1.multus-cni.io/default-network"
 	// UDNOpenPortsAnnotationName is the pod annotation to open default network pods on UDN pods.
@@ -209,14 +210,14 @@ func MarshalPodAnnotation(annotations map[string]string, podInfo *PodAnnotation,
 	if err != nil {
 		return nil, fmt.Errorf("failed marshaling podNetworks map %v", podNetworks)
 	}
-	annotations[OvnPodAnnotationName] = string(bytes)
+	annotations[types.OvnPodAnnotationName] = string(bytes)
 	return annotations, nil
 }
 
 // UnmarshalPodAnnotation returns the Pod's network info of the given network from pod.Annotations
 func UnmarshalPodAnnotation(annotations map[string]string, nadKey string) (*PodAnnotation, error) {
 	var err error
-	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
+	ovnAnnotation, ok := annotations[types.OvnPodAnnotationName]
 	if !ok {
 		return nil, newAnnotationNotSetError("could not find OVN pod annotation in %v", annotations)
 	}
@@ -307,7 +308,7 @@ func UnmarshalPodAnnotation(annotations map[string]string, nadKey string) (*PodA
 
 func UnmarshalPodAnnotationAllNetworks(annotations map[string]string) (map[string]podAnnotation, error) {
 	podNetworks := make(map[string]podAnnotation)
-	ovnAnnotation, ok := annotations[OvnPodAnnotationName]
+	ovnAnnotation, ok := annotations[types.OvnPodAnnotationName]
 	if ok {
 		if err := json.Unmarshal([]byte(ovnAnnotation), &podNetworks); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal ovn pod annotation %q: %v",

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package clustermanager
 
 import (
@@ -98,7 +101,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -164,7 +166,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -256,7 +257,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -328,7 +328,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -439,7 +438,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -512,7 +510,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -624,7 +621,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -751,7 +747,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1107,7 +1102,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 				config.OVNKubernetesFeature.EnableMultiNetwork = true
 				config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 				config.OVNKubernetesFeature.EnableNetworkConnect = true
@@ -1245,7 +1239,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1321,7 +1314,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1418,7 +1410,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1532,7 +1523,6 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 
 				_, err := config.InitConfig(ctx, nil, nil)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				config.Kubernetes.HostNetworkNamespace = ""
 
 				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package e2e
 
 import (
@@ -1166,9 +1169,6 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		logLocation := "/var/log"
 		coredumpDir := "/tmp/kind/logs/coredumps"
 		dbLocation := "/var/lib/openvswitch"
-		// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5782
-		skippedCoredumps := []string{"zebra", "bgpd", "mgmtd", "bfdd"}
-
 		// Check for coredumps on host
 		var coredumpFiles []string
 		files, err := os.ReadDir(coredumpDir)
@@ -1177,14 +1177,7 @@ func wrappedTestFramework(basename string) *framework.Framework {
 				if file.IsDir() {
 					continue
 				}
-				fileName := file.Name()
-				if slices.ContainsFunc(skippedCoredumps, func(s string) bool {
-					return strings.Contains(fileName, s)
-				}) {
-					framework.Logf("Ignoring coredump for skipped process: %s", fileName)
-					continue
-				}
-				coredumpFiles = append(coredumpFiles, fileName)
+				coredumpFiles = append(coredumpFiles, file.Name())
 			}
 		}
 
@@ -1198,7 +1191,10 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
 		ovsdb := "conf.db"
 
-		testName := strings.Replace(ginkgo.CurrentSpecReport().LeafNodeText, " ", "_", -1)
+		testName := strings.Trim(
+			regexp.MustCompile(`[^A-Za-z0-9._-]+`).ReplaceAllString(ginkgo.CurrentSpecReport().LeafNodeText, "_"),
+			"_",
+		)
 		logDir := fmt.Sprintf("%s/e2e-dbs/%s-%s", logLocation, testName, f.UniqueName)
 		// grab all OVS and OVN dbs
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
@@ -1448,11 +1444,6 @@ func isICMPNetworkPolicyBypassEnabled() bool {
 func isLocalGWModeEnabled() bool {
 	val, present := os.LookupEnv("OVN_GATEWAY_MODE")
 	return present && val == "local"
-}
-
-func isHelmEnabled() bool {
-	val, present := os.LookupEnv("USE_HELM")
-	return present && val == "true"
 }
 
 func isPreConfiguredUdnAddressesEnabled() bool {

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -1742,7 +1745,7 @@ func newGateway(
 		}
 		gw.nodeIPManager = newAddressManager(nodeName, kube, mgmtPort, watchFactory, gwBridge)
 
-		if config.OvnKubeNode.Mode == types.NodeModeFull {
+		if config.IsModeFull() {
 			// Delete stale masquerade resources if there are any. This is to make sure that there
 			// are no Linux resources with IP from old masquerade subnet when masquerade subnet
 			// gets changed as part of day2 operation.
@@ -1832,7 +1835,7 @@ func newNodePortWatcher(
 	// of the node. If someone on the node is trying to access the NodePort service, those packets
 	// will not be processed by the OpenFlow flows, so we need to add iptable rules that DNATs the
 	// NodePortIP:NodePort to ClusterServiceIP:Port. We don't need to do this on DPU.
-	if config.OvnKubeNode.Mode == types.NodeModeFull {
+	if config.IsModeFull() {
 		if config.Gateway.Mode == config.GatewayModeLocal {
 			if err := initLocalGatewayIPTables(); err != nil {
 				return nil, err
@@ -1871,7 +1874,7 @@ func newNodePortWatcher(
 
 	// used to tell addServiceRules which rules to add
 	dpuMode := false
-	if config.OvnKubeNode.Mode != types.NodeModeFull {
+	if config.IsModeDPU() || config.IsModeDPUHost() {
 		dpuMode = true
 	}
 
@@ -1894,7 +1897,7 @@ func newNodePortWatcher(
 }
 
 func cleanupSharedGateway() error {
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if config.IsModeDPU() || config.IsModeFull() {
 		// NicToBridge() may be created before-hand, only delete the patch port here
 		stdout, stderr, err := util.RunOVSVsctl("--columns=name", "--no-heading", "find", "port",
 			"external_ids:ovn-localnet-port!=_")
@@ -1936,7 +1939,7 @@ func cleanupSharedGateway() error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if config.IsModeDPUHost() || config.IsModeFull() {
 		cleanupSharedGatewayIPTChains()
 	}
 	return nil
