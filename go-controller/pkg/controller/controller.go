@@ -18,6 +18,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -275,7 +276,11 @@ func (c *controller[T]) processNextQueueItem() bool {
 	if err != nil {
 		retry := c.config.MaxAttempts == InfiniteAttempts || c.queue.NumRequeues(key) < c.config.MaxAttempts
 		if retry {
-			klog.Errorf("Controller %s: error found while processing %s: %v", c.name, key, err)
+			if types.IsSuppressedError(err) {
+				klog.V(5).Infof("Controller %s: suppressed error while processing %s: %v", c.name, key, err)
+			} else {
+				klog.Errorf("Controller %s: error found while processing %s: %v", c.name, key, err)
+			}
 			c.queue.AddRateLimited(key)
 			return true
 		}

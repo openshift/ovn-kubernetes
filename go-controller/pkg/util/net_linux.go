@@ -824,7 +824,7 @@ func GetFilteredInterfaceAddrs(link netlink.Link, v4, v6 bool) ([]netlink.Addr, 
 	}
 	addrs, err := netLinkOps.AddrList(link, ipFamily)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list addresses for %q: %v", link.Attrs().Name, err)
+		return nil, fmt.Errorf("failed to list addresses for %q: %w", link.Attrs().Name, err)
 	}
 	validAddrs := make([]netlink.Addr, 0)
 	for _, addr := range addrs {

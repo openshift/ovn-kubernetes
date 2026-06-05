@@ -130,7 +130,7 @@ func (oc *DefaultNetworkController) configureNamespace(nsInfo *namespaceInfo, ns
 
 func (oc *DefaultNetworkController) updateNamespace(old, newer *corev1.Namespace) error {
 	var errors []error
-	klog.Infof("[%s] updating namespace", old.Name)
+	klog.V(5).Infof("[%s] updating namespace", old.Name)
 
 	nsInfo, nsUnlock := oc.getNamespaceLocked(old.Name, false)
 	if nsInfo == nil {

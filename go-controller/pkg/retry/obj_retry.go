@@ -151,14 +151,16 @@ func (r *RetryFramework) DoWithLock(key string, f func(key string)) {
 
 func (r *RetryFramework) initRetryObjWithAddBackoff(obj interface{}, lockedKey string, backoff time.Duration) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoff: backoff})
+	entry, loaded := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{backoff: backoff})
 	entry.timeStamp = time.Now()
 	entry.newObj = obj
 	if _, isPod := obj.(*corev1.Pod); isPod {
 		// for pods we want to retry indefinitely
 		entry.infiniteRetry = true
 	}
-	entry.failedAttempts = 0
+	if !loaded {
+		entry.failedAttempts = 0
+	}
 	entry.backoff = backoff
 	return entry
 }
@@ -171,7 +173,7 @@ func (r *RetryFramework) initRetryObjWithAdd(obj interface{}, lockedKey string) 
 
 // initRetryObjWithUpdate tracks objects that failed to be updated to potentially retry later
 func (r *RetryFramework) initRetryObjWithUpdate(oldObj, newObj interface{}, lockedKey string) *retryObjEntry {
-	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoff: initialBackoff})
+	entry, loaded := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: oldObj, backoff: initialBackoff})
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
 	entry.timeStamp = time.Now()
 	entry.newObj = newObj
@@ -180,7 +182,9 @@ func (r *RetryFramework) initRetryObjWithUpdate(oldObj, newObj interface{}, lock
 		entry.infiniteRetry = true
 	}
 	entry.config = oldObj
-	entry.failedAttempts = 0
+	if !loaded {
+		entry.failedAttempts = 0
+	}
 	return entry
 }
 
@@ -195,7 +199,7 @@ func (r *RetryFramework) initRetryObjWithDelete(obj interface{}, lockedKey strin
 
 func (r *RetryFramework) initRetryObjWithDeleteBackoff(obj interface{}, lockedKey string, config interface{}, noRetryAdd bool, backoff time.Duration) *retryObjEntry {
 	// even if the object was loaded and changed before with the same lock, LoadOrStore will return reference to the same object
-	entry, _ := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoff: initialBackoff})
+	entry, loaded := r.retryEntries.LoadOrStore(lockedKey, &retryObjEntry{config: config, backoff: initialBackoff})
 	entry.timeStamp = time.Now()
 	entry.oldObj = obj
 	if _, isPod := obj.(*corev1.Pod); isPod {
@@ -205,7 +209,9 @@ func (r *RetryFramework) initRetryObjWithDeleteBackoff(obj interface{}, lockedKe
 	if entry.config == nil {
 		entry.config = config
 	}
-	entry.failedAttempts = 0
+	if !loaded {
+		entry.failedAttempts = 0
+	}
 	if noRetryAdd {
 		// will not be retried for addition
 		entry.newObj = nil
@@ -359,7 +365,9 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 			initObj = entry.oldObj
 		}
 
-		klog.Infof("%s: retry object setup: %s %s", r.name, r.ResourceHandler.ObjType, objKey)
+		if entry.failedAttempts > 0 {
+			klog.Infof("%s: retry object setup: %s %s (failed attempts: %d)", r.name, r.ResourceHandler.ObjType, objKey, entry.failedAttempts)
+		}
 
 		if entry.newObj != nil {
 			// get the latest version of the object from the informer;
@@ -423,7 +431,9 @@ func (r *RetryFramework) resourceRetry(objKey string, now time.Time) {
 
 			// create new object if needed
 			if entry.newObj != nil {
-				klog.Infof("%s: adding new object: %s %s", r.name, r.ResourceHandler.ObjType, objKey)
+				if entry.failedAttempts > 0 {
+					klog.Infof("%s: adding new object: %s %s (failed attempts: %d)", r.name, r.ResourceHandler.ObjType, objKey, entry.failedAttempts)
+				}
 				if !r.ResourceHandler.IsResourceScheduled(entry.newObj) {
 					// unscheduled resources (pods) will be retried again later we do not track these as failures, and should not retry.
 					// we should avoid queuing objects to the retry handler that are not scheduled. Thus treat this as an error.
@@ -465,20 +475,12 @@ func (r *RetryFramework) iterateRetryResources() {
 		return
 	}
 	now := time.Now()
-	wg := &sync.WaitGroup{}
 
-	// Process the above list of objects that need retry by holding the lock for each one of them.
 	klog.V(5).Infof("%s: going to retry %v resource setup for %d objects: %s", r.name, r.ResourceHandler.ObjType, len(entriesKeys), entriesKeys)
 
 	for _, entryKey := range entriesKeys {
-		wg.Add(1)
-		go func(entryKey string) {
-			defer wg.Done()
-			r.resourceRetry(entryKey, now)
-		}(entryKey)
+		r.resourceRetry(entryKey, now)
 	}
-	klog.V(5).Infof("%s: waiting for all the %s retry setup to complete in iterateRetryResources", r.name, r.ResourceHandler.ObjType)
-	wg.Wait()
 	klog.V(5).Infof("%s: function iterateRetryResources for %s ended (in %v)", r.name, r.ResourceHandler.ObjType, time.Since(now))
 }
 
@@ -795,7 +797,7 @@ func (r *RetryFramework) WatchResourceFiltered(namespaceForFilteredHandler strin
 					// See: https://github.com/ovn-kubernetes/ovn-kubernetes/pull/3318#issuecomment-1349804450
 					if _, loaded := r.terminatedObjects.LoadAndDelete(key); loaded {
 						// object was already terminated
-						klog.Infof("%s: ignoring delete event for resource in terminal state %s %s",
+						klog.V(5).Infof("%s: ignoring delete event for resource in terminal state %s %s",
 							r.name, r.ResourceHandler.ObjType, key)
 						return
 					}
