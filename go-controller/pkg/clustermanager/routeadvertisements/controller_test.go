@@ -133,13 +133,15 @@ func (tn testNamespace) Namespace() *corev1.Namespace {
 }
 
 type testNode struct {
-	Name                     string
-	Generation               int
-	Labels                   map[string]string
-	PrimaryAddressAnnotation string
-	SubnetsAnnotation        string
-	VTEPIPs                  map[string][]string
-	RawVTEPAnnotation        *string
+	Name                      string
+	Generation                int
+	Labels                    map[string]string
+	PrimaryAddressAnnotation  string
+	SubnetsAnnotation         string
+	L3GatewayConfigAnnotation string
+	ChassisIDAnnotation       string
+	VTEPIPs                   map[string][]string
+	RawVTEPAnnotation         *string
 }
 
 func (tn testNode) Node() *corev1.Node {
@@ -150,6 +152,13 @@ func (tn testNode) Node() *corev1.Node {
 	annotations := map[string]string{
 		"k8s.ovn.org/node-subnets": tn.SubnetsAnnotation,
 		util.OvnNodeIfAddr:         primaryAddressAnnotation,
+	}
+	if tn.L3GatewayConfigAnnotation != "" {
+		annotations[util.OvnNodeL3GatewayConfig] = tn.L3GatewayConfigAnnotation
+		annotations[util.OvnNodeChassisID] = "chassis-" + tn.Name
+	}
+	if tn.ChassisIDAnnotation != "" {
+		annotations[util.OvnNodeChassisID] = tn.ChassisIDAnnotation
 	}
 	if tn.RawVTEPAnnotation != nil {
 		annotations[util.OVNNodeVTEPs] = *tn.RawVTEPAnnotation
@@ -178,27 +187,32 @@ type testPrefixSelector struct {
 }
 
 type testNeighbor struct {
-	ASN       uint32
-	Address   string
-	DisableMP *bool
-	Advertise []string
-	Receive   []testPrefixSelector
+	ASN                    uint32
+	Address                string
+	DualStackAddressFamily *bool
+	Advertise              []string
+	NextHopV4              string
+	NextHopV6              string
+	Receive                []testPrefixSelector
 }
 
 func (tn testNeighbor) Neighbor() frrapi.Neighbor {
 	n := frrapi.Neighbor{
-		ASN:       tn.ASN,
-		Address:   tn.Address,
-		DisableMP: true,
+		ASN:     tn.ASN,
+		Address: tn.Address,
 		ToAdvertise: frrapi.Advertise{
 			Allowed: frrapi.AllowedOutPrefixes{
 				Mode:     frrapi.AllowRestricted,
 				Prefixes: tn.Advertise,
 			},
+			NextHop: frrapi.NextHop{
+				IPv4: tn.NextHopV4,
+				IPv6: tn.NextHopV6,
+			},
 		},
 	}
-	if tn.DisableMP != nil {
-		n.DisableMP = *tn.DisableMP
+	if tn.DualStackAddressFamily != nil {
+		n.DualStackAddressFamily = *tn.DualStackAddressFamily
 	}
 	if len(tn.Receive) > 0 {
 		prefixSelectors := make([]frrapi.PrefixSelector, 0, len(tn.Receive))
@@ -469,6 +483,7 @@ func TestController_reconcile(t *testing.T) {
 		vteps                []*vtepv1.VTEP
 		reconcile            string
 		transport            string
+		gatewayMode          config.GatewayMode
 		ipv6                 bool
 		wantErr              bool
 		expectAcceptedStatus metav1.ConditionStatus
@@ -911,6 +926,44 @@ func TestController_reconcile(t *testing.T) {
 			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
+			name:        "reconciles pod RouteAdvertisement for DPU host default network with next-hop",
+			ra:          &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			gatewayMode: config.GatewayModeShared,
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+			},
+			nodes: []*testNode{
+				{
+					Name:                      "node",
+					Labels:                    map[string]string{types.OvnDPUHostNodeLabel: ""},
+					SubnetsAnnotation:         "{\"default\":\"1.1.0.0/24\"}",
+					L3GatewayConfigAnnotation: `{"default":{"mode":"shared","mac-address":"52:54:00:4c:e6:00","ip-addresses":["172.18.255.254/16"],"next-hops":["172.18.0.1"]}}`,
+				},
+			},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.1.0.0/24"}, NextHopV4: "172.18.255.254"},
+						}},
+					}},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
 			name:      "reconciles pod RouteAdvertisement for CUDN in no-overlay mode with ToReceive routes including CUDN pod subnets",
 			ra:        &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true, NetworkSelector: map[string]string{"selected": "true"}},
 			transport: types.NetworkTransportNoOverlay,
@@ -1096,7 +1149,7 @@ func TestController_reconcile(t *testing.T) {
 			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
-			name: "fails to reconcile if DisableMP is unset",
+			name: "fails to reconcile if dual-stack address family is set",
 			ra:   &testRA{Name: "ra", AdvertisePods: true},
 			frrConfigs: []*testFRRConfig{
 				{
@@ -1104,7 +1157,7 @@ func TestController_reconcile(t *testing.T) {
 					Namespace: frrNamespace,
 					Routers: []*testRouter{
 						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
-							{ASN: 1, Address: "1.0.0.100", DisableMP: ptr.To(false)},
+							{ASN: 1, Address: "1.0.0.100", DualStackAddressFamily: ptr.To(true)},
 						}},
 					},
 				},
@@ -1663,6 +1716,38 @@ exit
 			expectNADAnnotations: map[string]map[string]string{"blue6": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
+			name: "fails to reconcile EVPN target VRF when cloned default-VRF neighbor has dual-stack address family set",
+			ra:   &testRA{Name: "ra", TargetVRF: "red", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1", DualStackAddressFamily: ptr.To(true)},
+						}},
+						{ASN: 65000, VRF: "red", Prefixes: []string{"10.1.0.0/16"}, Neighbors: []*testNeighbor{
+							{ASN: 65000, Address: "192.168.1.1"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "red", Namespace: "red", Network: util.GenerateCUDNNetworkName("red"),
+					Topology: "layer2", Subnet: "10.1.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNVTEPName: "my-vtep", EVPNMACVRFVNI: 1000, EVPNMACVRFRouteTarget: "65000:1000"},
+			},
+			vteps: []*vtepv1.VTEP{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "my-vtep"},
+					Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/16"}},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}", VTEPIPs: map[string][]string{"my-vtep": {"100.64.0.1"}}}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
+		},
+		{
 			name: "advertises VTEP IP /32 in default-VRF router prefixes for EVPN MAC-VRF with target VRF",
 			ra:   &testRA{Name: "ra", TargetVRF: "red", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
 			frrConfigs: []*testFRRConfig{
@@ -2157,6 +2242,9 @@ exit
 			config.OVNKubernetesFeature.EnableEVPN = true
 			// satisfy EVPN LGW restriction, otherwise no effect
 			config.Gateway.Mode = config.GatewayModeLocal
+			if tt.gatewayMode != "" {
+				config.Gateway.Mode = tt.gatewayMode
+			}
 
 			fakeClientset := util.GetOVNClientset().GetClusterManagerClientset()
 			addGenerateNameReactor[*frrfake.Clientset](fakeClientset.FRRClient)
@@ -2232,15 +2320,17 @@ exit
 			defer wf.Shutdown()
 
 			// wait for caches to sync
-			cache.WaitForCacheSync(
-				context.Background().Done(),
+			hasSynced := []cache.InformerSynced{
 				wf.RouteAdvertisementsInformer().Informer().HasSynced,
 				wf.FRRConfigurationsInformer().Informer().HasSynced,
 				wf.NADInformer().Informer().HasSynced,
 				wf.NodeCoreInformer().Informer().HasSynced,
 				wf.EgressIPInformer().Informer().HasSynced,
-				wf.VTEPInformer().Informer().HasSynced,
-			)
+			}
+			if config.Gateway.Mode == config.GatewayModeLocal {
+				hasSynced = append(hasSynced, wf.VTEPInformer().Informer().HasSynced)
+			}
+			cache.WaitForCacheSync(context.Background().Done(), hasSynced...)
 
 			err = nm.Start()
 			// some test cases start with a bad RA status, avoid asserting
@@ -2497,6 +2587,24 @@ func TestUpdates(t *testing.T) {
 			name:              "reconciles all RAs on updated Node primary address annotation",
 			oldObject:         &testNode{Name: "eip", PrimaryAddressAnnotation: "old"},
 			newObject:         &testNode{Name: "eip", PrimaryAddressAnnotation: "new"},
+			expectedReconcile: []string{"ra1", "ra2", "ra3"},
+		},
+		{
+			name: "reconciles all RAs on updated Node L3 gateway annotation",
+			oldObject: &testNode{
+				Name:                      "eip",
+				L3GatewayConfigAnnotation: `{"default":{"mode":"shared","mac-address":"52:54:00:4c:e6:00","ip-addresses":["172.18.255.254/16"],"next-hops":["172.18.0.1"]}}`,
+			},
+			newObject: &testNode{
+				Name:                      "eip",
+				L3GatewayConfigAnnotation: `{"default":{"mode":"shared","mac-address":"52:54:00:d4:ac:00","ip-addresses":["172.18.255.253/16"],"next-hops":["172.18.0.1"]}}`,
+			},
+			expectedReconcile: []string{"ra1", "ra2", "ra3"},
+		},
+		{
+			name:              "reconciles all RAs on updated Node chassis ID annotation",
+			oldObject:         &testNode{Name: "eip", ChassisIDAnnotation: "old"},
+			newObject:         &testNode{Name: "eip", ChassisIDAnnotation: "new"},
 			expectedReconcile: []string{"ra1", "ra2", "ra3"},
 		},
 		{
