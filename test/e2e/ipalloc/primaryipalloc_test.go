@@ -89,12 +89,12 @@ func TestIPAlloc(t *testing.T) {
 		{
 			desc:                     "IPv4",
 			existingPrimaryNodeIPs:   []node{{v4: network{ip: "192.168.1.1", mask: "16"}}, {v4: network{ip: "192.168.1.2", mask: "16"}}},
-			expectedFromAllocateNext: []string{"192.168.2.3", "192.168.2.4"},
+			expectedFromAllocateNext: []string{"192.168.1.200", "192.168.1.201"},
 		},
 		{
 			desc:                     "IPv6",
-			existingPrimaryNodeIPs:   []node{{v4: network{ip: "fc00:f853:ccd:e793::5", mask: "64"}}, {v4: network{ip: "fc00:f853:ccd:e793::6", mask: "64"}}},
-			expectedFromAllocateNext: []string{"fc00:f853:ccd:e793::8", "fc00:f853:ccd:e793::9"},
+			existingPrimaryNodeIPs:   []node{{v6: network{ip: "fc00:f853:ccd:e793::5", mask: "64"}}, {v6: network{ip: "fc00:f853:ccd:e793::6", mask: "64"}}},
+			expectedFromAllocateNext: []string{"fc00:f853:ccd:e793::c8", "fc00:f853:ccd:e793::c9"},
 		},
 	}
 
@@ -126,6 +126,100 @@ func TestIPAlloc(t *testing.T) {
 		})
 	}
 
+}
+
+// TestIPAllocInitError verifies that newPrimaryIPAllocator rejects subnets that
+// contain the start of the reserved range but not its end, preventing silent
+// out-of-subnet allocations at runtime.
+func TestIPAllocInitError(t *testing.T) {
+	tests := []struct {
+		desc  string
+		nodes []node
+	}{
+		{
+			// 10.0.0.192/28 covers .192-.207: contains .200 (start) but not .254 (end)
+			desc:  "IPv4: subnet contains range start but excludes range end",
+			nodes: []node{{v4: network{ip: "10.0.0.200", mask: "28"}}},
+		},
+		{
+			// fc00:f853:ccd:e793::c0/123 covers ::c0-::df: contains ::c8 (start) but not ::ff (end)
+			desc:  "IPv6: subnet contains range start but excludes range end",
+			nodes: []node{{v6: network{ip: "fc00:f853:ccd:e793::c8", mask: "123"}}},
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			cs := fake.NewSimpleClientset(getNodesWithIPs(tc.nodes))
+			_, err := newPrimaryIPAllocator(cs.CoreV1().Nodes())
+			if err == nil {
+				t.Error("expected error for narrow subnet that excludes range end, got nil")
+			}
+		})
+	}
+}
+
+// TestIPAllocExhaustion verifies that allocating beyond the reserved range
+// (.254 for IPv4, ::ff for IPv6) returns an error instead of returning an
+// out-of-range IP like .255 or ::100.
+func TestIPAllocExhaustion(t *testing.T) {
+	tests := []struct {
+		desc            string
+		nodes           []node
+		skipCount       int    // passed to IncrementAndGetNext to reach the last valid IP
+		expectedLastIP  string // the last valid IP that should be returned
+		isIPv6          bool
+	}{
+		{
+			desc:           "IPv4: allocation after .254 fails",
+			nodes:          []node{{v4: network{ip: "192.168.1.1", mask: "16"}}, {v4: network{ip: "192.168.1.2", mask: "16"}}},
+			skipCount:      54, // 54 skipped (.200-.253) + 1 returned (.254) = 55 total
+			expectedLastIP: "192.168.1.254",
+		},
+		{
+			desc:           "IPv6: allocation after ::ff fails",
+			nodes:          []node{{v6: network{ip: "fc00:f853:ccd:e793::5", mask: "64"}}, {v6: network{ip: "fc00:f853:ccd:e793::6", mask: "64"}}},
+			skipCount:      55, // 55 skipped (::c8-::fe) + 1 returned (::ff) = 56 total
+			expectedLastIP: "fc00:f853:ccd:e793::ff",
+			isIPv6:         true,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			cs := fake.NewSimpleClientset(getNodesWithIPs(tc.nodes))
+			pipa, err := newPrimaryIPAllocator(cs.CoreV1().Nodes())
+			if err != nil {
+				t.Fatalf("unexpected init error: %v", err)
+			}
+			// Allocate up to the last valid IP in the reserved range
+			var lastIP net.IP
+			if tc.isIPv6 {
+				lastIP, err = pipa.IncrementAndGetNextV6(tc.skipCount)
+			} else {
+				lastIP, err = pipa.IncrementAndGetNextV4(tc.skipCount)
+			}
+			if err != nil {
+				t.Fatalf("unexpected error allocating up to last IP: %v", err)
+			}
+			expectedIP := net.ParseIP(tc.expectedLastIP)
+			if !lastIP.Equal(expectedIP) {
+				t.Fatalf("expected last valid IP %s, got %s", expectedIP, lastIP)
+			}
+			// Next allocation must fail with exhaustion error
+			if tc.isIPv6 {
+				_, err = pipa.AllocateNextV6()
+			} else {
+				_, err = pipa.AllocateNextV4()
+			}
+			if err == nil {
+				t.Error("expected reserved range exhaustion error, got nil")
+			}
+			if err != nil && !strings.Contains(err.Error(), "exhausted") {
+				t.Errorf("expected exhaustion error, got: %v", err)
+			}
+		})
+	}
 }
 
 func getNodesWithIPs(nodesSpec []node) runtime.Object {
