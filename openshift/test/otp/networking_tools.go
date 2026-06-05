@@ -19,8 +19,6 @@ import (
 )
 
 var _ = g.Describe("[sig-networking] OTP Networking Tools", func() {
-	defer g.GinkgoRecover()
-
 	var (
 		clientset *kubernetes.Clientset
 		config    *rest.Config

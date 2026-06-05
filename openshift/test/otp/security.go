@@ -18,8 +18,6 @@ import (
 )
 
 var _ = g.Describe("[sig-networking] OTP Security", func() {
-	defer g.GinkgoRecover()
-
 	var (
 		clientset *kubernetes.Clientset
 		config    *rest.Config
@@ -214,7 +212,10 @@ var _ = g.Describe("[sig-networking] OTP Security", func() {
 
 		// Wait for debug pod to be running
 		o.Eventually(func() corev1.PodPhase {
-			p, _ := clientset.CoreV1().Pods("openshift-ovn-kubernetes").Get(ctx, debugPodName, metav1.GetOptions{})
+			p, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").Get(ctx, debugPodName, metav1.GetOptions{})
+			if err != nil {
+				return corev1.PodPending
+			}
 			return p.Status.Phase
 		}, 60, 5).Should(o.Equal(corev1.PodRunning), "Debug pod did not reach Running state")
 

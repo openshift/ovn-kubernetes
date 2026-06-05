@@ -18,8 +18,6 @@ import (
 )
 
 var _ = g.Describe("[sig-networking] OTP Multus", func() {
-	defer g.GinkgoRecover()
-
 	var (
 		clientset *kubernetes.Clientset
 		config    *rest.Config
