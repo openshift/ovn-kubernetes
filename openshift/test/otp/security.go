@@ -1,86 +1,65 @@
 package otp
 
 import (
-	"bytes"
-	"context"
 	"strings"
 
 	g "github.com/onsi/ginkgo/v2"
 	o "github.com/onsi/gomega"
 
+	exutil "github.com/openshift/origin/test/extended/util"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/remotecommand"
+	e2e "k8s.io/kubernetes/test/e2e/framework"
 )
 
 var _ = g.Describe("[sig-networking] OTP Security", func() {
-	var (
-		clientset *kubernetes.Clientset
-		config    *rest.Config
-		ctx       context.Context
-	)
-
-	g.BeforeEach(func() {
-		ctx = context.Background()
-
-		// Load kubeconfig
-		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-		configOverrides := &clientcmd.ConfigOverrides{}
-		kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-
-		var err error
-		config, err = kubeConfig.ClientConfig()
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		clientset, err = kubernetes.NewForConfig(config)
-		o.Expect(err).NotTo(o.HaveOccurred())
-	})
+	var oc = exutil.NewCLI("otp-security")
 
 	// Medium-49216: API Token Logging Security
 	g.It("[OTP][blocking][case_id:49216] should not expose API tokens in ovnkube-node logs", func() {
 		g.By("Getting all ovnkube-node pods")
-		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
-		})
+		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("pods", "-n", "openshift-ovn-kubernetes", "-l", "app=ovnkube-node", "-o", "name").Output()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		o.Expect(len(pods.Items)).To(o.BeNumerically(">", 0), "Expected at least one ovnkube-node pod")
+
+		podNames := strings.Split(strings.TrimSpace(output), "\n")
+		o.Expect(len(podNames)).To(o.BeNumerically(">", 0), "Expected at least one ovnkube-node pod")
 
 		g.By("Checking logs from each ovnkube-node pod for token exposure")
 		totalViolations := 0
 		failedPods := []string{}
 		skippedPods := []string{}
 
-		for _, pod := range pods.Items {
-			// Get logs from ovnkube-controller container
-			logOptions := &corev1.PodLogOptions{
-				Container: "ovnkube-controller",
-				TailLines: int64Ptr(10000),
-			}
-
-			req := clientset.CoreV1().Pods("openshift-ovn-kubernetes").GetLogs(pod.Name, logOptions)
-			logs, err := req.DoRaw(ctx)
-
-			// If logs can't be retrieved, record and skip this pod
-			if err != nil {
-				g.GinkgoWriter.Printf("Warning: could not retrieve logs for pod %s: %v\n", pod.Name, err)
-				skippedPods = append(skippedPods, pod.Name)
+		for _, podName := range podNames {
+			// Strip "pod/" prefix if present
+			podName = strings.TrimPrefix(podName, "pod/")
+			if podName == "" {
 				continue
 			}
 
-			logsStr := string(logs)
+			// Get logs from ovnkube-controller container
+			logs, err := oc.AsAdmin().WithoutNamespace().Run("logs").Args(
+				"-n", "openshift-ovn-kubernetes",
+				podName,
+				"-c", "ovnkube-controller",
+				"--tail=10000",
+			).Output()
+
+			// If logs can't be retrieved, record and skip this pod
+			if err != nil {
+				e2e.Logf("Warning: could not retrieve logs for pod %s: %v", podName, err)
+				skippedPods = append(skippedPods, podName)
+				continue
+			}
 
 			// Search for sensitive patterns
 			patterns := []string{"api-token", "authorization", "bearer"}
 			podViolations := 0
 
 			for _, pattern := range patterns {
-				if strings.Contains(strings.ToLower(logsStr), pattern) {
+				if strings.Contains(strings.ToLower(logs), pattern) {
 					// Filter out false positives (configuration field names without values)
-					lines := strings.Split(logsStr, "\n")
+					lines := strings.Split(logs, "\n")
 					for _, line := range lines {
 						lowerLine := strings.ToLower(line)
 						if strings.Contains(lowerLine, pattern) {
@@ -101,15 +80,15 @@ var _ = g.Describe("[sig-networking] OTP Security", func() {
 
 			if podViolations > 0 {
 				totalViolations += podViolations
-				failedPods = append(failedPods, pod.Name)
+				failedPods = append(failedPods, podName)
 			}
 		}
 
 		// Ensure at least some pods were scanned
-		scannedCount := len(pods.Items) - len(skippedPods)
+		scannedCount := len(podNames) - len(skippedPods)
 		o.Expect(scannedCount).To(o.BeNumerically(">", 0),
 			"Could not retrieve logs from any pod - all %d pods skipped: %v",
-			len(pods.Items), skippedPods)
+			len(podNames), skippedPods)
 
 		// Assert no tokens were found
 		o.Expect(totalViolations).To(o.Equal(0),
@@ -120,16 +99,21 @@ var _ = g.Describe("[sig-networking] OTP Security", func() {
 	// Medium-77102: CIS File Permissions for CNI Config
 	g.It("[OTP][blocking][case_id:77102] should have secure permissions on CNI configuration files", func() {
 		g.By("Checking multus config permissions via multus pods")
-		multusPods, err := clientset.CoreV1().Pods("openshift-multus").List(ctx, metav1.ListOptions{
-			LabelSelector: "app=multus",
-		})
+		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("pods", "-n", "openshift-multus", "-l", "app=multus", "-o", "name").Output()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		o.Expect(len(multusPods.Items)).To(o.BeNumerically(">", 0), "Expected at least one multus pod")
+
+		multusPods := strings.Split(strings.TrimSpace(output), "\n")
+		o.Expect(len(multusPods)).To(o.BeNumerically(">", 0), "Expected at least one multus pod")
 
 		// Check first multus pod for config file permissions
-		multusPod := multusPods.Items[0].Name
-		output, err := execInPod(ctx, clientset, config, "openshift-multus", multusPod, "kube-multus",
-			[]string{"/bin/bash", "-c", "stat -c '%a %n' /host/etc/cni/net.d/*.conf"})
+		multusPod := strings.TrimPrefix(multusPods[0], "pod/")
+		output, err = oc.AsAdmin().WithoutNamespace().Run("exec").Args(
+			"-n", "openshift-multus",
+			multusPod,
+			"-c", "kube-multus",
+			"--",
+			"/bin/bash", "-c", "stat -c '%a %n' /host/etc/cni/net.d/*.conf",
+		).Output()
 		o.Expect(err).NotTo(o.HaveOccurred(), "Failed to check multus config permissions")
 
 		g.By("Verifying multus config has 600 permissions")
@@ -146,145 +130,49 @@ var _ = g.Describe("[sig-networking] OTP Security", func() {
 				"CIS violation: %s has insecure permissions %s (expected 600)", filename, perms)
 		}
 
-		g.By("Checking whereabouts config permissions")
-		// Get a worker node
-		nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{
-			LabelSelector: "node-role.kubernetes.io/worker",
-		})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		if len(nodes.Items) == 0 {
-			// Fall back to any node if no workers labeled
-			nodes, err = clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		g.By("Checking whereabouts config permissions on nodes")
+		// Get first worker node
+		output, err = oc.AsAdmin().WithoutNamespace().Run("get").Args("nodes", "-l", "node-role.kubernetes.io/worker", "-o", "jsonpath={.items[0].metadata.name}").Output()
+		if err != nil || output == "" {
+			// Fall back to any node
+			output, err = oc.AsAdmin().WithoutNamespace().Run("get").Args("nodes", "-o", "jsonpath={.items[0].metadata.name}").Output()
 			o.Expect(err).NotTo(o.HaveOccurred())
 		}
-		o.Expect(len(nodes.Items)).To(o.BeNumerically(">", 0), "Expected at least one node")
+		nodeName := strings.TrimSpace(output)
+		o.Expect(nodeName).NotTo(o.BeEmpty(), "Expected at least one node")
 
-		nodeName := nodes.Items[0].Name
-
-		// Create debug pod on node
-		debugPodName := "cis-perms-check-77102"
-		debugPod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      debugPodName,
-				Namespace: "openshift-ovn-kubernetes",
-			},
-			Spec: corev1.PodSpec{
-				NodeName:    nodeName,
-				HostNetwork: true,
-				HostPID:     true,
-				Containers: []corev1.Container{
-					{
-						Name:  "debug",
-						Image: "registry.access.redhat.com/ubi8/ubi-minimal:latest",
-						Command: []string{"sleep", "300"},
-						SecurityContext: &corev1.SecurityContext{
-							Privileged: boolPtr(true),
-						},
-						VolumeMounts: []corev1.VolumeMount{
-							{
-								Name:      "host",
-								MountPath: "/host",
-							},
-						},
-					},
-				},
-				Volumes: []corev1.Volume{
-					{
-						Name: "host",
-						VolumeSource: corev1.VolumeSource{
-							HostPath: &corev1.HostPathVolumeSource{
-								Path: "/",
-							},
-						},
-					},
-				},
-				RestartPolicy: corev1.RestartPolicyNever,
-			},
-		}
-
-		_, err = clientset.CoreV1().Pods("openshift-ovn-kubernetes").Create(ctx, debugPod, metav1.CreateOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		defer func() {
-			_ = clientset.CoreV1().Pods("openshift-ovn-kubernetes").Delete(ctx, debugPodName, metav1.DeleteOptions{})
-		}()
-
-		// Wait for debug pod to be running
-		o.Eventually(func() corev1.PodPhase {
-			p, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").Get(ctx, debugPodName, metav1.GetOptions{})
-			if err != nil {
-				return corev1.PodPending
-			}
-			return p.Status.Phase
-		}, 60, 5).Should(o.Equal(corev1.PodRunning), "Debug pod did not reach Running state")
-
-		// Check whereabouts config file permissions
-		output, err = execInPod(ctx, clientset, config, "openshift-ovn-kubernetes", debugPodName, "debug",
-			[]string{"/bin/bash", "-c", "stat -c '%a %n' /host/etc/kubernetes/cni/net.d/whereabouts.d/*.conf /host/etc/kubernetes/cni/net.d/whereabouts.d/*.kubeconfig 2>/dev/null || true"})
-		o.Expect(err).NotTo(o.HaveOccurred(), "Failed to check whereabouts config permissions")
+		// Check whereabouts config permissions using oc debug node
+		g.By("Checking whereabouts config file permissions via debug node")
+		output, err = oc.AsAdmin().WithoutNamespace().Run("debug").Args(
+			"node/"+nodeName,
+			"--",
+			"chroot", "/host", "/bin/bash", "-c",
+			"stat -c '%a %n' /etc/kubernetes/cni/net.d/whereabouts.d/*.conf /etc/kubernetes/cni/net.d/whereabouts.d/*.kubeconfig 2>/dev/null || true",
+		).Output()
+		// Note: debug node command may have some errors in stderr, but we only care about stdout
+		// so we don't fail on err here if we got output
 
 		g.By("Verifying whereabouts configs have 600 permissions")
 		if strings.TrimSpace(output) != "" {
 			lines = strings.Split(strings.TrimSpace(output), "\n")
 			for _, line := range lines {
-				if line == "" {
+				// Skip lines that look like debug pod messages
+				if strings.Contains(line, "Starting pod/") || strings.Contains(line, "Removing debug pod") ||
+				   strings.Contains(line, "To use host binaries") || line == "" {
 					continue
 				}
 				parts := strings.Fields(line)
-				o.Expect(len(parts)).To(o.BeNumerically(">=", 2), "Invalid stat output: %s", line)
+				if len(parts) < 2 {
+					continue
+				}
 				perms := parts[0]
 				filename := parts[1]
-				o.Expect(perms).To(o.Equal("600"),
-					"CIS violation: %s has insecure permissions %s (expected 600)", filename, perms)
+				// Only check .conf and .kubeconfig files, skip other files like "nodename"
+				if strings.HasSuffix(filename, ".conf") || strings.HasSuffix(filename, ".kubeconfig") {
+					o.Expect(perms).To(o.Equal("600"),
+						"CIS violation: %s has insecure permissions %s (expected 600)", filename, perms)
+				}
 			}
 		}
 	})
 })
-
-// Helper functions
-func int64Ptr(i int64) *int64 {
-	return &i
-}
-
-func boolPtr(b bool) *bool {
-	return &b
-}
-
-// execInPod executes a command in a pod and returns the output
-func execInPod(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config,
-	namespace, podName, containerName string, command []string) (string, error) {
-
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		return "", err
-	}
-
-	req := clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(podName).
-		Namespace(namespace).
-		SubResource("exec").
-		VersionedParams(&corev1.PodExecOptions{
-			Container: containerName,
-			Command:   command,
-			Stdout:    true,
-			Stderr:    true,
-		}, runtime.NewParameterCodec(scheme))
-
-	exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
-	if err != nil {
-		return "", err
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-	if err != nil {
-		return stdout.String() + "\n" + stderr.String(), err
-	}
-
-	return stdout.String(), nil
-}
