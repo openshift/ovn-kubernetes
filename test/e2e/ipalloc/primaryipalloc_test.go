@@ -89,12 +89,12 @@ func TestIPAlloc(t *testing.T) {
 		{
 			desc:                     "IPv4",
 			existingPrimaryNodeIPs:   []node{{v4: network{ip: "192.168.1.1", mask: "16"}}, {v4: network{ip: "192.168.1.2", mask: "16"}}},
-			expectedFromAllocateNext: []string{"192.168.2.3", "192.168.2.4"},
+			expectedFromAllocateNext: []string{"192.168.1.200", "192.168.1.201"},
 		},
 		{
 			desc:                     "IPv6",
-			existingPrimaryNodeIPs:   []node{{v4: network{ip: "fc00:f853:ccd:e793::5", mask: "64"}}, {v4: network{ip: "fc00:f853:ccd:e793::6", mask: "64"}}},
-			expectedFromAllocateNext: []string{"fc00:f853:ccd:e793::8", "fc00:f853:ccd:e793::9"},
+			existingPrimaryNodeIPs:   []node{{v6: network{ip: "fc00:f853:ccd:e793::5", mask: "64"}}, {v6: network{ip: "fc00:f853:ccd:e793::6", mask: "64"}}},
+			expectedFromAllocateNext: []string{"fc00:f853:ccd:e793::c8", "fc00:f853:ccd:e793::c9"},
 		},
 	}
 
@@ -103,7 +103,7 @@ func TestIPAlloc(t *testing.T) {
 			cs := fake.NewSimpleClientset(getNodesWithIPs(tc.existingPrimaryNodeIPs))
 			pipa, err := newPrimaryIPAllocator(cs.CoreV1().Nodes())
 			if err != nil {
-				t.Errorf(err.Error())
+				t.Error(err)
 				return
 			}
 			for _, expectedIPStr := range tc.expectedFromAllocateNext {
