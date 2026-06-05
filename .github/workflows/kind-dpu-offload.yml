@@ -4,8 +4,11 @@ on:
   pull_request:
     branches: [ master, release-* ]
     paths-ignore:
+      - 'docs/**'
       - '**/*.md'
       - 'mkdocs.yml'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
   push:
     branches:
       - master
@@ -21,6 +24,7 @@ concurrency:
 env:
   DPU_SIM_REF: main
   OVN_KUBERNETES_PATH: ${{ github.workspace }}/ovn-kubernetes
+  KIND_EXPERIMENTAL_PROVIDER: docker
 
 jobs:
   kind-dpu-offload:
