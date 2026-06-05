@@ -11,4 +11,5 @@ type DeploymentConfig interface {
 	ExternalBridgeName() string
 	PrimaryInterfaceName() string
 	GetAgnHostContainerImage() string
+	NBDBContainerName() string
 }

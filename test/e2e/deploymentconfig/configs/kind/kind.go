@@ -38,3 +38,7 @@ func (k kind) PrimaryInterfaceName() string {
 func (k kind) GetAgnHostContainerImage() string {
 	return image.GetE2EImage(image.Agnhost)
 }
+
+func (k kind) NBDBContainerName() string {
+	return "nb-ovsdb"
+}
