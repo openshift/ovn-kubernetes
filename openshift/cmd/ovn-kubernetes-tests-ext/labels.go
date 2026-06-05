@@ -2,6 +2,7 @@ package main
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/util/sets"
 )
@@ -20,12 +21,17 @@ func getTestExtensionLabels() []string {
 }
 
 // generatePrependedLabelsStr generates labels that are prepended to a test name
-func generatePrependedLabelsStr(labels sets.Set[string]) string {
+// Excludes labels that should not be prepended (e.g., those already in annotations)
+func generatePrependedLabelsStr(labels sets.Set[string], excludeLabels sets.Set[string]) string {
 	labelList := labels.UnsortedList()
 	sort.Strings(labelList)
 
 	var labelsStr = ""
 	for _, label := range labelList {
+		// Skip labels that are in the exclude list
+		if excludeLabels.Has(label) {
+			continue
+		}
 		labelsStr += "[" + label + "]"
 	}
 	return labelsStr
@@ -40,4 +46,26 @@ func getPrependLabels(labels sets.Set[string]) []string {
 		}
 	}
 	return prependLabels
+}
+
+// parseLabelsFromAnnotation extracts individual labels from annotation strings like "[Serial][Suite:openshift/conformance/serial]"
+func parseLabelsFromAnnotation(annotation string) []string {
+	var labels []string
+	remainder := annotation
+	for {
+		start := strings.Index(remainder, "[")
+		if start == -1 {
+			break
+		}
+		end := strings.Index(remainder[start:], "]")
+		if end == -1 {
+			break
+		}
+		label := remainder[start+1 : start+end]
+		if label != "" {
+			labels = append(labels, label)
+		}
+		remainder = remainder[start+end+1:]
+	}
+	return labels
 }
