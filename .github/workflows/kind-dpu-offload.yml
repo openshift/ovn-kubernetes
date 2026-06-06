@@ -105,7 +105,7 @@ jobs:
 
       - name: Run traffic flow tests
         working-directory: dpu-simulator
-        run: ./bin/dpu-sim tft run --config config-kind-ovnk-offload.yaml
+        run: ./bin/dpu-sim tft run --check --config config-kind-ovnk-offload.yaml
 
       - name: Export kind logs on failure
         if: failure()
@@ -208,7 +208,7 @@ jobs:
 
       - name: Run traffic flow tests
         working-directory: dpu-simulator
-        run: ./bin/dpu-sim tft run --config "${DPU_SIM_CONFIG}"
+        run: ./bin/dpu-sim tft run --check --config "${DPU_SIM_CONFIG}"
 
       - name: Export kind logs on failure
         if: failure()
