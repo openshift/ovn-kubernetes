@@ -626,6 +626,20 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 		if bsnc.IsPrimaryNetwork() {
 			activeNetwork, err = bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
 			if err != nil {
+				if apierrors.IsNotFound(err) {
+					// namespace is gone after we listed this pod, that means the pod no longer exists
+					// we don't need to preserve its previously allocated IP address or logical switch port
+					klog.Infof("%s network controller pod sync: pod %s/%s namespace has been deleted, ignoring pod",
+						bsnc.GetNetworkName(), pod.Namespace, pod.Name)
+					continue
+				}
+				if util.IsInvalidPrimaryNetworkError(err) {
+					// namespace exists but is in a transitional state (has UDN label but no NAD yet)
+					// skip this pod during initial sync to avoid blocking controller startup
+					klog.V(5).Infof("%s network controller pod sync: pod %s/%s namespace has invalid primary network state, ignoring pod during sync",
+						bsnc.GetNetworkName(), pod.Namespace, pod.Name)
+					continue
+				}
 				return fmt.Errorf("failed to find the active network for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 			}
 			if activeNetwork == nil || activeNetwork.IsDefault() {
