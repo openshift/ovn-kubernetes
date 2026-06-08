@@ -841,6 +841,11 @@ func (c *Controller) generateFRRConfiguration(
 		nodeV4, _, _ := strings.Cut(nodeIfAddr.IPv4, "/")
 		nodeV6, _, _ := strings.Cut(nodeIfAddr.IPv6, "/")
 
+		dpuHostGatewayNextHops, err := getDPUHostGatewayNextHops(node)
+		if err != nil {
+			return nil, err
+		}
+
 		targetRouter.Neighbors = make([]frrtypes.Neighbor, 0, len(source.Spec.BGP.Routers[i].Neighbors))
 		for _, neighbor := range source.Spec.BGP.Routers[i].Neighbors {
 			// Skip neighbors that are the node itself
@@ -848,16 +853,16 @@ func (c *Controller) generateFRRConfiguration(
 				continue
 			}
 
-			// If MultiProtocol is enabled (default) then a BGP session carries
-			// prefixes of both IPv4 and IPv6 families. Our problem is that with
-			// an IPv4 session, FRR can incorrectly pick the masquerade IPv6
-			// address (instead of the real address) as next hop for IPv6
-			// prefixes and that won't work. Note that with a dedicated IPv6
-			// session that can't happen since FRR will use the same address
-			// that was used to establish the session. Let's enforce the use of
-			// DisableMP for now.
-			if !neighbor.DisableMP {
-				return nil, fmt.Errorf("%w: DisableMP==false not supported, seen on FRRConfiguration %s/%s neighbor %s",
+			// If the dual-stack address family is enabled then a BGP session
+			// carries prefixes of both IPv4 and IPv6 families. Our problem is
+			// that with an IPv4 session, FRR can incorrectly pick the
+			// masquerade IPv6 address (instead of the real address) as next
+			// hop for IPv6 prefixes and that won't work. Note that with a
+			// dedicated IPv6 session that can't happen since FRR will use the
+			// same address that was used to establish the session. Enforce
+			// address-family-specific sessions for now.
+			if neighbor.DualStackAddressFamily {
+				return nil, fmt.Errorf("%w: DualStackAddressFamily==true not supported, seen on FRRConfiguration %s/%s neighbor %s",
 					errConfig,
 					source.Namespace,
 					source.Name,
@@ -876,6 +881,13 @@ func (c *Controller) generateFRRConfiguration(
 					Mode:     frrtypes.AllowRestricted,
 					Prefixes: advertisePrefixes,
 				},
+			}
+			if nextHop := dpuHostGatewayNextHops[isIPV6]; nextHop != "" {
+				if isIPV6 {
+					neighbor.ToAdvertise.NextHop.IPv6 = nextHop
+				} else {
+					neighbor.ToAdvertise.NextHop.IPv4 = nextHop
+				}
 			}
 
 			// For no-overlay networks, add routes to pod subnets to the accepted routes list
@@ -1065,8 +1077,13 @@ func (c *Controller) generateFRRConfiguration(
 				vtepRouter.Prefixes = vtepIPs
 				vtepRouter.Neighbors = nil // will rebuild below
 				for _, neighbor := range router.Neighbors {
-					if !neighbor.DisableMP {
-						continue
+					if neighbor.DualStackAddressFamily {
+						return nil, fmt.Errorf("%w: DualStackAddressFamily==true not supported, seen on FRRConfiguration %s/%s neighbor %s",
+							errConfig,
+							source.Namespace,
+							source.Name,
+							neighbor.Address,
+						)
 					}
 					isIPV6 := utilnet.IsIPv6String(neighbor.Address)
 					filteredVTEPIPs := util.MatchAllIPNetsStringFamily(isIPV6, vtepIPs)
@@ -1143,6 +1160,48 @@ func (c *Controller) generateFRRConfiguration(
 	}
 
 	return new, nil
+}
+
+func getDPUHostGatewayNextHops(node *corev1.Node) (map[bool]string, error) {
+	if config.Gateway.Mode != config.GatewayModeShared {
+		return nil, nil
+	}
+	if _, ok := node.Labels[types.OvnDPUHostNodeLabel]; !ok {
+		return nil, nil
+	}
+
+	// ParseNodeL3GatewayAnnotation also requires the chassis ID for enabled
+	// gateways, but reports a missing chassis ID as a config error. Check it
+	// first so a DPU host that is still initializing leaves the RA pending.
+	if _, err := util.ParseNodeChassisIDAnnotation(node); err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			return nil, fmt.Errorf("%w: waiting for chassis ID annotation to be set for DPU host node %q: %w",
+				errPending, node.Name, err)
+		}
+		return nil, fmt.Errorf("%w: failed to parse chassis ID annotation for DPU host node %q: %w",
+			errConfig, node.Name, err)
+	}
+
+	gatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	if err != nil {
+		if util.IsAnnotationNotSetError(err) {
+			return nil, fmt.Errorf("%w: waiting for L3 gateway annotation to be set for DPU host node %q: %w",
+				errPending, node.Name, err)
+		}
+		return nil, fmt.Errorf("%w: failed to parse L3 gateway annotation for DPU host node %q: %w",
+			errConfig, node.Name, err)
+	}
+	nextHops := map[bool]string{}
+	for _, ipNet := range gatewayConfig.IPAddresses {
+		if ipNet == nil || ipNet.IP == nil {
+			continue
+		}
+		nextHops[ipNet.IP.To4() == nil] = ipNet.IP.String()
+	}
+	if len(nextHops) == 0 {
+		return nil, fmt.Errorf("%w: no shared gateway IP addresses found for DPU host node %q", errConfig, node.Name)
+	}
+	return nextHops, nil
 }
 
 // vtepCIDRPrefixSelectors converts VTEP CIDRs into FRR PrefixSelectors that
@@ -1547,6 +1606,8 @@ func nodeNeedsUpdate(oldObj, newObj *corev1.Node) bool {
 		!reflect.DeepEqual(oldObj.Labels, newObj.Labels) ||
 		util.NodeSubnetAnnotationChanged(oldObj, newObj) ||
 		oldObj.Annotations[util.OvnNodeIfAddr] != newObj.Annotations[util.OvnNodeIfAddr] ||
+		util.NodeL3GatewayAnnotationChanged(oldObj, newObj) ||
+		util.NodeChassisIDAnnotationChanged(oldObj, newObj) ||
 		util.NodeVTEPsAnnotationChanged(oldObj, newObj)
 }
 
