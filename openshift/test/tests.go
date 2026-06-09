@@ -109,6 +109,7 @@ var InformingTests = []string{
 	// OTP (OpenShift Tests Private) migration - informing tests
 	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][informing][case_id:67625] should trace pod-to-pod traffic successfully",
 	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][informing][case_id:67648] should trace pod-to-hostnetworkpod traffic successfully",
+	"[JIRA:Networking][OTP][sig-network] OTP Multus [OTP][informing][case_id:69947] should send Unsolicited Neighbor Advertisements when macvlan pod is created",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
@@ -121,4 +122,6 @@ var BlockingTests = []string{
 	"[JIRA:Networking][OTP][sig-network] OTP Multus [OTP][blocking][case_id:76652] should support Dummy CNI plugin with Multus",
 	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][blocking][case_id:55889] should execute ovn-db-run-command script successfully",
 	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][blocking][case_id:45146] should create healthy pod with single-stack gateway on dual-stack cluster",
+	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][blocking][case_id:69761] should show aggregated status from all zones in AdminPolicyBasedExternalRoute",
+	"[JIRA:Networking][OTP][sig-network] OTP Multus [OTP][blocking][case_id:66876] should assign dual-stack IPs with Whereabouts IPAM",
 }
