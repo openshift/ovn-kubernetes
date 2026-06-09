@@ -45,6 +45,25 @@ const (
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
 
+// otpBlockingTests lists the substring patterns for OTP tests that should be blocking
+var otpBlockingTests = []string{
+	"should not expose API tokens in ovnkube-node logs",
+	"should have secure permissions on CNI configuration files",
+	"should handle large IPv6 exclude ranges without timeout",
+	"should support Dummy CNI plugin with Multus",
+	"should execute ovn-db-run-command script successfully",
+}
+
+// isOTPBlocking checks if an OTP test should be marked as blocking
+func isOTPBlocking(name string) bool {
+	for _, title := range otpBlockingTests {
+		if strings.Contains(name, title) {
+			return true
+		}
+	}
+	return false
+}
+
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
 // and test labels. When ocpInfra is nil (no cluster access), all tests are included.
 func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
@@ -139,8 +158,12 @@ func main() {
 	blockingTests := sets.New(test.BlockingTests...)
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
-		for _, label := range getTestExtensionLabels() {
-			spec.Labels.Insert(label)
+		isOTP := strings.Contains(spec.Name, "[OTP]")
+
+		if !isOTP {
+			for _, label := range getTestExtensionLabels() {
+				spec.Labels.Insert(label)
+			}
 		}
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
@@ -158,9 +181,15 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		if !isOTP {
+			spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		}
 
 		switch {
+		case isOTP && isOTPBlocking(spec.Name):
+			spec.Lifecycle = extensiontests.LifecycleBlocking
+		case isOTP:
+			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case blockingTests.Has(spec.Name):

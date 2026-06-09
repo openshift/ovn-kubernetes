@@ -107,17 +107,17 @@ var InformingTests = []string{
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4 [Suite:openshift/conformance/parallel]",
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6 [Suite:openshift/conformance/parallel]",
 	// OTP (OpenShift Tests Private) migration - informing tests
-	"[sig-networking] OTP Networking Tools [OTP][informing][case_id:67625] should trace pod-to-pod traffic successfully",
-	"[sig-networking] OTP Networking Tools [OTP][informing][case_id:67648] should trace pod-to-hostnetworkpod traffic successfully",
+	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][informing][case_id:67625] should trace pod-to-pod traffic successfully",
+	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][informing][case_id:67648] should trace pod-to-hostnetworkpod traffic successfully",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
 // if they fail.
 var BlockingTests = []string{
 	// OTP (OpenShift Tests Private) migration - blocking tests
-	"[sig-networking] OTP Security [OTP][blocking][case_id:49216] should not expose API tokens in ovnkube-node logs",
-	"[sig-networking] OTP Security [OTP][blocking][case_id:77102] should have secure permissions on CNI configuration files",
-	"[sig-networking] OTP Multus [OTP][blocking][case_id:57589] should handle large IPv6 exclude ranges without timeout",
-	"[sig-networking] OTP Multus [OTP][blocking][case_id:76652] should support Dummy CNI plugin with Multus",
-	"[sig-networking] OTP Networking Tools [OTP][blocking][case_id:55889] should execute ovn-db-run-command script successfully",
+	"[JIRA:Networking][OTP][sig-network] OTP Security [OTP][blocking][case_id:49216] should not expose API tokens in ovnkube-node logs",
+	"[JIRA:Networking][OTP][sig-network] OTP Security [OTP][blocking][case_id:77102] should have secure permissions on CNI configuration files",
+	"[JIRA:Networking][OTP][sig-network] OTP Multus [OTP][blocking][case_id:57589] should handle large IPv6 exclude ranges without timeout",
+	"[JIRA:Networking][OTP][sig-network] OTP Multus [OTP][blocking][case_id:76652] should support Dummy CNI plugin with Multus",
+	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][blocking][case_id:55889] should execute ovn-db-run-command script successfully",
 }
