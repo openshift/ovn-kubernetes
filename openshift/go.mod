@@ -13,6 +13,7 @@ require (
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
 	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.10.0
+	github.com/stretchr/testify v1.11.1
 	k8s.io/api v0.35.1
 	k8s.io/apimachinery v0.35.1
 	k8s.io/client-go v0.35.1
@@ -142,7 +143,6 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/urfave/cli/v2 v2.27.2 // indirect
 	github.com/vincent-petithory/dataurl v1.0.0 // indirect
 	github.com/vishvananda/netlink v1.3.2-0.20260320193013-72a8cd7e0a73 // indirect

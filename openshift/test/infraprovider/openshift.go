@@ -14,6 +14,7 @@ import (
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilnet "k8s.io/utils/net"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -97,6 +98,30 @@ func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 		// satisfy this condition; otherwise, they will be skipped.
 		os.Setenv("OVN_GATEWAY_MODE", "local")
 	}
+}
+
+func (o *OpenshiftInfraProvider) GetIPAddressFamily() (bool, bool) {
+	if o.operNetwork == nil {
+		return false, false
+	}
+	var hasIPv4 bool
+	var hasIPv6 bool
+	for _, cidr := range o.operNetwork.Spec.ServiceNetwork {
+		if utilnet.IsIPv6CIDRString(cidr) {
+			hasIPv6 = true
+		} else {
+			hasIPv4 = true
+		}
+	}
+	return hasIPv4, hasIPv6
+}
+
+func (o *OpenshiftInfraProvider) CheckForEgressIP() bool {
+	// when clusterInfra is set, then infra has ability to host external container,
+	// so it can run EgressIP E2Es. Also set ENABLE_NETWORK_SEGMENTATION env variable
+	// to true which is needed for net-seg specific EgressIP E2Es.
+	os.Setenv("ENABLE_NETWORK_SEGMENTATION", "true")
+	return o.clusterInfra != nil
 }
 
 // CheckForEVPN checks all EVPN prerequisites
@@ -294,18 +319,18 @@ func (o *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Ne
 	return o.externalContainerContextProvider.CreateNetwork(name, subnets...)
 }
 
-func (o *contextOpenshift) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
+func (o *contextOpenshift) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
 	if o.externalContainerContextProvider == nil {
 		panic("not implemented")
 	}
-	return o.externalContainerContextProvider.AttachNetwork(network, container)
+	return o.externalContainerContextProvider.AttachNetwork(network, instance)
 }
 
-func (o *contextOpenshift) DetachNetwork(network api.Network, container string) error {
+func (o *contextOpenshift) DetachNetwork(network api.Network, instance string) error {
 	if o.externalContainerContextProvider == nil {
 		panic("not implemented")
 	}
-	return o.externalContainerContextProvider.DetachNetwork(network, container)
+	return o.externalContainerContextProvider.DetachNetwork(network, instance)
 }
 
 func (o *contextOpenshift) DeleteNetwork(network api.Network) error {

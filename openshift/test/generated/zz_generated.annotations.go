@@ -1783,225 +1783,225 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e control plane test node readiness according to its defaults interface MTU size should get node ready with a big enough MTU": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Cluster Default Network of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Cluster Default Network of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
 	"e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name": "[Disabled:Unimplemented]",
 

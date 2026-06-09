@@ -13,16 +13,19 @@ import (
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/ginkgo"
+	"github.com/openshift-eng/openshift-tests-extension/pkg/util/sets"
 	"github.com/spf13/cobra"
 
-	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 
 	// ensure providers are initialised for configuring infra
+
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/aws"
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/azure"
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/gce"
@@ -39,6 +42,7 @@ var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
+	featureLabelEgressIP            = "Feature:EgressIP"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
 
@@ -62,6 +66,21 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// EVPN tests: only include if EVPN is enabled in the cluster
 	evpnEnabled := ocpInfra.CheckForEVPN()
 	if !evpnEnabled && spec.Labels.Has(featureLabelEVPN) {
+		return false
+	}
+
+	// EgressIP tests: include EgressIP tests only for baremetal cluster
+	// Run LGW and IPv4 specific tests on the cluster which is eligible.
+	canRunEgressIP := ocpInfra.CheckForEgressIP()
+	v4, _ := ocpInfra.GetIPAddressFamily()
+	if !canRunEgressIP && spec.Labels.Has(featureLabelEgressIP) {
+		return false
+	}
+	if os.Getenv("OVN_GATEWAY_MODE") != "local" &&
+		strings.Contains(spec.Name, "LGW") {
+		return false
+	}
+	if !v4 && strings.Contains(spec.Name, "IPv4") {
 		return false
 	}
 
@@ -130,6 +149,14 @@ func main() {
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
 		}
+		kubeClient, err := kubernetes.NewForConfig(cfg)
+		if err != nil {
+			panic(err)
+		}
+		err = ipalloc.InitPrimaryIPAllocator(kubeClient.CoreV1().Nodes())
+		if err != nil {
+			panic(err)
+		}
 	})
 
 	informingTests := sets.New(test.InformingTests...)
@@ -146,8 +173,16 @@ func main() {
 			spec.Exclude(extensiontests.TopologyEquals("SingleReplica"))
 		}
 
+		// Track labels from annotations separately to avoid prepending them
+		annotationLabels := sets.New[string]()
 		if annotations, ok := generated.AppendedAnnotations[spec.Name]; ok {
 			spec.Name += " " + annotations
+			// Parse labels from annotations (e.g., "[Serial][Suite:openshift/conformance/serial]")
+			// and add them to spec.Labels so suite qualifiers can filter on them
+			for _, label := range parseLabelsFromAnnotation(annotations) {
+				spec.Labels.Insert(label)
+				annotationLabels.Insert(label)
+			}
 		}
 
 		// prepend other labels by matching on existing spec labels
@@ -155,7 +190,8 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		// Prepend labels, excluding those already in annotations
+		spec.Name = generatePrependedLabelsStr(spec.Labels, annotationLabels) + " " + spec.Name
 
 		switch {
 		case informingTests.Has(spec.Name):
