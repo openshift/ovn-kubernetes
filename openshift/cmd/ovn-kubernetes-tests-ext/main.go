@@ -52,6 +52,9 @@ var otpBlockingTests = []string{
 	"should handle large IPv6 exclude ranges without timeout",
 	"should support Dummy CNI plugin with Multus",
 	"should execute ovn-db-run-command script successfully",
+	"should create healthy pod with single-stack gateway on dual-stack cluster",
+	"should show aggregated status from all zones in AdminPolicyBasedExternalRoute",
+	"should assign dual-stack IPs with Whereabouts IPAM",
 }
 
 // isOTPBlocking checks if an OTP test should be marked as blocking

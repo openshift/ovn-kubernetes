@@ -120,4 +120,5 @@ var BlockingTests = []string{
 	"[JIRA:Networking][OTP][sig-network] OTP Multus [OTP][blocking][case_id:57589] should handle large IPv6 exclude ranges without timeout",
 	"[JIRA:Networking][OTP][sig-network] OTP Multus [OTP][blocking][case_id:76652] should support Dummy CNI plugin with Multus",
 	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][blocking][case_id:55889] should execute ovn-db-run-command script successfully",
+	"[JIRA:Networking][OTP][sig-network] OTP Networking Tools [OTP][blocking][case_id:45146] should create healthy pod with single-stack gateway on dual-stack cluster",
 }
