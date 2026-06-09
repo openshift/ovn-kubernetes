@@ -155,7 +155,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				userDefinedNetworkIPv4Subnets := []string{"172.31.0.0/16"}
 				userDefinedNetworkIPv6Subnets := []string{"2014:100:200::0/60"}
 				if udnTopology == "layer3" {
-					userDefinedNetworkIPv4Subnets = []string{"172.31.0.0/23/24", "172.30.0.0/16/24"}
+					userDefinedNetworkIPv4Subnets = []string{"172.31.0.0/23/24", "172.32.0.0/16/24"}
 					userDefinedNetworkIPv6Subnets = []string{"2014:100:200::0/63/64", "2014:100:100::0/48/64"}
 				}
 				userDefinedNetworkSubnets := append(append([]string{}, userDefinedNetworkIPv4Subnets...), userDefinedNetworkIPv6Subnets...)

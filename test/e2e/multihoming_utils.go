@@ -46,7 +46,7 @@ func primaryLayer3MultiCIDRs() string {
 func primaryLayer3MultiIPv4CIDRs() string {
 	return joinStrings(
 		"172.31.0.0/23/24",
-		"172.30.0.0/16/24",
+		"172.32.0.0/16/24",
 	)
 }
 

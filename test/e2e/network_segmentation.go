@@ -83,7 +83,7 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 		// The first subnet can support 2 nodes; when the cluster has more than 2 nodes,
 		// both subnets will be utilized.
 		userDefinedNetworkIPv4Subnet1 = "172.31.0.0/23/24"
-		userDefinedNetworkIPv4Subnet2 = "172.30.0.0/16/24"
+		userDefinedNetworkIPv4Subnet2 = "172.32.0.0/16/24"
 		userDefinedNetworkIPv6Subnet1 = "2014:100:200::0/63/64"
 		userDefinedNetworkIPv6Subnet2 = "2014:100:100::0/48/64"
 	)
