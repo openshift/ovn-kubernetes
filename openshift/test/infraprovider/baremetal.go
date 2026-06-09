@@ -1241,6 +1241,22 @@ func (ci *baremetalInfra) attachVXLANNetworkToNode(network api.Network, nodeName
 		}
 	}
 
+	// Enable IP forwarding on VXLAN interface for EgressIP support
+	// This allows return traffic destined to EgressIPs (local addresses) to traverse
+	// the FORWARD chain where conntrack can apply automatic reverse NAT
+	if netInterface.IPv4 != "" {
+		enableIPv4ForwardingCmd := []string{"sysctl", "-w", fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", vxlanName)}
+		if _, err := ci.execNodeCommand(nodeName, enableIPv4ForwardingCmd); err != nil {
+			framework.Logf("Warning: failed to enable IPv4 forwarding on %s for node %s: %v", vxlanName, nodeName, err)
+		}
+	}
+	if netInterface.IPv6 != "" {
+		enableIPv6ForwardingCmd := []string{"sysctl", "-w", fmt.Sprintf("net.ipv6.conf.%s.forwarding=1", vxlanName)}
+		if _, err := ci.execNodeCommand(nodeName, enableIPv6ForwardingCmd); err != nil {
+			framework.Logf("Warning: failed to enable IPv6 forwarding on %s for node %s: %v", vxlanName, nodeName, err)
+		}
+	}
+
 	// Store interface info
 	ci.networkState.Lock()
 	if ci.networkState.containerNetworkInterfaces[nodeName] == nil {
