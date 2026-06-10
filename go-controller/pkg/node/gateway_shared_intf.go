@@ -2361,7 +2361,7 @@ func addHostMACBindings(bridgeName string) error {
 				klog.Warningf("Failed to remove IP neighbor entry for ip %s, on iface %s: %v",
 					ip, bridgeName, err)
 			}
-			if err = util.LinkNeighAdd(link, net.ParseIP(ip), dummyNextHopMAC); err != nil {
+			if err = util.LinkNeighSet(link, net.ParseIP(ip), dummyNextHopMAC); err != nil {
 				return fmt.Errorf("failed to configure neighbor: %s, on iface %s: %v",
 					ip, bridgeName, err)
 			}
