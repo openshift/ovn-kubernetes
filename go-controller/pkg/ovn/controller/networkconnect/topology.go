@@ -327,13 +327,11 @@ func (c *Controller) syncNetworkConnections(cnc *networkconnectv1.ClusterNetwork
 			}
 		}
 
-		// Ensure static routes on the connect router. For Layer2, skip when the local network is inactive.
-		if netInfo.TopologyType() != ovntypes.Layer2Topology || localActive {
-			createOps, err = c.ensureStaticRoutesOps(createOps, cnc, netInfo, subnets, allNodes)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("CNC %s: failed to ensure static routes for network %s: %w", cncName, netInfo.GetNetworkName(), err))
-				continue
-			}
+		// Ensure static routes on the connect router.
+		createOps, err = c.ensureStaticRoutesOps(createOps, cnc, netInfo, subnets, allNodes, localActive)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("CNC %s: failed to ensure static routes for network %s: %w", cncName, netInfo.GetNetworkName(), err))
+			continue
 		}
 
 		// If ServiceNetwork is enabled, add this network's LBs to the CNC's LBG
@@ -707,7 +705,8 @@ func (c *Controller) ensureConnectPortsOps(ops []ovsdb.Operation, cnc *networkco
 	}
 
 	if netInfo.TopologyType() == ovntypes.Layer3Topology {
-		// For Layer3 networks, create ports for all nodes
+		// For Layer3 networks, reconcile ports for each node based on
+		// per-node network activity.
 		for _, node := range nodes {
 			nodeID, err := util.GetNodeID(node)
 			if err != nil {
@@ -732,9 +731,10 @@ func (c *Controller) ensureConnectPortsOps(ops []ovsdb.Operation, cnc *networkco
 			networkPortName := getNetworkRouterToConnectRouterPortName(networkName, node.Name, cncName)
 
 			isLocalNode := util.GetNodeZone(node) == c.zone
+			nodeActive := c.networkManager.NodeHasNetwork(node.Name, networkName)
 
 			if isLocalNode {
-				if !localActive {
+				if !nodeActive {
 					ops, err = libovsdbops.DeleteLogicalRouterPortWithPredicateOps(c.nbClient, ops, connectRouterName,
 						func(item *nbdb.LogicalRouterPort) bool {
 							return item.Name == connectPortName
@@ -763,6 +763,23 @@ func (c *Controller) ensureConnectPortsOps(ops []ovsdb.Operation, cnc *networkco
 					return nil, fmt.Errorf("failed to create network router port ops %s: %v", networkPortName, err)
 				}
 			} else {
+				if !nodeActive {
+					ops, err = libovsdbops.DeleteLogicalRouterPortWithPredicateOps(c.nbClient, ops, connectRouterName,
+						func(item *nbdb.LogicalRouterPort) bool {
+							return item.Name == connectPortName
+						})
+					if err != nil {
+						return nil, fmt.Errorf("failed to delete remote connect router port ops %s: %v", connectPortName, err)
+					}
+					ops, err = libovsdbops.DeleteLogicalRouterPortWithPredicateOps(c.nbClient, ops, networkRouterName,
+						func(item *nbdb.LogicalRouterPort) bool {
+							return item.Name == networkPortName
+						})
+					if err != nil {
+						return nil, fmt.Errorf("failed to delete network router port ops %s: %v", networkPortName, err)
+					}
+					continue
+				}
 				// Remote node: create only the connect-router side port with requested-chassis set
 				// This makes the port type: remote in SB, enabling cross-zone tunneling
 				chassisID, err := util.ParseNodeChassisIDAnnotation(node)
@@ -1034,12 +1051,13 @@ func (c *Controller) createRoutingPoliciesOps(ops []ovsdb.Operation, dstNetworkI
 
 // ensureStaticRoutesOps returns ops to create static routes on the connect router for reaching network subnets.
 func (c *Controller) ensureStaticRoutesOps(ops []ovsdb.Operation, cnc *networkconnectv1.ClusterNetworkConnect,
-	netInfo util.NetInfo, subnets []*net.IPNet, nodes []*corev1.Node) ([]ovsdb.Operation, error) {
+	netInfo util.NetInfo, subnets []*net.IPNet, nodes []*corev1.Node, localActive bool) ([]ovsdb.Operation, error) {
 	cncName := cnc.Name
 	networkName := netInfo.GetNetworkName()
 	connectRouterName := getConnectRouterName(cncName)
 
 	networkID := netInfo.GetNetworkID()
+	var err error
 
 	// Get the network's pod subnets
 	podSubnets := netInfo.Subnets()
@@ -1049,6 +1067,19 @@ func (c *Controller) ensureStaticRoutesOps(ops []ovsdb.Operation, cnc *networkco
 		for _, node := range nodes {
 			nodeID, err := util.GetNodeID(node)
 			if err != nil {
+				continue
+			}
+			nodeActive := c.networkManager.NodeHasNetwork(node.Name, networkName)
+			if !nodeActive {
+				ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, connectRouterName,
+					func(item *nbdb.LogicalRouterStaticRoute) bool {
+						return item.ExternalIDs[libovsdbops.ObjectNameKey.String()] == cncName &&
+							item.ExternalIDs[libovsdbops.NetworkIDKey.String()] == strconv.Itoa(networkID) &&
+							item.ExternalIDs[libovsdbops.NodeIDKey.String()] == strconv.Itoa(nodeID)
+					})
+				if err != nil {
+					return nil, fmt.Errorf("failed to delete static route ops for inactive node %s: %v", node.Name, err)
+				}
 				continue
 			}
 
@@ -1074,6 +1105,18 @@ func (c *Controller) ensureStaticRoutesOps(ops []ovsdb.Operation, cnc *networkco
 		}
 	}
 	if netInfo.TopologyType() == ovntypes.Layer2Topology {
+		if !localActive {
+			ops, err = libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(c.nbClient, ops, connectRouterName,
+				func(item *nbdb.LogicalRouterStaticRoute) bool {
+					return item.ExternalIDs[libovsdbops.ObjectNameKey.String()] == cncName &&
+						item.ExternalIDs[libovsdbops.NetworkIDKey.String()] == strconv.Itoa(networkID)
+				})
+			if err != nil {
+				return nil, fmt.Errorf("failed to delete static route ops for inactive Layer2 network %s: %v", networkName, err)
+			}
+			return ops, nil
+		}
+
 		// For Layer2, create a single route to the network's subnets
 		portPairInfo, err := GetP2PAddresses(subnets, 0)
 		if err != nil {

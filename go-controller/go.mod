@@ -7,7 +7,6 @@ toolchain go1.25.1
 require (
 	github.com/Microsoft/hcsshim v0.13.0
 	github.com/alexflint/go-filemutex v1.3.0
-	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d
 	github.com/bhendo/go-powershell v0.0.0-20190719160123-219e7fb4e41e
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/containernetworking/cni v1.3.0
@@ -38,6 +37,7 @@ require (
 	github.com/onsi/gomega v1.38.2
 	github.com/openshift/api v0.0.0-20260311143357-f6ee4c095675
 	github.com/openshift/client-go v0.0.0-20260306160707-3935d929fc7d
+	github.com/ovn-kubernetes/dpu-simulator/lib/dpusim v0.0.0-20260507161134-3aec48e5cb25
 	github.com/ovn-kubernetes/libovsdb v0.8.2-0.20260302130604-c07ce22366ac
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2

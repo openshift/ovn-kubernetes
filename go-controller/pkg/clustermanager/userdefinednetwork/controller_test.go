@@ -111,6 +111,23 @@ var _ = Describe("User Defined Network Controller", func() {
 		)
 	}
 
+	expectTransportCondition := func(cudnName string, status metav1.ConditionStatus, reason, message string) {
+		Eventually(func() bool {
+			cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
+			if err != nil {
+				return false
+			}
+			for _, cond := range cudn.Status.Conditions {
+				if cond.Type == ConditionTypeTransportAccepted && cond.Status == status && cond.Reason == reason {
+					if message == "" || cond.Message == message {
+						return true
+					}
+				}
+			}
+			return false
+		}, 2*time.Second, 100*time.Millisecond).Should(BeTrue())
+	}
+
 	Context("manager", func() {
 		var c *Controller
 		AfterEach(func() {
@@ -1187,9 +1204,13 @@ var _ = Describe("User Defined Network Controller", func() {
 				}).Should(Equal([]metav1.Condition{{
 					Type:    "NetworkCreated",
 					Status:  "False",
-					Reason:  "VTEPNotFound",
+					Reason:  ReasonVTEPNotFound,
 					Message: "Cannot create network: VTEP 'default' does not exist. Create the VTEP CR first or update the CUDN to reference an existing VTEP.",
 				}}), "should report VTEPNotFound in status")
+
+				// TransportAccepted should also report VTEPNotFound
+				expectTransportCondition(cudn.Name, metav1.ConditionFalse, ReasonVTEPNotFound,
+					`VTEP "default" referenced by EVPN configuration does not exist.`)
 
 				// NAD should not be created when VTEP is missing
 				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(testNs.Name).Get(context.Background(), cudn.Name, metav1.GetOptions{})
@@ -1221,6 +1242,10 @@ var _ = Describe("User Defined Network Controller", func() {
 					_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(testNs.Name).Get(context.Background(), cudn.Name, metav1.GetOptions{})
 					return err
 				}).Should(Succeed(), "NAD should be created when VTEP exists")
+
+				// TransportAccepted should report RA missing (VTEP passes but no RA)
+				expectTransportCondition(cudn.Name, metav1.ConditionFalse, ReasonEVPNRouteAdvertisementsIsMissing,
+					"No RouteAdvertisements CR is advertising the pod networks.")
 			})
 
 			It("should automatically reconcile CUDN when VTEP is created after CUDN", func() {
@@ -1240,9 +1265,13 @@ var _ = Describe("User Defined Network Controller", func() {
 				}).Should(Equal([]metav1.Condition{{
 					Type:    "NetworkCreated",
 					Status:  "False",
-					Reason:  "VTEPNotFound",
+					Reason:  ReasonVTEPNotFound,
 					Message: "Cannot create network: VTEP '" + vtepName + "' does not exist. Create the VTEP CR first or update the CUDN to reference an existing VTEP.",
 				}}), "should initially report VTEPNotFound")
+
+				// TransportAccepted should also report VTEPNotFound
+				expectTransportCondition(cudn.Name, metav1.ConditionFalse, ReasonVTEPNotFound,
+					fmt.Sprintf("VTEP %q referenced by EVPN configuration does not exist.", vtepName))
 
 				// NAD should NOT exist yet
 				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(testNs.Name).Get(context.Background(), cudn.Name, metav1.GetOptions{})
@@ -1264,6 +1293,10 @@ var _ = Describe("User Defined Network Controller", func() {
 					Reason:  "NetworkAttachmentDefinitionCreated",
 					Message: "NetworkAttachmentDefinition has been created in following namespaces: [evpn-vtep-transition-test]",
 				}}), "should succeed after VTEP is created")
+
+				// TransportAccepted should transition to RA missing (VTEP now passes but no RA)
+				expectTransportCondition(cudn.Name, metav1.ConditionFalse, ReasonEVPNRouteAdvertisementsIsMissing,
+					"No RouteAdvertisements CR is advertising the pod networks.")
 
 				// NAD should now be created
 				Eventually(func() error {
@@ -1324,6 +1357,10 @@ var _ = Describe("User Defined Network Controller", func() {
 					return err
 				}).Should(Succeed(), "NAD should be created when VTEP exists")
 
+				// TransportAccepted should report RA missing (VTEP passes but no RA)
+				expectTransportCondition(cudn.Name, metav1.ConditionFalse, ReasonEVPNRouteAdvertisementsIsMissing,
+					"No RouteAdvertisements CR is advertising the pod networks.")
+
 				// Step 2: Delete the VTEP - this should trigger VTEPNotifier
 				err := cs.VTEPClient.K8sV1().VTEPs().Delete(context.Background(), vtep.Name, metav1.DeleteOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -1336,10 +1373,19 @@ var _ = Describe("User Defined Network Controller", func() {
 				}).Should(Equal([]metav1.Condition{{
 					Type:    "NetworkCreated",
 					Status:  "False",
-					Reason:  "VTEPNotFound",
+					Reason:  ReasonVTEPNotFound,
 					Message: "Cannot create network: VTEP '" + vtep.Name + "' does not exist. Create the VTEP CR first or update the CUDN to reference an existing VTEP.",
 				}}), "should report VTEPNotFound after VTEP is deleted")
+
+				// TransportAccepted should also report VTEPNotFound
+				expectTransportCondition(cudn.Name, metav1.ConditionFalse, ReasonVTEPNotFound,
+					fmt.Sprintf("VTEP %q referenced by EVPN configuration does not exist.", vtep.Name))
 			})
+
+			// Integration tests for VTEP Accepted gating (VTEP not accepted blocks
+			// NAD creation, VTEP transition to accepted creates NAD, VTEP becomes
+			// not-accepted after NAD exists freezes NADs) are in
+			// clustermanager_test.go where both the VTEP and UDN controllers run.
 
 			It("should fail when EVPN transport is requested but EVPN feature is disabled", func() {
 				// Disable EVPN feature flag for this test.
@@ -1361,9 +1407,13 @@ var _ = Describe("User Defined Network Controller", func() {
 				}).Should(Equal([]metav1.Condition{{
 					Type:    "NetworkCreated",
 					Status:  "False",
-					Reason:  "NetworkAttachmentDefinitionSyncError",
+					Reason:  ReasonEVPNConfigError,
 					Message: "EVPN transport requested but EVPN feature is not enabled",
 				}}), "should report error when EVPN flag is disabled")
+
+				// TransportAccepted should also report the config error
+				expectTransportCondition(cudn.Name, metav1.ConditionFalse, ReasonEVPNConfigError,
+					"EVPN transport requested but EVPN feature is not enabled")
 
 				// NAD should not be created when EVPN is disabled
 				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(testNs.Name).Get(context.Background(), cudn.Name, metav1.GetOptions{})
@@ -2093,14 +2143,14 @@ var _ = Describe("User Defined Network Controller", func() {
 	Context("ClusterUserDefinedNetwork object sync", func() {
 		It("should succeed given no CR", func() {
 			c := newTestController(noopRenderNadStub())
-			_, err := c.syncClusterUDN(nil)
+			_, err := c.syncClusterUDN(nil, nil)
 			Expect(err).To(Not(HaveOccurred()))
 		})
 		It("should succeed when no namespace match namespace-selector", func() {
 			cudn := testClusterUDN("test", "red")
 			c := newTestController(noopRenderNadStub(), cudn)
 
-			nads, err := c.syncClusterUDN(cudn)
+			nads, err := c.syncClusterUDN(cudn, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(nads).To(BeEmpty())
 		})
@@ -2109,7 +2159,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				NamespaceSelector: metav1.LabelSelector{}}}
 			c := newTestController(noopRenderNadStub(), cudn)
 
-			nads, err := c.syncClusterUDN(cudn)
+			nads, err := c.syncClusterUDN(cudn, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(nads).To(BeEmpty())
 
@@ -2123,7 +2173,7 @@ var _ = Describe("User Defined Network Controller", func() {
 
 			cudn := testClusterUDN("test", "blue")
 
-			_, err := c.syncClusterUDN(cudn)
+			_, err := c.syncClusterUDN(cudn, nil)
 			Expect(err).To(MatchError(expectedErr))
 		})
 
@@ -2159,7 +2209,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			deletedCUDN.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 			c := newTestController(noopRenderNadStub(), deletedCUDN)
 
-			nads, err := c.syncClusterUDN(deletedCUDN)
+			nads, err := c.syncClusterUDN(deletedCUDN, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(nads).To(BeEmpty())
 		})
@@ -2168,7 +2218,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			deletedCUDN.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 			c := newTestController(noopRenderNadStub(), deletedCUDN)
 
-			nads, err := c.syncClusterUDN(deletedCUDN)
+			nads, err := c.syncClusterUDN(deletedCUDN, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(nads).To(BeEmpty())
 			Expect(deletedCUDN.Finalizers).To(BeEmpty())
@@ -2184,7 +2234,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				expectedNAD := testClusterUdnNAD(cudn.Name, testNs.Name)
 				c = newTestController(renderNadStub(expectedNAD), cudn, testNs, expectedNAD)
 
-				nads, err := c.syncClusterUDN(cudn)
+				nads, err := c.syncClusterUDN(cudn, nil)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(nads).To(ConsistOf(*expectedNAD))
 
@@ -2196,7 +2246,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			})
 
 			It("should delete NAD", func() {
-				nads, err := c.syncClusterUDN(cudn)
+				nads, err := c.syncClusterUDN(cudn, nil)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(nads).To(BeEmpty())
 				Expect(cudn.Finalizers).To(BeEmpty())
@@ -2211,7 +2261,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					return true, nil, expectedErr
 				})
 
-				_, err := c.syncClusterUDN(cudn)
+				_, err := c.syncClusterUDN(cudn, nil)
 				Expect(err).To(MatchError(expectedErr))
 			})
 			It("should fail remove NAD finalizer when delete NAD fails", func() {
@@ -2220,7 +2270,7 @@ var _ = Describe("User Defined Network Controller", func() {
 					return true, nil, expectedErr
 				})
 
-				_, err := c.syncClusterUDN(cudn)
+				_, err := c.syncClusterUDN(cudn, nil)
 				Expect(err).To(MatchError(expectedErr))
 			})
 		})
@@ -2396,23 +2446,6 @@ var _ = Describe("User Defined Network Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	}
 
-	expectTransportCondition := func(cudnName string, status metav1.ConditionStatus, reason, message string) {
-		Eventually(func() bool {
-			cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
-			if err != nil {
-				return false
-			}
-			for _, cond := range cudn.Status.Conditions {
-				if cond.Type == "TransportAccepted" && cond.Status == status && cond.Reason == reason {
-					if message == "" || cond.Message == message {
-						return true
-					}
-				}
-			}
-			return false
-		}, 2*time.Second, 100*time.Millisecond).Should(BeTrue())
-	}
-
 	expectNoTransportCondition := func(cudnName string) {
 		Consistently(func() bool {
 			cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudnName, metav1.GetOptions{})
@@ -2449,14 +2482,14 @@ var _ = Describe("User Defined Network Controller", func() {
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "NoOverlayTransportAccepted", "Transport has been configured as 'no-overlay'.")
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonNoOverlayTransportAccepted, "Transport has been configured as 'no-overlay'.")
 		})
 
 		It("should update status to False when no RouteAdvertisements exists", func() {
 			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionNoOverlay)
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionFalse, "NoOverlayRouteAdvertisementsIsMissing", "No RouteAdvertisements CR is advertising the pod networks.")
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonNoOverlayRouteAdvertisementsIsMissing, "No RouteAdvertisements CR is advertising the pod networks.")
 		})
 
 		It("should update status to False when RouteAdvertisements exists but not accepted", func() {
@@ -2464,15 +2497,15 @@ var _ = Describe("User Defined Network Controller", func() {
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			createNotAcceptedRA("test-ra", map[string]string{"app": "test"})
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionFalse, "NoOverlayRouteAdvertisementsNotAccepted", "RouteAdvertisements CR test-ra advertises the pod subnets, but its status is not accepted.")
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonNoOverlayRouteAdvertisementsNotAccepted, "RouteAdvertisements CR test-ra advertises the pod subnets, but its status is not accepted.")
 		})
 
 		It("should update status to True with EVPNTransportAccepted when RA is accepted", func() {
 			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionEVPN)
-			c = newTestController(template.RenderNetAttachDefManifest, cudn)
+			c = newTestController(template.RenderNetAttachDefManifest, cudn, testVTEP("test-vtep"))
 			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 			Expect(c.Run()).To(Succeed())
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "EVPNTransportAccepted", "Transport has been configured as 'EVPN'.")
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonEVPNTransportAccepted, "Transport has been configured as 'EVPN'.")
 		})
 
 		It("should not update status when condition already matches", func() {
@@ -2498,7 +2531,7 @@ var _ = Describe("User Defined Network Controller", func() {
 
 			cudnObj, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), "test-cudn", metav1.GetOptions{})
 			Expect(err).NotTo(HaveOccurred())
-			_, err = c.syncClusterUDN(cudnObj)
+			_, err = c.syncClusterUDN(cudnObj, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			Consistently(func() string {
@@ -2516,28 +2549,28 @@ var _ = Describe("User Defined Network Controller", func() {
 			Expect(c.Run()).To(Succeed())
 
 			// Verify initial status is False (no RA exists)
-			expectTransportCondition("test-cudn", metav1.ConditionFalse, "NoOverlayRouteAdvertisementsIsMissing", "No RouteAdvertisements CR is advertising the pod networks.")
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonNoOverlayRouteAdvertisementsIsMissing, "No RouteAdvertisements CR is advertising the pod networks.")
 
 			// Now create the RouteAdvertisements CR
 			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 
 			// Verify status updates to True
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "NoOverlayTransportAccepted", "Transport has been configured as 'no-overlay'.")
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonNoOverlayTransportAccepted, "Transport has been configured as 'no-overlay'.")
 		})
 
 		It("should update status from False to True when RouteAdvertisements is created after CUDN (EVPN)", func() {
 			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, udnv1.TransportOptionEVPN)
-			c = newTestController(template.RenderNetAttachDefManifest, cudn)
+			c = newTestController(template.RenderNetAttachDefManifest, cudn, testVTEP("test-vtep"))
 			Expect(c.Run()).To(Succeed())
 
 			// Verify initial status is False (no RA exists)
-			expectTransportCondition("test-cudn", metav1.ConditionFalse, "EVPNRouteAdvertisementsIsMissing", "No RouteAdvertisements CR is advertising the pod networks.")
+			expectTransportCondition("test-cudn", metav1.ConditionFalse, ReasonEVPNRouteAdvertisementsIsMissing, "No RouteAdvertisements CR is advertising the pod networks.")
 
 			// Now create the RouteAdvertisements CR
 			createAcceptedRA("test-ra", map[string]string{"app": "test"})
 
 			// Verify status updates to True
-			expectTransportCondition("test-cudn", metav1.ConditionTrue, "EVPNTransportAccepted", "Transport has been configured as 'EVPN'.")
+			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonEVPNTransportAccepted, "Transport has been configured as 'EVPN'.")
 		})
 	})
 })
@@ -2877,6 +2910,15 @@ func testVTEP(name string) *vtepv1.VTEP {
 		Spec: vtepv1.VTEPSpec{
 			CIDRs: []vtepv1.CIDR{"100.64.0.0/24"},
 			Mode:  vtepv1.VTEPModeManaged,
+		},
+		Status: vtepv1.VTEPStatus{
+			Conditions: []metav1.Condition{{
+				Type:               "Accepted",
+				Status:             metav1.ConditionTrue,
+				Reason:             "Allocated",
+				Message:            "VTEP allocation succeeded",
+				LastTransitionTime: metav1.Now(),
+			}},
 		},
 	}
 }

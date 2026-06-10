@@ -51,11 +51,14 @@ spec:
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
-        # (or in /etc/ovn if OVN from new repository is used)
+        # (or in /etc/ovn if OVN from new repository is used,
+        # or in /var/lib/ovn if using Debian/Ubuntu packages)
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
           name: host-etc-ovs
         - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/lib/ovn/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
@@ -113,11 +116,14 @@ spec:
         terminationMessagePolicy: FallbackToLogsOnError
         volumeMounts:
         # ovn db is stored in the pod in /etc/openvswitch
-        # (or in /etc/ovn if OVN from new repository is used)
+        # (or in /etc/ovn if OVN from new repository is used,
+        # or in /var/lib/ovn if using Debian/Ubuntu packages)
         # and on the host in /var/lib/openvswitch/
         - mountPath: /etc/openvswitch/
           name: host-etc-ovs
         - mountPath: /etc/ovn/
+          name: host-var-lib-ovs
+        - mountPath: /var/lib/ovn/
           name: host-var-lib-ovs
         - mountPath: /var/log/openvswitch/
           name: host-var-log-ovs
@@ -273,6 +279,9 @@ spec:
         - mountPath: /etc/ovn/
           name: host-var-lib-ovs
           readOnly: true
+        - mountPath: /var/lib/ovn/
+          name: host-var-lib-ovs
+          readOnly: true
         - mountPath: /run/systemd/private
           name: run-systemd
           subPath: private
@@ -322,6 +331,10 @@ spec:
           value: {{ default "shared" .Values.global.gatewayMode }}
         - name: OVN_GATEWAY_OPTS
           value: {{ default "" .Values.global.gatewayOpts | quote }}
+        - name: OVN_SIMULATE_DPU
+          value: {{ default "false" .Values.global.simulateDpu | quote }}
+        - name: OVN_DPU_HOST_GATEWAY_REPRESENTOR_INTERFACE
+          value: {{ default "" .Values.global.dpuHostGatewayRepresentorInterface | quote }}
         - name: OVN_HYBRID_OVERLAY_ENABLE
           value: {{ default "" .Values.global.enableHybridOverlay | quote }}
         - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
@@ -402,8 +415,6 @@ spec:
           value: "local"
         - name: OVN_SOUTH
           value: "local"
-        - name: OVN_ENABLE_INTERCONNECT
-          value: {{ hasKey .Values.global "enableInterconnect" | ternary .Values.global.enableInterconnect false | quote }}
         - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
           value: {{ hasKey .Values.global "enableMultiExternalGateway" | ternary .Values.global.enableMultiExternalGateway false | quote }}
         - name: OVN_ENABLE_OVNKUBE_IDENTITY
