@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -184,35 +187,6 @@ func (na *NodeAllocator) releaseHybridOverlayNodeSubnet(nodeName string) {
 	klog.Infof("Deleted hybrid overlay HostSubnets for node %s", nodeName)
 }
 
-// NeedsNodeAllocation determines if the annotations that are assigned by NodeAllocator are missing on a node
-func (na *NodeAllocator) NeedsNodeAllocation(node *corev1.Node) bool {
-	// hybrid overlay check
-	if util.NoHostSubnet(node) {
-		if na.hasHybridOverlayAllocation() {
-			if _, ok := node.Annotations[hotypes.HybridOverlayNodeSubnet]; !ok {
-				return true
-			}
-		}
-		return false
-	}
-
-	// ovn node check
-	if na.hasNodeSubnetAllocation() {
-		if !util.HasNodeHostSubnetAnnotation(node, na.netInfo.GetNetworkName()) {
-			return true
-		}
-	}
-
-	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
-		if !util.HasUDNLayer2NodeGRLRPTunnelID(node, na.netInfo.GetNetworkName()) {
-			return true
-		}
-	}
-
-	return false
-
-}
-
 // NeedsNodeAllocationWithState determines if the annotations assigned by
 // NodeAllocator are missing on a node using pre-parsed node annotation state.
 func (na *NodeAllocator) NeedsNodeAllocationWithState(node *corev1.Node, state *sharednode.NodeAnnotationState) bool {
@@ -226,7 +200,11 @@ func (na *NodeAllocator) NeedsNodeAllocationWithState(node *corev1.Node, state *
 	}
 
 	if na.hasNodeSubnetAllocation() {
-		if _, err := state.Subnets(na.netInfo.GetNetworkName()); err != nil {
+		hostSubnets, err := state.Subnets(na.netInfo.GetNetworkName())
+		if err != nil {
+			return true
+		}
+		if !na.hasExpectedHostSubnets(hostSubnets) {
 			return true
 		}
 	}
@@ -238,6 +216,68 @@ func (na *NodeAllocator) NeedsNodeAllocationWithState(node *corev1.Node, state *
 	}
 
 	return false
+}
+
+// hasExpectedHostSubnets returns true when the node-subnets annotation matches
+// the current IP-family mode for this network. During single-stack/dual-stack
+// conversion we may have a stale annotation that still exists, but no longer
+// satisfies the configured families, so allocation must run again.
+func (na *NodeAllocator) hasExpectedHostSubnets(hostSubnets []*net.IPNet) bool {
+	ipv4Mode, ipv6Mode := na.netInfo.IPMode()
+	foundIPv4 := false
+	foundIPv6 := false
+
+	for _, subnet := range hostSubnets {
+		switch {
+		case utilnet.IsIPv4CIDR(subnet):
+			if !ipv4Mode || foundIPv4 {
+				return false
+			}
+			foundIPv4 = true
+		case utilnet.IsIPv6CIDR(subnet):
+			if !ipv6Mode || foundIPv6 {
+				return false
+			}
+			foundIPv6 = true
+		default:
+			return false
+		}
+	}
+
+	return foundIPv4 == ipv4Mode && foundIPv6 == ipv6Mode
+}
+
+// NeedsNodeCleanup determines if node annotations or allocator state exist for this network.
+func (na *NodeAllocator) NeedsNodeCleanup(node *corev1.Node) (bool, error) {
+	if util.NoHostSubnet(node) {
+		return false, nil
+	}
+
+	networkName := na.netInfo.GetNetworkName()
+	if util.HasNodeHostSubnetAnnotation(node, networkName) {
+		return true, nil
+	}
+
+	if _, err := util.ParseNetworkIDAnnotation(node, networkName); err == nil {
+		return true, nil
+	} else if !util.IsAnnotationNotSetError(err) {
+		return false, fmt.Errorf("failed to parse node %q network id annotation for network %s: %w",
+			node.Name, networkName, err)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+		if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName); err == nil {
+			return true, nil
+		} else if !util.IsAnnotationNotSetError(err) {
+			return false, fmt.Errorf("failed to parse node %q tunnel id annotation for network %s: %w",
+				node.Name, networkName, err)
+		}
+		if na.idAllocator != nil && na.idAllocator.GetID(networkName+"_"+node.Name) != types.InvalidID {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // HandleAddUpdateNodeEvent handles the add or update node event
@@ -367,15 +407,47 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 	return nil
 }
 
-// HandleDeleteNode handles the delete node event
-func (na *NodeAllocator) HandleDeleteNode(node *corev1.Node) error {
-	if na.hasHybridOverlayAllocation() {
-		na.releaseHybridOverlayNodeSubnet(node.Name)
+// CleanupNode removes this network's per-node annotations when a node object is available
+// and always releases allocator state for the provided node name.
+func (na *NodeAllocator) CleanupNode(nodeName string, node *corev1.Node) error {
+	networkName := na.netInfo.GetNetworkName()
+	if node != nil {
+		needsUpdate := util.HasNodeHostSubnetAnnotation(node, networkName)
+		if !needsUpdate {
+			if _, err := util.ParseNetworkIDAnnotation(node, networkName); err == nil {
+				needsUpdate = true
+			} else if !util.IsAnnotationNotSetError(err) {
+				return fmt.Errorf("failed to parse node %q network id annotation for network %s: %w",
+					node.Name, networkName, err)
+			}
+		}
+		if !needsUpdate && util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+			if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName); err == nil {
+				needsUpdate = true
+			} else if !util.IsAnnotationNotSetError(err) {
+				return fmt.Errorf("failed to parse node %q tunnel id annotation for network %s: %w",
+					node.Name, networkName, err)
+			}
+		}
+		if needsUpdate {
+			hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
+			// passing util.InvalidID deletes the network/tunnel id annotation for the network.
+			if err := na.updateNodeNetworkAnnotationsWithRetry(nodeName, hostSubnetsMap, types.InvalidID, types.InvalidID); err != nil {
+				return fmt.Errorf("failed to clear node %q subnet annotation for network %s: %w",
+					nodeName, networkName, err)
+			}
+		}
 	}
 
+	if na.hasHybridOverlayAllocation() {
+		na.releaseHybridOverlayNodeSubnet(nodeName)
+	}
 	if na.hasNodeSubnetAllocation() || na.hasHybridOverlayAllocationUnmanaged() {
-		na.clusterSubnetAllocator.ReleaseAllNetworks(node.Name)
+		na.clusterSubnetAllocator.ReleaseAllNetworks(nodeName)
 		na.recordSubnetUsage()
+	}
+	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+		na.idAllocator.ReleaseID(networkName + "_" + nodeName)
 	}
 
 	return nil

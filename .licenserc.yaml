@@ -1,0 +1,27 @@
+# Configuration for Apache SkyWalking Eyes license header checker (https://github.com/apache/skywalking-eyes)
+
+header:
+  license:
+    spdx-id: Apache-2.0
+    copyright-owner: The OVN-Kubernetes Contributors
+    content: |
+      SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+      SPDX-License-Identifier: Apache-2.0
+
+  paths:
+    - '**/*.go'
+    - '**/*.sh'
+    - '**/*.py'
+    - '**/Makefile'
+    - '**/Dockerfile'
+    - '**/Dockerfile.*'
+    - 'dist/images/iptables-scripts/*'
+
+  paths-ignore:
+    # Third-party vendored code (has its own licenses)
+    - 'go-controller/vendor/**'
+
+    # Protobuf generated files
+    - '**/*.pb.go'
+
+  comment: on-failure

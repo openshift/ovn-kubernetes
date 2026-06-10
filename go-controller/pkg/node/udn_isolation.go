@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -465,7 +468,7 @@ func podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 	}
 	// react to pod IP changes
 	return !reflect.DeepEqual(oldObj.Status, newObj.Status) ||
-		oldObj.Annotations[util.OvnPodAnnotationName] != newObj.Annotations[util.OvnPodAnnotationName] ||
+		oldObj.Annotations[types.OvnPodAnnotationName] != newObj.Annotations[types.OvnPodAnnotationName] ||
 		oldObj.Annotations[util.UDNOpenPortsAnnotationName] != newObj.Annotations[util.UDNOpenPortsAnnotationName]
 }
 

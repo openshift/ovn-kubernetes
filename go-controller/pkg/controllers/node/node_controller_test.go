@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -21,22 +24,29 @@ import (
 type fakeNodeHandler struct {
 	netName        string
 	syncErr        error
+	reconcileErr   error
 	syncCalls      int
 	reconcileCalls int
 	deleteCalls    int
+	lastOldNode    *corev1.Node
 }
 
 func (f *fakeNodeHandler) GetNetworkName() string {
 	return f.netName
 }
 
-func (f *fakeNodeHandler) ReconcileNode(_ *corev1.Node, newNode *corev1.Node, _, _ *NodeAnnotationState) error {
+func (f *fakeNodeHandler) ReconcileNode(oldNode *corev1.Node, newNode *corev1.Node, _, _ *NodeAnnotationState) error {
+	if oldNode != nil {
+		f.lastOldNode = oldNode.DeepCopy()
+	} else {
+		f.lastOldNode = nil
+	}
 	if newNode == nil {
 		f.deleteCalls++
 		return nil
 	}
 	f.reconcileCalls++
-	return nil
+	return f.reconcileErr
 }
 
 func (f *fakeNodeHandler) SyncNodes(_ []*corev1.Node) error {
@@ -82,7 +92,7 @@ func newNodeControllerForTest(threadiness int, reconcileAllCounter *int) control
 func TestNodeControllerStartFailure(t *testing.T) {
 	c := &NodeController{
 		name:               "topology-test",
-		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
+		networkManager:     networkmanager.Default().Interface(),
 		nodeController:     newNodeControllerForTest(0, nil),
 		handlers:           syncmap.NewSyncMap[NodeHandler](),
 		nodeReconciliation: map[string]map[string]bool{},
@@ -107,7 +117,7 @@ func TestRegisterNetworkControllerBootstrapFailure(t *testing.T) {
 	}
 	c := &NodeController{
 		name:               "topology-test",
-		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
+		networkManager:     networkmanager.Default().Interface(),
 		nodeController:     newNodeControllerForTest(1, nil),
 		nodeLister:         newNodeLister(t, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}),
 		handlers:           syncmap.NewSyncMap[NodeHandler](),
@@ -132,7 +142,7 @@ func TestRegisterNetworkControllerBootstrapFailure(t *testing.T) {
 func TestRegisterNetworkControllerPanicsOnDuplicateNetworkHandler(t *testing.T) {
 	c := &NodeController{
 		name:               "topology-test",
-		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
+		networkManager:     networkmanager.Default().Interface(),
 		nodeController:     newNodeControllerForTest(1, nil),
 		nodeLister:         newNodeLister(t, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}}),
 		handlers:           syncmap.NewSyncMap[NodeHandler](),
@@ -161,8 +171,8 @@ func TestDeregisterNetworkControllerClearsNetworkState(t *testing.T) {
 	handlers := syncmap.NewSyncMap[NodeHandler]()
 	handlers.Store(handler.netName, handler)
 	c := &NodeController{
-		policy:   &udnPolicy{networkManager: networkmanager.Default().Interface()},
-		handlers: handlers,
+		networkManager: networkmanager.Default().Interface(),
+		handlers:       handlers,
 		nodeReconciliation: map[string]map[string]bool{
 			handler.netName: {"node-a": false},
 		},
@@ -200,7 +210,7 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 	handlers.Store(handlerB.netName, handlerB)
 
 	c := &NodeController{
-		policy:             &udnPolicy{networkManager: networkmanager.Default().Interface()},
+		networkManager:     networkmanager.Default().Interface(),
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{},
 		nodeActive:         map[string]map[string]struct{}{},
@@ -221,6 +231,100 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 	}
 }
 
+func TestNodeControllerDoesNotFilterDefaultNetwork(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+	config.Default.Zone = "local-zone"
+
+	controller := &NodeController{networkManager: networkmanager.Default().Interface()}
+	remoteNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Annotations: map[string]string{
+				util.OvnNodeZoneName: "remote-zone",
+			},
+		},
+	}
+
+	if controller.shouldFilterByRemoteNetworkActivity(remoteNode, "default") {
+		t.Fatal("expected default network to skip dynamic UDN remote activity filtering")
+	}
+	if !controller.shouldFilterByRemoteNetworkActivity(remoteNode, "net-a") {
+		t.Fatal("expected non-default network to apply dynamic UDN remote activity filtering")
+	}
+}
+
+func TestReconcileUpdateFailureKeepsConfiguredCacheAndStoresLatestInformerNode(t *testing.T) {
+	handler := &fakeNodeHandler{
+		netName:      "net-a",
+		reconcileErr: errors.New("reconcile failed"),
+	}
+	oldNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Annotations: map[string]string{"v": "old"}}}
+	newNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Annotations: map[string]string{"v": "new"}}}
+
+	c := &NodeController{
+		networkManager:     networkmanager.Default().Interface(),
+		handlers:           syncmap.NewSyncMap[NodeHandler](),
+		nodeReconciliation: map[string]map[string]bool{},
+		nodeActive:         map[string]map[string]struct{}{},
+		nodeCache: map[string]map[string]*corev1.Node{
+			handler.netName: {oldNode.Name: oldNode.DeepCopy()},
+		},
+		annotationCache: NewNodeAnnotationCache(),
+	}
+
+	newState := c.annotationCache.UpdateNodeAnnotationState(newNode, true)
+	err := c.reconcileUpdate(handler, oldNode, newNode, handler.netName, nil, newState)
+	if err == nil {
+		t.Fatal("expected reconcileUpdate to fail")
+	}
+
+	cachedNode := c.getCachedNode(handler.netName, oldNode.Name)
+	if cachedNode == nil || cachedNode.Annotations["v"] != "old" {
+		t.Fatalf("expected configured cache to retain old node, got %#v", cachedNode)
+	}
+
+	latestInformerNode := c.getLatestInformerNode(handler.netName, oldNode.Name)
+	if latestInformerNode == nil || latestInformerNode.Annotations["v"] != "new" {
+		t.Fatalf("expected latest informer cache to store new node, got %#v", latestInformerNode)
+	}
+}
+
+func TestReconcileDeleteFallsBackToLatestInformerNode(t *testing.T) {
+	handler := &fakeNodeHandler{netName: "net-a"}
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node-a",
+			Annotations: map[string]string{"cleanup": "needed"},
+		},
+	}
+
+	c := &NodeController{
+		networkManager:     networkmanager.Default().Interface(),
+		handlers:           syncmap.NewSyncMap[NodeHandler](),
+		nodeReconciliation: map[string]map[string]bool{},
+		nodeActive:         map[string]map[string]struct{}{},
+		nodeCache:          map[string]map[string]*corev1.Node{},
+		annotationCache:    NewNodeAnnotationCache(),
+	}
+	c.setLatestInformerNode(handler.netName, newNode)
+
+	if err := c.reconcileDelete(handler, newNode.Name, handler.netName, c.getCachedNode(handler.netName, newNode.Name), nil); err != nil {
+		t.Fatalf("reconcileDelete returned error: %v", err)
+	}
+	if handler.deleteCalls != 1 {
+		t.Fatalf("expected delete to be called once, got %d", handler.deleteCalls)
+	}
+	if handler.lastOldNode == nil || handler.lastOldNode.Annotations["cleanup"] != "needed" {
+		t.Fatalf("expected delete to use latest informer node, got %#v", handler.lastOldNode)
+	}
+	if c.getLatestInformerNode(handler.netName, newNode.Name) != nil {
+		t.Fatal("expected latest informer cache to be cleared after delete")
+	}
+}
+
 func TestReconcileNodeRemoteNodeBecomesActiveTreatsAsAdd(t *testing.T) {
 	if err := config.PrepareTestConfig(); err != nil {
 		t.Fatalf("failed to prepare test config: %v", err)
@@ -234,7 +338,7 @@ func TestReconcileNodeRemoteNodeBecomesActiveTreatsAsAdd(t *testing.T) {
 
 	fakeNM := &fakeNodeActivityNetworkManager{active: true}
 	c := &NodeController{
-		policy:             &udnPolicy{networkManager: fakeNM},
+		networkManager:     fakeNM,
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{},
 		nodeActive:         map[string]map[string]struct{}{},
@@ -289,7 +393,7 @@ func TestReconcileNodeRemoteNodeBecomesInactiveDeletes(t *testing.T) {
 	}
 
 	c := &NodeController{
-		policy:             &udnPolicy{networkManager: &fakeNodeActivityNetworkManager{active: false}},
+		networkManager:     &fakeNodeActivityNetworkManager{active: false},
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{},
 		nodeActive: map[string]map[string]struct{}{
@@ -334,7 +438,7 @@ func TestReconcileNodeDeleteCacheMissStillClearsState(t *testing.T) {
 
 	c := &NodeController{
 		name:               "topology-test",
-		policy:             &udnPolicy{networkManager: &fakeNodeActivityNetworkManager{active: false}},
+		networkManager:     &fakeNodeActivityNetworkManager{active: false},
 		nodeLister:         newNodeLister(t),
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{handler.netName: {"node-a": true}},

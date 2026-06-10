@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package gatewayrouter
 
 import (
@@ -12,7 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilnet "k8s.io/utils/net"
 
-	types2 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -131,7 +134,7 @@ func TestAddSameNodeIPPolicy(t *testing.T) {
 			mgntIPv4:    node1CDNMgntIPv4Str,
 			mgntIPv6:    node1CDNMgntIPv6Str,
 		}
-		l3NetInfo, _ = util.NewNetInfo(&types2.NetConf{
+		l3NetInfo, _ = util.NewNetInfo(&ovncnitypes.NetConf{
 			NetConf:    cnitypes.NetConf{Name: udnNetworkName},
 			Topology:   types.Layer3Topology,
 			JoinSubnet: joinSubnetIPv4Str,    // not required, but adding so NewNetInfo doesn't fail
@@ -535,7 +538,7 @@ func TestAddHostCIDRPolicy(t *testing.T) {
 		hostCIDRPolicyPrio, _ = strconv.Atoi(types.UDNHostCIDRPolicyPriority)
 		_, hostCIDRV4Range, _ = net.ParseCIDR(hostCIDRV4RangeStr)
 		_, hostCIDRV6Range, _ = net.ParseCIDR(hostCIDRV6RangeStr)
-		l2NetInfo, _          = util.NewNetInfo(&types2.NetConf{
+		l2NetInfo, _          = util.NewNetInfo(&ovncnitypes.NetConf{
 			NetConf:    cnitypes.NetConf{Name: udnNetworkName},
 			Topology:   types.Layer2Topology,
 			JoinSubnet: joinSubnetIPv4Str,                                 // not required, but adding so NewNetInfo doesn't fail

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 /*
 The diagnostics package contains different tools to collect data they can be
 executed using the following flags at the test suite

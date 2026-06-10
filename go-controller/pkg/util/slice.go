@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package util
 
 // RemoveIndexFromSliceUnstable attempts to remove slice index specified by parameter i. Slice order is not preserved.

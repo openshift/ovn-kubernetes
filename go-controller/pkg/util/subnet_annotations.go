@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package util
 
 import (
@@ -142,13 +145,22 @@ func NodeSubnetAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 }
 
 func NodeSubnetAnnotationChangedForNetwork(oldNode, newNode *corev1.Node, netName string) bool {
-	var oldSubnets, newSubnets map[string]json.RawMessage
+	oldRaw := oldNode.Annotations[types.NodeSubnetsAnnotation]
+	newRaw := newNode.Annotations[types.NodeSubnetsAnnotation]
 
-	if err := json.Unmarshal([]byte(oldNode.Annotations[types.NodeSubnetsAnnotation]), &oldSubnets); err != nil {
+	if oldRaw == newRaw {
+		return false
+	}
+	if oldRaw == "" || newRaw == "" {
+		return true
+	}
+
+	var oldSubnets, newSubnets map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(oldRaw), &oldSubnets); err != nil {
 		klog.Errorf("Failed to unmarshal old node %s annotation: %v", oldNode.Name, err)
 		return false
 	}
-	if err := json.Unmarshal([]byte(newNode.Annotations[types.NodeSubnetsAnnotation]), &newSubnets); err != nil {
+	if err := json.Unmarshal([]byte(newRaw), &newSubnets); err != nil {
 		klog.Errorf("Failed to unmarshal new node %s annotation: %v", newNode.Name, err)
 		return false
 	}
