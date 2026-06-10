@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
@@ -1362,7 +1365,7 @@ func (e *EgressIPController) syncEgressIPs(_ []interface{}) error {
 	// since namespaces is the first object that egressIP feature starts watching
 
 	// update localZones cache of eIPCZoneController
-	// WatchNodes() is called before WatchEgressIPNamespaces() so the oc.localZones cache
+	// Node reconciliation runs before WatchEgressIPNamespaces() so the oc.localZones cache
 	// will be updated whereas WatchEgressNodes() is called after WatchEgressIPNamespaces()
 	// and so we must update the cache to ensure we are not stale.
 	// FIXME(martinkennelly): re-enable when EIP controller is fully extracted from DNC
@@ -1421,15 +1424,20 @@ func (e *EgressIPController) getALocalZoneNodeName() (string, error) {
 	return "", fmt.Errorf("failed to find a local OVN zone Node")
 }
 
-func (e *EgressIPController) StartNADReconciler() error {
+func (e *EgressIPController) StartNADReconciler() (err error) {
 	if e.networkManager == nil || e.nadReconciler == nil {
 		return nil
 	}
+
 	if !e.nadReconcilerRegistered {
-		id, err := e.networkManager.RegisterNADReconciler(e.nadReconciler)
-		if err != nil {
-			return err
-		}
+		defer func() {
+			if err != nil {
+				e.networkManager.DeRegisterNADReconciler(e.nadReconcilerID)
+				e.nadReconcilerRegistered = false
+				e.nadReconcilerID = 0
+			}
+		}()
+		id := e.networkManager.RegisterNADReconciler(e.nadReconciler)
 		e.nadReconcilerID = id
 		e.nadReconcilerRegistered = true
 	}
@@ -1441,9 +1449,7 @@ func (e *EgressIPController) StopNADReconciler() {
 		return
 	}
 	if e.nadReconcilerRegistered {
-		if err := e.networkManager.DeRegisterNADReconciler(e.nadReconcilerID); err != nil {
-			klog.Warningf("Failed to deregister egress IP NAD reconciler: %v", err)
-		}
+		e.networkManager.DeRegisterNADReconciler(e.nadReconcilerID)
 		e.nadReconcilerRegistered = false
 	}
 	controller.Stop(e.nadReconciler)

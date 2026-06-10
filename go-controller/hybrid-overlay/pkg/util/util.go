@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package util
 
 import (
@@ -7,21 +10,21 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
+	hotypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/hybrid-overlay/pkg/types"
 )
 
 // ParseHybridOverlayHostSubnet returns the parsed hybrid overlay hostsubnet if
 // the annotations included a valid one, or nil if they did not include one. If
 // one was included, but it is invalid, an error is returned.
 func ParseHybridOverlayHostSubnet(node *corev1.Node) (*net.IPNet, error) {
-	sub, ok := node.Annotations[types.HybridOverlayNodeSubnet]
+	sub, ok := node.Annotations[hotypes.HybridOverlayNodeSubnet]
 	if !ok {
 		return nil, nil
 	}
 	_, subnet, err := net.ParseCIDR(sub)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing node %s annotation %s value %q: %v",
-			node.Name, types.HybridOverlayNodeSubnet, sub, err)
+			node.Name, hotypes.HybridOverlayNodeSubnet, sub, err)
 	}
 	return subnet, nil
 }

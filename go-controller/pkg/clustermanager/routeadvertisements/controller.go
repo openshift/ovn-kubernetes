@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package routeadvertisements
 
 import (
@@ -1153,7 +1156,7 @@ func vtepCIDRPrefixSelectors(cidrs []string) []frrtypes.PrefixSelector {
 		} else {
 			le = 32
 		}
-		selectors = append(selectors, frrtypes.PrefixSelector{Prefix: cidr, LE: le})
+		selectors = append(selectors, frrtypes.PrefixSelector{Prefix: cidr, LE: le, GE: le})
 	}
 	return selectors
 }

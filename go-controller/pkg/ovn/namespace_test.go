@@ -1,23 +1,22 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
@@ -27,7 +26,6 @@ import (
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func getNamespaceAnnotations(fakeClient kubernetes.Interface, name string) map[string]string {
@@ -54,20 +52,21 @@ func newUDNNamespace(namespace string) *corev1.Namespace {
 	}
 }
 
-func getNsAddrSetHashNames(netControllerName, ns string) (string, string) {
-	return addressset.GetHashNamesForAS(getNamespaceAddrSetDbIDs(ns, netControllerName))
+func getStaleNamespaceAddrSetDbIDs(namespaceName, controller string) *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetNamespace, controller, map[libovsdbops.ExternalIDKey]string{
+		// namespace has only 1 address set, no additional ids are required
+		libovsdbops.ObjectNameKey: namespaceName,
+	})
 }
 
-func buildNamespaceAddressSets(namespace string, ips []string) (*nbdb.AddressSet, *nbdb.AddressSet) {
-	return addressset.GetTestDbAddrSets(getNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
+func buildStaleNamespaceAddressSets(namespace string, ips []string) (*nbdb.AddressSet, *nbdb.AddressSet) {
+	return addressset.GetTestDbAddrSets(getStaleNamespaceAddrSetDbIDs(namespace, "default-network-controller"), ips)
 }
 
 var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 	const (
-		namespaceName         = "namespace1"
-		clusterIPNet   string = "10.1.0.0"
-		clusterCIDR    string = clusterIPNet + "/16"
-		controllerName        = ovntypes.DefaultNetworkControllerName
+		namespaceName  = "namespace1"
+		controllerName = ovntypes.DefaultNetworkControllerName
 	)
 	var (
 		fakeOvn *FakeOVN
@@ -79,7 +78,7 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 		err := config.PrepareTestConfig()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		fakeOvn = NewFakeOVN(true)
+		fakeOvn = NewFakeOVN(false)
 		wg = &sync.WaitGroup{}
 	})
 
@@ -90,42 +89,33 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 	ginkgo.Context("on startup", func() {
 		ginkgo.It("only cleans up address sets owned by namespace", func() {
+			// namespace address sets are now deprecated and should all be removed on startup
 			namespace1 := ovntest.NewNamespace(namespaceName)
-			// namespace-owned address set for existing namespace, should stay
-			ns1 := getNamespaceAddrSetDbIDs(namespaceName, ovntypes.DefaultNetworkControllerName)
-			_, err := fakeOvn.asf.NewAddressSet(ns1, []string{"1.1.1.1"})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// namespace-owned address set for existing namespace, should be deleted
+			ns1, _ := buildStaleNamespaceAddressSets(namespaceName, []string{"1.1.1.1"})
 			// namespace-owned address set for stale namespace, should be deleted
-			ns2 := getNamespaceAddrSetDbIDs("namespace2", ovntypes.DefaultNetworkControllerName)
-			_, err = fakeOvn.asf.NewAddressSet(ns2, []string{"1.1.1.2"})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			// netpol peer address set for existing netpol, should stay
-			netpol := addresssetmanager.GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, nil, "nsName", ovntypes.DefaultNetworkControllerName)
-			_, err = fakeOvn.asf.NewAddressSet(netpol, []string{"1.1.1.3"})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			ns2, _ := buildStaleNamespaceAddressSets("namespace2", []string{"1.1.1.2"})
+			// netpol peer address set will be removed by the addresssetManager as unreferenced
+			netpol := addresssetmanager.GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, nil, nil, "nsName", ovntypes.DefaultNetworkControllerName, false)
+			netpolAS, _ := addressset.GetTestDbAddrSets(netpol, []string{"1.1.1.3"})
 			// egressQoS-owned address set, should stay
 			qos := getEgressQosAddrSetDbIDs("namespace", "0", controllerName)
-			_, err = fakeOvn.asf.NewAddressSet(qos, []string{"1.1.1.4"})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			qosAS, _ := addressset.GetTestDbAddrSets(qos, []string{"1.1.1.4"})
 			// hybridNode-owned address set, should stay
 			hybridNode := apbroute.GetHybridRouteAddrSetDbIDs("node", ovntypes.DefaultNetworkControllerName)
-			_, err = fakeOvn.asf.NewAddressSet(hybridNode, []string{"1.1.1.5"})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			hybridNodeAS, _ := addressset.GetTestDbAddrSets(hybridNode, []string{"1.1.1.5"})
 			// egress firewall-owned address set, should stay
 			ef := dnsnameresolver.GetEgressFirewallDNSAddrSetDbIDs("dnsname", controllerName)
-			_, err = fakeOvn.asf.NewAddressSet(ef, []string{"1.1.1.6"})
+			efAS, _ := addressset.GetTestDbAddrSets(ef, []string{"1.1.1.6"})
+
+			fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: []libovsdb.TestData{ns1, ns2, netpolAS, qosAS, hybridNodeAS, efAS}})
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{ns1, ns2, qosAS, hybridNodeAS, efAS}))
+
+			// now namespace address sets will be cleaned up
+			err := fakeOvn.controller.syncNamespaces([]interface{}{namespace1})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: []libovsdb.TestData{}})
-			err = fakeOvn.controller.syncNamespaces([]interface{}{namespace1})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			fakeOvn.asf.ExpectAddressSetWithAddresses(ns1, []string{"1.1.1.1"})
-			fakeOvn.asf.EventuallyExpectNoAddressSet(ns2)
-			fakeOvn.asf.ExpectAddressSetWithAddresses(netpol, []string{"1.1.1.3"})
-			fakeOvn.asf.ExpectAddressSetWithAddresses(qos, []string{"1.1.1.4"})
-			fakeOvn.asf.ExpectAddressSetWithAddresses(hybridNode, []string{"1.1.1.5"})
-			fakeOvn.asf.ExpectAddressSetWithAddresses(ef, []string{"1.1.1.6"})
+			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{qosAS, hybridNodeAS, efAS}))
 		})
 
 		ginkgo.It("reconciles an existing namespace with pods", func() {
@@ -170,8 +160,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceT.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(namespaceName, []string{tP.podIP})
-
 			// port group is empty, because it will be filled by pod add logic
 			pgIDs := getNamespacePortGroupDbIDs(namespaceName, ovntypes.DefaultNetworkControllerName)
 			pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
@@ -193,146 +181,10 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
-
 			pgIDs := getNamespacePortGroupDbIDs(namespaceName, ovntypes.DefaultNetworkControllerName)
 			pg := libovsdbutil.BuildPortGroup(pgIDs, nil, nil)
 			pg.UUID = pg.Name + "-UUID"
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{pg}))
-		})
-
-		ginkgo.It("creates an address set for existing nodes when the host network traffic namespace is created", func() {
-			config.Gateway.Mode = config.GatewayModeShared
-			config.Gateway.NodeportEnable = true
-			config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
-			var err error
-			config.Default.ClusterSubnets, err = config.ParseClusterSubnetEntries(clusterCIDR)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			node1 := tNode{
-				Name:                 "node1",
-				NodeIP:               "1.2.3.4",
-				NodeLRPMAC:           "0a:58:0a:01:01:01",
-				LrpIP:                "100.64.0.2",
-				LrpIPv6:              "fd98::2",
-				DrLrpIP:              "100.64.0.1",
-				PhysicalBridgeMAC:    "11:22:33:44:55:66",
-				SystemID:             "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
-				NodeSubnet:           "10.1.1.0/24",
-				GWRouter:             ovntypes.GWRouterPrefix + "node1",
-				GatewayRouterIPMask:  "172.16.16.2/24",
-				GatewayRouterIP:      "172.16.16.2",
-				GatewayRouterNextHop: "172.16.16.1",
-				PhysicalBridgeName:   "br-eth0",
-				NodeGWIP:             "10.1.1.1/24",
-				NodeMgmtPortIP:       "10.1.1.2",
-				NodeMgmtPortMAC:      "0a:58:0a:01:01:02",
-				DnatSnatIP:           "169.254.0.1",
-			}
-			// create a test node and annotate it with host subnet
-			testNode := node1.k8sNode("2")
-
-			hostNetworkNamespace := "test-host-network-ns"
-			config.Kubernetes.HostNetworkNamespace = hostNetworkNamespace
-
-			expectedClusterLBGroup := newLoadBalancerGroup(ovntypes.ClusterLBGroupName)
-			expectedSwitchLBGroup := newLoadBalancerGroup(ovntypes.ClusterSwitchLBGroupName)
-			expectedRouterLBGroup := newLoadBalancerGroup(ovntypes.ClusterRouterLBGroupName)
-			expectedOVNClusterRouter := newOVNClusterRouter()
-			expectedNodeSwitch := node1.logicalSwitch([]string{expectedClusterLBGroup.UUID, expectedSwitchLBGroup.UUID})
-			expectedClusterRouterPortGroup := newRouterPortGroup()
-			expectedClusterPortGroup := newClusterPortGroup()
-
-			fakeOvn.startWithDBSetup(
-				libovsdb.TestSetup{
-					NBData: []libovsdb.TestData{
-						newClusterJoinSwitch(),
-						expectedOVNClusterRouter,
-						expectedNodeSwitch,
-						expectedClusterRouterPortGroup,
-						expectedClusterPortGroup,
-						expectedClusterLBGroup,
-						expectedSwitchLBGroup,
-						expectedRouterLBGroup,
-					},
-				},
-				&corev1.NamespaceList{
-					Items: []corev1.Namespace{
-						*ovntest.NewNamespace(hostNetworkNamespace),
-					},
-				},
-				&corev1.NodeList{
-					Items: []corev1.Node{
-						testNode,
-					},
-				},
-			)
-			fakeOvn.controller.multicastSupport = false
-
-			fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: fakeOvn.fakeClient.KubeClient}, testNode.Name)
-
-			vlanID := uint(1024)
-			l3Config := node1.gatewayConfig(config.GatewayModeShared, vlanID)
-			err = util.SetL3GatewayConfig(nodeAnnotator, l3Config)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.UpdateNodeManagementPortMACAddresses(&testNode, nodeAnnotator, ovntest.MustParseMAC(node1.NodeMgmtPortMAC), ovntypes.DefaultNetworkName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostSubnetAnnotation(nodeAnnotator, ovntest.MustParseIPNets(node1.NodeSubnet))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = util.SetNodeHostCIDRs(nodeAnnotator, sets.New[string](fmt.Sprintf("%s/24", node1.NodeIP)))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			err = nodeAnnotator.Run()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			updatedNode, err := fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			nodeHostSubnetAnnotations, err := util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(nodeHostSubnetAnnotations[0].String()).To(gomega.Equal(node1.NodeSubnet))
-
-			expectedDatabaseState := []libovsdb.TestData{}
-			expectedDatabaseState = addNodeLogicalFlowsWithServiceController(expectedDatabaseState, expectedOVNClusterRouter,
-				expectedNodeSwitch, expectedClusterRouterPortGroup, expectedClusterPortGroup, &node1, fakeOvn.controller.svcTemplateSupport)
-
-			// Addressset of the host-network namespace was initialized but the node logical switch management port address may or may not
-			// be in the addressset yet, depending on if the host subnets annotation of the node exists in the informer cache. The addressset
-			// can only be deterministic when WatchNamespaces() handles this host network namespace.
-
-			gwLRPIPs, err := udn.GetGWRouterIPs(&testNode, &util.DefaultNetInfo{})
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(gwLRPIPs).ToNot(gomega.BeEmpty())
-
-			err = fakeOvn.controller.WatchNamespaces()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			err = fakeOvn.controller.WatchNodes()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			err = fakeOvn.controller.StartServiceController(wg, false)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			nodeSubnet := ovntest.MustParseIPNet(node1.NodeSubnet)
-			var clusterSubnets []*net.IPNet
-			for _, clusterSubnet := range config.Default.ClusterSubnets {
-				clusterSubnets = append(clusterSubnets, clusterSubnet.CIDR)
-			}
-			skipSnat := false
-			expectedDatabaseState = generateGatewayInitExpectedNB(expectedDatabaseState, expectedOVNClusterRouter,
-				expectedNodeSwitch, node1.Name, clusterSubnets, []*net.IPNet{nodeSubnet}, l3Config,
-				[]*net.IPNet{classBIPAddress(node1.LrpIP)}, []*net.IPNet{classBIPAddress(node1.DrLrpIP)}, skipSnat,
-				node1.NodeMgmtPortIP, "1400")
-			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(expectedDatabaseState))
-
-			// check the namespace again and ensure the address set
-			// being created with the right set of IPs in it.
-			allowIPs := []string{node1.NodeMgmtPortIP}
-			for _, lrpIP := range gwLRPIPs {
-				allowIPs = append(allowIPs, lrpIP.IP.String())
-			}
-			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(hostNetworkNamespace, allowIPs)
 		})
 
 		ginkgo.It("reconciles an existing namespace port group, without updating it", func() {
@@ -359,8 +211,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 
 			err := fakeOvn.controller.WatchNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			fakeOvn.asf.EventuallyExpectAddressSetWithAddresses(namespaceName, []string{})
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData(initialData))
 		})
 		ginkgo.It("deletes an existing namespace port group when egress firewall and multicast are disabled", func() {
@@ -406,27 +256,6 @@ var _ = ginkgo.Describe("OVN Namespace Operations", func() {
 			err := fakeOvn.controller.WatchNamespaces()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Eventually(fakeOvn.nbClient).Should(libovsdb.HaveData([]libovsdb.TestData{}))
-		})
-	})
-
-	ginkgo.Context("during execution", func() {
-		ginkgo.It("deletes an empty namespace's resources", func() {
-			fakeOvn.start(&corev1.NamespaceList{
-				Items: []corev1.Namespace{
-					*ovntest.NewNamespace(namespaceName),
-				},
-			})
-			err := fakeOvn.controller.WatchNamespaces()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			fakeOvn.asf.ExpectEmptyAddressSet(namespaceName)
-
-			err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, *metav1.NewDeleteOptions(1))
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-			// namespace's address set deletion is delayed by 20 second to let other handlers cleanup
-			gomega.Eventually(func() bool {
-				return fakeOvn.asf.AddressSetExists(namespaceName)
-			}, 21*time.Second).Should(gomega.BeFalse())
 		})
 	})
 })

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package clusternetworkconnect
 
 import "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/testscenario"

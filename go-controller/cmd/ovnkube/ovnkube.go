@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import (
@@ -276,7 +279,7 @@ func combineMetricsEndpoints(runMode *ovnkubeRunMode) bool {
 		runMode.node &&
 		config.Metrics.BindAddress != "" &&
 		config.Metrics.BindAddress == config.Metrics.OVNMetricsBindAddress &&
-		config.OvnKubeNode.Mode != types.NodeModeDPUHost
+		(config.IsModeDPU() || config.IsModeFull())
 }
 
 func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
@@ -308,7 +311,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	if config.Kubernetes.BootstrapKubeconfig != "" {
 		// In the case of dpus K8S_NODE will be set to dpu host's name
 		var csrNodeName string
-		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		if config.IsModeDPU() {
 			csrNodeName = os.Getenv("K8S_NODE_DPU")
 		} else {
 			csrNodeName = os.Getenv("K8S_NODE")
@@ -509,7 +512,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 	// Remove when OVN supports native silencing of GARPs on startup: https://issues.redhat.com/browse/FDP-1537
 	// isOVNKubeControllerSyncd is true when ovnkube controller has sync and changes are in OVN Southbound database.
 	var isOVNKubeControllerSyncd *atomic.Bool
-	if runMode.ovnkubeController && runMode.node && config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.OvnKubeNode.Mode == types.NodeModeFull {
+	if runMode.ovnkubeController && runMode.node && config.OVNKubernetesFeature.EnableEgressIP && config.OVNKubernetesFeature.EnableInterconnect && config.IsModeFull() {
 		isOVNKubeControllerSyncd = &atomic.Bool{}
 	}
 
@@ -583,7 +586,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			metrics.RegisterNodeMetrics(ctx.Done())
 
 			// OVS is not running on dpu-host nodes
-			if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+			if config.IsModeDPU() || config.IsModeFull() {
 				ovsClient, err = libovsdb.NewOVSClient(ctx.Done())
 				if err != nil {
 					nodeErr = fmt.Errorf("failed to initialize libovsdb vswitchd client: %w", err)
@@ -621,7 +624,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 
 	// start the prometheus server to serve OVS and OVN Metrics (default port: 9476)
 	// Note: for ovnkube node mode dpu-host no metrics is required as ovs/ovn is not running on the node.
-	if runMode.node && config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Metrics.OVNMetricsBindAddress != "" {
+	if runMode.node && (config.IsModeDPU() || config.IsModeFull()) && config.Metrics.OVNMetricsBindAddress != "" {
 
 		if ovsClient == nil {
 			ovsClient, err = libovsdb.NewOVSClient(ctx.Done())

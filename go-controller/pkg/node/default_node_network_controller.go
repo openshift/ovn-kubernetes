@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -157,7 +160,7 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 		routeManager: routeManager,
 		ovsClient:    ovsClient,
 	}
-	if util.IsNetworkSegmentationSupportEnabled() && config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if util.IsNetworkSegmentationSupportEnabled() && (config.IsModeDPUHost() || config.IsModeFull()) {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
 			cnnci.watchFactory.PodCoreInformer(), cnnci.name, cnnci.recorder)
 	}
@@ -207,7 +210,7 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 
 	nc.initRetryFrameworkForNode()
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if config.IsModeDPUHost() || config.IsModeFull() {
 		err = setupRemoteNodeNFTSets()
 		if err != nil {
 			return nil, fmt.Errorf("failed to setup PMTUD nftables sets: %w", err)
@@ -489,7 +492,7 @@ func setupOVNNode(node *corev1.Node) error {
 
 	// In the case of DPU, the hostname should be that of the DPU and not
 	// the K8s Node's. So skip setting the incorrect hostname.
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if config.IsModeDPUHost() || config.IsModeFull() {
 		setExternalIdsCmd = append(setExternalIdsCmd, fmt.Sprintf("external_ids:hostname=\"%s\"", node.Name))
 	}
 
@@ -704,7 +707,7 @@ func createNodeManagementPortController(
 		return nil, err
 	}
 
-	if config.OvnKubeNode.MgmtPortDPResourceName == "" && config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+	if config.OvnKubeNode.MgmtPortDPResourceName == "" && config.IsModeDPUHost() {
 		// this is called only when config.OvnKubeNode.MgmtPortDPResourceName is empty and in dpu-host mode:
 		// 1. If config.OvnKubeNode.MgmtPortDPResourceName is not empty, management port annotation is taken care
 		//    of by node controller manage.
@@ -743,13 +746,13 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	var subnets []*net.IPNet
 	var cniServer *cni.Server
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if config.IsModeDPUHost() || config.IsModeFull() {
 		if err = configureGlobalForwarding(); err != nil {
 			return err
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if config.IsModeDPU() || config.IsModeFull() {
 		// Bootstrap flows in OVS if just normal flow is present
 		if err := bootstrapOVSFlows(nc.name); err != nil {
 			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
@@ -769,7 +772,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to parse kubernetes node IP address. %v", nodeAddrStr)
 	}
 
-	if (config.OvnKubeNode.Mode == types.NodeModeDPUHost || config.OvnKubeNode.Mode == types.NodeModeDPU) &&
+	if (config.IsModeDPUHost() || config.IsModeDPU()) &&
 		config.OvnKubeNode.DPUNodeLeaseRenewInterval > 0 {
 		nc.dpuNodeLeaseManager = dpulease.NewManager(
 			nc.client,
@@ -778,7 +781,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 			time.Duration(config.OvnKubeNode.DPUNodeLeaseRenewInterval)*time.Second,
 			time.Duration(config.OvnKubeNode.DPUNodeLeaseDuration)*time.Second,
 		)
-		if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		if config.IsModeDPUHost() {
 			if _, err := nc.dpuNodeLeaseManager.EnsureLease(ctx); err != nil {
 				return err
 			}
@@ -790,7 +793,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	var sbZone string
 	var err1 error
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+	if config.IsModeDPUHost() {
 		// There is no SBDB to connect to in DPU Host mode, so we will just take the default input config zone
 		sbZone = config.Default.Zone
 	} else {
@@ -823,7 +826,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if config.IsModeDPUHost() || config.IsModeFull() {
 		if nc.udnHostIsolationManager != nil {
 			if err = nc.udnHostIsolationManager.Start(ctx); err != nil {
 				return err
@@ -854,7 +857,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	klog.Infof("Node %s ready for ovn initialization with subnet %s", nc.name, util.JoinIPNets(subnets, ","))
 
 	// Create CNI Server
-	if config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if config.IsModeDPUHost() || config.IsModeFull() {
 		kclient, ok := nc.Kube.(*kube.Kube)
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
@@ -868,7 +871,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	nodeAnnotator := kube.NewNodeAnnotator(nc.Kube, node.Name)
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+	if config.IsModeDPUHost() {
 		if err := configureGatewayInterfaceFromMgmtPort(); err != nil {
 			return err
 		}
@@ -893,7 +896,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	// Set the node-encap-ips annotation with the configured encap IP.
 	// This encap IP is unavailable on the DPU host mode, so we don't need to set it there.
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if config.IsModeDPU() || config.IsModeFull() {
 		encapIPList := sets.New[string]()
 		encapIPList.Insert(strings.Split(config.Default.EffectiveEncapIP, ",")...)
 		if err := util.SetNodeEncapIPs(nodeAnnotator, encapIPList); err != nil {
@@ -906,7 +909,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	}
 
 	// Connect ovn-controller to SBDB
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if config.IsModeDPU() || config.IsModeFull() {
 		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
 			if err := auth.SetDBAuth(); err != nil {
 				return fmt.Errorf("unable to set the authentication towards OVN local dbs")
@@ -915,9 +918,9 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	}
 
 	// First part of gateway initialization. It will be completed by (nc *DefaultNodeNetworkController) Start()
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if config.IsModeDPU() || config.IsModeFull() {
 		// IPv6 is not supported in DPU enabled nodes, error out if ovnkube is not set in IPv4 mode
-		if config.IPv6Mode && config.OvnKubeNode.Mode == types.NodeModeDPU {
+		if config.IPv6Mode && config.IsModeDPU() {
 			return fmt.Errorf("IPv6 mode is not supported on a DPU enabled node")
 		}
 		// Initialize gateway for OVS internal port or representor management port
@@ -952,7 +955,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	waiter := newStartupWaiter()
 
 	// Complete gateway initialization
-	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+	if config.IsModeDPUHost() {
 		err = nc.initGatewayDPUHost()
 		if err != nil {
 			return err
@@ -970,7 +973,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	// for at least one node in the given zone)
 	// NOTE: ovnkube-node in DPU-host mode has no SBDB to connect to. The encap port will be handled by the
 	// ovnkube-node running in DPU mode on behalf of the host.
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost && config.Default.EncapPort != config.DefaultEncapPort {
+	if (config.IsModeDPU() || config.IsModeFull()) && config.Default.EncapPort != config.DefaultEncapPort {
 		if err := setEncapPort(ctx); err != nil {
 			return err
 		}
@@ -1006,8 +1009,8 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 
 	// Note(adrianc): DPU deployments are expected to support the new shared gateway changes, upgrade flow
 	// is not needed. Future upgrade flows will need to take DPUs into account.
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		if config.OvnKubeNode.Mode == types.NodeModeFull {
+	if config.IsModeDPU() || config.IsModeFull() {
+		if config.IsModeFull() {
 			// Configure route for svc towards shared gateway interface
 			if err := configureSvcRouteViaInterface(nc.routeManager, nc.Gateway.GetGatewayIface(), DummyNextHopIPs()); err != nil {
 				return err
@@ -1034,7 +1037,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 			defer nc.wg.Done()
 			nodeController.Run(stopCh)
 		}(nc.stopChan)
-	} else if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	} else if config.IsModeDPU() || config.IsModeFull() {
 		// attempt to cleanup the possibly stale bridge
 		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", "br-ext")
 		if err != nil {
@@ -1058,7 +1061,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if config.IsModeDPU() || config.IsModeFull() {
 		// If interconnect is disabled OR interconnect is running in single-zone-mode,
 		// the ovnkube-master is responsible for patching ICNI managed namespaces with
 		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
@@ -1089,13 +1092,13 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if nc.dpuNodeLeaseManager != nil {
-		if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		if config.IsModeDPU() {
 			nc.wg.Add(1)
 			go func() {
 				defer nc.wg.Done()
 				nc.dpuNodeLeaseManager.RunUpdater(ctx)
 			}()
-		} else if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		} else if config.IsModeDPUHost() {
 			if err := nc.dpuNodeLeaseManager.CheckStatus(ctx); err != nil {
 				klog.Warningf("Initial DPU node lease check failed: %v", err)
 			}
@@ -1107,7 +1110,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		if _, err := nc.watchPodsDPU(); err != nil {
 			return err
 		}
@@ -1126,7 +1129,7 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	// configure NFT/IPT rules for egressService
-	if config.OVNKubernetesFeature.EnableEgressService && config.OvnKubeNode.Mode != types.NodeModeDPU {
+	if config.OVNKubernetesFeature.EnableEgressService && (config.IsModeDPUHost() || config.IsModeFull()) {
 		wf := nc.watchFactory.(*factory.WatchFactory)
 		c, err := egressservice.NewController(nc.stopChan, nodetypes.OvnKubeNodeSNATMark, nc.name,
 			wf.EgressServiceInformer(), wf.ServiceInformer(), wf.EndpointSliceInformer())
@@ -1372,7 +1375,7 @@ func (nc *DefaultNodeNetworkController) addOrUpdateNode(node *corev1.Node) error
 		addrs = append(addrs, nodeIP.String())
 		klog.Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
 		// Only add to nftables if this is remote node
-		if config.OvnKubeNode.Mode != types.NodeModeDPU && node.Name != nc.name {
+		if (config.IsModeDPUHost() || config.IsModeFull()) && node.Name != nc.name {
 			nftElems = append(nftElems, &knftables.Element{
 				Set: types.NFTRemoteNodeIPsv4,
 				Key: []string{nodeIP.String()},
@@ -1385,14 +1388,14 @@ func (nc *DefaultNodeNetworkController) addOrUpdateNode(node *corev1.Node) error
 		addrs = append(addrs, nodeIP.String())
 		klog.Infof("Adding remote node %q, IP: %s to PMTUD blocking rules", node.Name, nodeIP)
 		// Only add to nftables if this is remote node
-		if config.OvnKubeNode.Mode != types.NodeModeDPU && node.Name != nc.name {
+		if (config.IsModeDPUHost() || config.IsModeFull()) && node.Name != nc.name {
 			nftElems = append(nftElems, &knftables.Element{
 				Set: types.NFTRemoteNodeIPsv6,
 				Key: []string{nodeIP.String()},
 			})
 		}
 	}
-	if config.OvnKubeNode.Mode != types.NodeModeDPU && len(nftElems) > 0 {
+	if (config.IsModeDPUHost() || config.IsModeFull()) && len(nftElems) > 0 {
 		if err := nodenft.UpdateNFTElements(nftElems); err != nil {
 			return fmt.Errorf("unable to update NFT elements for node %q, error: %w", node.Name, err)
 		}
@@ -1453,7 +1456,7 @@ func (nc *DefaultNodeNetworkController) syncNodes(objs []interface{}) error {
 	var keepNFTSetElemsV4, keepNFTSetElemsV6 []*knftables.Element
 	var errors []error
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		return nil
 	}
 
