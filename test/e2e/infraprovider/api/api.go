@@ -34,6 +34,10 @@ type ClusterProvider interface {
 	ShutdownNode(nodeName string) error
 	// StartNode starts the specified node
 	StartNode(nodeName string) error
+	// RebootNode restarts the specified node. The node will automatically come back
+	// without requiring a separate StartNode call. The implementation may use
+	// docker restart (KinD) or systemctl reboot (OpenShift).
+	RebootNode(nodeName string) error
 	// PreloadImages pulls the given images and loads them into the cluster
 	// so that they are available to pods without a runtime pull. Providers
 	// that do not support preloading may implement this as a no-op.

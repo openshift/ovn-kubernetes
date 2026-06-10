@@ -12,4 +12,4 @@ ${HERE}/check-go-mod-consistency.sh
 # Update e2e test annotations that indicate openshift compatibility
 pushd "$ROOT"
 trap popd EXIT
-go generate -mod=vendor "$ROOT/test/e2e_test.go"
+go generate -mod=vendor "$ROOT/pkg/e2e_test.go"
