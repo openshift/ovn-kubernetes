@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"slices"
 	"time"
 
 	"github.com/vishvananda/netlink"
@@ -47,6 +46,10 @@ const (
 	// UDNMasqueradeIPRulePriority the priority of the ip routing rules created for masquerade IP address
 	// allocated for every user defined network.
 	UDNMasqueradeIPRulePriority = 2000
+	// dpuUDNVRFRouteTableIDStart is a distinct table range for UDN VRFs
+	// created on DPUs. DPU mode has no host management interface to derive a
+	// table from, so this avoids colliding with link-index based tables.
+	dpuUDNVRFRouteTableIDStart = 100000
 )
 
 // UserDefinedNetworkGateway contains information
@@ -264,6 +267,11 @@ func (udng *UserDefinedNetworkGateway) AddNetwork() error {
 			return fmt.Errorf("could not add VRF %s routes for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err)
 		}
 	}
+	if config.IsModeDPU() {
+		if err = udng.ensureDPUVRF(); err != nil {
+			return err
+		}
+	}
 
 	udng.updateAdvertisementStatus()
 
@@ -342,16 +350,16 @@ func (udng *UserDefinedNetworkGateway) GetNetworkRuleMetadata() string {
 // DelNetwork has returned succesfully.
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 	var errs []error
+	vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
 	if config.IsModeDPUHost() || config.IsModeFull() {
-		vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
 		// delete the iprules for this network
 		if err := udng.ruleManager.DeleteWithMetadata(udng.GetNetworkRuleMetadata()); err != nil {
 			errs = append(errs, fmt.Errorf("unable to delete iprules for network %s, err: %v", udng.GetNetworkName(), err))
 		}
-		// delete the VRF device for this network
-		if err := udng.vrfManager.DeleteVRF(vrfDeviceName); err != nil {
-			errs = append(errs, fmt.Errorf("unable to delete VRF device %s for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err))
-		}
+	}
+	// delete the VRF device for this network
+	if err := udng.vrfManager.DeleteVRF(vrfDeviceName); err != nil {
+		errs = append(errs, fmt.Errorf("unable to delete VRF device %s for network %s, err: %v", vrfDeviceName, udng.GetNetworkName(), err))
 	}
 	if config.IsModeDPU() || config.IsModeFull() {
 		// delete the openflows for this network
@@ -428,10 +436,28 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 	for _, subnet := range networkLocalSubnets {
 		if config.IPv6Mode && utilnet.IsIPv6CIDR(subnet) || config.IPv4Mode && utilnet.IsIPv4CIDR(subnet) {
 			ip := udng.GetNodeManagementIP(subnet)
-			var err error
-			var exists bool
-			if exists, err = util.LinkAddrExist(mpLink, ip); err == nil && !exists {
-				err = util.LinkAddrAdd(mpLink, ip, 0, 0, 0)
+			addrFlags := 0
+			if udng.useNoPrefixRouteManagementPortIPs() {
+				// In local gateway no-overlay mode, ingress to local UDN pods
+				// must go through OVN, so prevent Linux from creating a
+				// connected route that bypasses the UDN cluster router.
+				addrFlags = unix.IFA_F_NOPREFIXROUTE
+			}
+			existingIP, err := util.LinkAddrGetIPNet(mpLink, ip.IP)
+			if err != nil {
+				return fmt.Errorf("failed to find management port IP from subnet %s on netdevice %s for network %s, err: %v",
+					subnet, mpLink.Attrs().Name, udng.GetNetworkName(), err)
+			}
+			if existingIP != nil && existingIP.String() != ip.String() {
+				err = util.LinkAddrDel(mpLink, existingIP)
+				if err != nil {
+					return fmt.Errorf("failed to delete stale management port IP %s from netdevice %s for network %s, err: %v",
+						existingIP, mpLink.Attrs().Name, udng.GetNetworkName(), err)
+				}
+				existingIP = nil
+			}
+			if existingIP == nil {
+				err = util.LinkAddrAdd(mpLink, ip, addrFlags, 0, 0)
 			}
 			if err != nil {
 				return fmt.Errorf("failed to add management port IP from subnet %s to netdevice %s for network %s, err: %v",
@@ -440,6 +466,12 @@ func (udng *UserDefinedNetworkGateway) addUDNManagementPortIPs(mpLink netlink.Li
 		}
 	}
 	return nil
+}
+
+func (udng *UserDefinedNetworkGateway) useNoPrefixRouteManagementPortIPs() bool {
+	return config.Gateway.Mode == config.GatewayModeLocal &&
+		udng.TopologyType() == types.Layer3Topology &&
+		udng.Transport() == types.NetworkTransportNoOverlay
 }
 
 // computeRoutesForUDN returns a list of routes programmed into a given UDN's VRF
@@ -508,6 +540,8 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 	//   169.254.0.3 via 100.100.1.1 dev ovn-k8s-mp1
 	// For Layer3 networks add the cluster subnet route
 	//   100.100.0.0/16 via 100.100.1.1 dev ovn-k8s-mp1
+	// Local-gateway no-overlay Layer3 uses the node-local subnet instead:
+	//   100.100.1.0/24 via 100.100.1.1 dev ovn-k8s-mp1
 	networkLocalSubnets, err := udng.getLocalSubnets()
 	if err != nil {
 		return nil, err
@@ -516,6 +550,17 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 		gwIP := udng.GetNodeGatewayIP(localSubnet)
 		if gwIP == nil {
 			return nil, fmt.Errorf("unable to find gateway IP for network %s, subnet: %s", udng.GetNetworkName(), localSubnet)
+		}
+		if udng.useNoPrefixRouteManagementPortIPs() {
+			// The management port address uses noprefixroute in local gateway
+			// no-overlay mode. Add a host route to the UDN gateway before
+			// installing routes through it.
+			retVal = append(retVal, netlink.Route{
+				LinkIndex: mpLink.Attrs().Index,
+				Dst:       util.GetIPNetFullMaskFromIP(gwIP.IP),
+				Scope:     netlink.SCOPE_LINK,
+				Table:     udng.vrfTableId,
+			})
 		}
 		etpLocalMasqueradeIP := config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP
 		if utilnet.IsIPv6CIDR(localSubnet) {
@@ -531,6 +576,15 @@ func (udng *UserDefinedNetworkGateway) computeRoutesForUDN(mpLink netlink.Link) 
 			Table: udng.vrfTableId,
 		})
 		if udng.NetInfo.TopologyType() == types.Layer3Topology {
+			if udng.useNoPrefixRouteManagementPortIPs() {
+				retVal = append(retVal, netlink.Route{
+					LinkIndex: mpLink.Attrs().Index,
+					Dst:       localSubnet,
+					Gw:        gwIP.IP,
+					Table:     udng.vrfTableId,
+				})
+				continue
+			}
 			for _, clusterSubnet := range udng.Subnets() {
 				if clusterSubnet.CIDR.Contains(gwIP.IP) {
 					retVal = append(retVal, netlink.Route{
@@ -807,6 +861,21 @@ func (udng *UserDefinedNetworkGateway) doReconcile() error {
 	return nil
 }
 
+func dpuUDNVRFRouteTableID(networkID int) int {
+	return dpuUDNVRFRouteTableIDStart + networkID
+}
+
+func (udng *UserDefinedNetworkGateway) ensureDPUVRF() error {
+	vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
+	vrfTableID := dpuUDNVRFRouteTableID(udng.GetNetworkID())
+	udng.vrfTableId = vrfTableID
+	if err := udng.vrfManager.AddVRF(vrfDeviceName, "", uint32(vrfTableID), nil); err != nil {
+		return fmt.Errorf("could not add DPU VRF %d for network %s, err: %v",
+			vrfTableID, udng.GetNetworkName(), err)
+	}
+	return nil
+}
+
 // updateUDNVRFIPRules updates IP rules for a network depending on whether the
 // network is advertised to the default VRF or not
 func (udng *UserDefinedNetworkGateway) updateUDNVRFIPRules() error {
@@ -959,7 +1028,6 @@ func (udng *UserDefinedNetworkGateway) deleteAdvertisedUDNIsolationRules() error
 }
 
 func (udng *UserDefinedNetworkGateway) updateAdvertisementStatus() {
-	vrfs := udng.GetPodNetworkAdvertisedOnNodeVRFs(udng.node.Name)
-	udng.isNetworkAdvertised = len(vrfs) > 0
-	udng.isNetworkAdvertisedToDefaultVRF = slices.Contains(vrfs, types.DefaultNetworkName)
+	udng.isNetworkAdvertised = util.IsPodNetworkAdvertisedAtNode(udng.NetInfo, udng.node.Name)
+	udng.isNetworkAdvertisedToDefaultVRF = util.IsPodNetworkAdvertisedAtNodeDefaultVRF(udng.NetInfo, udng.node.Name)
 }

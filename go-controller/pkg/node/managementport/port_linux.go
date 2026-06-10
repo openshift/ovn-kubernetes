@@ -302,7 +302,7 @@ func setupManagementPortIPFamilyConfig(link netlink.Link, mpcfg *managementPortC
 				klog.Warningf("Could not remove remove stale IP neighbor entry for IP %s, on iface %s: %v", cfg.gwIP.String(), types.K8sMgmtIntfName, err)
 			}
 		}
-		err = util.LinkNeighAdd(link, cfg.gwIP, mpcfg.gwMAC)
+		err = util.LinkNeighSet(link, cfg.gwIP, mpcfg.gwMAC)
 	}
 	if err != nil {
 		return err

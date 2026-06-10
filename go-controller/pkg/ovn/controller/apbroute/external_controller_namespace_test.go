@@ -200,9 +200,8 @@ var _ = Describe("OVN External Gateway namespace", func() {
 		annotatedPodGW = &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "annotatedPod", Namespace: namespaceGW.Name,
 				Labels: map[string]string{"name": "annotatedPod"},
-				Annotations: map[string]string{"k8s.ovn.org/routing-namespaces": "test",
-					"k8s.ovn.org/routing-network": "",
-					nettypes.NetworkStatusAnnot:   fmt.Sprintf(network_status, annotatedPodIP)},
+				Annotations: map[string]string{
+					nettypes.NetworkStatusAnnot: fmt.Sprintf(network_status, annotatedPodIP)},
 			},
 			Status: corev1.PodStatus{
 				PodIPs: []corev1.PodIP{{IP: annotatedPodIP}},
