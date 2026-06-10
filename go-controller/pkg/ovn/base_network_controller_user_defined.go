@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
@@ -407,7 +410,7 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 		if lsp != nil {
 			portUUID = lsp.UUID
 		}
-		addOps, err := bsnc.addPodToNamespaceForUserDefinedNetwork(pod.Namespace, podAnnotation.IPs, portUUID)
+		addOps, err := bsnc.addPodToNamespaceForUserDefinedNetwork(pod.Namespace, portUUID)
 		if err != nil {
 			return err
 		}
@@ -488,13 +491,6 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 
 		// handle remote pod clean up but only do this one time
 		if !hasLogicalPort && !alreadyProcessed {
-			if bsnc.doesNetworkRequireIPAM() &&
-				// address set is for network policy only. So either multi network policy is enabled or network
-				// segmentation, and it is a primary UDN (regular netpol)
-				(util.IsMultiNetworkPoliciesSupportEnabled() || (util.IsNetworkSegmentationSupportEnabled() && bsnc.IsPrimaryNetwork())) {
-				return bsnc.removeRemoteZonePodFromNamespaceAddressSet(pod)
-			}
-
 			// except for localnet networks, continue the delete flow in case a node just
 			// became remote where we might still need to cleanup. On L3 networks
 			// the node switch is removed so there is no need to do this.
@@ -707,7 +703,7 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 }
 
 // addPodToNamespaceForUserDefinedNetwork returns the ops needed to add pod's IP to the namespace's address set.
-func (bsnc *BaseUserDefinedNetworkController) addPodToNamespaceForUserDefinedNetwork(ns string, ips []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
+func (bsnc *BaseUserDefinedNetworkController) addPodToNamespaceForUserDefinedNetwork(ns string, portUUID string) ([]ovsdb.Operation, error) {
 	var err error
 	nsInfo, nsUnlock, err := bsnc.ensureNamespaceLockedForUserDefinedNetwork(ns, true, nil)
 	if err != nil {
@@ -716,7 +712,7 @@ func (bsnc *BaseUserDefinedNetworkController) addPodToNamespaceForUserDefinedNet
 
 	defer nsUnlock()
 
-	return bsnc.addLocalPodToNamespaceLocked(nsInfo, ips, portUUID)
+	return bsnc.addLocalPodToNamespaceLocked(nsInfo, portUUID)
 }
 
 // AddNamespaceForUserDefinedNetwork creates corresponding addressset in ovn db for User Defined Network
@@ -733,14 +729,6 @@ func (bsnc *BaseUserDefinedNetworkController) AddNamespaceForUserDefinedNetwork(
 		return fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 	nsUnlock()
-	// Enqueue the UDN namespace into network policy controller if it needs to be
-	// processed by network policy peer namespace handlers.
-	if bsnc.IsPrimaryNetwork() {
-		err = bsnc.requeuePeerNamespace(ns)
-		if err != nil {
-			return fmt.Errorf("failed to requeue peer namespace %s: %v", ns.Name, err)
-		}
-	}
 	return nil
 }
 
@@ -748,7 +736,7 @@ func (bsnc *BaseUserDefinedNetworkController) AddNamespaceForUserDefinedNetwork(
 // and returns it with its mutex locked.
 // ns is the name of the namespace, while namespace is the optional k8s namespace object
 func (bsnc *BaseUserDefinedNetworkController) ensureNamespaceLockedForUserDefinedNetwork(ns string, readOnly bool, namespace *corev1.Namespace) (*namespaceInfo, func(), error) {
-	return bsnc.ensureNamespaceLockedCommon(ns, readOnly, namespace, bsnc.getAllNamespacePodAddresses, bsnc.configureNamespaceCommon)
+	return bsnc.ensureNamespaceLockedCommon(ns, readOnly, namespace, bsnc.configureNamespaceCommon)
 }
 
 func (bsnc *BaseUserDefinedNetworkController) updateNamespaceForUserDefinedNetwork(old, newer *corev1.Namespace) error {
@@ -903,8 +891,11 @@ func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Op
 		return ops, fmt.Errorf("failed to get ops to delete port groups owned by controller %s", controllerName)
 	}
 
+	// Skip PodSelector address sets - those are owned by the shared AddressSetManager
+	// and cleaned up via AddressSetManager.CleanupForController in the controller's cleanup().
 	asPredicate := func(item *nbdb.AddressSet) bool {
-		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName
+		return item.ExternalIDs[libovsdbops.OwnerControllerKey.String()] == controllerName &&
+			item.ExternalIDs[libovsdbops.OwnerTypeKey.String()] != libovsdbops.PodSelectorOwnerType
 	}
 	ops, err = libovsdbops.DeleteAddressSetsWithPredicateOps(nbClient, ops, asPredicate)
 	if err != nil {

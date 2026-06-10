@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package types
 
 import (
@@ -39,6 +42,18 @@ func IsSuppressedError(err error) bool {
 			}
 		}
 		return suppress
+	}
+	if unwrapper, ok := err.(interface{ Unwrap() []error }); ok {
+		errs := unwrapper.Unwrap()
+		if len(errs) == 0 {
+			return false
+		}
+		for _, e := range errs {
+			if !IsSuppressedError(e) {
+				return false
+			}
+		}
+		return true
 	}
 	return errors.As(err, &suppressedError)
 }

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 
 # Currently supported platforms of multi-arch images are: amd64 arm64
 LINUX_ARCH=(amd64 arm64)

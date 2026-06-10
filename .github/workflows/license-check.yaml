@@ -1,0 +1,19 @@
+name: License Header Check
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-license-header:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: License Eye Header
+        uses: apache/skywalking-eyes@v0.8.0

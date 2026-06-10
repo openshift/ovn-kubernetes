@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package endpointslicemirror
 
 import (
@@ -94,7 +97,7 @@ func (c *Controller) enqueueEndpointSlice(obj interface{}) {
 		}
 	}
 	if key := c.getDefaultEndpointSliceKey(eps); key != "" {
-		c.queue.AddRateLimited(key)
+		c.queue.Add(key)
 	}
 }
 
@@ -256,19 +259,8 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		return nil
 	}
 
-	klog.Infof("Processing %s/%s EndpointSlice in %q primary network", namespace, name, namespacePrimaryNetwork.GetNetworkName())
-
-	nadKey, err := c.networkManager.GetPrimaryNADForNamespace(namespace)
-	if err != nil {
-		return err
-	}
-	if nadKey == types.DefaultNetworkName {
-		return fmt.Errorf("no primary NAD found for namespace %s", namespace)
-	}
-	if networkName := c.networkManager.GetNetworkNameForNADKey(nadKey); networkName == "" || networkName != namespacePrimaryNetwork.GetNetworkName() {
-		return fmt.Errorf("primary NAD %s does not match network %s", nadKey, namespacePrimaryNetwork.GetNetworkName())
-	}
-
+	// Fetch the default and mirrored EndpointSlices first so we can do a cheap
+	// resource-version check before the more expensive NAD lookups.
 	defaultEndpointSlice, err := c.endpointSliceLister.EndpointSlices(namespace).Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return err
@@ -327,6 +319,20 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 		}
 	}
 
+	// We have actual work to do — resolve the NAD for the primary network.
+	klog.Infof("Processing %s/%s EndpointSlice in %q primary network", namespace, name, namespacePrimaryNetwork.GetNetworkName())
+
+	nadKey, err := c.networkManager.GetPrimaryNADForNamespace(namespace)
+	if err != nil {
+		return err
+	}
+	if nadKey == types.DefaultNetworkName {
+		return fmt.Errorf("no primary NAD found for namespace %s", namespace)
+	}
+	if networkName := c.networkManager.GetNetworkNameForNADKey(nadKey); networkName == "" || networkName != namespacePrimaryNetwork.GetNetworkName() {
+		return fmt.Errorf("primary NAD %s does not match network %s", nadKey, namespacePrimaryNetwork.GetNetworkName())
+	}
+
 	currentMirror, err := c.mirrorEndpointSlice(mirroredEndpointSlice, defaultEndpointSlice, namespacePrimaryNetwork, nadKey)
 	if err != nil {
 		return err
@@ -334,6 +340,10 @@ func (c *Controller) syncDefaultEndpointSlice(ctx context.Context, key string) e
 
 	if !reflect.DeepEqual(currentMirror, mirroredEndpointSlice) {
 		if currentMirror.Name == "" {
+			if len(currentMirror.Endpoints) == 0 {
+				klog.V(5).Infof("Skipping creation of empty mirrored EndpointSlice for: %s", cache.MetaObjectToName(defaultEndpointSlice))
+				return nil
+			}
 			klog.Infof("Creating the mirrored EndpointSlice for: %s", cache.MetaObjectToName(defaultEndpointSlice))
 			_, err := c.kubeClient.DiscoveryV1().EndpointSlices(namespace).Create(ctx, currentMirror, metav1.CreateOptions{})
 			return err

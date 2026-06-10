@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package cni
 
 import (
@@ -15,7 +18,7 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
+	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -85,7 +88,7 @@ var _ = Describe("Network Segmentation", func() {
 			SandboxID:    "824bceff24af3",
 			Netns:        "ns",
 			IfName:       "eth0",
-			CNIConf: &types.NetConf{
+			CNIConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{},
 				DeviceID: "",
 			},

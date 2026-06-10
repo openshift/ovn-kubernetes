@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package label
 
 // overrideMap is used to rewrite label key and/or values. For example, if you want to rewrite Feature to a downstream specific name,
