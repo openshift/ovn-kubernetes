@@ -1231,6 +1231,28 @@ func GetOVNMetrics(oc *exutil.CLI, url string) string {
 	return metricsLog
 }
 
+// ExtractMetricValue reads a metrics file and returns the value (second field) from the Nth line
+// matching metricName. This replaces shell pipelines like: cat file | grep metric | awk 'NR==N{print $2}'
+func ExtractMetricValue(filePath, metricName string, matchIndex int) string {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, metricName) {
+			count++
+			if count == matchIndex {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					return fields[1]
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func CheckIPsec(oc *exutil.CLI) string {
 	output, err := oc.WithoutNamespace().AsAdmin().Run("get").Args("network.operator", "cluster", "-o=jsonpath={.spec.defaultNetwork.ovnKubernetesConfig.ipsecConfig.mode}").Output()
 	o.Expect(err).NotTo(o.HaveOccurred())

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -175,8 +174,7 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		var metricNumber string
 		metricsErr := wait.Poll(5*time.Second, 60*time.Second, func() (bool, error) {
 			output := otputils.GetOVNMetrics(oc, prometheusURL)
-			metricOutput, _ := exec.Command("bash", "-c", "cat "+output+" | grep openshift_unidle_events_total | awk 'NR==3{print $2}'").Output()
-			metricNumber = strings.TrimSpace(string(metricOutput))
+			metricNumber = strings.TrimSpace(otputils.ExtractMetricValue(output, "openshift_unidle_events_total", 3))
 			e2e.Logf("The output of openshift_unidle_events metrics is : %v", metricNumber)
 			if metricNumber != "" {
 				return true, nil
@@ -221,12 +219,17 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		})
 		o.Expect(checkErr).NotTo(o.HaveOccurred(), "Timed out waiting for curl to %s to succeed", dstURL)
 
+		baselineValue, _ := strconv.Atoi(metricNumber)
 		metricsOutput := wait.Poll(5*time.Second, 60*time.Second, func() (bool, error) {
 			output := otputils.GetOVNMetrics(oc, prometheusURL)
-			metricOutput, _ := exec.Command("bash", "-c", "cat "+output+" | grep openshift_unidle_events_total | awk 'NR==3{print $2}'").Output()
-			metricValue := strings.TrimSpace(string(metricOutput))
+			metricValue := strings.TrimSpace(otputils.ExtractMetricValue(output, "openshift_unidle_events_total", 3))
 			e2e.Logf("The output of openshift_unidle_events metrics is : %v", metricValue)
-			if !strings.Contains(metricValue, metricNumber) {
+			currentValue, err := strconv.Atoi(metricValue)
+			if err != nil {
+				e2e.Logf("Can't parse metric value %q as integer: %v, try again", metricValue, err)
+				return false, nil
+			}
+			if currentValue > baselineValue {
 				return true, nil
 			}
 			e2e.Logf("Can't get correct metrics of openshift_unidle_events and try again")
@@ -235,7 +238,7 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(metricsOutput).NotTo(o.HaveOccurred(), "Fail to get updated metric openshift_unidle_events_total")
 	})
 
-	g.It("[OTP] 60539-Verify metrics ovs_vswitchd_interfaces_total", func() {
+	g.It("[Serial] [OTP] 60539-Verify metrics ovs_vswitchd_interfaces_total", func() {
 		var (
 			namespace           = "openshift-ovn-kubernetes"
 			metricName          = "ovs_vswitchd_interfaces_total"
@@ -271,7 +274,8 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(podReadyErr).NotTo(o.HaveOccurred(), "Waiting for pod with label name=test-pods become ready timeout after scale up")
 
 		g.By("3. Get the metrics of " + metricName + " after creating new pod on the node")
-		metricValue1Int, _ := strconv.Atoi(metricValue1)
+		metricValue1Int, parseErr := strconv.Atoi(metricValue1)
+		o.Expect(parseErr).NotTo(o.HaveOccurred(), "failed to parse baseline metric %s value %q", metricName, metricValue1)
 		expectedIncFloor := metricValue1Int + 10 - delta
 		expectedIncCeil := metricValue1Int + 10 + delta
 		e2e.Logf("The expected value of the %s is : %v to %v", metricName, expectedIncFloor, expectedIncCeil)
@@ -308,7 +312,7 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(metricDecOutput).NotTo(o.HaveOccurred(), "Fail to get metric %s after scale down", metricName)
 	})
 
-	g.It("[OTP] 60704-Verify metrics ovs_vswitchd_interface_up_wait_seconds_total", func() {
+	g.It("[Serial] [OTP] 60704-Verify metrics ovs_vswitchd_interface_up_wait_seconds_total", func() {
 		var (
 			namespace           = "openshift-ovn-kubernetes"
 			metricName          = "ovs_vswitchd_interface_up_wait_seconds_total"
@@ -355,7 +359,7 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(metricIncOutput).NotTo(o.HaveOccurred(), "Fail to get metric %s", metricName)
 	})
 
-	g.It("[OTP] 60708-Verify metrics ovnkube_resource_retry_failures_total", func() {
+	g.It("[Serial] [Slow] [OTP] 60708-Verify metrics ovnkube_resource_retry_failures_total", func() {
 		var (
 			namespace           = "openshift-ovn-kubernetes"
 			metricName          = "ovnkube_resource_retry_failures_total"
@@ -407,7 +411,8 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(checkErr).NotTo(o.HaveOccurred(), "fail to get expected log in pod %v", ovnMasterPodName)
 
 		g.By("4. Get the metrics of " + metricName + " again when resource retry failure occur")
-		metricValue1Int, _ := strconv.Atoi(metricValue1)
+		metricValue1Int, parseErr := strconv.Atoi(metricValue1)
+		o.Expect(parseErr).NotTo(o.HaveOccurred(), "failed to parse baseline metric %s value %q", metricName, metricValue1)
 		expectedIncValue := strconv.Itoa(metricValue1Int + 1)
 		e2e.Logf("The expected value of the %s is : %v", metricName, expectedIncValue)
 		metricIncOutput := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
