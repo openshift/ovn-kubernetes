@@ -33,6 +33,7 @@ type LogicalRouterPolicy struct {
 	Nexthop     *string                   `ovsdb:"nexthop"`
 	Nexthops    []string                  `ovsdb:"nexthops"`
 	Options     map[string]string         `ovsdb:"options"`
+	OutputPort  *string                   `ovsdb:"output_port"`
 	Priority    int                       `ovsdb:"priority"`
 }
 
@@ -230,6 +231,28 @@ func equalLogicalRouterPolicyOptions(a, b map[string]string) bool {
 	return true
 }
 
+func (a *LogicalRouterPolicy) GetOutputPort() *string {
+	return a.OutputPort
+}
+
+func copyLogicalRouterPolicyOutputPort(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalLogicalRouterPolicyOutputPort(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
 func (a *LogicalRouterPolicy) GetPriority() int {
 	return a.Priority
 }
@@ -243,6 +266,7 @@ func (a *LogicalRouterPolicy) DeepCopyInto(b *LogicalRouterPolicy) {
 	b.Nexthop = copyLogicalRouterPolicyNexthop(a.Nexthop)
 	b.Nexthops = copyLogicalRouterPolicyNexthops(a.Nexthops)
 	b.Options = copyLogicalRouterPolicyOptions(a.Options)
+	b.OutputPort = copyLogicalRouterPolicyOutputPort(a.OutputPort)
 }
 
 func (a *LogicalRouterPolicy) DeepCopy() *LogicalRouterPolicy {
@@ -271,6 +295,7 @@ func (a *LogicalRouterPolicy) Equals(b *LogicalRouterPolicy) bool {
 		equalLogicalRouterPolicyNexthop(a.Nexthop, b.Nexthop) &&
 		equalLogicalRouterPolicyNexthops(a.Nexthops, b.Nexthops) &&
 		equalLogicalRouterPolicyOptions(a.Options, b.Options) &&
+		equalLogicalRouterPolicyOutputPort(a.OutputPort, b.OutputPort) &&
 		a.Priority == b.Priority
 }
 
