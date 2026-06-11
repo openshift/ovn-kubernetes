@@ -545,7 +545,6 @@ skip_ovn_image_build_load() {
 
 create_ovn_kubernetes() {
     cd ${DIR}/../helm/ovn-kubernetes
-    label_ovn_single_node_zones
     value_file="values-single-node-zone.yaml"
     if [ "${DPU_MODE}" == "dpu" ]; then
       value_file="values-single-node-zone-dpu.yaml"

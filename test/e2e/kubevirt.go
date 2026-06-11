@@ -1481,39 +1481,8 @@ passwd:
 			namespace = fr.Namespace.Name
 			workerNodeList, err := fr.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{LabelSelector: labels.FormatLabels(map[string]string{"node-role.kubernetes.io/worker": ""})})
 			Expect(err).NotTo(HaveOccurred())
-			nodesByOVNZone := map[string][]corev1.Node{}
-			for _, workerNode := range workerNodeList.Items {
-				ovnZone, ok := workerNode.Labels["k8s.ovn.org/zone-name"]
-				if !ok {
-					ovnZone = "global"
-				}
-				_, ok = nodesByOVNZone[ovnZone]
-				if !ok {
-					nodesByOVNZone[ovnZone] = []corev1.Node{}
-				}
-				nodesByOVNZone[ovnZone] = append(nodesByOVNZone[ovnZone], workerNode)
-			}
-
-			selectedNodes = []corev1.Node{}
-			// If there is one global zone select the first three for the
-			// migration
-			if len(nodesByOVNZone) == 1 {
-				selectedNodes = []corev1.Node{
-					workerNodeList.Items[0],
-					workerNodeList.Items[1],
-					workerNodeList.Items[2],
-				}
-				// Otherwise select a pair of nodes from different OVN zones
-			} else {
-				for _, nodes := range nodesByOVNZone {
-					selectedNodes = append(selectedNodes, nodes[0])
-					if len(selectedNodes) == 3 {
-						break // we want just three of them
-					}
-				}
-			}
-
-			Expect(selectedNodes).To(HaveLen(3), "at least three nodes in different zones are needed for interconnect scenarios")
+			Expect(len(workerNodeList.Items)).To(BeNumerically(">=", 3), "at least three worker nodes are needed for interconnect live-migration scenarios")
+			selectedNodes = workerNodeList.Items[:3]
 
 			// Label the selected nodes with the generated namespaces, so we can
 			// configure VM nodeSelector with it and live migration will take only

@@ -469,11 +469,6 @@ Before starting OVN-Kubernetes, work around an issue where `br-int` is added by 
 ovs-vsctl add-br br-int
 ~~~
 
-Single-node-zone interconnect requires every node to be labeled with its zone name **before** the Helm install:
-~~~
-for n in node1 node2 node3; do kubectl label node $n k8s.ovn.org/zone-name=$n --overwrite; done
-~~~
-
 Next, install OVN-Kubernetes with the Helm chart, pointing `global.image.repository` at the image you just pushed (or use the public `ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu` image to skip the build steps above). If `helm` isn't already on the master, install it with `curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash`.
 ~~~
 cd $HOME/work/src/github.com/ovn-kubernetes/ovn-kubernetes/helm/ovn-kubernetes

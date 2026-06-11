@@ -1927,13 +1927,6 @@ remove_no_schedule_taint() {
   done
 }
 
-label_ovn_single_node_zones() {
-  KIND_NODES=$(kind_get_nodes)
-  for n in $KIND_NODES; do
-    kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
-  done
-}
-
 OPENSSL=""
 set_openssl_binary() {
   for s in openssl openssl3; do
@@ -1958,7 +1951,6 @@ scale_kind_cluster() {
   # change this to https://github.com/lobuhi/kindscaler once PR https://github.com/lobuhi/kindscaler/pull/1 is accepted
   git clone https://github.com/trozet/kindscaler /tmp/kindscaler
   /tmp/kindscaler/kindscaler.sh ${KIND_CLUSTER_NAME} -r worker -c ${KIND_NUM_WORKER}
-  label_ovn_single_node_zones
   if [ "$OVN_IMAGE" == local ]; then
     set_ovn_image
   fi
