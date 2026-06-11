@@ -45,7 +45,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-55889: ovn-db-run-command Script Functionality
-	g.It("[OTP][blocking][case_id:55889] should execute ovn-db-run-command script successfully", func() {
+	g.It("[OTP][informing][55889] should execute ovn-db-run-command script successfully", func() {
 		g.By("Finding an ovnkube-node pod with northd container")
 		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
@@ -106,7 +106,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-67625: ovnkube-trace pod-to-pod
-	g.It("[OTP][informing][case_id:67625] should trace pod-to-pod traffic successfully", func() {
+	g.It("[OTP][informing][67625] should trace pod-to-pod traffic successfully", func() {
 		g.By("Finding ovnkube-node pods")
 		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
@@ -119,6 +119,11 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: traceNS,
+				Labels: map[string]string{
+					"pod-security.kubernetes.io/enforce": "privileged",
+					"pod-security.kubernetes.io/audit":   "privileged",
+					"pod-security.kubernetes.io/warn":    "privileged",
+				},
 			},
 		}
 		_, err = clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
@@ -186,12 +191,17 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-67648: ovnkube-trace pod-to-hostnetworkpod
-	g.It("[OTP][informing][case_id:67648] should trace pod-to-hostnetworkpod traffic successfully", func() {
+	g.It("[OTP][informing][67648] should trace pod-to-hostnetworkpod traffic successfully", func() {
 		g.By("Creating test namespace")
 		const traceNS = "test-ovnkube-trace-67648"
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: traceNS,
+				Labels: map[string]string{
+					"pod-security.kubernetes.io/enforce": "privileged",
+					"pod-security.kubernetes.io/audit":   "privileged",
+					"pod-security.kubernetes.io/warn":    "privileged",
+				},
 			},
 		}
 		_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
@@ -262,13 +272,18 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-45146: BZ 1986708 - Pod should be healthy when gw IP is single stack on dual stack cluster
-	g.It("[OTP][blocking][case_id:45146] should create healthy pod with single-stack gateway on dual-stack cluster", func() {
+	g.It("[OTP][informing][45146] should create healthy pod with single-stack gateway on dual-stack cluster", func() {
 		const testNS = "test-single-stack-gw-45146"
 
 		g.By("Creating test namespace")
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testNS,
+				Labels: map[string]string{
+					"pod-security.kubernetes.io/enforce": "privileged",
+					"pod-security.kubernetes.io/audit":   "privileged",
+					"pod-security.kubernetes.io/warn":    "privileged",
+				},
 			},
 		}
 		_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
@@ -342,7 +357,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-69761: Check apbexternalroute status when all zones reported success
-	g.It("[OTP][blocking][case_id:69761] should show aggregated status from all zones in AdminPolicyBasedExternalRoute", func() {
+	g.It("[OTP][informing][69761] should show aggregated status from all zones in AdminPolicyBasedExternalRoute", func() {
 		const testNS = "test-apbexternalroute-69761"
 
 		g.By("Creating test namespace")

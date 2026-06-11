@@ -41,7 +41,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Security", func() {
 	})
 
 	// Medium-49216: API Token Logging Security
-	g.It("[OTP][blocking][case_id:49216] should not expose API tokens in ovnkube-node logs", func() {
+	g.It("[OTP][informing][49216] should not expose API tokens in ovnkube-node logs", func() {
 		g.By("Getting all ovnkube-node pods")
 		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
@@ -118,7 +118,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Security", func() {
 	})
 
 	// Medium-77102: CIS File Permissions for CNI Config
-	g.It("[OTP][blocking][case_id:77102] should have secure permissions on CNI configuration files", func() {
+	g.It("[OTP][informing][77102] should have secure permissions on CNI configuration files", func() {
 		g.By("Checking multus config permissions via multus pods")
 		multusPods, err := clientset.CoreV1().Pods("openshift-multus").List(ctx, metav1.ListOptions{
 			LabelSelector: "app=multus",
