@@ -12,6 +12,10 @@ permissions:
   issues: write
   actions: read
 
+concurrency:
+  group: perf-report-${{ github.event.workflow_run.head_branch || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   process-performance-results:
     name: Process Performance Results
