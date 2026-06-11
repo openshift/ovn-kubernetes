@@ -986,6 +986,10 @@ func (c *Controller) repairNode() error {
 	}
 	parsedNodeEIPConfig, err := c.getNodeEgressIPConfig()
 	if err != nil {
+		if ovnconfig.OvnKubeNode.Mode == types.NodeModeDPUHost && util.IsAnnotationNotSetError(err) {
+			klog.Infof("DPUHost mode: %s annotation not yet set by DPU, deferring egress IP repair", util.OvnNodeIfAddr)
+			return nil
+		}
 		return fmt.Errorf("failed to get node egress IP config: %v", err)
 	}
 	for _, egressIP := range egressIPs {
