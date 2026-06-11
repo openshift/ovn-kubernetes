@@ -98,7 +98,7 @@ RUN git log -n 1
 # Stage to download OVN RPMs from koji #
 ########################################
 FROM quay.io/fedora/fedora:43 AS kojidownloader
-ARG ovnver=ovn-25.09.2-82.fc43
+ARG ovnver=ovn-26.03.1-50.fc43
 
 USER root
 
