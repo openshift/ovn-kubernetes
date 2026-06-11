@@ -17,7 +17,7 @@ import (
 	e2eoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 )
 
-var _ = g.Describe("[sig-network][Suite:openshift/ovn-kubernetes][Suite:openshift/conformance/serial] SDN network segmentation policy", func() {
+var _ = g.Describe("[sig-network][Suite:openshift/conformance/serial] SDN network segmentation policy", func() {
 	var (
 		oc = exutil.NewCLI("networking-netseg-policy")
 	)
