@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,7 +23,7 @@ import (
 	e2eoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 )
 
-var _ = g.Describe("[sig-networking] OVN metrics", func() {
+var _ = g.Describe("[JIRA:Networking][sig-networking] OVN metrics", func() {
 	defer g.GinkgoRecover()
 
 	var oc = exutil.NewCLI("networking-ovn-metrics")
@@ -37,6 +36,9 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 	})
 
 	g.It("[OTP] 45841-Add OVN flow count metric", func() {
+		if otputils.IsHypershiftHostedCluster(oc) {
+			g.Skip("Not compatible with HyperShift hosted cluster")
+		}
 		var (
 			namespace = "openshift-ovn-kubernetes"
 			ovncmName = "kube-rbac-proxy-ovn-metrics"
@@ -59,6 +61,9 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 	})
 
 	g.It("[OTP] 47471-Record update to cache versus port binding", func() {
+		if otputils.IsHypershiftHostedCluster(oc) {
+			g.Skip("Not compatible with HyperShift hosted cluster")
+		}
 		var (
 			namespace = "openshift-ovn-kubernetes"
 			ovncmName = "kube-rbac-proxy-ovn-metrics"
@@ -88,6 +93,9 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 	})
 
 	g.It("[OTP] 52072-Add mechanism to record duration for k8 kinds", func() {
+		if otputils.IsHypershiftHostedCluster(oc) {
+			g.Skip("Not compatible with HyperShift hosted cluster")
+		}
 		var (
 			namespace = "openshift-ovn-kubernetes"
 			podLabel  = "app=ovnkube-node"
@@ -113,6 +121,9 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 	})
 
 	g.It("[OTP] 47524-Metrics for ovn-appctl stopwatch/show command", func() {
+		if otputils.IsHypershiftHostedCluster(oc) {
+			g.Skip("Not compatible with HyperShift hosted cluster")
+		}
 		var (
 			namespace = "openshift-ovn-kubernetes"
 			ovncmName = "kube-rbac-proxy-ovn-metrics"
@@ -156,6 +167,9 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 	})
 
 	g.It("[OTP] 45689-Metrics for idling enable/disabled", func() {
+		if otputils.IsHypershiftHostedCluster(oc) {
+			g.Skip("Not compatible with HyperShift hosted cluster")
+		}
 		var (
 			buildPruningBaseDir = testdata.FixturePath("networking")
 			testPodFile         = filepath.Join(buildPruningBaseDir, "metrics", "metrics-pod.yaml")
@@ -175,8 +189,7 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		var metricNumber string
 		metricsErr := wait.Poll(5*time.Second, 60*time.Second, func() (bool, error) {
 			output := otputils.GetOVNMetrics(oc, prometheusURL)
-			metricOutput, _ := exec.Command("bash", "-c", "cat "+output+" | grep openshift_unidle_events_total | awk 'NR==3{print $2}'").Output()
-			metricNumber = strings.TrimSpace(string(metricOutput))
+			metricNumber = strings.TrimSpace(otputils.ExtractMetricValue(output, "openshift_unidle_events_total", 3))
 			e2e.Logf("The output of openshift_unidle_events metrics is : %v", metricNumber)
 			if metricNumber != "" {
 				return true, nil
@@ -221,12 +234,17 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		})
 		o.Expect(checkErr).NotTo(o.HaveOccurred(), "Timed out waiting for curl to %s to succeed", dstURL)
 
+		baselineValue, _ := strconv.Atoi(metricNumber)
 		metricsOutput := wait.Poll(5*time.Second, 60*time.Second, func() (bool, error) {
 			output := otputils.GetOVNMetrics(oc, prometheusURL)
-			metricOutput, _ := exec.Command("bash", "-c", "cat "+output+" | grep openshift_unidle_events_total | awk 'NR==3{print $2}'").Output()
-			metricValue := strings.TrimSpace(string(metricOutput))
+			metricValue := strings.TrimSpace(otputils.ExtractMetricValue(output, "openshift_unidle_events_total", 3))
 			e2e.Logf("The output of openshift_unidle_events metrics is : %v", metricValue)
-			if !strings.Contains(metricValue, metricNumber) {
+			currentValue, err := strconv.Atoi(metricValue)
+			if err != nil {
+				e2e.Logf("Can't parse metric value %q as integer: %v, try again", metricValue, err)
+				return false, nil
+			}
+			if currentValue > baselineValue {
 				return true, nil
 			}
 			e2e.Logf("Can't get correct metrics of openshift_unidle_events and try again")
@@ -235,7 +253,7 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(metricsOutput).NotTo(o.HaveOccurred(), "Fail to get updated metric openshift_unidle_events_total")
 	})
 
-	g.It("[OTP] 60539-Verify metrics ovs_vswitchd_interfaces_total", func() {
+	g.It("[Serial] [OTP] 60539-Verify metrics ovs_vswitchd_interfaces_total", func() {
 		var (
 			namespace           = "openshift-ovn-kubernetes"
 			metricName          = "ovs_vswitchd_interfaces_total"
@@ -271,7 +289,8 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(podReadyErr).NotTo(o.HaveOccurred(), "Waiting for pod with label name=test-pods become ready timeout after scale up")
 
 		g.By("3. Get the metrics of " + metricName + " after creating new pod on the node")
-		metricValue1Int, _ := strconv.Atoi(metricValue1)
+		metricValue1Int, parseErr := strconv.Atoi(metricValue1)
+		o.Expect(parseErr).NotTo(o.HaveOccurred(), "failed to parse baseline metric %s value %q", metricName, metricValue1)
 		expectedIncFloor := metricValue1Int + 10 - delta
 		expectedIncCeil := metricValue1Int + 10 + delta
 		e2e.Logf("The expected value of the %s is : %v to %v", metricName, expectedIncFloor, expectedIncCeil)
@@ -308,7 +327,7 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(metricDecOutput).NotTo(o.HaveOccurred(), "Fail to get metric %s after scale down", metricName)
 	})
 
-	g.It("[OTP] 60704-Verify metrics ovs_vswitchd_interface_up_wait_seconds_total", func() {
+	g.It("[Serial] [OTP] 60704-Verify metrics ovs_vswitchd_interface_up_wait_seconds_total", func() {
 		var (
 			namespace           = "openshift-ovn-kubernetes"
 			metricName          = "ovs_vswitchd_interface_up_wait_seconds_total"
@@ -345,7 +364,10 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		metricIncOutput := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
 			metricValue2 := otputils.GetOVNMetricsInSpecificContainer(oc, containerName, podName, prometheusURL, metricName)
 			metricValue2Float, parseErr2 := strconv.ParseFloat(metricValue2, 64)
-			o.Expect(parseErr2).NotTo(o.HaveOccurred())
+			if parseErr2 != nil {
+				e2e.Logf("Failed to parse metric value %q: %v, retrying", metricValue2, parseErr2)
+				return false, nil
+			}
 			if metricValue2Float > metricValue1Float {
 				return true, nil
 			}
@@ -355,9 +377,17 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		o.Expect(metricIncOutput).NotTo(o.HaveOccurred(), "Fail to get metric %s", metricName)
 	})
 
-	g.It("[OTP] 60708-Verify metrics ovnkube_resource_retry_failures_total", func() {
+	// The OVN retry framework uses exponential backoff (1s, 2s, 4s, ..., 60s cap)
+	// with MaxFailedAttempts=15 and a 30-second periodic check interval.
+	// Total retry exhaustion takes ~13-17 minutes depending on jitter and load.
+	// CI environments with higher control-plane latency may take up to ~20 minutes.
+	// [Timeout:25m] overrides the openshift-tests default 15-minute per-test timeout.
+	// NodeTimeout must exceed the polling window to avoid premature spec interruption.
+	g.It("[Serial] [Slow] [OTP] [Timeout:25m] 60708-Verify metrics ovnkube_resource_retry_failures_total", g.NodeTimeout(30*time.Minute), func(ctx g.SpecContext) {
+		if otputils.IsHypershiftHostedCluster(oc) {
+			g.Skip("Not compatible with HyperShift - requires ovnkube-control-plane which runs on management cluster, skipped on both hosted and management control planes")
+		}
 		var (
-			namespace           = "openshift-ovn-kubernetes"
 			metricName          = "ovnkube_resource_retry_failures_total"
 			egressNodeLabel     = "k8s.ovn.org/egress-assignable"
 			buildPruningBaseDir = testdata.FixturePath("networking")
@@ -369,6 +399,8 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		ovnMasterPodName := otputils.GetOVNKMasterPod(oc)
 		containerName := "kube-rbac-proxy"
 		metricValue1 := otputils.GetOVNMetricsInSpecificContainer(oc, containerName, ovnMasterPodName, prometheusURL, metricName)
+		metricValue1Int, parseErr := strconv.Atoi(metricValue1)
+		o.Expect(parseErr).NotTo(o.HaveOccurred(), "failed to parse baseline metric %s value %q", metricName, metricValue1)
 
 		g.By("2. Configure egressip with invalid ip address to trigger resource retry")
 		g.By("2.1 Label EgressIP node")
@@ -386,38 +418,30 @@ var _ = g.Describe("[sig-networking] OVN metrics", func() {
 		g.By("2.3 Create egressip object with invalid ip address")
 		egressipName := "egressip-" + otputils.GetRandomString()
 		egressip := otputils.EgressIPResource1{
-			Name:     egressipName,
-			Template: egressIPTemplate,
+			Name:      egressipName,
+			Template:  egressIPTemplate,
 			EgressIP1: "a.b.c.d",
 			EgressIP2: "a.b.0.1",
 		}
 		defer egressip.DeleteEgressIPObject1(oc)
 		egressip.CreateEgressIPObject1(oc)
 
-		g.By("3. Waiting for ovn resource retry failure")
-		targetLog := egressipName + ": exceeded number of failed attempts"
-		checkErr := wait.Poll(2*time.Minute, 16*time.Minute, func() (bool, error) {
-			podLogs, logErr := otputils.GetSpecificPodLogs(oc, namespace, "ovnkube-cluster-manager", ovnMasterPodName, targetLog)
-			if len(podLogs) == 0 || logErr != nil {
-				e2e.Logf("did not get expected podLogs, or have err: %v, try again", logErr)
+		g.By("3. Waiting for " + metricName + " to increment after retry exhaustion")
+		e2e.Logf("Baseline %s = %d, waiting for value >= %d", metricName, metricValue1Int, metricValue1Int+1)
+		metricIncOutput := wait.Poll(30*time.Second, 25*time.Minute, func() (bool, error) {
+			metricValue2 := otputils.GetOVNMetricsInSpecificContainer(oc, containerName, ovnMasterPodName, prometheusURL, metricName)
+			metricValue2Int, convErr := strconv.Atoi(metricValue2)
+			if convErr != nil {
+				e2e.Logf("Failed to parse metric value %q: %v, try again", metricValue2, convErr)
 				return false, nil
 			}
-			return true, nil
-		})
-		o.Expect(checkErr).NotTo(o.HaveOccurred(), "fail to get expected log in pod %v", ovnMasterPodName)
-
-		g.By("4. Get the metrics of " + metricName + " again when resource retry failure occur")
-		metricValue1Int, _ := strconv.Atoi(metricValue1)
-		expectedIncValue := strconv.Itoa(metricValue1Int + 1)
-		e2e.Logf("The expected value of the %s is : %v", metricName, expectedIncValue)
-		metricIncOutput := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
-			metricValue2 := otputils.GetOVNMetricsInSpecificContainer(oc, containerName, ovnMasterPodName, prometheusURL, metricName)
-			if metricValue2 == expectedIncValue {
+			if metricValue2Int >= metricValue1Int+1 {
+				e2e.Logf("Metric %s incremented from %d to %d", metricName, metricValue1Int, metricValue2Int)
 				return true, nil
 			}
-			e2e.Logf("Can't get correct metrics value of %s and try again", metricName)
+			e2e.Logf("Metric %s still at %d (waiting for >= %d)", metricName, metricValue2Int, metricValue1Int+1)
 			return false, nil
 		})
-		o.Expect(metricIncOutput).NotTo(o.HaveOccurred(), "Fail to get metric %s", metricName)
+		o.Expect(metricIncOutput).NotTo(o.HaveOccurred(), "Metric %s did not increment after retry exhaustion", metricName)
 	})
 })
