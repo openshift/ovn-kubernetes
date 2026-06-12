@@ -379,8 +379,8 @@ func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targe
 
 // wrapper logic around pokeEndpoint
 // contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
-func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
-	responses := sets.NewString()
+func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.Set[string]) bool {
+	responses := sets.New[string]()
 
 	for i := 0; i < maxTries; i++ {
 		epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, externalAddress, externalPort, "hostname")

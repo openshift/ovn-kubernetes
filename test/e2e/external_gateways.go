@@ -1638,7 +1638,7 @@ spec:
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(stdout).To(gomega.Equal(fmt.Sprintf("adminpolicybasedexternalroute.k8s.ovn.org/%s created\n", policyName)))
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gwIPs := sets.NewString(gateways...).List()
+	gwIPs := sets.List(sets.New(gateways...))
 	gomega.Eventually(func() string {
 		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1659,7 +1659,7 @@ func checkAPBExternalRouteStatus(policyName string) {
 
 func createAPBExternalRouteCRWithStaticHop(policyName, namespaceName string, bfd bool, gateways ...string) {
 	createAPBExternalRouteCRWithStaticHopAndStatus(policyName, namespaceName, bfd, "Success", gateways...)
-	gwIPs := sets.NewString(gateways...).List()
+	gwIPs := sets.List(sets.New(gateways...))
 	gomega.Eventually(func() string {
 		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
