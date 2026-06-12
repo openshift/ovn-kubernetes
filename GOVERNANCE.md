@@ -11,6 +11,9 @@ This governance explains how the project is run.
 - [Members](#members)
   - [Becoming a Member](#becoming-a-member)
   - [Removing a Member](#removing-a-member)
+- [Area Maintainers](#area-maintainers)
+  - [Becoming an Area Maintainer](#becoming-an-area-maintainer)
+  - [Removing an Area Maintainer](#removing-an-area-maintainer)
 - [Meetings](#meetings)
 - [Code of Conduct](#code-of-conduct)
 - [Security Response Team](#security-response-team)
@@ -58,6 +61,13 @@ the project succeed.
 
 The collective team of all Maintainers is known as the Maintainer Council, which
 is the governing body for the project.
+
+Maintainers have purview over all areas and Area Maintainers. They create and
+dissolve areas, appoint and remove Area Maintainers, approve changes to an
+area's file scope in `CODEOWNERS`, and may override or merge any PR regardless
+of area boundaries. Area Maintainers operate under the authority delegated by
+the Maintainers and are expected to escalate cross-area concerns or contentious
+decisions to them.
 
 ### Becoming a Maintainer
 
@@ -136,6 +146,80 @@ maintainers.
 Members who are consistently unresponsive to assigned PR reviews may be
 contacted by Maintainers to discuss their availability and commitment. If the
 pattern of non-responsiveness continues, the Member may be removed.
+
+## Area Maintainers
+
+Area Maintainers are trusted contributors who own a specific area of the
+codebase (e.g. KubeVirt, Egress IP, Services). They have the authority to review,
+approve, and merge pull requests that **exclusively** touch files within their
+area, as defined in `CODEOWNERS`. Area Maintainers are not full Maintainers —
+they cannot merge PRs that touch files outside their designated area.
+
+Area Maintainers are automatically requested as reviewers by GitHub when a PR
+modifies files matching their `CODEOWNERS` patterns. They can merge qualifying
+PRs by commenting `/area-maintainer-approved` on the PR, which triggers the
+merge bot (`.github/workflows/area-merge.yml`) to verify file scope and CI
+status before merging.
+
+### Area Maintainer Responsibilities
+
+- **Area health and ownership:** Take ownership of the overall health of the
+  area. Maintain high code quality standards, ensure technical debt is managed,
+  foster innovation without rushing changes that compromise stability, and
+  promptly bring up stuck PRs for review at community meetings.
+- **PR approval:** Review and approve pull requests within their area.
+  Ensure contributions meet quality standards and are well-tested. Area
+  Maintainers must not approve or merge their own pull requests — another
+  area maintainer, reviewer, or repo maintainer must review and approve them.
+- **Design proposals:** Own, review, and drive OKEPs (OVN-Kubernetes Enhancement
+  Proposals) related to their area.
+- **Documentation:** Ensure documentation for the area is accurate and
+  up to date.
+- **CI health:** Monitor CI for their area and address failures and flakes
+  promptly without needing to be pinged.
+- **Upstream engagement:** Attend OVN-Kubernetes upstream meetings and represent
+  the area's interests, especially for cross-area collaborations.
+- **Community support:** Help other contributors working in the area with
+  reviews, guidance, and mentoring.
+- **Communication:** Keep the Maintainers informed of important changes,
+  design decisions, and roadmap items happening in the area.
+- **Scope management:** If the area's file list in `CODEOWNERS` needs
+  expansion or contraction, file a request to the Maintainers, who have the
+  final say on the area's scope.
+
+### Becoming an Area Maintainer
+
+Area Maintainers are typically individuals who are already fulfilling the
+responsibilities listed above — the role formalizes what they are already doing.
+To become an Area Maintainer you need to demonstrate the following:
+
+- commitment to the specific area:
+  - participate in discussions, contributions, code and documentation reviews
+    related to the area for 3 months or more,
+  - perform reviews for 5 non-trivial pull requests in the area,
+  - contribute 10 non-trivial pull requests to the area and have them merged,
+- demonstrated ownership of area health: maintaining code quality, addressing
+  CI failures, keeping documentation current, and driving improvements without
+  compromising stability,
+- deep understanding of the area's code, design, and interactions with the
+  rest of the project,
+- ability to write quality code and/or documentation,
+- ability to collaborate with the team.
+
+A new Area Maintainer must be proposed by an existing Maintainer by sending a
+message to the [developer mailing list](https://groups.google.com/g/ovn-kubernetes).
+The appointment requires approval from a simple majority of the Maintainers.
+Once approved, the new Area Maintainer's GitHub username is added to the
+relevant entries in `CODEOWNERS`.
+
+### Removing an Area Maintainer
+
+Area Maintainers may resign at any time.
+
+Area Maintainers may also be removed after being inactive in their area for a
+period of 6 months or more, for failure to fulfill their responsibilities, or
+for violating the Code of Conduct. An Area Maintainer may be removed at any
+time by a simple majority vote of the Maintainers.
 
 ## Meetings
 
