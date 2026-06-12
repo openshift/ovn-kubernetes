@@ -1219,7 +1219,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	endpointsSelector := map[string]string{"servicebackend": "true"}
 
 	var endPoints []*v1.Pod
-	var nodesHostnames sets.String
+	var nodesHostnames sets.Set[string]
 	var maxTries int
 	var nodes *v1.NodeList
 	var newNodeAddresses []string
@@ -1235,7 +1235,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1315,7 +1315,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							continue
 						}
 
-						responses := sets.NewString()
+						responses := sets.New[string]()
 						valid := false
 						nodePort := nodeTCPPort
 						if protocol == "udp" {
@@ -1463,7 +1463,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							for _, protocol := range []string{"http", "udp"} {
 								port := protocolPorts[protocol]
 								ginkgo.By(fmt.Sprintf("Hitting nodeport %s/%d on %s with IP %s and reaching all the endpoints ", protocol, port, nodeName, address))
-								responses := sets.NewString()
+								responses := sets.New[string]()
 								valid := false
 								for i := 0; i < maxTries; i++ {
 									epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, address, port, "hostname")
@@ -1639,7 +1639,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1740,7 +1740,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 			for _, protocol := range []string{"http", "udp"} {
 				for _, externalAddress := range newNodeAddresses {
-					responses := sets.NewString()
+					responses := sets.New[string]()
 					valid := false
 					externalPort := int32(clusterHTTPPort)
 					if protocol == "udp" {
@@ -1782,7 +1782,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 	f := wrappedTestFramework("nodeport-ingress-test")
 	hostNetEndpointsSelector := map[string]string{"hostNetservicebackend": "true"}
 	var endPoints []*v1.Pod
-	var nodesHostnames sets.String
+	var nodesHostnames sets.Set[string]
 	var nodes *v1.NodeList
 	var providerCtx infraapi.Context
 	var isDualStack bool
@@ -1804,7 +1804,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)

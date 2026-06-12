@@ -647,7 +647,7 @@ spec:
 				ginkgo.By("Selecting additional IP addresses for serverNode on which source pod lives (networking routing to secondaryIP address on other nodes is harder to achieve)")
 				// add new secondary IP from node subnet to the node where the source pod lives on,
 				// if the cluster is v6 add an ipv6 address
-				toCurlSecondaryNodeIPAddresses := sets.NewString()
+				toCurlSecondaryNodeIPAddresses := sets.New[string]()
 				// node2ndaryIPs holds the nodeName as the key and the value is
 				// a map with ipFamily(v4 or v6) as the key and the secondaryIP as the value
 				node2ndaryIPs := make(map[string]map[int]string)
@@ -699,7 +699,7 @@ spec:
 				}
 
 				ginkgo.By("Should NOT be able to reach each secondary hostIP via node selector")
-				for _, address := range toCurlSecondaryNodeIPAddresses.List() {
+				for _, address := range sets.List(toCurlSecondaryNodeIPAddresses) {
 					if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) || IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
 						continue
 					}
@@ -739,7 +739,7 @@ spec:
 				}
 
 				ginkgo.By("Should be able to reach secondary hostIP via node selector")
-				for _, address := range toCurlSecondaryNodeIPAddresses.List() {
+				for _, address := range sets.List(toCurlSecondaryNodeIPAddresses) {
 					if !IsIPv6Cluster(f.ClientSet) && utilnet.IsIPv6String(address) || IsIPv6Cluster(f.ClientSet) && !utilnet.IsIPv6String(address) {
 						continue
 					}
