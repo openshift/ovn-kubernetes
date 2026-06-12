@@ -4,12 +4,18 @@
 package infraprovider
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
+
+// ErrExternalInfraUnavailable is returned when external container infrastructure is not available.
+// This typically indicates the cluster is running on a cloud platform without bare-metal
+// external container/network infrastructure support.
+var ErrExternalInfraUnavailable = errors.New("external container infrastructure not available")
 
 var infraProvider api.Provider
 
