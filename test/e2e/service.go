@@ -1476,6 +1476,10 @@ spec:
 		// different streams and replace what it thinks to be a conflicting port
 		// with a different one, breaking the stream for the involved peers.
 		ginkgo.It("should handle IP fragments", func() {
+			// Skip if external container infrastructure is not available
+			// This test requires bare-metal cluster infrastructure with external containers
+			skipIfExternalInfraUnavailable()
+
 			ginkgo.By("Selecting a schedulable node")
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 1)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1496,13 +1500,15 @@ spec:
 
 			serverPodName := nodeName + "-ep"
 			var serverContainerName string
-			_, err = createPod(f, serverPodName, nodeName, f.Namespace.Name, []string{}, endpointsSelector,
+			serverPod, err := createPod(f, serverPodName, nodeName, f.Namespace.Name, []string{}, endpointsSelector,
 				func(p *v1.Pod) {
 					p.Spec.Containers[0].Args = args
 					serverContainerName = p.Spec.Containers[0].Name
 				},
 			)
 			framework.ExpectNoError(err)
+			// Use the actual pod name from the created pod, as createPod sanitizes the name
+			serverPodName = serverPod.Name
 
 			ginkgo.By("Creating NodePort service")
 			serviceName := "service"
