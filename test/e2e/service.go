@@ -978,6 +978,10 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		})
 
 		ginkgo.It("should listen on each host addresses", func() {
+			// Skip if external container infrastructure is not available
+			// This test requires bare-metal cluster infrastructure with external containers
+			skipIfExternalInfraUnavailable()
+
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
 			nodesHostnames := sets.NewString()
@@ -1160,6 +1164,10 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		})
 
 		ginkgo.It("should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP", func() {
+			// Skip if external container infrastructure is not available
+			// This test requires bare-metal cluster infrastructure with external containers
+			skipIfExternalInfraUnavailable()
+
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
 			nodesHostnames := sets.NewString()
