@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	e2einfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
@@ -23,10 +24,6 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
-)
-
-const (
-	errExternalInfraNotAvailable = "external container infrastructure not available - this test requires external container/network infrastructure provider to be initialized"
 )
 
 type OpenshiftInfraProvider struct {
@@ -155,7 +152,7 @@ func isLocalGatewayMode(network *operv1.Network) bool {
 
 func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
 	if o.clusterInfra == nil {
-		return api.NetworkInterface{}, fmt.Errorf("GetExternalContainerNetworkInterface: %s", errExternalInfraNotAvailable)
+		return api.NetworkInterface{}, fmt.Errorf("GetExternalContainerNetworkInterface: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetExternalContainerNetworkInterface(container, network)
 }
@@ -184,14 +181,14 @@ func (o *OpenshiftInfraProvider) Name() string {
 
 func (o *OpenshiftInfraProvider) PrimaryNetwork() (api.Network, error) {
 	if o.clusterInfra == nil {
-		return nil, fmt.Errorf("PrimaryNetwork: %s", errExternalInfraNotAvailable)
+		return nil, fmt.Errorf("PrimaryNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetNetwork(primaryNetworkName)
 }
 
 func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
 	if o.clusterInfra == nil {
-		return nil, fmt.Errorf("GetNetwork: %s", errExternalInfraNotAvailable)
+		return nil, fmt.Errorf("GetNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetNetwork(name)
 
@@ -227,7 +224,7 @@ func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string
 
 func (o *OpenshiftInfraProvider) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
 	if o.clusterInfra == nil {
-		return "", fmt.Errorf("ExecExternalContainerCommand: %s", errExternalInfraNotAvailable)
+		return "", fmt.Errorf("ExecExternalContainerCommand: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.ExecExternalContainerCommand(container, cmd)
 }
@@ -242,7 +239,7 @@ func (o *OpenshiftInfraProvider) ExternalContainerPrimaryInterfaceName() string 
 
 func (o *OpenshiftInfraProvider) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
 	if o.clusterInfra == nil {
-		return "", fmt.Errorf("GetExternalContainerLogs: %s", errExternalInfraNotAvailable)
+		return "", fmt.Errorf("GetExternalContainerLogs: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetExternalContainerLogs(container)
 }
@@ -257,7 +254,7 @@ func (o *OpenshiftInfraProvider) GetExternalContainerPort() uint16 {
 
 func (o *OpenshiftInfraProvider) ListNetworks() ([]string, error) {
 	if o.clusterInfra == nil {
-		return nil, fmt.Errorf("ListNetworks: %s", errExternalInfraNotAvailable)
+		return nil, fmt.Errorf("ListNetworks: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.ListNetworks()
 }
@@ -281,42 +278,42 @@ type contextOpenshift struct {
 
 func (o *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
 	if o.externalContainerContextProvider == nil {
-		return api.ExternalContainer{}, fmt.Errorf("CreateExternalContainer: %s", errExternalInfraNotAvailable)
+		return api.ExternalContainer{}, fmt.Errorf("CreateExternalContainer: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.CreateExternalContainer(container)
 }
 
 func (o *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
 	if o.externalContainerContextProvider == nil {
-		return fmt.Errorf("DeleteExternalContainer: %s", errExternalInfraNotAvailable)
+		return fmt.Errorf("DeleteExternalContainer: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DeleteExternalContainer(container)
 }
 
 func (o *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
 	if o.externalContainerContextProvider == nil {
-		return nil, fmt.Errorf("CreateNetwork: %s", errExternalInfraNotAvailable)
+		return nil, fmt.Errorf("CreateNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.CreateNetwork(name, subnets...)
 }
 
 func (o *contextOpenshift) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
 	if o.externalContainerContextProvider == nil {
-		return api.NetworkInterface{}, fmt.Errorf("AttachNetwork: %s", errExternalInfraNotAvailable)
+		return api.NetworkInterface{}, fmt.Errorf("AttachNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.AttachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DetachNetwork(network api.Network, container string) error {
 	if o.externalContainerContextProvider == nil {
-		return fmt.Errorf("DetachNetwork: %s", errExternalInfraNotAvailable)
+		return fmt.Errorf("DetachNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DetachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 	if o.externalContainerContextProvider == nil {
-		return fmt.Errorf("DeleteNetwork: %s", errExternalInfraNotAvailable)
+		return fmt.Errorf("DeleteNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DeleteNetwork(network)
 }
