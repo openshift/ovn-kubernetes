@@ -198,7 +198,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: fmt.Sprintf("%t", hwOffload),
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add breth0 breth0 0 " + eth0MAC,
+			fmt.Sprintf("ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add breth0 breth0 %d %s", gatewayVLANID, eth0MAC),
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
@@ -681,7 +681,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Output: "false",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add %s %s 0 %s", brphys, brphys, hostMAC),
+			fmt.Sprintf("ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add %s %s %d %s", brphys, hostRep, gatewayVLANID, hostMAC),
 		})
 		// GetDPUHostRepInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
