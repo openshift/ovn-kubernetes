@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -419,12 +420,17 @@ func (s *Server) getPrimaryUDNPodRequest(originalPodRequest *PodRequest) (*PodRe
 				pod.Namespace, pod.Name, resourceName, err)
 		}
 		primaryPodRequest.CNIConf.DeviceID = deviceID
+		// Load device info if the device plugin wrote it. The file may not
+		// exist (e.g. when the device plugin has no NAD discovery configured),
+		// in which case GetNetdevNameFromDeviceId falls back to sysfs.
 		deviceInfo, err := nadutils.LoadDeviceInfoFromDP(resourceName, deviceID)
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("failed to load primary UDN's device info for pod %s/%s resource %s deviceID %s: %w",
 				pod.Namespace, pod.Name, resourceName, deviceID, err)
 		}
-		primaryPodRequest.deviceInfo = *deviceInfo
+		if deviceInfo != nil {
+			primaryPodRequest.deviceInfo = *deviceInfo
+		}
 	}
 	if err = updateDeviceInfo(primaryPodRequest); err != nil {
 		return nil, err
