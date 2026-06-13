@@ -17,6 +17,11 @@ linters:
     govet:
       disable:
         - fieldalignment
+        # govet.enable-all opts into every analyzer exposed by the
+        # Go/golangci-lint toolchain. The inline analyzer is not stable
+        # across the toolchain versions used by developers and CI, so keep it
+        # disabled explicitly while preserving the rest of govet.
+        - inline
         - shadow
       enable-all: true
     importas:
