@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"reflect"
 
-	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 
 	corev1 "k8s.io/api/core/v1"
@@ -36,8 +35,7 @@ func hasResourceAnUpdateFunc(objType reflect.Type) bool {
 		factory.EgressIPPodType,
 		factory.EgressNodeType,
 		factory.NamespaceType,
-		factory.MultiNetworkPolicyType,
-		factory.IPAMClaimsType:
+		factory.MultiNetworkPolicyType:
 		return true
 	}
 	return false
@@ -116,17 +114,6 @@ func (h *baseNetworkControllerEventHandler) areResourcesEqual(objType reflect.Ty
 			mnp1.Annotations[ovnStatelessNetPolAnnotationName] == mnp2.Annotations[ovnStatelessNetPolAnnotationName] &&
 			mnp1.Annotations[PolicyForAnnotation] == mnp2.Annotations[PolicyForAnnotation]
 		return areEqual, nil
-
-	case factory.IPAMClaimsType:
-		ipamClaim1, ok := obj1.(*ipamclaimsapi.IPAMClaim)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj1 of type %T to *ipamclaimsapi.IPAMClaim", obj1)
-		}
-		ipamClaim2, ok := obj2.(*ipamclaimsapi.IPAMClaim)
-		if !ok {
-			return false, fmt.Errorf("could not cast obj2 of type %T to *ipamclaimsapi.IPAMClaim", obj2)
-		}
-		return reflect.DeepEqual(ipamClaim1, ipamClaim2), nil
 	}
 
 	return false, fmt.Errorf("no object comparison for type %s", objType)
@@ -169,9 +156,6 @@ func (h *baseNetworkControllerEventHandler) getResourceFromInformerCache(objType
 
 	case factory.MultiNetworkPolicyType:
 		obj, err = watchFactory.GetMultiNetworkPolicy(namespace, name)
-
-	case factory.IPAMClaimsType:
-		obj, err = watchFactory.GetIPAMClaim(namespace, name)
 
 	default:
 		err = fmt.Errorf("object type %s not supported, cannot retrieve it from informers cache",

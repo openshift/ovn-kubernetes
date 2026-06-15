@@ -220,6 +220,13 @@ func NewDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, net
 			return nil, fmt.Errorf("failed to setup PMTUD nftables chain: %w", err)
 		}
 
+		if util.IsRouteAdvertisementsEnabled() {
+			err = configureAdvertisedUDNIsolationNFTables()
+			if err != nil {
+				return nil, fmt.Errorf("failed to setup advertised UDN isolation nftables: %w", err)
+			}
+		}
+
 		// Setup nftables sets for no-overlay SNAT exemption in LGW mode.
 		// In SGW mode, OVN address sets are used instead.
 		if config.Default.Transport == types.NetworkTransportNoOverlay && config.NoOverlay.OutboundSNAT == types.NoOverlaySNATEnabled && config.Gateway.Mode == config.GatewayModeLocal {
@@ -833,7 +840,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		}
 	}
 
-	// First wait for the node logical switch to be created by the Master, timeout is 300s.
+	// First wait for the node logical switch to be created by ovnkube-controller, timeout is 300s.
 	err = wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 300*time.Second, true, func(_ context.Context) (bool, error) {
 		if node, err = nc.watchFactory.GetNode(nc.name); err != nil {
 			klog.Infof("Waiting to retrieve node %s: %v", nc.name, err)
@@ -857,7 +864,11 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager, nc.ovsClient, nc.dpuNodeLeaseManager)
+		var dpuHealth cni.DPUStatusProvider
+		if nc.dpuNodeLeaseManager != nil {
+			dpuHealth = nc.dpuNodeLeaseManager
+		}
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager, nc.ovsClient, dpuHealth)
 		if err != nil {
 			return err
 		}
@@ -1305,28 +1316,34 @@ func exGatewayPodsAnnotationsChanged(oldNs, newNs *corev1.Namespace) bool {
 	// In reality we only care about exgw pod deletions, however since the list of IPs is not expected to change
 	// that often, let's check for *any* changes to these annotations compared to their previous state and trigger
 	// the logic for checking if we need to delete any conntrack entries
-	return (oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]) ||
-		(oldNs.Annotations[util.RoutingExternalGWsAnnotation] != newNs.Annotations[util.RoutingExternalGWsAnnotation])
+	return oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]
 }
 
 func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 	namespaces, err := nc.watchFactory.GetNamespaces()
 	if err != nil {
-		klog.Errorf("Unable to get pods from informer: %v", err)
+		klog.Errorf("Unable to get namespaces from informer: %v", err)
 	}
 	for _, namespace := range namespaces {
-		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
-		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
-		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
-			pods, err := nc.watchFactory.GetPods(namespace.Name)
-			if err != nil {
-				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
-			}
-			if len(pods) > 0 || err != nil {
-				// we only need to proceed if there is at least one pod in this namespace on this node
-				// OR if we couldn't fetch the pods for some reason at this juncture
-				_ = nc.syncConntrackForExternalGateways(namespace)
-			}
+		// Only namespaces targeted by an AdminPolicyBasedExternalRoute can have
+		// external-gateway ECMP conntrack entries to reconcile (the legacy
+		// routing-external-gws annotation is no longer supported).
+		gatewayIPs, err := nc.apbExternalRouteNodeController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespace.Name)
+		if err != nil {
+			klog.Errorf("Unable to retrieve gateway IPs for Admin Policy Based External Route objects for namespace %s: %v", namespace.Name, err)
+			continue
+		}
+		if gatewayIPs.Len() == 0 {
+			continue
+		}
+		pods, err := nc.watchFactory.GetPods(namespace.Name)
+		if err != nil {
+			klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
+		}
+		if len(pods) > 0 || err != nil {
+			// we only need to proceed if there is at least one pod in this namespace on this node
+			// OR if we couldn't fetch the pods for some reason at this juncture
+			_ = nc.syncConntrackForExternalGateways(namespace)
 		}
 	}
 }
@@ -1336,10 +1353,8 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	if err != nil {
 		return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects: %w", err)
 	}
-	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
-	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
-	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
-
+	// ARP for the gateway IPs' MACs to form an allowlist; conntrack entries whose
+	// destination MAC is no longer valid (e.g. after a gateway MAC change) are removed.
 	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*corev1.Pod, error) {
 		return nc.watchFactory.GetPods(newNs.Name)
 	})

@@ -818,7 +818,7 @@ func TestLinkRouteExists(t *testing.T) {
 	}
 }
 
-func TestLinkNeighAdd(t *testing.T) {
+func TestLinkNeighSet(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)
 	// below is defined in net_linux.go
@@ -838,7 +838,7 @@ func TestLinkNeighAdd(t *testing.T) {
 			inputLink: mockLink,
 			errExp:    true,
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "NeighAdd", OnCallMethodArgType: []string{"*netlink.Neigh"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
+				{OnCallMethodName: "NeighSet", OnCallMethodArgType: []string{"*netlink.Neigh"}, RetArgList: []interface{}{fmt.Errorf("mock error")}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
@@ -848,7 +848,7 @@ func TestLinkNeighAdd(t *testing.T) {
 			desc:      "test code path where adding neighbor returns success",
 			inputLink: mockLink,
 			onRetArgsNetLinkLibOpers: []ovntest.TestifyMockHelper{
-				{OnCallMethodName: "NeighAdd", OnCallMethodArgType: []string{"*netlink.Neigh"}, RetArgList: []interface{}{nil}},
+				{OnCallMethodName: "NeighSet", OnCallMethodArgType: []string{"*netlink.Neigh"}, RetArgList: []interface{}{nil}},
 			},
 			onRetArgsLinkIfaceOpers: []ovntest.TestifyMockHelper{
 				{OnCallMethodName: "Attrs", OnCallMethodArgType: []string{}, RetArgList: []interface{}{&netlink.LinkAttrs{Name: "testIfaceName", Index: 1}}},
@@ -861,7 +861,7 @@ func TestLinkNeighAdd(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
-			err := LinkNeighAdd(tc.inputLink, tc.inputNeigIP, tc.inputMacAddr)
+			err := LinkNeighSet(tc.inputLink, tc.inputNeigIP, tc.inputMacAddr)
 			t.Log(err)
 			if tc.errExp {
 				require.Error(t, err)

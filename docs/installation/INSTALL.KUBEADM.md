@@ -362,7 +362,7 @@ systemctl enable crio --now
 See [https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/#installing-kubeadm-kubelet-and-kubectl](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/#installing-kubeadm-kubelet-and-kubectl) for further details.
 
 ~~~
-KUBE_VERSION=v1.35
+KUBE_VERSION=v1.36
 cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
 [kubernetes]
 name=Kubernetes
@@ -469,11 +469,6 @@ Before starting OVN-Kubernetes, work around an issue where `br-int` is added by 
 ovs-vsctl add-br br-int
 ~~~
 
-Single-node-zone interconnect requires every node to be labeled with its zone name **before** the Helm install:
-~~~
-for n in node1 node2 node3; do kubectl label node $n k8s.ovn.org/zone-name=$n --overwrite; done
-~~~
-
 Next, install OVN-Kubernetes with the Helm chart, pointing `global.image.repository` at the image you just pushed (or use the public `ghcr.io/ovn-kubernetes/ovn-kubernetes/ovn-kube-ubuntu` image to skip the build steps above). If `helm` isn't already on the master, install it with `curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash`.
 ~~~
 cd $HOME/work/src/github.com/ovn-kubernetes/ovn-kubernetes/helm/ovn-kubernetes
@@ -484,7 +479,7 @@ helm install ovn-kubernetes . \
     --set global.image.tag=latest
 ~~~
 
-> **CEL CRD note:** Several OVN-Kubernetes CRDs use CEL `x-kubernetes-validations` rules that don't install cleanly on older Kubernetes versions — the per-CRD cost budget rejects four of them on Kubernetes 1.31, and the indexed `all(i, v, …)` macro used by `vteps` and `routeadvertisements` is rejected on 1.32. Use Kubernetes 1.33 or newer (the example above pins to v1.35) and the chart's CRDs install cleanly via `helm install`.
+> **CEL CRD note:** Several OVN-Kubernetes CRDs use CEL `x-kubernetes-validations` rules that don't install cleanly on older Kubernetes versions — the per-CRD cost budget rejects four of them on Kubernetes 1.31, and the indexed `all(i, v, …)` macro used by `vteps` and `routeadvertisements` is rejected on 1.32. Use Kubernetes 1.33 or newer (the example above pins to v1.36) and the chart's CRDs install cleanly via `helm install`.
 
 The Helm chart does not remove kube-proxy. Since the `kubeadm init` command above installs kube-proxy by default, delete the kube-proxy DaemonSet:
 ~~~

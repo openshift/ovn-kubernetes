@@ -4,14 +4,12 @@
 package ovn
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"strings"
 	"time"
 
-	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	mnpapi "github.com/k8snetworkplumbingwg/multi-networkpolicy/pkg/apis/k8s.cni.cncf.io/v1beta1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -33,8 +31,8 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -97,8 +95,6 @@ func (bsnc *BaseUserDefinedNetworkController) AddUserDefinedNetworkResourceCommo
 				mp.Namespace, mp.Name, err)
 			return err
 		}
-	case factory.IPAMClaimsType:
-		return nil
 
 	default:
 		return bsnc.AddResourceCommon(objType, obj)
@@ -159,8 +155,6 @@ func (bsnc *BaseUserDefinedNetworkController) UpdateUserDefinedNetworkResourceCo
 				return err
 			}
 		}
-	case factory.IPAMClaimsType:
-		return nil
 
 	default:
 		return fmt.Errorf("object type %s not supported", objType)
@@ -202,25 +196,6 @@ func (bsnc *BaseUserDefinedNetworkController) DeleteUserDefinedNetworkResourceCo
 				mp.Namespace, mp.Name, err)
 			return err
 		}
-
-	case factory.IPAMClaimsType:
-		ipamClaim, ok := obj.(*ipamclaimsapi.IPAMClaim)
-		if !ok {
-			return fmt.Errorf("could not cast obj of type %T to *ipamclaimsapi.IPAMClaim", obj)
-		}
-
-		switchName, err := bsnc.getExpectedSwitchName(dummyPod())
-		if err != nil {
-			return err
-		}
-		ipAllocator := bsnc.lsManager.ForSwitch(switchName)
-		err = bsnc.ipamClaimsReconciler.Reconcile(ipamClaim, nil, ipAllocator)
-		if err != nil && !errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
-			return fmt.Errorf("error deleting IPAMClaim: %w", err)
-		} else if errors.Is(err, persistentips.ErrIgnoredIPAMClaim) {
-			return nil // let's avoid the log below, since nothing was released.
-		}
-		klog.Infof("Released IPs %q for network %q", ipamClaim.Status.IPs, ipamClaim.Spec.Network)
 
 	default:
 		return bsnc.DeleteResourceCommon(objType, obj)
@@ -514,18 +489,6 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 			continue
 		}
 
-		// if we allow for persistent IPs, then we need to check if this pod has an IPAM Claim
-		if bsnc.allowPersistentIPs() {
-			hasIPAMClaim, err := bsnc.hasIPAMClaim(pod, nadKey)
-			if err != nil {
-				return fmt.Errorf("unable to determine if pod %s has IPAM Claim: %w", podDesc, err)
-			}
-			// if there is an IPAM claim, don't release the pod IPs
-			if hasIPAMClaim {
-				continue
-			}
-		}
-
 		// Releasing IPs needs to happen last so that we can deterministically know that if delete failed that
 		// the IP of the pod needs to be released. Otherwise we could have a completed pod failed to be removed
 		// and we dont know if the IP was released or not, and subsequently could accidentally release the IP
@@ -540,73 +503,6 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 
 	}
 	return nil
-}
-
-// hasIPAMClaim determines whether a pod's IPAM is being handled by IPAMClaim CR.
-// pod passed should already be validated as having a network connection to nadKey
-func (bsnc *BaseUserDefinedNetworkController) hasIPAMClaim(pod *corev1.Pod, nadKey string) (bool, error) {
-	if !bsnc.AllowsPersistentIPs() {
-		return false, nil
-	}
-
-	var ipamClaimName string
-	var wasPersistentIPRequested bool
-	if bsnc.IsPrimaryNetwork() {
-		// 'k8s.ovn.org/primary-udn-ipamclaim' annotation has been deprecated. Maintain backward compatibility by
-		// using it as a fallback; when defaultNSE.IPAMClaimReference is set, it takes precedence.
-		if desiredClaimName, isIPAMClaimRequested := pod.Annotations[util.DeprecatedOvnUDNIPAMClaimName]; isIPAMClaimRequested && desiredClaimName != "" {
-			wasPersistentIPRequested = true
-			ipamClaimName = desiredClaimName
-		}
-		defaultNSE, err := util.GetK8sPodDefaultNetworkSelection(pod)
-		if err != nil {
-			return false, err
-		}
-		if defaultNSE != nil && defaultNSE.IPAMClaimReference != "" {
-			wasPersistentIPRequested = true
-			ipamClaimName = defaultNSE.IPAMClaimReference
-		}
-	} else {
-		// secondary network the IPAM claim reference is on the network selection element
-		on, networkMap, err := util.GetUDNPodNADToNetworkMapping(
-			pod,
-			bsnc.GetNetInfo(),
-			bsnc.networkManager.GetNetworkNameForNADKey,
-		)
-		if err != nil {
-			return false, fmt.Errorf("failed to get network mapping for pod %s/%s on network %s: %v",
-				pod.Namespace, pod.Name, bsnc.GetNetworkName(), err)
-		}
-		if !on {
-			klog.Warningf("Pod %s/%s is not scheduled on network %s", pod.Namespace, pod.Name, bsnc.GetNetworkName())
-			return false, nil
-		}
-		for key, network := range networkMap {
-			if key == nadKey {
-				if len(network.IPAMClaimReference) > 0 {
-					ipamClaimName = network.IPAMClaimReference
-					wasPersistentIPRequested = true
-				}
-				break
-			}
-		}
-	}
-
-	if !wasPersistentIPRequested || len(ipamClaimName) == 0 {
-		return false, nil
-	}
-
-	ipamClaim, err := bsnc.ipamClaimsReconciler.FindIPAMClaim(ipamClaimName, pod.Namespace)
-	if apierrors.IsNotFound(err) {
-		klog.Errorf("IPAMClaim %q for namespace: %q not found...will release IPs: %v",
-			ipamClaimName, pod.Namespace, err)
-		return false, nil
-	} else if err != nil {
-		return false, fmt.Errorf("failed to get IPAMClaim %s/%s: %w", pod.Namespace, ipamClaimName, err)
-	}
-
-	hasIPAMClaim := ipamClaim != nil && len(ipamClaim.Status.IPs) > 0
-	return hasIPAMClaim, nil
 }
 
 func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods []interface{}) error {
@@ -625,6 +521,21 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 		if bsnc.IsPrimaryNetwork() {
 			activeNetwork, err = bsnc.networkManager.GetActiveNetworkForNamespace(pod.Namespace)
 			if err != nil {
+				if apierrors.IsNotFound(err) {
+					// namespace deleted after pod listing - safe to skip
+					klog.Infof("%s network controller pod sync: pod %s/%s namespace deleted, skipping",
+						bsnc.GetNetworkName(), pod.Namespace, pod.Name)
+					continue
+				}
+				if util.IsInvalidPrimaryNetworkError(err) {
+					// If network manager isn't aware of the primary network for this pod's namespace,
+					// it can't possibly be already wired to our network unless someone is directly messing
+					// with the NADs owned by a CUDN, as network manager syncs all NADs at startup.
+					// Skip during initial sync to avoid blocking startup.
+					klog.V(5).Infof("%s network controller pod sync: pod %s/%s namespace network not ready, skipping",
+						bsnc.GetNetworkName(), pod.Namespace, pod.Name)
+					continue
+				}
 				return fmt.Errorf("failed to find the active network for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 			}
 			if activeNetwork == nil || activeNetwork.IsDefault() {
@@ -896,25 +807,6 @@ func cleanupPolicyLogicalEntities(nbClient libovsdbclient.Client, ops []ovsdb.Op
 	return ops, nil
 }
 
-// WatchIPAMClaims starts the watching of IPAMClaim resources and calls
-// back the appropriate handler logic
-func (bsnc *BaseUserDefinedNetworkController) WatchIPAMClaims() error {
-	if bsnc.ipamClaimsHandler != nil {
-		return nil
-	}
-	handler, err := bsnc.retryIPAMClaims.WatchResource()
-	if err != nil {
-		bsnc.ipamClaimsHandler = handler
-	}
-	return err
-}
-
-func (oc *BaseUserDefinedNetworkController) allowPersistentIPs() bool {
-	return config.OVNKubernetesFeature.EnablePersistentIPs &&
-		util.DoesNetworkRequireIPAM(oc.GetNetInfo()) &&
-		util.AllowsPersistentIPs(oc.GetNetInfo())
-}
-
 // buildUDNEgressSNAT is used to build the conditional SNAT required on L3 and L2 UDNs to
 // steer traffic correctly via mp0 when leaving OVN to the host
 func (bsnc *BaseUserDefinedNetworkController) buildUDNEgressSNAT(localPodSubnets []*net.IPNet, outputPort string, isUDNAdvertised bool) ([]*nbdb.NAT, error) {
@@ -939,10 +831,12 @@ func (bsnc *BaseUserDefinedNetworkController) buildUDNEgressSNAT(localPodSubnets
 		// For advertised networks, we need to SNAT any traffic leaving the
 		// pods from these networks towards the node IPs in the cluster. In
 		// order to do such a conditional SNAT, we need an address set that
-		// contains the node IPs in the cluster. Given that egressIP feature
-		// already has an address set containing these nodeIPs owned by the
-		// default network controller, let's re-use it.
-		nodeIPsASIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName)
+		// contains the node IPs in the cluster. Re-use the shared cluster node
+		// IP address set owned by the address set manager.
+		nodeIPsASIDs, err := bsnc.addressSetManager.EnsureClusterNodeIPsAddressSet(addresssetmanager.ClusterNodeIPsRouteAdvertisementsBackRef)
+		if err != nil {
+			return nil, fmt.Errorf("failed to ensure cluster node IP address set for route advertisements: %w", err)
+		}
 		nodeIPsAS, err = bsnc.addressSetFactory.GetAddressSet(nodeIPsASIDs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get address set with IDs %v: %w", nodeIPsASIDs, err)
@@ -975,6 +869,32 @@ func (bsnc *BaseUserDefinedNetworkController) buildUDNEgressSNAT(localPodSubnets
 			return nil, fmt.Errorf("masquerade IP cannot be empty network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
 		}
 
+		if isUDNAdvertised && config.Gateway.Mode == config.GatewayModeShared {
+			addedAllowedExtIPsSNAT := false
+			// OVN NAT.allowed_ext_ips accepts a single Address_Set, so create one
+			// SNAT per allowed destination set.
+			for _, allowedExtIPsAS := range []addressset.AddressSet{nodeIPsAS, svcIPsAS} {
+				allowedExtIPs := getAddressSetUUIDForIPFamily(ipFamily, allowedExtIPsAS)
+				if allowedExtIPs == "" {
+					continue
+				}
+				snats = append(snats, libovsdbops.BuildSNATWithAllowedExtIPs(
+					&masqIP.ManagementPort.IP,
+					localPodSubnet,
+					outputPort,
+					extIDs,
+					"",
+					allowedExtIPs,
+				))
+				addedAllowedExtIPsSNAT = true
+			}
+			if !addedAllowedExtIPsSNAT {
+				return nil, fmt.Errorf("failed to build allowed_ext_ips SNAT for advertised network %s, subnet %s: no address set UUID for IPv%s",
+					bsnc.GetNetworkName(), localPodSubnet, ipFamily)
+			}
+			continue // move to the next pod subnet
+		}
+
 		if isUDNAdvertised {
 			additionalSNATMatch := getClusterNodesDestinationBasedSNATMatch(ipFamily, nodeIPsAS, svcIPsAS)
 			if additionalSNATMatch != "" {
@@ -982,17 +902,55 @@ func (bsnc *BaseUserDefinedNetworkController) buildUDNEgressSNAT(localPodSubnets
 			}
 		}
 
-		snat := libovsdbops.BuildSNATWithMatch(
-			&masqIP.ManagementPort.IP,
-			localPodSubnet,
-			outputPort,
-			extIDs,
-			snatMatch,
-		)
+		// For noOverlay mode with outboundSNAT enabled in local gateway mode, add exempted_ext_ips
+		// to prevent SNATing pod-to-pod traffic within the same CUDN while still SNATing pod-to-external traffic.
+		// This SNAT is on ovn_cluster_router, which is used in local gateway mode.
+		var snat *nbdb.NAT
+		if bsnc.GetNetInfo().Transport() == types.NetworkTransportNoOverlay &&
+			bsnc.GetNetInfo().OutboundSNAT() == types.NoOverlaySNATEnabled &&
+			config.Gateway.Mode == config.GatewayModeLocal {
+			snatMatch = ""
+			v4UUID, v6UUID, err := getNoOverlaySNATExemptionAsUUID(bsnc.addressSetFactory, bsnc.GetNetInfo(), bsnc.controllerName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get no-overlay SNAT exemption address set UUID: %w", err)
+			}
+			// Use the appropriate UUID based on IP family
+			exemptedExtIPs := v4UUID
+			if ipFamily == utilnet.IPv6 {
+				exemptedExtIPs = v6UUID
+			}
+			snat = libovsdbops.BuildSNATWithExemptedExtIPs(
+				&masqIP.ManagementPort.IP,
+				localPodSubnet,
+				outputPort,
+				extIDs,
+				snatMatch,
+				exemptedExtIPs,
+			)
+		} else {
+			snat = libovsdbops.BuildSNATWithMatch(
+				&masqIP.ManagementPort.IP,
+				localPodSubnet,
+				outputPort,
+				extIDs,
+				snatMatch,
+			)
+		}
 		snats = append(snats, snat)
 	}
 
 	return snats, nil
+}
+
+func getAddressSetUUIDForIPFamily(ipFamily utilnet.IPFamily, as addressset.AddressSet) string {
+	if as == nil {
+		return ""
+	}
+	v4UUID, v6UUID := as.GetASUUID()
+	if ipFamily == utilnet.IPv6 {
+		return v6UUID
+	}
+	return v4UUID
 }
 
 func getMasqueradeManagementIPSNATMatch(dstMac string) string {
