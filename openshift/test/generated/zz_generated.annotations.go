@@ -1087,32 +1087,6 @@ var AppendedAnnotations = map[string]string{
 
 	"EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv6 pods": "[Disabled:Unimplemented]",
 
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the namespace while the CR static hop still references the same namespace in the policy IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the namespace while the CR static hop still references the same namespace in the policy IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the namespace while the CR static hop still references the same namespace in the policy IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the namespace while the CR static hop still references the same namespace in the policy IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations and a policy CR and after the annotations are removed ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs TCP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs TCP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs UDP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs UDP ipv6": "[Disabled:Unimplemented]",
-
 	"External Gateway When validating the Admin Policy Based External Route status Should update the status of a successful and failed CRs": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
@@ -1139,27 +1113,27 @@ var AppendedAnnotations = map[string]string{
 
 	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv6": "[Disabled:Unimplemented]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod annotation update": "[Disabled:Unimplemented]",
-
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
+
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod label update": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod not ready": "[Disabled:Unimplemented]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod annotation update": "[Disabled:Unimplemented]",
-
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
+
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod label update": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod not ready": "[Disabled:Unimplemented]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod annotation update": "[Disabled:Unimplemented]",
-
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
+
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod label update": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod not ready": "[Disabled:Unimplemented]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod annotation update": "[Disabled:Unimplemented]",
-
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
+
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod label update": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod not ready": "[Disabled:Unimplemented]",
 
@@ -1203,94 +1177,6 @@ var AppendedAnnotations = map[string]string{
 
 	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv6": "[Disabled:Unimplemented]",
 
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled TCP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled TCP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled UDP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled UDP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod annotation update": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod not ready": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod annotation update": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod delete": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod not ready": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod annotation update": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod delete": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod not ready": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod annotation update": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod not ready": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway CR ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway CR ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled TCP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled TCP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled UDP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled UDP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway e2e ingress gateway traffic validation Should validate ingress connectivity from an external gateway": "[Disabled:Unimplemented]",
-
-	"External Gateway e2e non-vxlan external gateway and update validation Should validate connectivity without vxlan before and after updating the namespace annotation to a new external gateway": "[Disabled:Unimplemented]",
-
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv4": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv6": "[Disabled:Unimplemented]",
@@ -1314,6 +1200,8 @@ var AppendedAnnotations = map[string]string{
 	"Kubevirt Virtual Machines with default pod network when live migration with pre-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP": "[Disabled:Unimplemented]",
+
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress routed over evpn": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
 
