@@ -23,7 +23,7 @@ import (
 	e2eoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 )
 
-var _ = g.Describe("[sig-networking] OVN metrics", func() {
+var _ = g.Describe("[JIRA:Networking][sig-networking] OVN metrics", func() {
 	defer g.GinkgoRecover()
 
 	var oc = exutil.NewCLI("networking-ovn-metrics")
