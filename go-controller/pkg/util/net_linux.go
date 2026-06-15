@@ -58,6 +58,7 @@ type NetLinkOps interface {
 	RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error)
 	RuleAdd(rule *netlink.Rule) error
 	NeighAdd(neigh *netlink.Neigh) error
+	NeighSet(neigh *netlink.Neigh) error
 	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilters(table netlink.ConntrackTableType, family netlink.InetFamily, filters ...netlink.CustomConntrackFilter) (uint, error)
@@ -240,6 +241,10 @@ func (defaultNetLinkOps) RuleAdd(rule *netlink.Rule) error {
 
 func (defaultNetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
 	return netlink.NeighAdd(neigh)
+}
+
+func (defaultNetLinkOps) NeighSet(neigh *netlink.Neigh) error {
+	return netlink.NeighSet(neigh)
 }
 
 func (defaultNetLinkOps) NeighDel(neigh *netlink.Neigh) error {
@@ -613,8 +618,10 @@ func LinkRouteGetByDstAndGw(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (
 	return route, err
 }
 
-// LinkFDBAdd adds a static FDB entry on the bridge that owns the given port.
-func LinkFDBAdd(port netlink.Link, mac net.HardwareAddr, vlan int) error {
+// LinkFDBSet adds or replaces a static FDB entry on the bridge that owns the given port.
+// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so it succeeds whether
+// the entry is new or already exists.
+func LinkFDBSet(port netlink.Link, mac net.HardwareAddr, vlan int) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    port.Attrs().Index,
 		Family:       syscall.AF_BRIDGE,
@@ -623,8 +630,8 @@ func LinkFDBAdd(port netlink.Link, mac net.HardwareAddr, vlan int) error {
 		Vlan:         vlan,
 		HardwareAddr: mac,
 	}
-	if err := netLinkOps.NeighAdd(neigh); err != nil {
-		return fmt.Errorf("failed to add FDB entry %s vlan %d on %s: %w", mac, vlan, port.Attrs().Name, err)
+	if err := netLinkOps.NeighSet(neigh); err != nil {
+		return fmt.Errorf("failed to set FDB entry %s vlan %d on %s: %w", mac, vlan, port.Attrs().Name, err)
 	}
 	return nil
 }
@@ -658,8 +665,10 @@ func LinkNeighDel(link netlink.Link, neighIP net.IP) error {
 	return nil
 }
 
-// LinkNeighAdd adds MAC/IP bindings for the given link
-func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
+// LinkNeighSet adds or replaces MAC/IP bindings for the given link.
+// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so it succeeds whether
+// the entry is new or already exists (e.g. zebra's extern_learn).
+func LinkNeighSet(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,
 		Family:       getFamily(neighIP),
@@ -667,9 +676,9 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 		IP:           neighIP,
 		HardwareAddr: neighMAC,
 	}
-	err := netLinkOps.NeighAdd(neigh)
+	err := netLinkOps.NeighSet(neigh)
 	if err != nil {
-		return fmt.Errorf("failed to add neighbour entry %+v: %w", neigh, err)
+		return fmt.Errorf("failed to set neighbour entry %+v: %w", neigh, err)
 	}
 	return nil
 }

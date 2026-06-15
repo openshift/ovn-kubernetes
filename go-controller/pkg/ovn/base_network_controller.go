@@ -46,7 +46,6 @@ import (
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	zoneic "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovnretry "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -101,8 +100,6 @@ type BaseNetworkController struct {
 	retryNetworkPolicies *ovnretry.RetryFramework
 	// retry framework for network policies
 	retryMultiNetworkPolicies *ovnretry.RetryFramework
-	// retry framework for IPAMClaims
-	retryIPAMClaims *ovnretry.RetryFramework
 
 	// nodeReconciler is the shared node controller used by controllers that
 	// reconcile node topology through pkg/controllers/node.
@@ -114,16 +111,12 @@ type BaseNetworkController struct {
 	podHandler *factory.Handler
 	// namespace events factory Handler
 	namespaceHandler *factory.Handler
-	// ipam claims events factory Handler
-	ipamClaimsHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
 
 	// An utility to allocate the PodAnnotation to pods
 	podAnnotationAllocator *pod.PodAnnotationAllocator
-
-	ipamClaimsReconciler *persistentips.IPAMClaimReconciler
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *PortCache
@@ -200,11 +193,13 @@ type BaseNetworkController struct {
 func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed func(string)) error {
 	// gather some information first
 	var reconcileNodes []string
+	subnetsChanged := clusterSubnetsChanged(oc, netInfo)
 	oc.localZoneNodes.Range(func(key, _ any) bool {
 		nodeName := key.(string)
 		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
 		isAdvertised := util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName)
-		if wasAdvertised == isAdvertised {
+		reconcileSubnetChange := subnetsChanged && (isAdvertised || config.OVNKubernetesFeature.EnableEgressIP)
+		if wasAdvertised == isAdvertised && !reconcileSubnetChange {
 			// noop
 			return true
 		}
@@ -229,6 +224,20 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 		return fmt.Errorf("failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
 	}
 	return oc.doReconcile(reconcileRoutes, reconcilePendingPods, reconcileNodes, setNodeFailed, reconcileNamespaces.List())
+}
+
+func clusterSubnetsChanged(old, new util.NetInfo) bool {
+	oldSubnets := sets.New[string]()
+	for _, subnet := range old.Subnets() {
+		oldSubnets.Insert(subnet.CIDR.String())
+	}
+
+	newSubnets := sets.New[string]()
+	for _, subnet := range new.Subnets() {
+		newSubnets.Insert(subnet.CIDR.String())
+	}
+
+	return !oldSubnets.Equal(newSubnets)
 }
 
 func (oc *BaseNetworkController) updateNADKeysChanged(nadKeys []string) bool {
@@ -861,7 +870,7 @@ func (bnc *BaseNetworkController) recordNodeErrorEvent(node *corev1.Node, nodeEr
 	}
 
 	klog.V(5).Infof("Posting %s event for Node %s: %v", corev1.EventTypeWarning, node.Name, nodeErr)
-	bnc.recorder.Eventf(nodeRef, corev1.EventTypeWarning, "ErrorReconcilingNode", nodeErr.Error())
+	bnc.recorder.Eventf(nodeRef, corev1.EventTypeWarning, "ErrorReconcilingNode", "%v", nodeErr)
 }
 
 func (bnc *BaseNetworkController) recordPodErrorEvent(pod *corev1.Pod, podErr error) {
@@ -871,7 +880,7 @@ func (bnc *BaseNetworkController) recordPodErrorEvent(pod *corev1.Pod, podErr er
 			pod.Namespace, pod.Name, err)
 	} else {
 		klog.V(5).Infof("Posting a %s event for Pod %s/%s", corev1.EventTypeWarning, pod.Namespace, pod.Name)
-		bnc.recorder.Eventf(podRef, corev1.EventTypeWarning, "ErrorReconcilingPod", podErr.Error())
+		bnc.recorder.Eventf(podRef, corev1.EventTypeWarning, "ErrorReconcilingPod", "%v", podErr)
 	}
 }
 

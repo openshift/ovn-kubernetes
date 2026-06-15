@@ -64,7 +64,7 @@ false
 ""
 </pre>
 </td>
-			<td>Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws</td>
+			<td>Whether to disable SNAT of egress traffic in namespaces with external gateways configured via AdminPolicyBasedExternalRoute CRs</td>
 		</tr>
 		<tr>
 			<td>global.dockerConfigSecret</td>
@@ -266,7 +266,7 @@ false
 false
 </pre>
 </td>
-			<td>Use SSL transport to NB/SB db and northd</td>
+			<td>Use SSL transport for the Egress IP gRPC health-check (NB cert paths are reused for this; OVN NB/SB DB connections are always unix sockets)</td>
 		</tr>
 		<tr>
 			<td>global.enableStatelessNetworkPolicy</td>

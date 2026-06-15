@@ -99,7 +99,8 @@ global:
   enablePreconfiguredUDNAddresses: false
   # -- Configure to enable IPsec
   enableIpsec: false
-  # -- Use SSL transport to NB/SB db and northd
+  # -- Use SSL transport for the Egress IP gRPC health-check (NB cert paths
+  # are reused for this; OVN NB/SB DB connections are always unix sockets).
   enableSsl: false
   # -- Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes
   enableMultiExternalGateway: true
@@ -126,7 +127,7 @@ global:
   enableDNSNameResolver: false
   # -- Configure to allow ICMP and ICMPv6 traffic to bypass NetworkPolicy deny rules
   allowICMPNetworkPolicy: false
-  # -- Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+  # -- Whether to disable SNAT of egress traffic in namespaces with external gateways configured via AdminPolicyBasedExternalRoute CRs
   disableSnatMultipleGws: ""
   # -- Controls if forwarding is allowed on OVNK controlled interfaces
   # @default -- false
