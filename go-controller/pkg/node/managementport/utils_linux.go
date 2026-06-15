@@ -200,7 +200,13 @@ func DeleteManagementPortRepInterface(network, repDevice, savedName string) erro
 
 	link, err := util.GetNetLinkOps().LinkByName(repDevice)
 	if err != nil {
-		return fmt.Errorf("failed to lookup management port representor interface %s for network %s: %v", repDevice, network, err)
+		if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return fmt.Errorf("failed to lookup management port representor interface %s for network %s: %v", repDevice, network, err)
+		}
+
+		klog.V(5).Infof("Management port representor interface %s is already removed for network %s", repDevice, network)
+
+		return nil
 	}
 
 	err = TearDownManagementPortLink(network, link, savedName)
