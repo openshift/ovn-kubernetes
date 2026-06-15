@@ -833,56 +833,11 @@ function memory_trim_on_compaction_supported {
 }
 
 function get_node_zone() {
-  createKubeconfig=false
-  # DPU might have K8S_TOKEN/K8S_TOKENFILE and K8S_CACERT/K8S_CACERT_DATA provided to access DPU host (K8S_NODE here)
-  # which is in a different cluster. So we might need to create kubeconfig accordingly.
-  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-    if [[ -n ${K8S_TOKEN} ]] || [[ -n ${K8S_TOKEN_FILE} ]] || [[ -n ${K8S_CACERT_DATA} ]] || [[ -n ${K8S_CACERT} ]]; then
-      createKubeconfig=true
-    fi
-  fi
-
-  if [[ ${createKubeconfig} == "false" ]]; then
-    zone=$(kubectl --server=${K8S_APISERVER} --token=${k8s_token} --certificate-authority=${k8s_cacert} \
-       get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
-  else
-    local dpuhost_k8s_apiserver=${K8S_APISERVER}
-    local dpuhost_k8s_token=${K8S_TOKEN}
-    local dpuhost_ca_config=""
-    if [[ -n ${K8S_TOKEN_FILE} ]]; then
-      dpuhost_k8s_token=$(cat ${K8S_TOKEN_FILE})
-    fi
-    if [[ -n ${K8S_CACERT_DATA} ]]; then
-      dpuhost_ca_config="certificate-authority-data: ${K8S_CACERT_DATA}"
-    elif [[ -n ${K8S_CACERT} ]]; then
-      dpuhost_ca_config="certificate-authority: ${K8S_CACERT}"
-    fi
-    zone=$(kubectl --kubeconfig=<(cat <<EOF
-apiVersion: v1
-kind: Config
-clusters:
-- cluster:
-    server: ${dpuhost_k8s_apiserver}
-    ${dpuhost_ca_config}
-  name: dpuhost-cluster
-contexts:
-- context:
-    cluster: dpuhost-cluster
-    user: dpu-user
-  name: dpuhost-context
-current-context: dpuhost-context
-users:
-- name: dpu-user
-  user:
-    token: ${dpuhost_k8s_token}
-EOF
-) get node ${K8S_NODE} -o=jsonpath={'.metadata.labels.k8s\.ovn\.org/zone-name'})
-
-  fi
-  if [ -z "$zone" ]; then
-    zone="${K8S_NODE}"
-  fi
-  echo "$zone"
+  # Single-node-zone is the only supported interconnect topology: each node is
+  # its own zone, named after the kube node. In DPU mode, K8S_NODE has already
+  # been overridden earlier in this script from the OVS external_id
+  # host-k8s-nodename, so it carries the DPU-host's node name.
+  echo "${K8S_NODE}"
 }
 
 # v1.0.0 - run nb_ovsdb in a separate container listening only on

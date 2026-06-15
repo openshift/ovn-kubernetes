@@ -57,8 +57,6 @@ const (
 	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
 
-var singleNodePerZoneResult *bool
-
 type IpNeighbor struct {
 	Dst    string `json:"dst"`
 	Lladdr string `json:"lladdr"`
@@ -1457,27 +1455,8 @@ func isPreConfiguredUdnAddressesEnabled() bool {
 	return val == "true"
 }
 
-func singleNodePerZone() bool {
-	if singleNodePerZoneResult == nil {
-		args := []string{"get", "pods", "--selector=app=ovnkube-node", "-o", "jsonpath={.items[0].spec.containers[*].name}"}
-		containerNames := e2ekubectl.RunKubectlOrDie(deploymentconfig.Get().OVNKubernetesNamespace(), args...)
-		result := true
-		for _, containerName := range strings.Split(containerNames, " ") {
-			if containerName == "ovnkube-node" {
-				result = false
-				break
-			}
-		}
-		singleNodePerZoneResult = &result
-	}
-	return *singleNodePerZoneResult
-}
-
 func getNodeContainerName() string {
-	if singleNodePerZone() {
-		return "ovnkube-controller"
-	}
-	return "ovnkube-node"
+	return "ovnkube-controller"
 }
 
 // getNodeZone returns the node's zone

@@ -72,10 +72,6 @@ if [[ "$BUILD_IMAGE" == "true" ]]; then
   docker tag ovn-kube-ubuntu:latest "$IMG"
 fi
 
-for n in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
-  kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
-done
-
 # Deploy OVN-Kubernetes using Helm
 cd ${DIR}/ovn-kubernetes
 helm install ovn-kubernetes . -f ${VALUES_FILE} \

@@ -10,12 +10,24 @@ export DIR="$( cd -- "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )
 
 # Source the kind-common.sh file from the same directory where this script is located
 source "${DIR}/kind-common.sh"
+source "${DIR}/kind-dpu-sim-lib.sh"
+
+OVN_HELM_EXTRA_VALUES=()
 
 set_default_params() {
   set_common_default_params
   check_ipv6
   set_cluster_cidr_ip_families
-  OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
+  DPU_MODE=${DPU_MODE:-none}
+  if [[ "${DPU_MODE}" != "none" && "${DPU_MODE}" != "host" && "${DPU_MODE}" != "dpu" ]]; then
+    echo "Invalid DPU_MODE: ${DPU_MODE}. Expected one of: none, host, dpu"
+    exit 1
+  fi
+  local ovnkube_identity_default=true
+  if [ "${DPU_MODE}" != "none" ]; then
+    ovnkube_identity_default=false
+  fi
+  OVN_ENABLE_OVNKUBE_IDENTITY=${OVN_ENABLE_OVNKUBE_IDENTITY:-${ovnkube_identity_default}}
 }
 
 usage() {
@@ -51,6 +63,11 @@ usage() {
     echo "       [ -cn  | --cluster-name ]"
     echo "       [ -mip | --metrics-ip <ip> ]"
     echo "       [ -mtu <mtu> ]"
+    echo "       [ --dpu-mode <none|host|dpu> ]"
+    echo "       [ -f | --extra-values <file> ]"
+    echo "       [ --frr-k8s-remote-kubeconfig <file> ]"
+    echo "       [ --frr-k8s-host-kubeconfig <file> ]"
+    echo "       [ --frr-k8s-remote-node-map <host=dpu[,host=dpu...]> ]"
     echo "       [ --enable-coredumps ]"
     echo "       [ -h ]"
     echo ""
@@ -129,6 +146,11 @@ usage() {
     echo "-sw  | --allow-system-writes                  Allow the script to write to /etc/hosts and other system files when needed."
     echo "-ric | --run-in-container                     Run the script from inside a docker container (adapts kubeconfig API URL)."
     echo "-kc  | --kubeconfig                           Output kubeconfig path. DEFAULT: \$HOME/\$KIND_CLUSTER_NAME.conf"
+    echo "--dpu-mode                                    Deploy OVN-Kubernetes for DPU simulator mode: none, host, or dpu. DEFAULT: none"
+    echo "-f | --extra-values                           Extra Helm values file appended after the base values file. May be repeated."
+    echo "--frr-k8s-remote-kubeconfig                   Kubeconfig used by DPU-cluster FRR-K8S pods to watch the host cluster API."
+    echo "--frr-k8s-host-kubeconfig                     Kubeconfig used by this script to write FRR-K8S resources to the host cluster API."
+    echo "--frr-k8s-remote-node-map                     Comma-separated host-node=dpu-node pairs for remote FRR-K8S node-name mapping."
     echo "-nokvipam | --opt-out-kv-ipam                 Skip installing the KubeVirt IPAM controller (requires --install-kubevirt)."
     echo ""
 
@@ -252,8 +274,6 @@ parse_args() {
                                                   ;;
             -cn | --cluster-name )                shift
                                                   KIND_CLUSTER_NAME=$1
-                                                  # Setup KUBECONFIG
-                                                  set_default_params
                                                   ;;
             -dns | --enable-dnsnameresolver )     OVN_ENABLE_DNSNAMERESOLVER=true
                                                   ;;
@@ -362,6 +382,48 @@ parse_args() {
             -kc | --kubeconfig )                  shift
                                                   KUBECONFIG=$1
                                                   ;;
+            --dpu-mode )                          shift
+                                                  DPU_MODE=$1
+                                                  if [[ "${DPU_MODE}" != "none" && "${DPU_MODE}" != "host" && "${DPU_MODE}" != "dpu" ]]; then
+                                                    echo "Invalid --dpu-mode: ${DPU_MODE}. Expected one of: none, host, dpu"
+                                                    exit 1
+                                                  fi
+                                                  if [[ "${DPU_MODE}" != "none" && -z "${OVN_ENABLE_OVNKUBE_IDENTITY:-}" ]]; then
+                                                    OVN_ENABLE_OVNKUBE_IDENTITY=false
+                                                  fi
+                                                  ;;
+            -f | --extra-values )                 shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --extra-values" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  OVN_HELM_EXTRA_VALUES+=("$1")
+                                                  ;;
+            --frr-k8s-remote-kubeconfig )         shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --frr-k8s-remote-kubeconfig" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  FRR_K8S_REMOTE_KUBECONFIG=$1
+                                                  ;;
+            --frr-k8s-host-kubeconfig )           shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --frr-k8s-host-kubeconfig" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  FRR_K8S_HOST_KUBECONFIG=$1
+                                                  ;;
+            --frr-k8s-remote-node-map )           shift
+                                                  if [[ -z "${1:-}" || "${1:-}" == -* ]]; then
+                                                    echo "Missing value for --frr-k8s-remote-node-map" >&2
+                                                    usage
+                                                    exit 1
+                                                  fi
+                                                  FRR_K8S_REMOTE_NODE_MAP=$1
+                                                  ;;
             -nokvipam | --opt-out-kv-ipam )       KIND_OPT_OUT_KUBEVIRT_IPAM=true
                                                   ;;
             * )                                   usage
@@ -439,6 +501,11 @@ print_params() {
      echo "KIND_INSTALL_PROMETHEUS = $KIND_INSTALL_PROMETHEUS"
      echo "KIND_ALLOW_SYSTEM_WRITES = $KIND_ALLOW_SYSTEM_WRITES"
      echo "RUN_IN_CONTAINER = $RUN_IN_CONTAINER"
+     echo "DPU_MODE = $DPU_MODE"
+     echo "OVN_HELM_EXTRA_VALUES = ${OVN_HELM_EXTRA_VALUES[*]}"
+     echo "FRR_K8S_REMOTE_KUBECONFIG = ${FRR_K8S_REMOTE_KUBECONFIG:-}"
+     echo "FRR_K8S_HOST_KUBECONFIG = ${FRR_K8S_HOST_KUBECONFIG:-}"
+     echo "FRR_K8S_REMOTE_NODE_MAP = ${FRR_K8S_REMOTE_NODE_MAP:-}"
      echo "MASTER_LOG_LEVEL = $MASTER_LOG_LEVEL"
      echo "NODE_LOG_LEVEL = $NODE_LOG_LEVEL"
      echo "OVN_LOG_LEVEL_NB = $OVN_LOG_LEVEL_NB"
@@ -463,25 +530,55 @@ helm_prereqs() {
     sudo sysctl fs.inotify.max_user_instances=512
 }
 
+helm_extra_values_args() {
+    local args=""
+    local values_file
+    for values_file in "${OVN_HELM_EXTRA_VALUES[@]}"; do
+        args+=" -f $(printf '%q' "${values_file}")"
+    done
+    printf '%s' "${args}"
+}
+
+skip_ovn_image_build_load() {
+    [ "${DPU_MODE}" != "none" ] && [ "${#OVN_HELM_EXTRA_VALUES[@]}" -gt 0 ] && [ "${OVN_IMAGE}" == "local" ]
+}
+
 create_ovn_kubernetes() {
     cd ${DIR}/../helm/ovn-kubernetes
-    label_ovn_single_node_zones
     value_file="values-single-node-zone.yaml"
+    if [ "${DPU_MODE}" == "dpu" ]; then
+      value_file="values-single-node-zone-dpu.yaml"
+    fi
     echo "value_file=${value_file}"
+    local extra_values_args helm_network_args helm_image_args helm_log_args
+    extra_values_args="$(helm_extra_values_args)"
     # For multi-pod-subnet case, NET_CIDR_IPV4 is a list of CIDRs separated by comma.
     # When Helm encounters a comma within a string value in a --set argument, it attempts to parse the comma as a separator
     # for multiple values (like a list or a map), not as part of a single string value.
     set -x
     ESCAPED_NET_CIDR="${NET_CIDR//,/\\,}"
     ESCAPED_SVC_CIDR="${SVC_CIDR//,/\\,}"
+    if [ "${DPU_MODE}" == "dpu" ]; then
+      helm_network_args="--set global.mtu=${OVN_MTU}"
+      if skip_ovn_image_build_load; then
+        helm_image_args=""
+      else
+        helm_image_args="--set global.dpuImage.repository=${OVN_IMAGE%:*} --set global.dpuImage.tag=${OVN_IMAGE##*:}"
+      fi
+      helm_log_args="--set ovnkube-single-node-zone-dpu.ovnkubeNodeLogLevel=${NODE_LOG_LEVEL} --set-string ovnkube-single-node-zone-dpu.nbLogLevel=\"${OVN_LOG_LEVEL_NB}\" --set-string ovnkube-single-node-zone-dpu.sbLogLevel=\"${OVN_LOG_LEVEL_SB}\" --set-string ovnkube-single-node-zone-dpu.northdLogLevel=\"${OVN_LOG_LEVEL_NORTHD}\" --set-string ovnkube-single-node-zone-dpu.ovnControllerLogLevel=\"${OVN_LOG_LEVEL_CONTROLLER}\""
+    else
+      helm_network_args="--set k8sAPIServer=${API_URL} --set podNetwork=\"${ESCAPED_NET_CIDR}\" --set serviceNetwork=\"${ESCAPED_SVC_CIDR}\" --set mtu=${OVN_MTU}"
+      if skip_ovn_image_build_load; then
+        helm_image_args=""
+      else
+        helm_image_args="--set global.image.repository=${OVN_IMAGE%:*} --set global.image.tag=${OVN_IMAGE##*:}"
+      fi
+      helm_log_args="--set ovnkube-control-plane.logLevel=${MASTER_LOG_LEVEL} --set ovnkube-node.logLevel=${NODE_LOG_LEVEL} --set ovnkube-single-node-zone.ovnkubeNodeLogLevel=${NODE_LOG_LEVEL} --set-string ovnkube-single-node-zone.nbLogLevel=\"${OVN_LOG_LEVEL_NB}\" --set-string ovnkube-single-node-zone.sbLogLevel=\"${OVN_LOG_LEVEL_SB}\" --set-string ovnkube-single-node-zone.northdLogLevel=\"${OVN_LOG_LEVEL_NORTHD}\" --set-string ovnkube-node.ovnControllerLogLevel=\"${OVN_LOG_LEVEL_CONTROLLER}\" --set-string ovnkube-single-node-zone.ovnControllerLogLevel=\"${OVN_LOG_LEVEL_CONTROLLER}\""
+    fi
     cmd=$(cat <<EOF
-helm upgrade --install ovn-kubernetes . -f "${value_file}" \
-          --set k8sAPIServer=${API_URL} \
-          --set podNetwork="${ESCAPED_NET_CIDR}" \
-          --set serviceNetwork="${ESCAPED_SVC_CIDR}" \
-          --set mtu=${OVN_MTU} \
-          --set global.image.repository=${OVN_IMAGE%:*} \
-          --set global.image.tag=${OVN_IMAGE##*:} \
+helm upgrade --install ovn-kubernetes . -f "${value_file}" ${extra_values_args} \
+          ${helm_network_args} \
+          ${helm_image_args} \
           --set-string global.v4JoinSubnet="${JOIN_SUBNET_IPV4}" \
           --set-string global.v6JoinSubnet="${JOIN_SUBNET_IPV6}" \
           --set-string global.v4MasqueradeSubnet="${MASQUERADE_SUBNET_IPV4}" \
@@ -538,14 +635,7 @@ helm upgrade --install ovn-kubernetes . -f "${value_file}" \
           $( [ -n "${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT}" ] && echo "--set global.ipfixCacheActiveTimeout=${OVN_IPFIX_CACHE_ACTIVE_TIMEOUT}" ) \
           $( [ -n "${LIBOVSDB_CLIENT_LOGFILE}" ] && echo "--set global.libovsdbClientLogFile=${LIBOVSDB_CLIENT_LOGFILE}" ) \
           --set hostNetworkNamespace=${OVN_HOST_NETWORK_NAMESPACE} \
-          --set ovnkube-control-plane.logLevel=${MASTER_LOG_LEVEL} \
-          --set ovnkube-node.logLevel=${NODE_LOG_LEVEL} \
-          --set ovnkube-single-node-zone.ovnkubeNodeLogLevel=${NODE_LOG_LEVEL} \
-          --set-string ovnkube-single-node-zone.nbLogLevel="${OVN_LOG_LEVEL_NB}" \
-          --set-string ovnkube-single-node-zone.sbLogLevel="${OVN_LOG_LEVEL_SB}" \
-          --set-string ovnkube-single-node-zone.northdLogLevel="${OVN_LOG_LEVEL_NORTHD}" \
-          --set-string ovnkube-node.ovnControllerLogLevel="${OVN_LOG_LEVEL_CONTROLLER}" \
-          --set-string ovnkube-single-node-zone.ovnControllerLogLevel="${OVN_LOG_LEVEL_CONTROLLER}"
+          ${helm_log_args}
 EOF
        )
     echo "${cmd}"
@@ -561,6 +651,13 @@ install_online_ovn_kubernetes_crds() {
 check_dependencies
 parse_args "$@"
 set_default_params
+if [ "${DPU_MODE}" == "dpu" ] && [ "${ENABLE_ROUTE_ADVERTISEMENTS}" == true ]; then
+  if [[ -z "${FRR_K8S_REMOTE_KUBECONFIG:-}" || -z "${FRR_K8S_REMOTE_NODE_MAP:-}" ]]; then
+    echo "DPU mode with route advertisements requires --frr-k8s-remote-kubeconfig and --frr-k8s-remote-node-map" >&2
+    exit 1
+  fi
+  validate_frr_k8s_remote
+fi
 print_params
 helm_prereqs
 
@@ -597,13 +694,21 @@ fi
 if [ "$RUN_IN_CONTAINER" == true ]; then
   run_script_in_container
 fi
-# when using a non-default cluster name, fix up the context/cluster/user names in kubeconfig
-if [ "$KIND_CLUSTER_NAME" != "ovn" ]; then
+# when using a non-default cluster name created by this script, fix up the
+# context/cluster/user names in kubeconfig. In deploy mode the kubeconfig is
+# supplied by the caller and should be used as-is.
+if [ "$KIND_CREATE" == true ] && [ "$KIND_CLUSTER_NAME" != "ovn" ]; then
   fixup_kubeconfig_names
 fi
-build_ovn_image
+if skip_ovn_image_build_load; then
+  echo "Skipping OVN image build/load; DPU extra values are expected to provide the image"
+else
+  build_ovn_image
+fi
 detect_apiserver_url
-install_ovn_image
+if ! skip_ovn_image_build_load; then
+  install_ovn_image
+fi
 if [ "$OVN_ENABLE_DNSNAMERESOLVER" == true ]; then
     build_dnsnameresolver_images
     install_dnsnameresolver_images
@@ -617,17 +722,26 @@ if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
   if [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" == true ]; then
     # Enable bgp port listening on node, required for managed mode. FRR will listen on port 179 to receive BGP updates from other nodes.
     frr_port=179
-  else
-    # external FRR is required for unmanaged mode
+  elif [ "${DPU_MODE}" != "host" ]; then
+    # external FRR is required for unmanaged mode where the FRR-K8S speakers run.
     deploy_frr_external_container
     deploy_bgp_external_server
   fi
-  install_frr_k8s $frr_port
+  if [ "${DPU_MODE}" == "host" ]; then
+    install_frr_k8s_crds
+  else
+    install_frr_k8s $frr_port
+  fi
 fi
 if [ "$KIND_REMOVE_TAINT" == true ]; then
   remove_no_schedule_taint
 fi
 create_ovn_kubernetes
+
+# --deploy: helm sees no spec diff (same OVN_IMAGE tag), so refresh pods manually.
+if [ "$KIND_CREATE" == false ] && [ "$KIND_LOCAL_REGISTRY" == false ]; then
+  refresh_ovn_pods
+fi
 
 install_online_ovn_kubernetes_crds
 if [ "$KIND_INSTALL_INGRESS" == true ]; then
@@ -666,13 +780,15 @@ if [ "$KIND_INSTALL_KUBEVIRT" == true ]; then
   fi
 fi
 
-if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
+if [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ] && [ "${DPU_MODE}" != "host" ]; then
   # wait for frr-k8s to be ready
   wait_for_frr_k8s
   if [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" != true ]; then
     configure_frr_k8s
   fi
 fi
+
+restart_dpu_sim_system_deployments_after_ovnk
 
 # IPsec pods need the signer-ca ConfigMap and signed CSRs before they can roll out.
 # The ovn-ipsec DaemonSet is created by the helm chart (tags.ovn-ipsec=true), install_ipsec
