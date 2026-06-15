@@ -403,7 +403,7 @@ var _ = Describe("addressManager.updateOVNEncapIPAndReconnect", func() {
 		return got[0].ExternalIDs["ovn-encap-ip"]
 	}
 
-	It("is a no-op when the encap IP is already configured", func() {
+	ovntest.OnSupportedPlatformsIt("is a no-op when the encap IP is already configured", func() {
 		am := startHarness(map[string]string{"ovn-encap-ip": "10.1.1.10"})
 		// fexec has no expectations; if ovn-appctl runs, it fails the test.
 		am.updateOVNEncapIPAndReconnect(net.ParseIP("10.1.1.10"))
@@ -411,7 +411,7 @@ var _ = Describe("addressManager.updateOVNEncapIPAndReconnect", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
 
-	It("writes the encap IP and restarts ovn-controller when it differs", func() {
+	ovntest.OnSupportedPlatformsIt("writes the encap IP and restarts ovn-controller when it differs", func() {
 		am := startHarness(map[string]string{"ovn-encap-ip": "10.1.1.10"})
 		fexec.AddFakeCmdsNoOutputNoError([]string{ovnAppctlExitRestart})
 		am.updateOVNEncapIPAndReconnect(net.ParseIP("10.1.1.20"))
@@ -420,7 +420,7 @@ var _ = Describe("addressManager.updateOVNEncapIPAndReconnect", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
 
-	It("writes the encap IP when no prior value exists", func() {
+	ovntest.OnSupportedPlatformsIt("writes the encap IP when no prior value exists", func() {
 		am := startHarness(nil)
 		fexec.AddFakeCmdsNoOutputNoError([]string{ovnAppctlExitRestart})
 		am.updateOVNEncapIPAndReconnect(net.ParseIP("10.1.1.10"))
@@ -428,7 +428,7 @@ var _ = Describe("addressManager.updateOVNEncapIPAndReconnect", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue())
 	})
 
-	It("preserves unrelated external_ids while updating the encap IP", func() {
+	ovntest.OnSupportedPlatformsIt("preserves unrelated external_ids while updating the encap IP", func() {
 		am := startHarness(map[string]string{
 			"ovn-encap-ip": "10.1.1.10",
 			"system-id":    "node-a",

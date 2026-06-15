@@ -594,7 +594,7 @@ func getNodeStatus(node string) string {
 	return status
 }
 
-// waitClusterHealthy ensures we have a given number of ovn-k worker and master nodes,
+// waitClusterHealthy ensures we have a given number of ovn-k worker and control-plane nodes,
 // as well as all nodes are healthy
 func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, controlPlanePodName string) error {
 	return wait.PollImmediate(2*time.Second, 120*time.Second, func() (bool, error) {
@@ -642,7 +642,7 @@ func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, control
 			LabelSelector: "name=" + controlPlanePodName,
 		})
 		if err != nil {
-			return false, fmt.Errorf("failed to list ovn-kube master pods: %w", err)
+			return false, fmt.Errorf("failed to list ovn-kube control-plane pods: %w", err)
 		}
 		if len(podList.Items) != numControlPlanePods {
 			framework.Logf("Not enough running %s pods, want %d, have %d", controlPlanePodName, numControlPlanePods, len(podList.Items))
@@ -2015,4 +2015,18 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		}
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
+}
+
+// firstSubnetOf returns the first subnet of a given size within the provided
+// subnet
+func firstSubnetOf(subnet string, subnetSize int) string {
+	_, ipNet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		panic(fmt.Sprintf("firstSubnetOf: invalid subnet %q: %v", subnet, err))
+	}
+	ones, bits := ipNet.Mask.Size()
+	if subnetSize < ones || subnetSize > bits {
+		panic(fmt.Sprintf("firstSubnetOf: requested size /%d is not between min /%d and max /%d for %s", subnetSize, ones, bits, subnet))
+	}
+	return fmt.Sprintf("%s/%d", ipNet.IP, subnetSize)
 }
