@@ -32,8 +32,8 @@ func extractVMFromExternalIDs(externalIDs map[string]string) *ktypes.NamespacedN
 	return &ktypes.NamespacedName{Namespace: namespace, Name: vmName}
 }
 
-// externalIDContainsVM return true if the nbdb ExternalIDs has namespace
-// and name entries matching the VM
+// externalIDsContainsVM returns true if the nbdb ExternalIDs have namespace
+// and name entries matching the VM.
 func externalIDsContainsVM(externalIDs map[string]string, vm *ktypes.NamespacedName) bool {
 	if vm == nil {
 		return false
@@ -50,9 +50,9 @@ func externalIDsContainsVM(externalIDs map[string]string, vm *ktypes.NamespacedN
 	return *vm == *externalIDsVM
 }
 
-// OwnsItAndIsOrphanOrWrongZone return true if kubevirt owns this OVN NB
-// resource by checking if it has the VM name in external_ids and also checks
-// if the expected ovn zone corresponds with the one it created via the
+// ownsItAndIsOrphanOrWrongZone returns true if KubeVirt owns this OVN NB
+// resource by checking if it has the VM name in external_ids and also checking
+// if the expected OVN zone corresponds with the one it created via the
 // OvnZoneExternalIDKey.
 // The controllerName parameter ensures that only resources owned by the
 // specified controller are considered for deletion, preventing cross-controller
