@@ -2042,6 +2042,8 @@ ovn-cluster-manager() {
   }
   echo "ovn_cluster_manager_ssl_opts=${ovn_cluster_manager_ssl_opts}"
 
+  rm -f ${OVN_RUNDIR}/ovnkube-cluster-manager.pid
+
   echo "=============== ovn-cluster-manager ========== control plane node only"
   /usr/bin/ovnkube --init-cluster-manager ${K8S_NODE} \
     ${anp_enabled_flag} \
