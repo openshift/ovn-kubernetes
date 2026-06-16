@@ -34,21 +34,22 @@ var (
 
 // ACL defines an object in ACL table
 type ACL struct {
-	UUID        string            `ovsdb:"_uuid"`
-	Action      ACLAction         `ovsdb:"action"`
-	Direction   ACLDirection      `ovsdb:"direction"`
-	ExternalIDs map[string]string `ovsdb:"external_ids"`
-	Label       int               `ovsdb:"label"`
-	Log         bool              `ovsdb:"log"`
-	Match       string            `ovsdb:"match"`
-	Meter       *string           `ovsdb:"meter"`
-	Name        *string           `ovsdb:"name"`
-	Options     map[string]string `ovsdb:"options"`
-	Priority    int               `ovsdb:"priority"`
-	SampleEst   *string           `ovsdb:"sample_est"`
-	SampleNew   *string           `ovsdb:"sample_new"`
-	Severity    *ACLSeverity      `ovsdb:"severity"`
-	Tier        int               `ovsdb:"tier"`
+	UUID                 string            `ovsdb:"_uuid"`
+	Action               ACLAction         `ovsdb:"action"`
+	Direction            ACLDirection      `ovsdb:"direction"`
+	ExternalIDs          map[string]string `ovsdb:"external_ids"`
+	Label                int               `ovsdb:"label"`
+	Log                  bool              `ovsdb:"log"`
+	Match                string            `ovsdb:"match"`
+	Meter                *string           `ovsdb:"meter"`
+	Name                 *string           `ovsdb:"name"`
+	NetworkFunctionGroup *string           `ovsdb:"network_function_group"`
+	Options              map[string]string `ovsdb:"options"`
+	Priority             int               `ovsdb:"priority"`
+	SampleEst            *string           `ovsdb:"sample_est"`
+	SampleNew            *string           `ovsdb:"sample_new"`
+	Severity             *ACLSeverity      `ovsdb:"severity"`
+	Tier                 int               `ovsdb:"tier"`
 }
 
 func (a *ACL) GetUUID() string {
@@ -140,6 +141,28 @@ func copyACLName(a *string) *string {
 }
 
 func equalACLName(a, b *string) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
+func (a *ACL) GetNetworkFunctionGroup() *string {
+	return a.NetworkFunctionGroup
+}
+
+func copyACLNetworkFunctionGroup(a *string) *string {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalACLNetworkFunctionGroup(a, b *string) bool {
 	if (a == nil) != (b == nil) {
 		return false
 	}
@@ -258,6 +281,7 @@ func (a *ACL) DeepCopyInto(b *ACL) {
 	b.ExternalIDs = copyACLExternalIDs(a.ExternalIDs)
 	b.Meter = copyACLMeter(a.Meter)
 	b.Name = copyACLName(a.Name)
+	b.NetworkFunctionGroup = copyACLNetworkFunctionGroup(a.NetworkFunctionGroup)
 	b.Options = copyACLOptions(a.Options)
 	b.SampleEst = copyACLSampleEst(a.SampleEst)
 	b.SampleNew = copyACLSampleNew(a.SampleNew)
@@ -289,6 +313,7 @@ func (a *ACL) Equals(b *ACL) bool {
 		a.Match == b.Match &&
 		equalACLMeter(a.Meter, b.Meter) &&
 		equalACLName(a.Name, b.Name) &&
+		equalACLNetworkFunctionGroup(a.NetworkFunctionGroup, b.NetworkFunctionGroup) &&
 		equalACLOptions(a.Options, b.Options) &&
 		a.Priority == b.Priority &&
 		equalACLSampleEst(a.SampleEst, b.SampleEst) &&
