@@ -202,7 +202,7 @@ collect_module_downloads() {
                     cp go.sum "${tmp_sumfile}"
                 fi
 
-                GOTOOLCHAIN=local GOWORK=off GOFLAGS=-mod=mod \
+                GOWORK=off GOFLAGS=-mod=mod \
                     go mod download -modfile="$(basename "${tmp_modfile}")" -json all || true
             )
         done \
@@ -265,6 +265,11 @@ generate_license_tree() {
     )
 
     if [[ ${conflict} -ne 0 ]]; then
+        exit 1
+    fi
+
+    if [[ ${#package_dirs[@]} -eq 0 ]]; then
+        echo "no third-party module source directories were collected; refusing to overwrite ${LICENSES_DIR}" >&2
         exit 1
     fi
 
