@@ -73,7 +73,7 @@ func newClientLogger(dbModelName string) (logger logr.Logger, err error) {
 // the stopCh is required to ensure the goroutine for ssl cert
 // update is not leaked
 func newClient(cfg config.OvnAuthConfig, dbModel model.ClientDBModel, stopCh <-chan struct{}, opts ...client.Option) (client.Client, error) {
-	const connectTimeout time.Duration = types.OVSDBTimeout * 2
+	const connectTimeout time.Duration = types.OVSDBTimeout * 4
 	const inactivityTimeout time.Duration = types.OVSDBTimeout * 18
 	logger, err := newClientLogger(dbModel.Name())
 	if err != nil {
