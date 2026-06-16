@@ -231,8 +231,8 @@ module.exports = async ({ github, context, core }) => {
     const latestByName = new Map();
     for (const run of allCheckRuns) {
       const existing = latestByName.get(run.name);
-      const runTime = run.started_at ? new Date(run.started_at).getTime() : 0;
-      const existingTime = existing && existing.started_at ? new Date(existing.started_at).getTime() : 0;
+      const runTime = new Date(run.started_at || run.created_at || 0).getTime();
+      const existingTime = existing ? new Date(existing.started_at || existing.created_at || 0).getTime() : 0;
       if (!existing || runTime > existingTime) {
         latestByName.set(run.name, run);
       }
