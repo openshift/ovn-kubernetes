@@ -20,7 +20,6 @@ import (
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/onsi/gomega"
 	"github.com/stretchr/testify/mock"
-	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,21 +50,17 @@ type testPod struct {
 	completed   bool
 	network     *nadapi.NetworkSelectionElement
 	labels      map[string]string
-	annotations map[string]string
 }
 
 func (p testPod) getPod(t *testing.T) *corev1.Pod {
 	t.Helper()
-	if p.annotations == nil {
-		p.annotations = map[string]string{}
-	}
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "pod",
 			UID:         apitypes.UID("pod"),
 			Namespace:   "namespace",
+			Annotations: map[string]string{},
 			Labels:      p.labels,
-			Annotations: p.annotations,
 		},
 		Spec: corev1.PodSpec{
 			HostNetwork: p.hostNetwork,
@@ -679,13 +674,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 					scheduled: true,
 					completed: true,
 					network:   &nadapi.NetworkSelectionElement{Namespace: "namespace", Name: "nad"},
-					labels: map[string]string{
-						kubevirtv1.VirtualMachineNameLabel: "myvm",
-						kubevirtv1.AppLabel:                "virt-launcher",
-					},
-					annotations: map[string]string{
-						kubevirtv1.DomainAnnotation: "myvm",
-					},
+					labels:    map[string]string{"vm.kubevirt.io/name": "myvm"},
 				},
 			},
 			expectMACRelease: &net.HardwareAddr{0x0a, 0x0a, 0x0a, 0x0a, 0x0a, 0x0a},
@@ -724,13 +713,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 					scheduled: true,
 					completed: true,
 					network:   &nadapi.NetworkSelectionElement{Namespace: "namespace", Name: "nad"},
-					labels: map[string]string{
-						kubevirtv1.VirtualMachineNameLabel: "myvm",
-						kubevirtv1.AppLabel:                "virt-launcher",
-					},
-					annotations: map[string]string{
-						kubevirtv1.DomainAnnotation: "myvm",
-					},
+					labels:    map[string]string{"vm.kubevirt.io/name": ""},
 				},
 			},
 			newPodCopyRunning: true,
@@ -750,13 +733,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 					scheduled: true,
 					completed: true,
 					network:   &nadapi.NetworkSelectionElement{Namespace: "namespace", Name: "nad"},
-					labels: map[string]string{
-						kubevirtv1.VirtualMachineNameLabel: "myvm",
-						kubevirtv1.AppLabel:                "virt-launcher",
-					},
-					annotations: map[string]string{
-						kubevirtv1.DomainAnnotation: "myvm",
-					},
+					labels:    map[string]string{"vm.kubevirt.io/name": "myvm"},
 				},
 			},
 			expectError:     `failed to release pod "namespace/pod" mac "0a:0a:0a:0a:0a:0a": failed checking all VM "namespace/myvm" pods are completed: failed finding related pods for pod namespace/pod when checking if they are completed: test error`,
@@ -820,13 +797,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				new: &testPod{
 					network:   &nadapi.NetworkSelectionElement{Namespace: "namespace", Name: "nad"},
 					scheduled: true,
-					labels: map[string]string{
-						kubevirtv1.VirtualMachineNameLabel: "myvm",
-						kubevirtv1.AppLabel:                "virt-launcher",
-					},
-					annotations: map[string]string{
-						kubevirtv1.DomainAnnotation: "myvm",
-					},
+					labels:    map[string]string{"vm.kubevirt.io/name": "myvm"},
 				},
 			},
 			expectAllocate: true,
@@ -843,13 +814,7 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 				new: &testPod{
 					scheduled: true, completed: true,
 					network: &nadapi.NetworkSelectionElement{Namespace: "namespace", Name: "nad"},
-					labels: map[string]string{
-						kubevirtv1.VirtualMachineNameLabel: "myvm",
-						kubevirtv1.AppLabel:                "virt-launcher",
-					},
-					annotations: map[string]string{
-						kubevirtv1.DomainAnnotation: "myvm",
-					},
+					labels:  map[string]string{"vm.kubevirt.io/name": "myvm"},
 				},
 			},
 			expectMACOwnerID: "namespace/myvm",

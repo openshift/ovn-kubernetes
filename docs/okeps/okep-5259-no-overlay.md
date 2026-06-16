@@ -632,23 +632,6 @@ The routing table of the default VRF of node A which contains learned BGP routes
 10.128.2.0/24 nhid 25 via 172.18.0.4 dev eth0 proto bgp metric 20
 ```
 
-For layer-3 no-overlay UDNs in local gateway mode, OVN-Kubernetes installs the
-management port address with `noprefixroute` and adds explicit VRF routes through
-the UDN gateway IP. The local UDN pod subnet is routed as
-`10.128.0.0/24 via 10.128.0.1 dev ovn-k8s-mpX` instead of using a connected
-route on the management port, so underlay ingress to local UDN pods still goes
-through the OVN logical topology.
-
-For example, the relevant routes in the UDN VRF on a node with local UDN pod
-subnet `10.128.0.0/24` look like:
-
-```text
-10.128.0.0/24 via 10.128.0.1 dev ovn-k8s-mpX
-10.128.0.1 dev ovn-k8s-mpX scope link
-10.128.1.0/24 nhid 30 via 172.18.0.2 dev breth0 proto bgp metric 20
-10.128.2.0/24 nhid 25 via 172.18.0.4 dev breth0 proto bgp metric 20
-```
-
 ```mermaid
 sequenceDiagram
     participant Pod1 on Node A
@@ -761,9 +744,9 @@ SNAT behavior via:
   is not SNATed. Pod IPs must be routable on the external network.
 
 * **`outboundSNAT: Enabled`** (or `outbound-snat=enabled`): Pod egress traffic
-  to external destinations is SNATed at node egress. In shared gateway mode and
-  local gateway mode using the default VRF, this exposes the node IP. In local
-  gateway VRF-Lite, Linux masquerade uses the selected VRF egress interface IP.
+  to external destinations is SNATed to the node IP. This is intended for
+  deployments where pod networks are only advertised to an internal BGP fabric
+  and are not routable from external networks.
 
 **Important:** Regardless of this setting, pod-to-remote-pod traffic within the
 same network is never SNATed, while traffic to remote nodes, the Kubernetes API
@@ -844,19 +827,6 @@ priority            : 0
 type                : snat
 ```
 
-For advertised UDNs in shared gateway mode, conditional SNATs on the UDN cluster
-router use `allowed_ext_ips` instead of `match`. This keeps the destination
-constraint on the NAT while allowing northd to render the reverse conntrack flows
-needed by NodePort reply traffic. Since `allowed_ext_ips` accepts one
-address set, each destination address set uses a separate NAT row: one for
-cluster node IPs and one for UDN service ClusterIPs.
-
-A future improvement is to restore the original conditional SNAT and set
-`options:ct-commit-all=true` on the logical router. This is postponed in shared
-gateway mode because that is the gateway mode used by offloaded deployments, and
-the option is not fully offloadable yet. As explained in the next section,
-Local gateway mode already uses `ct-commit-all`, since that scenario is not offloaded.
-
 ##### Local Gateway Mode
 
 When `outboundSNAT` is disabled, the existing BGP feature behavior is preserved:
@@ -866,9 +836,6 @@ for details).
 When `outboundSNAT` is enabled for the default network, pod egress traffic is
 forwarded to the host kernel by the ovn-cluster-router, where it is then SNATed
 to the node IP using nftables rules.
-
-For local gateway VRF-Lite CUDNs, the exposed source IP is the egress interface IP in
-the target VRF.
 
 In the following example, `10.128.0.0/24` is the pod subnet in the local node,
 `10.128.0.0/16` is the CIDR of the pod network. `outboundSNAT` is enabled for
@@ -917,11 +884,6 @@ options             : {stateless="false"}
 priority            : 0
 type                : snat
 ```
-
-In local gateway mode, conditional SNATs on network-scoped UDN cluster routers
-use `options:ct-commit-all=true`. This keeps the NAT condition while committing
-traffic in the router SNAT zone, allowing the reverse conntrack handling needed
-by NodePort reply traffic.
 
 #### UDN Traffic Isolation
 

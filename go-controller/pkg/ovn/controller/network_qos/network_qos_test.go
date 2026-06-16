@@ -1167,8 +1167,8 @@ func initEnv(clientset *util.OVNClientset, initialDB *libovsdbtest.TestSetup) {
 	var err error
 	stopChan = make(chan struct{})
 
-	watchFactory, err = factory.NewOVNKubeControllerWatchFactory(
-		&util.OVNKubeControllerClientset{
+	watchFactory, err = factory.NewMasterWatchFactory(
+		&util.OVNMasterClientset{
 			KubeClient:            clientset.KubeClient,
 			NetworkQoSClient:      clientset.NetworkQoSClient,
 			NetworkAttchDefClient: clientset.NetworkAttchDefClient,

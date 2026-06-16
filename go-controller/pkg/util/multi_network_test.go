@@ -46,36 +46,6 @@ func TestParseNetworkSubnets(t *testing.T) {
 			},
 		},
 		{
-			desc:     "multiple ipv4 subnets layer3 topology",
-			topology: ovntypes.Layer3Topology,
-			subnets:  "192.168.1.0/24/28, 192.168.2.0/24/28",
-			expectedSubnets: []config.CIDRNetworkEntry{
-				{
-					CIDR:             ovntest.MustParseIPNet("192.168.1.0/24"),
-					HostSubnetLength: 28,
-				},
-				{
-					CIDR:             ovntest.MustParseIPNet("192.168.2.0/24"),
-					HostSubnetLength: 28,
-				},
-			},
-		},
-		{
-			desc:     "multiple ipv6 subnets layer3 topology",
-			topology: ovntypes.Layer3Topology,
-			subnets:  "fda6::/48, fda7::/48",
-			expectedSubnets: []config.CIDRNetworkEntry{
-				{
-					CIDR:             ovntest.MustParseIPNet("fda6::/48"),
-					HostSubnetLength: 64,
-				},
-				{
-					CIDR:             ovntest.MustParseIPNet("fda7::/48"),
-					HostSubnetLength: 64,
-				},
-			},
-		},
-		{
 			desc:     "empty subnets layer 3 topology",
 			topology: ovntypes.Layer3Topology,
 		},
@@ -1757,70 +1727,6 @@ func TestSubnetOverlapCheck(t *testing.T) {
 				g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(test.expectedError.Error())))
 			} else {
 				_, err := ParseNADInfo(networkAttachmentDefinition)
-				g.Expect(err).NotTo(gomega.HaveOccurred())
-			}
-		})
-	}
-}
-
-func TestValidateNetConfOutboundSNAT(t *testing.T) {
-	tests := []struct {
-		name          string
-		transport     string
-		outboundSNAT  string
-		expectedError string
-	}{
-		{
-			name:         "empty outboundSNAT is accepted without no-overlay transport",
-			outboundSNAT: "",
-		},
-		{
-			name:         "enabled outboundSNAT is accepted with no-overlay transport",
-			transport:    ovntypes.NetworkTransportNoOverlay,
-			outboundSNAT: ovntypes.NoOverlaySNATEnabled,
-		},
-		{
-			name:         "disabled outboundSNAT is accepted with no-overlay transport",
-			transport:    ovntypes.NetworkTransportNoOverlay,
-			outboundSNAT: ovntypes.NoOverlaySNATDisabled,
-		},
-		{
-			name:          "enabled outboundSNAT is rejected without no-overlay transport",
-			outboundSNAT:  ovntypes.NoOverlaySNATEnabled,
-			expectedError: `outboundSNAT is only valid when transport is "no-overlay"`,
-		},
-		{
-			name:          "enabled outboundSNAT is rejected with EVPN transport",
-			transport:     ovntypes.NetworkTransportEVPN,
-			outboundSNAT:  ovntypes.NoOverlaySNATEnabled,
-			expectedError: `outboundSNAT is only valid when transport is "no-overlay"`,
-		},
-		{
-			name:          "invalid outboundSNAT is rejected with no-overlay transport",
-			transport:     ovntypes.NetworkTransportNoOverlay,
-			outboundSNAT:  "maybe",
-			expectedError: `invalid outboundSNAT "maybe"`,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			g := gomega.NewWithT(t)
-			nadName := "namespace/network"
-			netconf := &ovncnitypes.NetConf{
-				NetConf: cnitypes.NetConf{
-					Name: "network",
-				},
-				NADName:      nadName,
-				Topology:     ovntypes.Layer3Topology,
-				Transport:    test.transport,
-				OutboundSNAT: test.outboundSNAT,
-			}
-
-			err := ValidateNetConf(nadName, netconf)
-			if test.expectedError != "" {
-				g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(test.expectedError)))
-			} else {
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 			}
 		})

@@ -874,7 +874,6 @@ func (oc *DefaultNetworkController) newGatewayManager(nodeName string) *GatewayM
 		oc.GetNetInfo(),
 		oc.watchFactory,
 		nodecontroller.NewNodeAnnotationCache(),
-		oc.addressSetManager,
 		oc.gatewayOptions()...,
 	)
 	return gatewayManager

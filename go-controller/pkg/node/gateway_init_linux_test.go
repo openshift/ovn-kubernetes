@@ -291,7 +291,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		hostSubnets := ovntest.MustParseIPNets(nodeSubnet)
 		rm := routemanager.NewController()
 		netInfo := &multinetworkmocks.NetInfo{}
-		netInfo.On("Transport").Return("")
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
 		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))
@@ -1269,7 +1268,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		hostSubnets := ovntest.MustParseIPNets(nodeSubnet)
 		rm := routemanager.NewController()
 		netInfo := &multinetworkmocks.NetInfo{}
-		netInfo.On("Transport").Return("")
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
 		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))

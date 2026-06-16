@@ -33,7 +33,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/controller/udnenabledsvc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -940,12 +939,10 @@ func (bsnc *BaseUserDefinedNetworkController) buildUDNEgressSNAT(localPodSubnets
 		// For advertised networks, we need to SNAT any traffic leaving the
 		// pods from these networks towards the node IPs in the cluster. In
 		// order to do such a conditional SNAT, we need an address set that
-		// contains the node IPs in the cluster. Re-use the shared cluster node
-		// IP address set owned by the address set manager.
-		nodeIPsASIDs, err := bsnc.addressSetManager.EnsureClusterNodeIPsAddressSet(addresssetmanager.ClusterNodeIPsRouteAdvertisementsBackRef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to ensure cluster node IP address set for route advertisements: %w", err)
-		}
+		// contains the node IPs in the cluster. Given that egressIP feature
+		// already has an address set containing these nodeIPs owned by the
+		// default network controller, let's re-use it.
+		nodeIPsASIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName)
 		nodeIPsAS, err = bsnc.addressSetFactory.GetAddressSet(nodeIPsASIDs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get address set with IDs %v: %w", nodeIPsASIDs, err)
@@ -978,32 +975,6 @@ func (bsnc *BaseUserDefinedNetworkController) buildUDNEgressSNAT(localPodSubnets
 			return nil, fmt.Errorf("masquerade IP cannot be empty network %s (%d): %v", bsnc.GetNetworkName(), networkID, err)
 		}
 
-		if isUDNAdvertised && config.Gateway.Mode == config.GatewayModeShared {
-			addedAllowedExtIPsSNAT := false
-			// OVN NAT.allowed_ext_ips accepts a single Address_Set, so create one
-			// SNAT per allowed destination set.
-			for _, allowedExtIPsAS := range []addressset.AddressSet{nodeIPsAS, svcIPsAS} {
-				allowedExtIPs := getAddressSetUUIDForIPFamily(ipFamily, allowedExtIPsAS)
-				if allowedExtIPs == "" {
-					continue
-				}
-				snats = append(snats, libovsdbops.BuildSNATWithAllowedExtIPs(
-					&masqIP.ManagementPort.IP,
-					localPodSubnet,
-					outputPort,
-					extIDs,
-					"",
-					allowedExtIPs,
-				))
-				addedAllowedExtIPsSNAT = true
-			}
-			if !addedAllowedExtIPsSNAT {
-				return nil, fmt.Errorf("failed to build allowed_ext_ips SNAT for advertised network %s, subnet %s: no address set UUID for IPv%s",
-					bsnc.GetNetworkName(), localPodSubnet, ipFamily)
-			}
-			continue // move to the next pod subnet
-		}
-
 		if isUDNAdvertised {
 			additionalSNATMatch := getClusterNodesDestinationBasedSNATMatch(ipFamily, nodeIPsAS, svcIPsAS)
 			if additionalSNATMatch != "" {
@@ -1011,55 +982,17 @@ func (bsnc *BaseUserDefinedNetworkController) buildUDNEgressSNAT(localPodSubnets
 			}
 		}
 
-		// For noOverlay mode with outboundSNAT enabled in local gateway mode, add exempted_ext_ips
-		// to prevent SNATing pod-to-pod traffic within the same CUDN while still SNATing pod-to-external traffic.
-		// This SNAT is on ovn_cluster_router, which is used in local gateway mode.
-		var snat *nbdb.NAT
-		if bsnc.GetNetInfo().Transport() == types.NetworkTransportNoOverlay &&
-			bsnc.GetNetInfo().OutboundSNAT() == types.NoOverlaySNATEnabled &&
-			config.Gateway.Mode == config.GatewayModeLocal {
-			snatMatch = ""
-			v4UUID, v6UUID, err := getNoOverlaySNATExemptionAsUUID(bsnc.addressSetFactory, bsnc.GetNetInfo(), bsnc.controllerName)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get no-overlay SNAT exemption address set UUID: %w", err)
-			}
-			// Use the appropriate UUID based on IP family
-			exemptedExtIPs := v4UUID
-			if ipFamily == utilnet.IPv6 {
-				exemptedExtIPs = v6UUID
-			}
-			snat = libovsdbops.BuildSNATWithExemptedExtIPs(
-				&masqIP.ManagementPort.IP,
-				localPodSubnet,
-				outputPort,
-				extIDs,
-				snatMatch,
-				exemptedExtIPs,
-			)
-		} else {
-			snat = libovsdbops.BuildSNATWithMatch(
-				&masqIP.ManagementPort.IP,
-				localPodSubnet,
-				outputPort,
-				extIDs,
-				snatMatch,
-			)
-		}
+		snat := libovsdbops.BuildSNATWithMatch(
+			&masqIP.ManagementPort.IP,
+			localPodSubnet,
+			outputPort,
+			extIDs,
+			snatMatch,
+		)
 		snats = append(snats, snat)
 	}
 
 	return snats, nil
-}
-
-func getAddressSetUUIDForIPFamily(ipFamily utilnet.IPFamily, as addressset.AddressSet) string {
-	if as == nil {
-		return ""
-	}
-	v4UUID, v6UUID := as.GetASUUID()
-	if ipFamily == utilnet.IPv6 {
-		return v6UUID
-	}
-	return v4UUID
 }
 
 func getMasqueradeManagementIPSNATMatch(dstMac string) string {

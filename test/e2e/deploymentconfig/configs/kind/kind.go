@@ -4,9 +4,8 @@
 package kind
 
 import (
-	"k8s.io/kubernetes/test/utils/image"
-
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 )
 
@@ -36,5 +35,5 @@ func (k kind) PrimaryInterfaceName() string {
 }
 
 func (k kind) GetAgnHostContainerImage() string {
-	return image.GetE2EImage(image.Agnhost)
+	return images.AgnHost()
 }

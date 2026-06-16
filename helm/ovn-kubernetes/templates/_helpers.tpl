@@ -52,12 +52,7 @@ Generate DPU image
 {{- end }}
 
 {{/*
-Output "yes" if enableSsl is true, otherwise "no".
-
-This toggle no longer controls SSL on the OVN NB/SB DB connections (those are
-local unix sockets in IC mode); it now only gates whether `--nb-client-*` flags
-are passed to ovnkube binaries that run the Egress IP gRPC health-check, which
-reuses these NB cert paths.
+Output "yes" if enableSsl is true, otherwise "no"
 */}}
 {{- define "isSslEnabled" -}}
 {{- $sslEnabled := hasKey .Values.global "enableSsl" | ternary .Values.global.enableSsl false }}

@@ -246,10 +246,8 @@ type mutableNetInfo struct {
 	podNetworkAdvertisements map[string][]string
 	eipAdvertisements        map[string][]string
 
-	// subnets can be added for Layer3 networks
-	subnets []config.CIDRNetworkEntry
-
 	// information generated from previous fields, not used in comparisons
+
 	// namespaces from nads
 	namespaces sets.Set[string]
 }
@@ -284,14 +282,11 @@ func (l *mutableNetInfo) equals(r *mutableNetInfo) bool {
 	defer l.RUnlock()
 	r.RLock()
 	defer r.RUnlock()
-
-	lessCIDR := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
 	return reflect.DeepEqual(l.id, r.id) &&
 		reflect.DeepEqual(l.tunnelKeys, r.tunnelKeys) &&
 		reflect.DeepEqual(l.nads, r.nads) &&
 		reflect.DeepEqual(l.podNetworkAdvertisements, r.podNetworkAdvertisements) &&
-		reflect.DeepEqual(l.eipAdvertisements, r.eipAdvertisements) &&
-		cmp.Equal(l.subnets, r.subnets, cmpopts.SortSlices(lessCIDR))
+		reflect.DeepEqual(l.eipAdvertisements, r.eipAdvertisements)
 }
 
 func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
@@ -305,7 +300,6 @@ func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
 	aux.nads = r.nads.Clone()
 	aux.setPodNetworkAdvertisedOnVRFs(r.podNetworkAdvertisements)
 	aux.setEgressIPAdvertisedAtNodes(r.eipAdvertisements)
-	aux.subnets = append([]config.CIDRNetworkEntry(nil), r.subnets...)
 	aux.namespaces = r.namespaces.Clone()
 	r.RUnlock()
 	l.Lock()
@@ -315,7 +309,6 @@ func (l *mutableNetInfo) copyFrom(r *mutableNetInfo) {
 	l.nads = aux.nads
 	l.podNetworkAdvertisements = aux.podNetworkAdvertisements
 	l.eipAdvertisements = aux.eipAdvertisements
-	l.subnets = aux.subnets
 	l.namespaces = aux.namespaces
 }
 
@@ -738,6 +731,7 @@ type userDefinedNetInfo struct {
 	allowPersistentIPs bool
 
 	ipv4mode, ipv6mode    bool
+	subnets               []config.CIDRNetworkEntry
 	excludeSubnets        []*net.IPNet
 	reservedSubnets       []*net.IPNet
 	infrastructureSubnets []*net.IPNet
@@ -748,9 +742,8 @@ type userDefinedNetInfo struct {
 	defaultGatewayIPs   []net.IP
 	managementIPs       []net.IP
 
-	transport    string
-	evpn         *ovncnitypes.EVPNConfig
-	outboundSNAT string
+	transport string
+	evpn      *ovncnitypes.EVPNConfig
 }
 
 func (nInfo *userDefinedNetInfo) GetNetInfo() NetInfo {
@@ -888,7 +881,8 @@ func (nInfo *userDefinedNetInfo) Transport() string {
 
 // OutboundSNAT() string returns the outbound SNAT configuration for this network when using no-overlay transport.
 func (nInfo *userDefinedNetInfo) OutboundSNAT() string {
-	return nInfo.outboundSNAT
+	// TODO: implement per-network no-overlay outbound SNAT configuration
+	return ""
 }
 
 // EVPNVTEPName returns the name of the VTEP CR for EVPN
@@ -978,9 +972,7 @@ func (nInfo *userDefinedNetInfo) IPMode() (bool, bool) {
 
 // Subnets returns the Subnets value
 func (nInfo *userDefinedNetInfo) Subnets() []config.CIDRNetworkEntry {
-	nInfo.RLock()
-	defer nInfo.RUnlock()
-	return append([]config.CIDRNetworkEntry(nil), nInfo.mutableNetInfo.subnets...)
+	return nInfo.subnets
 }
 
 // ExcludeSubnets returns the ExcludeSubnets value
@@ -1027,10 +1019,6 @@ func (nInfo *userDefinedNetInfo) JoinSubnets() []*net.IPNet {
 // For now it is only set for Primary Layer2 UDNs, otherwise is empty
 func (nInfo *userDefinedNetInfo) TransitSubnets() []*net.IPNet {
 	return nInfo.transitSubnets
-}
-
-func (nInfo *userDefinedNetInfo) reconcile(other NetInfo) {
-	nInfo.mutableNetInfo.reconcile(other)
 }
 
 func (nInfo *userDefinedNetInfo) canReconcile(other NetInfo) bool {
@@ -1084,17 +1072,10 @@ func (nInfo *userDefinedNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo.EVPNIPVRFRouteTarget() != other.EVPNIPVRFRouteTarget() {
 		return false
 	}
-	if nInfo.OutboundSNAT() != other.OutboundSNAT() {
-		return false
-	}
 
 	lessCIDRNetworkEntry := func(a, b config.CIDRNetworkEntry) bool { return a.String() < b.String() }
-	if !cmp.Equal(nInfo.Subnets(), other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
-		// For Layer3 topology, adding subnets is considered compatible and reconcilable
-		// CRD validation ensures only subnet additions are allowed
-		if nInfo.topology != types.Layer3Topology {
-			return false
-		}
+	if !cmp.Equal(nInfo.subnets, other.Subnets(), cmpopts.SortSlices(lessCIDRNetworkEntry)) {
+		return false
 	}
 
 	lessIPNet := func(a, b net.IPNet) bool { return a.String() < b.String() }
@@ -1124,6 +1105,7 @@ func (nInfo *userDefinedNetInfo) copy() *userDefinedNetInfo {
 		allowPersistentIPs:    nInfo.allowPersistentIPs,
 		ipv4mode:              nInfo.ipv4mode,
 		ipv6mode:              nInfo.ipv6mode,
+		subnets:               nInfo.subnets,
 		excludeSubnets:        nInfo.excludeSubnets,
 		reservedSubnets:       nInfo.reservedSubnets,
 		infrastructureSubnets: nInfo.infrastructureSubnets,
@@ -1134,7 +1116,6 @@ func (nInfo *userDefinedNetInfo) copy() *userDefinedNetInfo {
 		managementIPs:         nInfo.managementIPs,
 		transport:             nInfo.transport,
 		evpn:                  nInfo.evpn,
-		outboundSNAT:          nInfo.outboundSNAT,
 	}
 	// copy mutables
 	c.mutableNetInfo.copyFrom(&nInfo.mutableNetInfo)
@@ -1155,15 +1136,14 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		netName:        netconf.Name,
 		primaryNetwork: netconf.Role == types.NetworkRolePrimary,
 		topology:       types.Layer3Topology,
+		subnets:        subnets,
 		joinSubnets:    joinSubnets,
 		mtu:            netconf.MTU,
 		transport:      netconf.Transport,
 		evpn:           netconf.EVPN,
-		outboundSNAT:   netconf.OutboundSNAT,
 		mutableNetInfo: mutableNetInfo{
-			id:      types.InvalidID,
-			nads:    sets.Set[string]{},
-			subnets: append([]config.CIDRNetworkEntry(nil), subnets...),
+			id:   types.InvalidID,
+			nads: sets.Set[string]{},
 		},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
@@ -1226,6 +1206,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		netName:               netconf.Name,
 		primaryNetwork:        netconf.Role == types.NetworkRolePrimary,
 		topology:              types.Layer2Topology,
+		subnets:               subnets,
 		joinSubnets:           joinSubnets,
 		transitSubnets:        transitSubnets,
 		excludeSubnets:        excludes,
@@ -1238,9 +1219,8 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		transport:             netconf.Transport,
 		evpn:                  netconf.EVPN,
 		mutableNetInfo: mutableNetInfo{
-			id:      types.InvalidID,
-			nads:    sets.Set[string]{},
-			subnets: append([]config.CIDRNetworkEntry(nil), subnets...),
+			id:   types.InvalidID,
+			nads: sets.Set[string]{},
 		},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
@@ -1265,15 +1245,15 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error
 	ni := &userDefinedNetInfo{
 		netName:             netconf.Name,
 		topology:            types.LocalnetTopology,
+		subnets:             subnets,
 		excludeSubnets:      excludes,
 		mtu:                 netconf.MTU,
 		vlan:                uint(netconf.VLANID),
 		allowPersistentIPs:  netconf.AllowPersistentIPs,
 		physicalNetworkName: netconf.PhysicalNetworkName,
 		mutableNetInfo: mutableNetInfo{
-			id:      types.InvalidID,
-			nads:    sets.Set[string]{},
-			subnets: append([]config.CIDRNetworkEntry(nil), subnets...),
+			id:   types.InvalidID,
+			nads: sets.Set[string]{},
 		},
 	}
 	ni.ipv4mode, ni.ipv6mode = getIPMode(subnets)
@@ -1576,18 +1556,6 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 			types.NetworkTransportNoOverlay,
 			types.NetworkTransportEVPN,
 		})
-	}
-	if netconf.OutboundSNAT != "" {
-		if netconf.Transport != types.NetworkTransportNoOverlay {
-			return fmt.Errorf("outboundSNAT is only valid when transport is %q", types.NetworkTransportNoOverlay)
-		}
-		if netconf.OutboundSNAT != types.NoOverlaySNATEnabled &&
-			netconf.OutboundSNAT != types.NoOverlaySNATDisabled {
-			return fmt.Errorf("invalid outboundSNAT %q: must be one of %q", netconf.OutboundSNAT, []string{
-				types.NoOverlaySNATEnabled,
-				types.NoOverlaySNATDisabled,
-			})
-		}
 	}
 
 	if netconf.JoinSubnet != "" && netconf.Topology == types.LocalnetTopology {
@@ -1955,29 +1923,8 @@ func AllowsPersistentIPs(netInfo NetInfo) bool {
 	}
 }
 
-// IsPodNetworkAdvertisedAtNode returns true if the pod network is advertised at
-// the given node. For networks with NoOverlay or EVPN transport this always
-// returns true as those networks should always be advertised.
 func IsPodNetworkAdvertisedAtNode(netInfo NetInfo, node string) bool {
-	switch netInfo.Transport() {
-	case types.NetworkTransportNoOverlay, types.NetworkTransportEVPN:
-		return true
-	default:
-		return len(netInfo.GetPodNetworkAdvertisedOnNodeVRFs(node)) > 0
-	}
-}
-
-// IsPodNetworkAdvertisedAtNodeDefaultVRF returns true if the pod network is
-// advertised at the given node in the default VRF. For networks with EVPN
-// transport this always returns false as those networks should not be
-// advertised in the default VRF.
-func IsPodNetworkAdvertisedAtNodeDefaultVRF(netInfo NetInfo, node string) bool {
-	switch netInfo.Transport() {
-	case types.NetworkTransportEVPN:
-		return false
-	default:
-		return slices.Contains(netInfo.GetPodNetworkAdvertisedOnNodeVRFs(node), types.DefaultNetworkName)
-	}
+	return len(netInfo.GetPodNetworkAdvertisedOnNodeVRFs(node)) > 0
 }
 
 func GetNetworkVRFName(netInfo NetInfo) string {

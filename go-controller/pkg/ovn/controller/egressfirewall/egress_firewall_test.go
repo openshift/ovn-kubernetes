@@ -91,7 +91,7 @@ var _ = ginkgo.Describe("OVN test basic functions", func() {
 			EgressServiceClient: &egressservicefake.Clientset{}, NetworkQoSClient: &networkqosfake.Clientset{}}
 
 		var err error
-		iFactory, err = factory.NewOVNKubeControllerWatchFactory(&util.OVNKubeControllerClientset{
+		iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{
 			KubeClient:           fakeClient,
 			EgressFirewallClient: kubeInterface.EgressFirewallClient,
 		})

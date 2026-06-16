@@ -132,7 +132,7 @@ func initController(k8sObjects, routePolicyObjects []runtime.Object) {
 	stopChan = make(chan struct{})
 	fakeClient = fake.NewSimpleClientset(append(k8sObjects, node)...)
 	fakeRouteClient = adminpolicybasedrouteclient.NewSimpleClientset(routePolicyObjects...)
-	iFactory, err = factory.NewOVNKubeControllerWatchFactory(&util.OVNKubeControllerClientset{
+	iFactory, err = factory.NewMasterWatchFactory(&util.OVNMasterClientset{
 		KubeClient:             fakeClient,
 		AdminPolicyRouteClient: fakeRouteClient,
 	})
