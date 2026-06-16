@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -468,9 +467,8 @@ func setupOVNNode(node *corev1.Node) error {
 		// to finish computation specially with complex acl configuration with port range.
 		fmt.Sprintf("other_config:bundle-idle-timeout=%d",
 			config.Default.OpenFlowProbe),
-		// If Interconnect feature is enabled, we want to tell ovn-controller to
-		// make this node/chassis as an interconnect gateway.
-		fmt.Sprintf("external_ids:ovn-is-interconn=%s", strconv.FormatBool(config.OVNKubernetesFeature.EnableInterconnect)),
+		// Tell ovn-controller to make this node/chassis an interconnect gateway.
+		"external_ids:ovn-is-interconn=true",
 		fmt.Sprintf("external_ids:ovn-monitor-all=%t", config.Default.MonitorAll),
 		fmt.Sprintf("external_ids:ovn-ofctrl-wait-before-clear=%d", config.Default.OfctrlWaitBeforeClear),
 		fmt.Sprintf("external_ids:ovn-enable-lflow-cache=%t", config.Default.LFlowCacheEnable),
@@ -606,11 +604,7 @@ func configureGatewayInterfaceFromMgmtPort() error {
 
 func exportManagementPortAnnotation(netdevName string, nodeAnnotator kube.Annotator) error {
 	klog.Infof("Exporting management port annotation for default network: netdev '%v'", netdevName)
-	deviceID, err := util.GetDeviceIDFromNetdevice(netdevName)
-	if err != nil {
-		return err
-	}
-	cfg, err := util.GetNetworkDeviceDetails(deviceID)
+	cfg, err := util.GetDPUOps().ResolveDeviceDetails(netdevName)
 	if err != nil {
 		return err
 	}
@@ -670,7 +664,7 @@ func getMgmtPortAndRepNameModeDPU(node *corev1.Node) (string, string, error) {
 	if !ok {
 		return "", "", fmt.Errorf("failed to find management port details for %s network", types.DefaultNetworkName)
 	}
-	rep, err := util.GetSriovnetOps().GetVfRepresentorDPU(fmt.Sprintf("%d", cfg.PfId), fmt.Sprintf("%d", cfg.FuncId))
+	rep, err := util.GetDPUOps().GetPortRepresentor(fmt.Sprintf("%d", cfg.PfId), fmt.Sprintf("%d", cfg.FuncId))
 	return "", rep, err
 }
 
@@ -696,6 +690,7 @@ func getMgmtPortAndRepName(node *corev1.Node) (string, string, error) {
 }
 
 func createNodeManagementPortController(
+	ovsClient client.Client,
 	node *corev1.Node,
 	subnets []*net.IPNet,
 	nodeAnnotator kube.Annotator,
@@ -717,7 +712,7 @@ func createNodeManagementPortController(
 			return nil, err
 		}
 	}
-	return managementport.NewManagementPortController(node, subnets, netdevName, rep, routeManager, netInfo)
+	return managementport.NewManagementPortController(ovsClient, node, subnets, netdevName, rep, routeManager, netInfo)
 }
 
 // getOVNSBZone returns the zone name stored in the Southbound db.
@@ -879,6 +874,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	// Setup management ports
 	nc.mgmtPortController, err = createNodeManagementPortController(
+		nc.ovsClient,
 		node,
 		subnets,
 		nodeAnnotator,
@@ -1062,12 +1058,12 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 	}
 
 	if config.IsModeDPU() || config.IsModeFull() {
-		// If interconnect is disabled OR interconnect is running in single-zone-mode,
-		// the ovnkube-master is responsible for patching ICNI managed namespaces with
-		// "k8s.ovn.org/external-gw-pod-ips". In that case, we need ovnkube-node to flush
-		// conntrack on every node. In multi-zone-interconnect case, we will handle the flushing
-		// directly on the ovnkube-controller code to avoid an extra namespace annotation
-		if !config.OVNKubernetesFeature.EnableInterconnect || nc.sbZone == types.OvnDefaultZone {
+		// In single-zone deployments (default zone), ovnkube-controller patches the
+		// "k8s.ovn.org/external-gw-pod-ips" namespace annotation; ovnkube-node
+		// watches it here and flushes conntrack on every node. In multi-zone
+		// interconnect, ovnkube-controller flushes conntrack directly and skips
+		// the annotation.
+		if nc.sbZone == types.OvnDefaultZone {
 			err := nc.WatchNamespaces()
 			if err != nil {
 				return fmt.Errorf("failed to watch namespaces: %w", err)
