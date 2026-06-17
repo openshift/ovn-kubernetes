@@ -225,6 +225,20 @@ module.exports = async ({ github, context, core }) => {
       checkPage++;
     }
 
+    // Deduplicate check runs by name, keeping only the most recent per name.
+    // GitHub returns all runs for a SHA including stale ones from earlier
+    // workflow invocations (e.g. cancelled runs before a close/reopen retry).
+    const latestByName = new Map();
+    for (const run of allCheckRuns) {
+      const existing = latestByName.get(run.name);
+      const runTime = new Date(run.started_at || run.created_at || 0).getTime();
+      const existingTime = existing ? new Date(existing.started_at || existing.created_at || 0).getTime() : 0;
+      if (!existing || runTime > existingTime) {
+        latestByName.set(run.name, run);
+      }
+    }
+    const checkRuns = Array.from(latestByName.values());
+
     const { data: combinedStatus } = await github.rest.repos.getCombinedStatusForRef({
       owner: context.repo.owner,
       repo: context.repo.repo,
@@ -234,7 +248,7 @@ module.exports = async ({ github, context, core }) => {
     const pendingChecks = [];
     const failedChecks = [];
 
-    for (const run of allCheckRuns) {
+    for (const run of checkRuns) {
       if (run.name === 'area-merge') continue;
       if (run.status !== 'completed') {
         pendingChecks.push(run.name);
