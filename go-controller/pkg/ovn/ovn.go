@@ -12,7 +12,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
-	listers "k8s.io/client-go/listers/core/v1"
 	ref "k8s.io/client-go/tools/reference"
 	"k8s.io/klog/v2"
 
@@ -368,7 +367,7 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 	initClusterEgressPolicies := func(_ libovsdbclient.Client, _ addressset.AddressSetFactory, _ util.NetInfo, _ []*net.IPNet, _, _ string) error {
 		return nil
 	}
-	ensureNodeNoReroutePolicies := func(_ libovsdbclient.Client, _ addressset.AddressSetFactory, _, _, _ string, _ listers.NodeLister, _, _ bool) error {
+	ensureNodeNoReroutePolicies := func(_ libovsdbclient.Client, _ addressset.AddressSetFactory, _, _, _ string, _ addressset.AddressSet, _, _ bool) error {
 		return nil
 	}
 	// used only when IC=true
@@ -386,18 +385,14 @@ func (oc *DefaultNetworkController) InitEgressServiceZoneController() (*egresssv
 			return InitClusterEgressPolicies(nbClient, addressSetFactory, ni, clusterSubnets, controllerName, routerName, clusterNodeIPsAddrSetDbIDs)
 		}
 		ensureNodeNoReroutePolicies = func(nbClient libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-			network, router, controller string, nodeLister listers.NodeLister, v4, v6 bool) error {
-			clusterNodeIPsAddrSetDbIDs, err := oc.addressSetManager.EnsureClusterNodeIPsAddressSet(addresssetmanager.ClusterNodeIPsEgressServiceBackRef)
-			if err != nil {
-				return fmt.Errorf("failed to ensure cluster node IP address set for EgressService: %w", err)
-			}
-			return ensureDefaultNoRerouteNodePolicies(nbClient, addressSetFactory, network, router, controller, nodeLister, v4, v6, clusterNodeIPsAddrSetDbIDs)
+			network, router, controller string, clusterNodesAddressSets addressset.AddressSet, v4, v6 bool) error {
+			return ensureDefaultNoRerouteNodePolicies(nbClient, addressSetFactory, network, router, controller, clusterNodesAddressSets, v4, v6)
 		}
 		createDefaultNodeRouteToExternal = libovsdbutil.CreateDefaultRouteToExternal
 	}
 
 	return egresssvc_zone.NewController(oc.GetNetInfo(), ovntypes.DefaultNetworkControllerName, oc.client, oc.nbClient, oc.addressSetFactory,
-		initClusterEgressPolicies, ensureNodeNoReroutePolicies,
+		oc.addressSetManager, initClusterEgressPolicies, ensureNodeNoReroutePolicies,
 		createDefaultNodeRouteToExternal,
 		oc.stopChan, oc.watchFactory.EgressServiceInformer(), oc.watchFactory.ServiceCoreInformer(),
 		oc.watchFactory.EndpointSliceCoreInformer(),

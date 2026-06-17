@@ -19,6 +19,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -128,9 +129,19 @@ func (c *Controller) syncNode(key string) error {
 	}
 	// We ensure node no re-route policies contemplating possible node IP
 	// address changes regardless of allocated services.
+
+	// Ensure cluster node address sets (shared cluster-wide resource)
+	clusterNodeIPsAddrSetDbIDs, err := c.addressSetManager.EnsureClusterNodeIPsAddressSet(addresssetmanager.ClusterNodeIPsEgressServiceBackRef)
+	if err != nil {
+		return fmt.Errorf("failed to ensure cluster node IP address set for EgressService: %w", err)
+	}
+	clusterNodesAddressSets, err := c.addressSetFactory.GetAddressSet(clusterNodeIPsAddrSetDbIDs)
+	if err != nil {
+		return fmt.Errorf("cannot ensure that addressSet %s exists %v", addresssetmanager.ClusterNodeIPsEgressServiceBackRef, err)
+	}
 	network := util.DefaultNetInfo{}
 	networkName := network.GetNetworkName()
-	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, networkName, c.GetNetworkScopedClusterRouterName(), c.controllerName, c.nodeLister, config.IPv4Mode, config.IPv6Mode)
+	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, networkName, c.GetNetworkScopedClusterRouterName(), c.controllerName, clusterNodesAddressSets, config.IPv4Mode, config.IPv6Mode)
 	if err != nil {
 		return err
 	}
