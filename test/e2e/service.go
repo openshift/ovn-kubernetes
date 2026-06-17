@@ -978,6 +978,10 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		})
 
 		ginkgo.It("should listen on each host addresses", func() {
+			// Skip if external container infrastructure is not available
+			// This test requires bare-metal cluster infrastructure with external containers
+			skipIfExternalInfraUnavailable()
+
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
 			nodesHostnames := sets.NewString()
@@ -1160,6 +1164,10 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		})
 
 		ginkgo.It("should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP", func() {
+			// Skip if external container infrastructure is not available
+			// This test requires bare-metal cluster infrastructure with external containers
+			skipIfExternalInfraUnavailable()
+
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
 			nodesHostnames := sets.NewString()
@@ -1476,6 +1484,10 @@ spec:
 		// different streams and replace what it thinks to be a conflicting port
 		// with a different one, breaking the stream for the involved peers.
 		ginkgo.It("should handle IP fragments", func() {
+			// Skip if external container infrastructure is not available
+			// This test requires bare-metal cluster infrastructure with external containers
+			skipIfExternalInfraUnavailable()
+
 			ginkgo.By("Selecting a schedulable node")
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 1)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1496,13 +1508,15 @@ spec:
 
 			serverPodName := nodeName + "-ep"
 			var serverContainerName string
-			_, err = createPod(f, serverPodName, nodeName, f.Namespace.Name, []string{}, endpointsSelector,
+			serverPod, err := createPod(f, serverPodName, nodeName, f.Namespace.Name, []string{}, endpointsSelector,
 				func(p *v1.Pod) {
 					p.Spec.Containers[0].Args = args
 					serverContainerName = p.Spec.Containers[0].Name
 				},
 			)
 			framework.ExpectNoError(err)
+			// Use the actual pod name from the created pod, as createPod sanitizes the name
+			serverPodName = serverPod.Name
 
 			ginkgo.By("Creating NodePort service")
 			serviceName := "service"
@@ -2645,6 +2659,18 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", feature.Serv
 	)
 	f := wrappedTestFramework(svcName)
 	ginkgo.BeforeEach(func() {
+		// Skip MetalLB tests if MetalLB is not installed
+		// MetalLB speaker pods are required for LoadBalancer service functionality
+		speakerPods, err := f.ClientSet.CoreV1().Pods("metallb-system").List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "component=speaker",
+		})
+		// If the API call fails, that's a real error (not a skip condition)
+		framework.ExpectNoError(err, "failed to list MetalLB speaker pods")
+		// Only skip if MetalLB is not installed (zero speaker pods found)
+		if len(speakerPods.Items) == 0 {
+			e2eskipper.Skipf("MetalLB speaker pods not found in metallb-system namespace - skipping MetalLB test (this is expected on cloud platforms)")
+		}
+
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 2)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 2 {

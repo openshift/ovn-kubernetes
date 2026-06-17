@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	e2einfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
@@ -151,7 +152,7 @@ func isLocalGatewayMode(network *operv1.Network) bool {
 
 func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return api.NetworkInterface{}, fmt.Errorf("GetExternalContainerNetworkInterface: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetExternalContainerNetworkInterface(container, network)
 }
@@ -180,14 +181,14 @@ func (o *OpenshiftInfraProvider) Name() string {
 
 func (o *OpenshiftInfraProvider) PrimaryNetwork() (api.Network, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("PrimaryNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetNetwork(primaryNetworkName)
 }
 
 func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("GetNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetNetwork(name)
 
@@ -223,35 +224,37 @@ func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string
 
 func (o *OpenshiftInfraProvider) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("ExecExternalContainerCommand: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.ExecExternalContainerCommand(container, cmd)
 }
 
 func (o *OpenshiftInfraProvider) ExternalContainerPrimaryInterfaceName() string {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		framework.Logf("WARNING: ExternalContainerPrimaryInterfaceName called but external infrastructure not initialized - returning empty string")
+		return ""
 	}
 	return o.clusterInfra.ExternalContainerPrimaryInterfaceName()
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("GetExternalContainerLogs: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetExternalContainerLogs(container)
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerPort() uint16 {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		framework.Logf("WARNING: GetExternalContainerPort called but external infrastructure not initialized - returning 0")
+		return 0
 	}
 	return o.clusterInfra.GetExternalContainerPort()
 }
 
 func (o *OpenshiftInfraProvider) ListNetworks() ([]string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("ListNetworks: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.ListNetworks()
 }
@@ -275,42 +278,42 @@ type contextOpenshift struct {
 
 func (o *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return api.ExternalContainer{}, fmt.Errorf("CreateExternalContainer: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.CreateExternalContainer(container)
 }
 
 func (o *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DeleteExternalContainer: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DeleteExternalContainer(container)
 }
 
 func (o *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("CreateNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.CreateNetwork(name, subnets...)
 }
 
 func (o *contextOpenshift) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return api.NetworkInterface{}, fmt.Errorf("AttachNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.AttachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DetachNetwork(network api.Network, container string) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DetachNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DetachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DeleteNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DeleteNetwork(network)
 }

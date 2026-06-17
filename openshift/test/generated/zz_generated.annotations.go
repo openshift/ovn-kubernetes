@@ -597,147 +597,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer2": "[Disabled:Unimplemented]",
-
-	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3 no-overlay SNAT disabled unmanaged routing": "[Disabled:Unimplemented]",
-
-	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3 no-overlay SNAT enabled unmanaged routing": "[Disabled:Unimplemented]",
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3": "[Disabled:Unimplemented]",
 
@@ -753,11 +613,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
@@ -817,11 +673,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
@@ -881,11 +733,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
-
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
@@ -1351,19 +1199,17 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after succeeded live migration": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should start multiple VMs with same hostname": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure connectivity works on an external service when mtu changes in intermediate node": "[Suite:openshift/conformance/parallel]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure connectivity works on an external service when mtu changes in intermediate node": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and backend pods are also egressIP served pods": "[Suite:openshift/conformance/parallel]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and backend pods are also egressIP served pods": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and session affinity is set": "[Suite:openshift/conformance/parallel]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and session affinity is set": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with 0 node ports when ETP=local": "[Suite:openshift/conformance/parallel]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with 0 node ports when ETP=local": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with 0 node ports when named targetPorts are used and ETP=local": "[Suite:openshift/conformance/parallel]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with 0 node ports when named targetPorts are used and ETP=local": "[Disabled:Unimplemented]",
-
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with pmtud": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with pmtud": "[Suite:openshift/conformance/parallel]",
 
 	"Multi Homing A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
 
@@ -1649,18 +1495,6 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer3 UDN": "[Disabled:Unimplemented]",
 
-	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork add bad subnet should not cause change on existing NAD": "[Suite:openshift/conformance/parallel]",
-
-	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork add subnet not affecting existing node subnet assignment": "[Suite:openshift/conformance/parallel]",
-
-	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork can perform east/west traffic between nodes on different CIDR L3 primary network": "[Suite:openshift/conformance/parallel]",
-
-	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork add bad subnet should not cause change on existing NAD": "[Suite:openshift/conformance/parallel]",
-
-	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork add subnet not affecting existing node subnet assignment": "[Suite:openshift/conformance/parallel]",
-
-	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork can perform east/west traffic between nodes on different CIDR L3 primary network": "[Suite:openshift/conformance/parallel]",
-
 	"Network Segmentation pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network with custom network": "[Disabled:Unimplemented]",
 
 	"Network Segmentation pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Disabled:Unimplemented]",
@@ -1687,8 +1521,6 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
-
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, localnet": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, no-overlay, valid": "[Disabled:Unimplemented]",
@@ -1698,8 +1530,6 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, evpn": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
-
-	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid mtu": "[Disabled:Unimplemented]",
 
@@ -1809,67 +1639,67 @@ var AppendedAnnotations = map[string]string{
 
 	"Pod to pod TCP with low MTU when a client ovnk pod targeting an ovnk pod server(running on another node) with low mtu when MTU is lowered between the two nodes large queries to the server pod on another node shall work for TCP": "[Disabled:Unimplemented]",
 
-	"Service Hairpin SNAT Should ensure service hairpin traffic is NOT SNATed to hairpin masquerade IP; GR LB": "[Disabled:Unimplemented]",
+	"Service Hairpin SNAT Should ensure service hairpin traffic is NOT SNATed to hairpin masquerade IP; GR LB": "[Suite:openshift/conformance/parallel]",
 
-	"Service Hairpin SNAT Should ensure service hairpin traffic is SNATed to hairpin masquerade IP; Switch LB": "[Disabled:Unimplemented]",
+	"Service Hairpin SNAT Should ensure service hairpin traffic is SNATed to hairpin masquerade IP; Switch LB": "[Suite:openshift/conformance/parallel]",
 
-	"Services All service features work when manually listening on a non-default address": "[Disabled:Unimplemented]",
+	"Services All service features work when manually listening on a non-default address": "[Suite:openshift/conformance/parallel]",
 
-	"Services Allow connection to an external IP using a source port that is equal to a node port": "[Disabled:Unimplemented]",
+	"Services Allow connection to an external IP using a source port that is equal to a node port": "[Suite:openshift/conformance/parallel]",
 
-	"Services Creates a host-network service, and ensures that host-network pods can connect to it": "[Disabled:Unimplemented]",
+	"Services Creates a host-network service, and ensures that host-network pods can connect to it": "[Suite:openshift/conformance/parallel]",
 
-	"Services Creates a service with session-affinity, and ensures it works after backend deletion": "[Disabled:Unimplemented]",
+	"Services Creates a service with session-affinity, and ensures it works after backend deletion": "[Suite:openshift/conformance/parallel]",
 
-	"Services Distributes external traffic to multiple host-network endpoints with different named target ports": "[Disabled:Unimplemented]",
+	"Services Distributes external traffic to multiple host-network endpoints with different named target ports": "[Suite:openshift/conformance/parallel]",
 
-	"Services Distributes traffic to multiple endpoints with different named target ports": "[Disabled:Unimplemented]",
+	"Services Distributes traffic to multiple endpoints with different named target ports": "[Suite:openshift/conformance/parallel]",
 
-	"Services Distributes traffic to multiple host-network endpoints with different named target ports": "[Disabled:Unimplemented]",
+	"Services Distributes traffic to multiple host-network endpoints with different named target ports": "[Suite:openshift/conformance/parallel]",
 
-	"Services Maintains service connectivity during rolling update when target port changes": "[Disabled:Unimplemented]",
+	"Services Maintains service connectivity during rolling update when target port changes": "[Suite:openshift/conformance/parallel]",
 
-	"Services does not use host masquerade address as source IP address when communicating externally": "[Disabled:Unimplemented]",
+	"Services does not use host masquerade address as source IP address when communicating externally": "[Suite:openshift/conformance/parallel]",
 
-	"Services of type NodePort should be able to preserve UDP traffic when server pod cycles for a NodePort service via a different node": "[Disabled:Unimplemented]",
+	"Services of type NodePort should be able to preserve UDP traffic when server pod cycles for a NodePort service via a different node": "[Suite:openshift/conformance/parallel]",
 
-	"Services of type NodePort should handle IP fragments": "[Disabled:Unimplemented]",
+	"Services of type NodePort should handle IP fragments": "[Suite:openshift/conformance/parallel]",
 
-	"Services of type NodePort should listen on each host addresses": "[Disabled:Unimplemented]",
+	"Services of type NodePort should listen on each host addresses": "[Suite:openshift/conformance/parallel]",
 
-	"Services of type NodePort should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP": "[Disabled:Unimplemented]",
+	"Services of type NodePort should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:openshift/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:openshift/conformance/parallel]",
 
 	"Status manager validation Should validate the egress firewall status when adding a new zone": "[Disabled:Unimplemented]",
 
@@ -1941,11 +1771,11 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e control plane should provide Internet connection continuously when all ovnkube-control-plane pods are killed": "[Disabled:Unimplemented]",
 
-	"e2e control plane should provide Internet connection continuously when all pods are killed on node running leader instance of ovnkube-control-plane": "[Disabled:Unimplemented]",
+	"e2e control plane should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane": "[Disabled:Unimplemented]",
 
 	"e2e control plane should provide Internet connection continuously when ovnkube-node pod is killed": "[Disabled:Unimplemented]",
 
-	"e2e control plane should provide Internet connection continuously when pod running leader instance of ovnkube-control-plane is killed": "[Disabled:Unimplemented]",
+	"e2e control plane should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed": "[Disabled:Unimplemented]",
 
 	"e2e control plane should provide connection to external host by DNS name from a pod": "[Disabled:Unimplemented]",
 
