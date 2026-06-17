@@ -1012,29 +1012,34 @@ func ipAddrExistsAtInterface(ipAddr net.IP, iface net.Interface) (bool, error) {
 	return false, nil
 }
 
-// SetforwardingModeForInterface update the forwarding options for the specified interface
-func SetforwardingModeForInterface(ifName string) error {
-	// we use forward slash as path separator to allow dotted interfaceName e.g. foo.200
-	stdout, stderr, err := RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/forwarding=1", ifName))
-	// systctl output enforces dot as path separator
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", strings.ReplaceAll(ifName, ".", "/")) {
+// The sysctl fs interface uses slash as the path separator and allows interface names to
+// contain dots. But the CLI uses dots as the separator and expects interface names to
+// have been rewritten to use slashes instead.
+func sysctlIfName(ifName string) string {
+	return strings.ReplaceAll(ifName, ".", "/")
+}
+
+// SetForwardingModeForInterface updates the forwarding options for the specified interface
+func SetForwardingModeForInterface(ifName string) error {
+	setVal := fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", sysctlIfName(ifName))
+	stdout, stderr, err := RunSysctl("-w", setVal)
+	if err != nil || stdout != setVal {
 		return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
 			ifName, stdout, stderr, err)
 	}
 	return nil
 }
 
-// SetRPFilterLooseModeForInterface update the reverse path filtering options for the specified interface
+const rpFilterLooseMode = "2"
+
+// SetRPFilterLooseModeForInterface updates the reverse path filtering options for the
+// specified interface to avoid dropping packets with masqueradeIP coming out of
+// managementport interface.
+// NOTE: v6 doesn't have rp_filter strict mode block
 func SetRPFilterLooseModeForInterface(ifName string) error {
-	// update the reverse path filtering options for the specified interface to avoid dropping packets with masqueradeIP
-	// coming out of managementport interface
-	// NOTE: v6 doesn't have rp_filter strict mode block
-	rpFilterLooseMode := "2"
-	// TODO: Convert testing framework to mock golang module utilities. Example:
-	// we use forward slash as path separator to allow dotted mgmtPortName e.g. foo.200
-	stdout, stderr, err := RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/rp_filter=%s", ifName, rpFilterLooseMode))
-	// systctl output enforces dot as path separator
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", strings.ReplaceAll(ifName, ".", "/"), rpFilterLooseMode) {
+	setVal := fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", sysctlIfName(ifName), rpFilterLooseMode)
+	stdout, stderr, err := RunSysctl("-w", setVal)
+	if err != nil || stdout != setVal {
 		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
 			ifName, stdout, stderr, err)
 	}
