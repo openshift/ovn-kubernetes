@@ -2037,9 +2037,16 @@ ip route add %[3]s via %[4]s
 				WithPolling(time.Second).
 				Should(Succeed(), step)
 
-			// expect 2 addresses on dual-stack deployments; 1 on single-stack
+			// IPv6 is not supported for secondaries with IPAM since
+			// KubeVirt does not run a DHCPv6 server for bridge bindings,
+			// so the VMI status will only report IPv4 addresses.
+			// For primary UDNs, expect dual-stack (2 addresses); for
+			// secondaries, expect IPv4 only (1 address).
 			step = by(vmi.Name, "Wait for addresses at the virtual machine")
 			expectedNumberOfAddresses := len(dualCIDRs)
+			if td.role != udnv1.NetworkRolePrimary {
+				expectedNumberOfAddresses = 1
+			}
 			expectedAddreses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
 			if _, hasIPRequests := vmi.Annotations[kubevirt.AddressesAnnotation]; hasIPRequests {
 				Expect(expectedAddreses).To(ConsistOf(filterIPs(fr.ClientSet, staticIPv4, staticIPv6)), "expected addresses should be consistent with the static IPs")
