@@ -8,6 +8,9 @@ reviews:
   poem: true
   review_status: true
   collapse_walkthrough: false
+  slop_detection:
+    enabled: true
+    label: "coderabbit/ai-slop"
   auto_review:
     enabled: true
     drafts: false
