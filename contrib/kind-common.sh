@@ -859,7 +859,7 @@ install_kubevirt() {
     # nightly tag - install specific nightly (i.e 20240910)
     # KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"stable"}
 
-    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"v1.6.2"}
+    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"v1.8.4"}
 
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
