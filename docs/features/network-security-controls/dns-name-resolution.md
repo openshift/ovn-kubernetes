@@ -1,4 +1,4 @@
-# DNS name resolover
+# DNS name resolver
 
 ## Introduction
 
@@ -19,7 +19,7 @@ CRD will be used by ovnk to get the latest IP addresses corresponding to a DNS n
 the feature is enabled. However, the cluster administrator does not need to interact with
 the CR. 
 
-## Configuring DNS name resolover in a cluster
+## Configuring DNS name resolver in a cluster
 
 Always check the dependencies on the [Requirements page](../requirements.md)
 
