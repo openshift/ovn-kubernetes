@@ -2104,6 +2104,117 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 })
 
+var _ = ginkgo.Describe("Gateway Router static routes to the distributed router", func() {
+	const (
+		drNextHop      = "100.65.0.1"
+		clusterSubnet  = "10.193.0.0/16"
+		nodeHostSubnet = "10.193.0.0/24"
+	)
+
+	var (
+		fakeOvn      *FakeOVN
+		gwRouterName = types.GWRouterPrefix + nodeName
+	)
+
+	ginkgo.BeforeEach(func() {
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.Gateway.Mode = config.GatewayModeShared
+		config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
+		fakeOvn = NewFakeOVN(true)
+	})
+
+	ginkgo.AfterEach(func() {
+		fakeOvn.shutdown()
+	})
+
+	// drRoutePrefixes returns the IP prefixes of the gateway router's static
+	// routes whose nexthop is the distributed router (ovn_cluster_router) join
+	// switch port.
+	drRoutePrefixes := func() []string {
+		routes, err := libovsdbops.GetRouterLogicalRouterStaticRoutesWithPredicate(
+			fakeOvn.nbClient,
+			&nbdb.LogicalRouter{Name: gwRouterName},
+			func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.Nexthop == drNextHop
+			})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		prefixes := make([]string, 0, len(routes))
+		for _, route := range routes {
+			prefixes = append(prefixes, route.IPPrefix)
+		}
+		return prefixes
+	}
+
+	// runUpdate seeds a gateway router (plus any pre-existing static routes) and
+	// invokes updateGWRouterStaticRoutes for the default network.
+	runUpdate := func(gwConfig *GatewayConfig, seedRoutes ...*nbdb.LogicalRouterStaticRoute) {
+		gwRouter := &nbdb.LogicalRouter{
+			UUID: gwRouterName + "-UUID",
+			Name: gwRouterName,
+		}
+		nbData := []libovsdbtest.TestData{gwRouter}
+		for _, route := range seedRoutes {
+			nbData = append(nbData, route)
+			gwRouter.StaticRoutes = append(gwRouter.StaticRoutes, route.UUID)
+		}
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: nbData}, &corev1.NodeList{
+			Items: []corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			},
+		})
+
+		gw := newGatewayManager(fakeOvn, nodeName)
+		externalRouterPort := types.GWRouterToExtSwitchPrefix + gwRouterName
+		gomega.Expect(gw.updateGWRouterStaticRoutes(gwConfig, externalRouterPort, gwRouter)).To(gomega.Succeed())
+	}
+
+	newGWConfig := func() *GatewayConfig {
+		return &GatewayConfig{
+			annoConfig:                 &util.L3GatewayConfig{},
+			hostSubnets:                ovntest.MustParseIPNets(nodeHostSubnet),
+			clusterSubnets:             ovntest.MustParseIPNets(clusterSubnet),
+			ovnClusterLRPToJoinIfAddrs: ovntest.MustParseIPNets(drNextHop + "/16"),
+		}
+	}
+
+	ginkgo.It("routes the whole cluster subnet via the distributed router in overlay mode", func() {
+		// default (empty) transport == overlay
+		runUpdate(newGWConfig())
+		gomega.Expect(drRoutePrefixes()).To(gomega.ConsistOf(clusterSubnet))
+	})
+
+	ginkgo.It("routes only the node host subnet via the distributed router in no-overlay mode", func() {
+		config.Default.Transport = types.NetworkTransportNoOverlay
+		runUpdate(newGWConfig())
+		gomega.Expect(drRoutePrefixes()).To(gomega.ConsistOf(nodeHostSubnet))
+	})
+
+	ginkgo.It("removes a stale cluster subnet route via the distributed router in no-overlay mode", func() {
+		config.Default.Transport = types.NetworkTransportNoOverlay
+		staleRoute := &nbdb.LogicalRouterStaticRoute{
+			UUID:     "stale-cluster-subnet-route-UUID",
+			IPPrefix: clusterSubnet,
+			Nexthop:  drNextHop,
+		}
+		runUpdate(newGWConfig(), staleRoute)
+		// the stale /16 must be gone, leaving only the node's /24
+		gomega.Expect(drRoutePrefixes()).To(gomega.ConsistOf(nodeHostSubnet))
+	})
+
+	ginkgo.It("removes a stale node host subnet route via the distributed router in overlay mode", func() {
+		// default (empty) transport == overlay; simulate an upgrade from
+		// no-overlay where the GR was left with only the node's /24 route.
+		staleRoute := &nbdb.LogicalRouterStaticRoute{
+			UUID:     "stale-host-subnet-route-UUID",
+			IPPrefix: nodeHostSubnet,
+			Nexthop:  drNextHop,
+		}
+		runUpdate(newGWConfig(), staleRoute)
+		// the stale /24 must be gone, leaving only the cluster /16
+		gomega.Expect(drRoutePrefixes()).To(gomega.ConsistOf(clusterSubnet))
+	})
+})
+
 func newGatewayManager(ovn *FakeOVN, nodeName string) *GatewayManager {
 	controller := ovn.controller
 	return NewGatewayManager(
