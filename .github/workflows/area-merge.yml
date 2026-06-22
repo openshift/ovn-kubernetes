@@ -13,13 +13,19 @@ jobs:
        github.event.issue.pull_request &&
        contains(github.event.comment.body, '/area-maintainer-approved')) ||
       github.event_name == 'check_suite'
-    permissions:
-      contents: write
-      pull-requests: write
-      checks: read
-      statuses: read
     runs-on: ubuntu-latest
     steps:
+      - name: Generate merge app token
+        id: merge-app-token-generator
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.OVN_KUBERNETES_MERGE_BOT }}
+          private-key: ${{ secrets.OVN_KUBERNETES_MERGE_BOT }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-checks: read
+          permission-statuses: read
+
       - name: Checkout base branch (for CODEOWNERS and scripts)
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -32,7 +38,7 @@ jobs:
       - name: Area maintainer merge check
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.merge-app-token-generator.outputs.token }}
           script: |
             const script = require('./.github/scripts/area-merge.js');
             await script({ github, context, core });
