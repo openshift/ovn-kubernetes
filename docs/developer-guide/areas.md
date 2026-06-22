@@ -24,6 +24,27 @@ in the governance docs.
   authorization before merging.
 * PRs that touch files across multiple areas require a repo Maintainer to merge.
 
+## Merge Bot (ovn-kubernetes-merge-bot)
+
+The area merge workflow uses a dedicated GitHub App called
+**ovn-kubernetes-merge-bot** to perform merges. This is required because the
+repository's branch protection rules restrict who can push to `master`. The
+app is added to the branch protection allow-list, enabling it to merge PRs on
+behalf of area maintainers once all checks pass.
+
+**Configuration:**
+
+| Item | Location |
+|---|---|
+| GitHub App | Installed on the `ovn-kubernetes` org ([app settings](https://github.com/organizations/ovn-kubernetes/settings/apps/ovn-kubernetes-merge-bot)) |
+| Client ID | Repository variable: `OVN_KUBERNETES_MERGE_BOT` |
+| Private key | Repository secret: `OVN_KUBERNETES_MERGE_BOT` |
+| Branch protection | `master` — app listed under "Restrict who can push to matching branches" |
+
+The workflow generates a short-lived installation token via
+[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token)
+at the start of each run. No long-lived access tokens are used during workflow execution.
+
 ## Current Areas
 
 ### Virtualization
