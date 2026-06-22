@@ -278,9 +278,6 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	}
 
 	o.portCache = NewPortCache(o.stopChan)
-	o.addressSetManager = addresssetmanager.NewAddressSetManager(o.watcher.PodCoreInformer(),
-		o.watcher.NamespaceInformer(), o.watcher.NodeCoreInformer(), o.nbClient, o.networkManager.Interface().GetNetworkNameForNADKey)
-
 	kubeOVN := &kube.KubeOVN{
 		Kube:      kube.Kube{KClient: o.fakeClient.KubeClient},
 		EIPClient: o.fakeClient.EgressIPClient,
@@ -293,12 +290,13 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		o.portCache,
 		o.networkManager.Interface(),
 		o.asf,
-		o.addressSetManager,
 		config.IPv4Mode,
 		config.IPv6Mode,
 		"",
 		types.DefaultNetworkControllerName,
 	)
+	o.addressSetManager = addresssetmanager.NewAddressSetManager(o.watcher.PodCoreInformer(),
+		o.watcher.NamespaceInformer(), o.watcher.NodeCoreInformer(), o.nbClient, o.networkManager.Interface().GetNetworkNameForNADKey)
 
 	if o.asf == nil {
 		o.eIPController.addressSetFactory = addressset.NewOvnAddressSetFactory(o.nbClient, config.IPv4Mode, config.IPv6Mode)

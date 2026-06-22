@@ -1212,7 +1212,6 @@ func (oc *Layer2UserDefinedNetworkController) newGatewayManager(nodeName string)
 		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.nodeAnnotationCache,
-		oc.addressSetManager,
 		config.Layer2UsesTransitRouter,
 		oc.gatewayOptions()...,
 	)

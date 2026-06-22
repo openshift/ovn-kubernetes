@@ -786,9 +786,6 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 			return err
 		}
 	}
-	if err := cleanupDeprecatedClusterNodeIPsAddressSet(oc.nbClient); err != nil {
-		return err
-	}
 
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
 		if err = oc.apbExternalRouteController.Run(oc.wg, 1); err != nil {
