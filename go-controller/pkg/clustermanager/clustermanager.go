@@ -236,6 +236,10 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 		return err
 	}
 
+	if err := cm.setTopologyType(); err != nil {
+		return err
+	}
+
 	// Start networkManager before other controllers
 	if err := cm.networkManager.Start(); err != nil {
 		return err
@@ -364,6 +368,25 @@ func (cm *ClusterManager) Stop() {
 		cm.noOverlayController = nil
 	}
 	cm.nodeController.Stop()
+}
+
+func (cm *ClusterManager) setTopologyType() error {
+	nodes, err := cm.wf.GetNodes()
+	if err != nil {
+		return fmt.Errorf("unable to list nodes while setting topology type for layer2: %w", err)
+	}
+	config.Layer2UsesTransitRouter = true
+	for _, node := range nodes {
+		topoVer := node.Annotations[util.Layer2TopologyVersion]
+		if topoVer != util.TransitRouterTopoVersion {
+			klog.Infof("Node %s has layer2-topology-version=%q (want %q) — setting Layer2UsesTransitRouter=false",
+				node.Name, topoVer, util.TransitRouterTopoVersion)
+			config.Layer2UsesTransitRouter = false
+			break
+		}
+	}
+	klog.Infof("Cluster manager layer2 transit router topology: %v (checked %d nodes)", config.Layer2UsesTransitRouter, len(nodes))
+	return nil
 }
 
 func (cm *ClusterManager) NewNetworkController(netInfo util.NetInfo) (networkmanager.NetworkController, error) {
