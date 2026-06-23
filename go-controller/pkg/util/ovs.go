@@ -830,14 +830,13 @@ func DetectCheckPktLengthSupport(bridge string) (bool, error) {
 	return false, nil
 }
 
-// SetStaticFDBEntry programs a static MAC entry into the OVS FIB and disables MAC learning for this entry
-func SetStaticFDBEntry(bridge, port string, mac net.HardwareAddr) error {
-	// Assume default VLAN for local port
-	vlan := "0"
+// SetStaticFDBEntry programs a static MAC entry into the OVS FIB and disables MAC learning for this entry.
+func SetStaticFDBEntry(bridge, port string, mac net.HardwareAddr, vlanID uint) error {
+	vlan := fmt.Sprintf("%d", vlanID)
 	stdout, stderr, err := RunOvsVswitchdAppCtl("fdb/add", bridge, port, vlan, mac.String())
 	if err != nil {
-		return fmt.Errorf("failed to add FDB entry to OVS for LOCAL port, "+
-			"stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+		return fmt.Errorf("failed to add FDB entry to OVS for port %s, "+
+			"stdout: %q, stderr: %q, error: %v", port, stdout, stderr, err)
 	}
 	return nil
 }
