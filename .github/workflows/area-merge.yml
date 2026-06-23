@@ -21,10 +21,6 @@ jobs:
         with:
           client-id: ${{ vars.OVN_KUBERNETES_MERGE_BOT }}
           private-key: ${{ secrets.OVN_KUBERNETES_MERGE_BOT }}
-          permission-contents: write
-          permission-pull-requests: write
-          permission-checks: read
-          permission-statuses: read
 
       - name: Checkout base branch (for CODEOWNERS and scripts)
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
