@@ -66,9 +66,16 @@ func (bnc *BaseNetworkController) shouldWatchNamespaces() bool {
 	// - The network is the default network.
 	// - The network is primary, and network segmentation is enabled.
 	// - The network is secondary, and multi NetworkPolicies are enabled.
-	return bnc.IsDefault() ||
+	result := bnc.IsDefault() ||
 		bnc.IsPrimaryNetwork() && util.IsNetworkSegmentationSupportEnabled() ||
 		bnc.IsUserDefinedNetwork() && util.IsMultiNetworkPoliciesSupportEnabled()
+	if !result {
+		klog.Infof("shouldWatchNamespaces=false for network %s: IsDefault=%v IsPrimary=%v IsUDN=%v MNPEnabled=%v NetSegEnabled=%v",
+			bnc.GetNetworkName(), bnc.IsDefault(), bnc.IsPrimaryNetwork(),
+			bnc.IsUserDefinedNetwork(), util.IsMultiNetworkPoliciesSupportEnabled(),
+			util.IsNetworkSegmentationSupportEnabled())
+	}
+	return result
 }
 
 // WatchNamespaces starts the watching of namespace resource and calls
