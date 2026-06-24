@@ -44,6 +44,15 @@ func primaryLayer3MultiCIDRs() string {
 	return joinStrings(primaryLayer3MultiIPv4CIDRs(), primaryLayer3MultiIPv6CIDRs())
 }
 
+// primaryLayer3CIDRs returns one IPv4 and one IPv6 CIDR for a primary network
+// in layer3 topology. Use this instead of primaryLayer3MultiCIDRs() when
+// multi-subnet support is not being tested, to avoid validation failures on
+// single-stack clusters where filtering leaves 2 same-family CIDRs.
+func primaryLayer3CIDRs() string {
+	v4, v6 := allocators.GetFirstUDNSubnets()
+	return joinStrings(v4+"/24", v6+"/64")
+}
+
 // primaryLayer3IPv4CIDRs returns two IPv4 CIDRs for a primary network in layer3
 // topology. The first CIDR is resized to a /23 to force an overflow to the
 // second CIDR for a third and subsequent nodes hostSubnet.
