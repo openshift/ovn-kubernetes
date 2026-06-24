@@ -733,6 +733,14 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
+	"BGP: For BGP configured networks with multicast feature enabled for namespace Layer 2 CUDN EVPN MAC-VRF and IP-VRF handle multicast IGMP query": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks with multicast feature enabled for namespace Layer 2 CUDN EVPN MAC-VRF and IP-VRF handle multicast UDP traffic": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks with multicast feature enabled for namespace Layer 2 CUDN EVPN MAC-VRF handle multicast IGMP query": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks with multicast feature enabled for namespace Layer 2 CUDN EVPN MAC-VRF handle multicast UDP traffic": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer2": "[Disabled:Unimplemented]",
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3 no-overlay SNAT disabled unmanaged routing": "[Disabled:Unimplemented]",
