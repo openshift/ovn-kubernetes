@@ -45,7 +45,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-55889: ovn-db-run-command Script Functionality
-	g.It("[OTP][informing][55889] should execute ovn-db-run-command script successfully", func() {
+	g.It("55889-should execute ovn-db-run-command script successfully", func() {
 		g.By("Finding an ovnkube-node pod with northd container")
 		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
@@ -106,7 +106,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-67625: ovnkube-trace pod-to-pod
-	g.It("[OTP][informing][67625] should trace pod-to-pod traffic successfully", func() {
+	g.It("67625-should trace pod-to-pod traffic successfully", func() {
 		g.By("Finding ovnkube-node pods")
 		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
@@ -191,7 +191,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-67648: ovnkube-trace pod-to-hostnetworkpod
-	g.It("[OTP][informing][67648] should trace pod-to-hostnetworkpod traffic successfully", func() {
+	g.It("67648-should trace pod-to-hostnetworkpod traffic successfully", func() {
 		g.By("Creating test namespace")
 		const traceNS = "test-ovnkube-trace-67648"
 		ns := &corev1.Namespace{
@@ -272,7 +272,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-45146: BZ 1986708 - Pod should be healthy when gw IP is single stack on dual stack cluster
-	g.It("[OTP][informing][45146] should create healthy pod with single-stack gateway on dual-stack cluster", func() {
+	g.It("45146-should create healthy pod with single-stack gateway on dual-stack cluster", func() {
 		const testNS = "test-single-stack-gw-45146"
 
 		g.By("Creating test namespace")
@@ -357,7 +357,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 	})
 
 	// Medium-69761: Check apbexternalroute status when all zones reported success
-	g.It("[OTP][informing][69761] should show aggregated status from all zones in AdminPolicyBasedExternalRoute", func() {
+	g.It("69761-should show aggregated status from all zones in AdminPolicyBasedExternalRoute", func() {
 		const testNS = "test-apbexternalroute-69761"
 
 		g.By("Creating test namespace")
@@ -471,7 +471,8 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 		// Check that at least one message mentions the configured IPs
 		hasExpectedIPs := false
 		for _, msg := range messages {
-			msgStr := msg.(string)
+			msgStr, ok := msg.(string)
+			o.Expect(ok).To(o.BeTrue(), "Each message should be a string")
 			if strings.Contains(msgStr, "172.18.0.8") && strings.Contains(msgStr, "172.18.0.9") {
 				hasExpectedIPs = true
 				break

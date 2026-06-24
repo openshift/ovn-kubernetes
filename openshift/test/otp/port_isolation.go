@@ -45,7 +45,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 	})
 
 	// OCP-80524: Verify pods with isolated port using bridge-cni
-	g.It("[OTP][informing][80524] should isolate pods with portIsolation enabled on bridge CNI", func() {
+	g.It("80524-should isolate pods with portIsolation enabled on bridge CNI", func() {
 		testNS := "test-bridge-port-isolation-80524"
 
 		g.By("Creating test namespace")
@@ -246,7 +246,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 	})
 
 	// OCP-80525: Verify pods with isolated and non-isolated ports using bridge-cni
-	g.It("[OTP][informing][80525] should allow communication on non-isolated network but not on isolated network", func() {
+	g.It("80525-should allow communication on non-isolated network but not on isolated network", func() {
 		testNS := "test-bridge-mixed-isolation-80525"
 
 		g.By("Creating test namespace")
@@ -515,7 +515,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 	})
 
 	// OCP-81757: UDN Verify pods with isolated and non-isolated ports using same type of CNI and IPAM
-	g.It("[OTP][informing][81757] should test port isolation with UDN and bridge CNI", func() {
+	g.It("81757-should test port isolation with UDN and bridge CNI", func() {
 		testNS := "test-udn-port-isolation-81757"
 
 		g.By("Creating test namespace with UDN label")
@@ -853,7 +853,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 
 	// OCP-80526: UDN Verify pods with isolated and non-isolated ports using bridge-cni
 	// This test combines UDN (Layer2 Primary) with mixed port isolation from test 80525
-	g.It("[OTP][informing][80526] should test UDN with mixed port isolation on bridge CNI", func() {
+	g.It("80526-should test UDN with mixed port isolation on bridge CNI", func() {
 		testNS := "test-udn-mixed-isolation-80526"
 
 		g.By("Creating test namespace with UDN")

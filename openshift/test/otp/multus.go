@@ -48,7 +48,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus", func() {
 	})
 
 	// High-57589: Whereabouts CNI Timeout with Large Exclude Range
-	g.It("[OTP][informing][57589] should handle large IPv6 exclude ranges without timeout", func() {
+	g.It("57589-should handle large IPv6 exclude ranges without timeout", func() {
 		const testNS = "test-whereabouts-57589"
 
 		g.By("Creating test namespace")
@@ -139,7 +139,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus", func() {
 	})
 
 	// Medium-76652: Dummy CNI Support
-	g.It("[OTP][informing][76652] should support Dummy CNI plugin with Multus", func() {
+	g.It("76652-should support Dummy CNI plugin with Multus", func() {
 		const testNS = "test-dummy-cni-76652"
 
 		g.By("Creating test namespace")
@@ -233,7 +233,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus", func() {
 	})
 
 	// Medium-66876: Support Dual Stack IP assignment for whereabouts CNI/IPAM
-	g.It("[OTP][informing][66876] should assign dual-stack IPs with Whereabouts IPAM", func() {
+	g.It("66876-should assign dual-stack IPs with Whereabouts IPAM", func() {
 		const testNS = "test-whereabouts-dualstack-66876"
 
 		g.By("Creating test namespace")
@@ -506,7 +506,7 @@ python3 /tmp/server.py`,
 
 	// OCP-69947: Macvlan pods send Unsolicited Neighbor Advertisements
 	// Note: Marked as informing due to timing sensitivity with tcpdump in automated environment
-	g.It("[OTP][informing][69947] should send Unsolicited Neighbor Advertisements when macvlan pod is created", func() {
+	g.It("69947-should send Unsolicited Neighbor Advertisements when macvlan pod is created", func() {
 		testNS := "test-macvlan-na-69947"
 
 		g.By("Creating test namespace")
