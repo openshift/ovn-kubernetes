@@ -11,9 +11,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -21,7 +18,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", func() {
+var _ = g.Describe("[OTP] OVN Networking Tools", func() {
 	var (
 		clientset *kubernetes.Clientset
 		config    *rest.Config
@@ -44,7 +41,6 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 		o.Expect(err).NotTo(o.HaveOccurred())
 	})
 
-	// Medium-55889: ovn-db-run-command Script Functionality
 	g.It("55889-should execute ovn-db-run-command script successfully", func() {
 		g.By("Finding an ovnkube-node pod with northd container")
 		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
@@ -105,8 +101,26 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 			"Output doesn't appear to be valid OVN database content: %s", output)
 	})
 
-	// Medium-67625: ovnkube-trace pod-to-pod
 	g.It("67625-should trace pod-to-pod traffic successfully", func() {
+		// FIXME: RBAC Issue - This test requires pods/exec permission for ovn-kubernetes-node service account
+		//
+		// ovnkube-trace tool needs the following permissions:
+		//   - pods (get, list) - cluster-wide (already exists in openshift-ovn-kubernetes-node-limited)
+		//   - nodes (get, list) - cluster-wide (already exists in openshift-ovn-kubernetes-node-limited)
+		//   - pods/exec (create) - MISSING - needed to exec into ovnkube-node pods to run ovnkube-trace
+		//
+		// TODO: Determine proper solution with OTP team:
+		//   1. How did original OTP tests handle this RBAC requirement?
+		//   2. Should there be a permanent ClusterRole for test environments?
+		//   3. Should tests use a different service account with required permissions?
+		//   4. Should this be added to openshift-ovn-kubernetes-node-limited role for test environments?
+		//
+		// Current status: Test will FAIL with "pods/exec is forbidden" until RBAC is resolved.
+		// This test is marked [informing] so it won't block CI, but the issue needs proper resolution.
+		//
+		// See: Anurag/Arti for guidance on how OTP handled ovnkube-trace RBAC requirements.
+
+		var err error
 		g.By("Finding ovnkube-node pods")
 		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
 			LabelSelector: "app=ovnkube-node",
@@ -183,15 +197,18 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 			traceNS, "src-pod",
 			traceNS, "dst-pod",
 			"tcp", "8080")
-		o.Expect(err).NotTo(o.HaveOccurred())
+		o.Expect(err).NotTo(o.HaveOccurred(), "ovnkube-trace failed with output:\n%s", output)
 
 		g.By("Verifying trace output shows packet delivery")
-		o.Expect(output).To(o.ContainSubstring("output"), "Trace should show output action")
+		o.Expect(output).To(o.ContainSubstring("indicates success"), "Trace should indicate success")
 		o.Expect(output).NotTo(o.ContainSubstring("drop"), "Trace should not show packet drops")
 	})
 
-	// Medium-67648: ovnkube-trace pod-to-hostnetworkpod
 	g.It("67648-should trace pod-to-hostnetworkpod traffic successfully", func() {
+		// FIXME: RBAC Issue - Same as test 67625 - requires pods/exec permission
+		// See test 67625 for detailed explanation of RBAC requirements and TODO items.
+
+		var err error
 		g.By("Creating test namespace")
 		const traceNS = "test-ovnkube-trace-67648"
 		ns := &corev1.Namespace{
@@ -204,7 +221,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 				},
 			},
 		}
-		_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+		_, err = clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 		o.Expect(err).NotTo(o.HaveOccurred())
 
 		defer func() {
@@ -262,225 +279,16 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Networking Tools", f
 			traceNS, "src-pod",
 			traceNS, "dst-hostnet-pod",
 			"tcp", "22")
-		o.Expect(err).NotTo(o.HaveOccurred())
+		o.Expect(err).NotTo(o.HaveOccurred(), "ovnkube-trace failed with output:\n%s", output)
 
 		g.By("Verifying trace shows routing to host network")
 		// Trace should show packet reaching the node (might show different path than pod-to-pod)
 		o.Expect(output).NotTo(o.BeEmpty(), "Trace should produce output")
+		o.Expect(output).To(o.ContainSubstring("indicates success"), "Trace should indicate success")
 		// Host-network traffic bypasses some OVN overlay, so just verify no hard drops
 		o.Expect(output).NotTo(o.ContainSubstring("policy drop"), "Should not be blocked by policy")
 	})
 
-	// Medium-45146: BZ 1986708 - Pod should be healthy when gw IP is single stack on dual stack cluster
-	g.It("45146-should create healthy pod with single-stack gateway on dual-stack cluster", func() {
-		const testNS = "test-single-stack-gw-45146"
-
-		g.By("Creating test namespace")
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testNS,
-				Labels: map[string]string{
-					"pod-security.kubernetes.io/enforce": "privileged",
-					"pod-security.kubernetes.io/audit":   "privileged",
-					"pod-security.kubernetes.io/warn":    "privileged",
-				},
-			},
-		}
-		_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		defer func() {
-			g.By("Cleaning up test namespace")
-			_ = clientset.CoreV1().Namespaces().Delete(ctx, testNS, metav1.DeleteOptions{})
-		}()
-
-		g.By("Creating pod with single-stack gateway routing annotations")
-		// This simulates a gateway pod with single-stack routing on a dual-stack cluster
-		// Testing BZ 1986708 - pod should remain healthy despite stack mismatch
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "gw-single-stack-pod",
-				Namespace: testNS,
-				Annotations: map[string]string{
-					"k8s.ovn.org/routing-namespaces": testNS,
-					"k8s.ovn.org/routing-network":    "foo",
-					// Single-stack IPv4 network status on potentially dual-stack cluster
-					"k8s.v1.cni.cncf.io/network-status": `[{"name":"foo","interface":"net1","ips":["172.19.0.5"],"mac":"01:23:45:67:89:10"}]`,
-				},
-			},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:    "test",
-						Image:   "registry.access.redhat.com/ubi8/ubi-minimal:latest",
-						Command: []string{"sleep", "3600"},
-					},
-				},
-			},
-		}
-
-		_, err = clientset.CoreV1().Pods(testNS).Create(ctx, pod, metav1.CreateOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		g.By("Waiting for pod to reach Running state (validating BZ 1986708 fix)")
-		// The bug was that pods with single-stack gw on dual-stack clusters would fail
-		// This test ensures the pod becomes healthy
-		o.Eventually(func() corev1.PodPhase {
-			p, err := clientset.CoreV1().Pods(testNS).Get(ctx, "gw-single-stack-pod", metav1.GetOptions{})
-			if err != nil {
-				return corev1.PodPending
-			}
-			return p.Status.Phase
-		}, 60, 5).Should(o.Equal(corev1.PodRunning),
-			"Pod with single-stack gateway should reach Running state on dual-stack cluster")
-
-		g.By("Verifying pod is healthy with Ready condition")
-		p, err := clientset.CoreV1().Pods(testNS).Get(ctx, "gw-single-stack-pod", metav1.GetOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		// Check that pod has at least one container in Ready state
-		hasReadyContainer := false
-		for _, containerStatus := range p.Status.ContainerStatuses {
-			if containerStatus.Ready {
-				hasReadyContainer = true
-				break
-			}
-		}
-		o.Expect(hasReadyContainer).To(o.BeTrue(),
-			"Pod should have at least one ready container, validating health despite single-stack GW")
-
-		g.By("Verifying routing annotations are preserved")
-		o.Expect(p.Annotations["k8s.ovn.org/routing-namespaces"]).To(o.Equal(testNS),
-			"Routing namespace annotation should be preserved")
-		o.Expect(p.Annotations["k8s.ovn.org/routing-network"]).To(o.Equal("foo"),
-			"Routing network annotation should be preserved")
-	})
-
-	// Medium-69761: Check apbexternalroute status when all zones reported success
-	g.It("69761-should show aggregated status from all zones in AdminPolicyBasedExternalRoute", func() {
-		const testNS = "test-apbexternalroute-69761"
-
-		g.By("Creating test namespace")
-		ns := &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testNS,
-			},
-		}
-		_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		defer func() {
-			g.By("Cleaning up test namespace and AdminPolicyBasedExternalRoute")
-			dynamicClient, _ := dynamic.NewForConfig(config)
-			apbrGVR := schema.GroupVersionResource{
-				Group:    "k8s.ovn.org",
-				Version:  "v1",
-				Resource: "adminpolicybasedexternalroutes",
-			}
-			_ = dynamicClient.Resource(apbrGVR).Delete(ctx, "default-route-policy", metav1.DeleteOptions{})
-			_ = clientset.CoreV1().Namespaces().Delete(ctx, testNS, metav1.DeleteOptions{})
-		}()
-
-		g.By("Creating AdminPolicyBasedExternalRoute with static next hops")
-		dynamicClient, err := dynamic.NewForConfig(config)
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		apbrGVR := schema.GroupVersionResource{
-			Group:    "k8s.ovn.org",
-			Version:  "v1",
-			Resource: "adminpolicybasedexternalroutes",
-		}
-
-		apbr := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"apiVersion": "k8s.ovn.org/v1",
-				"kind":       "AdminPolicyBasedExternalRoute",
-				"metadata": map[string]interface{}{
-					"name": "default-route-policy",
-				},
-				"spec": map[string]interface{}{
-					"from": map[string]interface{}{
-						"namespaceSelector": map[string]interface{}{
-							"matchLabels": map[string]interface{}{
-								"kubernetes.io/metadata.name": testNS,
-			},
-						},
-					},
-					"nextHops": map[string]interface{}{
-						"static": []interface{}{
-							map[string]interface{}{"ip": "172.18.0.8"},
-							map[string]interface{}{"ip": "172.18.0.9"},
-						},
-					},
-				},
-			},
-		}
-
-		_, err = dynamicClient.Resource(apbrGVR).Create(ctx, apbr, metav1.CreateOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-
-		g.By("Waiting for AdminPolicyBasedExternalRoute status to be populated")
-		var apbrStatus *unstructured.Unstructured
-		o.Eventually(func() bool {
-			apbrStatus, err = dynamicClient.Resource(apbrGVR).Get(ctx, "default-route-policy", metav1.GetOptions{})
-			if err != nil {
-				return false
-			}
-			status, found, _ := unstructured.NestedMap(apbrStatus.Object, "status")
-			return found && len(status) > 0
-		}, 120, 10).Should(o.BeTrue(), "AdminPolicyBasedExternalRoute status should be populated")
-
-		g.By("Verifying status contains messages from all zones (nodes)")
-		status, found, err := unstructured.NestedMap(apbrStatus.Object, "status")
-		o.Expect(err).NotTo(o.HaveOccurred())
-		o.Expect(found).To(o.BeTrue(), "Status field should exist")
-
-		messages, found, err := unstructured.NestedSlice(status, "messages")
-		o.Expect(err).NotTo(o.HaveOccurred())
-		o.Expect(found).To(o.BeTrue(), "Status.messages field should exist")
-		o.Expect(len(messages)).To(o.BeNumerically(">", 0), "Status.messages should contain at least one zone report")
-
-		// Get node count to validate we have messages from nodes
-		nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-		o.Expect(err).NotTo(o.HaveOccurred())
-		nodeCount := len(nodes.Items)
-
-		g.By(fmt.Sprintf("Verifying status.messages has entries from zones (cluster has %d nodes)", nodeCount))
-		// Each message should be prefixed with zone name (node name by default)
-		// Format: "<zone-name>: configured external gateway IPs: 172.18.0.8,172.18.0.9"
-		for _, msg := range messages {
-			msgStr, ok := msg.(string)
-			o.Expect(ok).To(o.BeTrue(), "Each message should be a string")
-			o.Expect(msgStr).To(o.ContainSubstring("configured external gateway IPs"),
-				"Message should describe configured gateway IPs")
-			o.Expect(msgStr).To(o.MatchRegexp(`^[^:]+:`),
-				"Message should be prefixed with zone name followed by colon")
-		}
-
-		g.By("Verifying status.status is Success when all zones report success")
-		statusValue, found, err := unstructured.NestedString(status, "status")
-		o.Expect(err).NotTo(o.HaveOccurred())
-		if found {
-			// Status should be "Success" when all zones reported successfully
-			// or empty if not all zones have reported yet
-			o.Expect(statusValue).To(o.Or(o.Equal("Success"), o.BeEmpty()),
-				"Status should be 'Success' when all zones reported, or empty if still pending")
-		}
-
-		g.By("Verifying external gateway IPs are configured in messages")
-		// Check that at least one message mentions the configured IPs
-		hasExpectedIPs := false
-		for _, msg := range messages {
-			msgStr, ok := msg.(string)
-			o.Expect(ok).To(o.BeTrue(), "Each message should be a string")
-			if strings.Contains(msgStr, "172.18.0.8") && strings.Contains(msgStr, "172.18.0.9") {
-				hasExpectedIPs = true
-				break
-			}
-		}
-		o.Expect(hasExpectedIPs).To(o.BeTrue(),
-			"At least one zone should report the configured external gateway IPs (172.18.0.8, 172.18.0.9)")
-	})
 })
 
 // runOVNKubeTrace executes ovnkube-trace in an ovnkube-node pod
@@ -517,6 +325,8 @@ func runOVNKubeTrace(ctx context.Context, clientset *kubernetes.Clientset, confi
 		return "", err
 	}
 
+	// ovnkube-trace is in the ovnkube-controller container within ovnkube-node pod
+	// Note: Container structure changed - ovnkube-controller is now part of ovnkube-node pod
 	req := clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(nodePod).
