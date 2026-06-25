@@ -30,6 +30,7 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
+	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -122,6 +123,10 @@ var _ = Describe("Network Segmentation: services", feature.NetworkSegmentation, 
 				)
 				Expect(err).NotTo(HaveOccurred())
 
+				// On cloud platforms (e.g. AWS), UDP LoadBalancer services are not supported and
+				// external containers (frr) are unavailable. Gate all such checks on KinD.
+				isKindCluster := infraprovider.IsKind()
+
 				By(fmt.Sprintf("Creating a UDN LoadBalancer service"))
 				policy := v1.IPFamilyPolicyPreferDualStack
 				udnService, err := jig.CreateUDPService(context.TODO(), func(s *v1.Service) {
@@ -138,9 +143,11 @@ var _ = Describe("Network Segmentation: services", feature.NetworkSegmentation, 
 				})
 				framework.ExpectNoError(err)
 
-				By("Wait for UDN LoadBalancer Ingress to pop up")
-				udnService, err = jig.WaitForLoadBalancer(context.TODO(), 180*time.Second)
-				framework.ExpectNoError(err)
+				if isKindCluster {
+					By("Wait for UDN LoadBalancer Ingress to pop up")
+					udnService, err = jig.WaitForLoadBalancer(context.TODO(), 180*time.Second)
+					framework.ExpectNoError(err)
+				}
 
 				By("Creating a UDN backend pod")
 				udnServerPod := e2epod.NewAgnhostPod(
@@ -169,7 +176,9 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				By("Connect to the UDN service cluster IP from the UDN client pod on the same node")
 				checkConnectionToClusterIPs(f, udnClientPod, udnService, udnServerPod.Name)
 				By("Connect to the UDN service nodePort on all 3 nodes from the UDN client pod")
-				checkConnectionToLoadBalancers(f, udnClientPod, udnService, udnServerPod.Name)
+				if isKindCluster {
+					checkConnectionToLoadBalancers(f, udnClientPod, udnService, udnServerPod.Name)
+				}
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[0], "endpoint node", udnServerPod.Name)
 				if !dynamicUDNEnabled {
 					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
@@ -182,7 +191,9 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 				By("Connect to the UDN service from the UDN client pod on a different node")
 				checkConnectionToClusterIPs(f, udnClientPod2, udnService, udnServerPod.Name)
-				checkConnectionToLoadBalancers(f, udnClientPod2, udnService, udnServerPod.Name)
+				if isKindCluster {
+					checkConnectionToLoadBalancers(f, udnClientPod2, udnService, udnServerPod.Name)
+				}
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[1], "local node", udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
 				if !dynamicUDNEnabled {
@@ -191,13 +202,15 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 				By("Connect to the UDN service from the UDN client external container")
 				externalContainer := infraapi.ExternalContainer{Name: "frr"}
-				if !dynamicUDNEnabled {
-					checkConnectionToLoadBalancersFromExternalContainer(f, externalContainer, udnService, udnServerPod.Name)
-				}
-				checkConnectionToNodePortFromExternalContainer(externalContainer, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
-				if !dynamicUDNEnabled {
-					checkConnectionToNodePortFromExternalContainer(externalContainer, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
-					checkConnectionToNodePortFromExternalContainer(externalContainer, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+				if isKindCluster {
+					if !dynamicUDNEnabled {
+						checkConnectionToLoadBalancersFromExternalContainer(f, externalContainer, udnService, udnServerPod.Name)
+					}
+					checkConnectionToNodePortFromExternalContainer(externalContainer, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
+					if !dynamicUDNEnabled {
+						checkConnectionToNodePortFromExternalContainer(externalContainer, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
+						checkConnectionToNodePortFromExternalContainer(externalContainer, udnService, &nodes.Items[2], "other node", udnServerPod.Name)
+					}
 				}
 
 				// Default network -> UDN
@@ -206,6 +219,13 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				defaultNetNamespace := &v1.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: f.Namespace.Name + "-default",
+						Labels: map[string]string{
+							// Match the PodSecurity level that wrappedTestFramework sets via f.CreateNamespace
+							// so that pods created in this namespace are not rejected by PSA on cloud clusters.
+							admissionapi.EnforceLevelLabel: string(admissionapi.LevelPrivileged),
+							admissionapi.WarnLevelLabel:    string(admissionapi.LevelPrivileged),
+							admissionapi.AuditLevelLabel:   string(admissionapi.LevelPrivileged),
+						},
 					},
 				}
 				f.AddNamespacesToDelete(defaultNetNamespace)
