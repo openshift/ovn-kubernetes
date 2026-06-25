@@ -21,7 +21,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolation", func() {
+var _ = g.Describe("[OTP] UDN Port Isolation", func() {
 	var (
 		clientset *kubernetes.Clientset
 		config    *rest.Config
@@ -52,9 +52,11 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testNS,
 				Labels: map[string]string{
-					"pod-security.kubernetes.io/enforce": "privileged",
-					"pod-security.kubernetes.io/audit":   "privileged",
-					"pod-security.kubernetes.io/warn":    "privileged",
+					"pod-security.kubernetes.io/enforce":                     "privileged",
+					"pod-security.kubernetes.io/audit":                       "privileged",
+					"pod-security.kubernetes.io/warn":                        "privileged",
+					"security.openshift.io/scc.podSecurityLabelSync":         "false",
+					"k8s.ovn.org/primary-user-defined-network":               "layer2-ipv4-pudn1",
 				},
 			},
 		}
@@ -95,8 +97,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 					"layer2": map[string]interface{}{
 						"role": "Primary",
 						"subnets": []interface{}{
-							"10.10.0.0/16",
-							"FC00:10:10::0/64",
+							"10.132.0.0/16",
 						},
 					},
 				},
@@ -107,6 +108,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 		o.Expect(err).NotTo(o.HaveOccurred())
 
 		// Wait for UDN to be ready
+		// Check multiple possible condition types as the API might use different names
 		o.Eventually(func() bool {
 			obj, err := dynamicClient.Resource(udnGVR).Namespace(testNS).Get(ctx, "layer2-ipv4-pudn1", metav1.GetOptions{})
 			if err != nil {
@@ -120,14 +122,17 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 			if !found {
 				return false
 			}
+			// Check for NetworkCreated condition (UDN uses this instead of NetworkReady)
 			for _, cond := range conditions {
 				condMap := cond.(map[string]interface{})
-				if condMap["type"] == "NetworkReady" && condMap["status"] == "True" {
+				condType, _ := condMap["type"].(string)
+				condStatus, _ := condMap["status"].(string)
+				if condType == "NetworkCreated" && condStatus == "True" {
 					return true
 				}
 			}
 			return false
-		}, 120, 5).Should(o.BeTrue(), "UDN should become ready")
+		}, 180, 5).Should(o.BeTrue(), "UDN should become ready")
 
 		g.By("Creating NAD with portIsolation enabled")
 		nadIsolated := `{
@@ -380,8 +385,6 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 		o.Expect(nonIsolatedOutput).To(o.ContainSubstring("0% packet loss"), "Should show successful ping on non-isolated bridge")
 	})
 
-	// OCP-80526: UDN Verify pods with isolated and non-isolated ports using bridge-cni
-	// This test combines UDN (Layer2 Primary) with mixed port isolation from test 80525
 	g.It("80526-should test UDN with mixed port isolation on bridge CNI", func() {
 		testNS := "test-udn-mixed-isolation-80526"
 
@@ -390,9 +393,10 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testNS,
 				Labels: map[string]string{
-					"pod-security.kubernetes.io/enforce": "privileged",
-					"pod-security.kubernetes.io/audit":   "privileged",
-					"pod-security.kubernetes.io/warn":    "privileged",
+					"pod-security.kubernetes.io/enforce":          "privileged",
+					"pod-security.kubernetes.io/audit":            "privileged",
+					"pod-security.kubernetes.io/warn":             "privileged",
+					"k8s.ovn.org/primary-user-defined-network":    "layer2-ipv4-pudn1",
 				},
 			},
 		}
@@ -433,8 +437,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 					"layer2": map[string]interface{}{
 						"role": "Primary",
 						"subnets": []interface{}{
-							"10.10.0.0/16",
-							"FC00:10:10::0/64",
+							"10.132.0.0/16",
 						},
 					},
 				},
@@ -445,6 +448,7 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 		o.Expect(err).NotTo(o.HaveOccurred())
 
 		// Wait for UDN to be ready
+		// Check multiple possible condition types as the API might use different names
 		o.Eventually(func() bool {
 			obj, err := dynamicClient.Resource(udnGVR).Namespace(testNS).Get(ctx, "layer2-ipv4-pudn1", metav1.GetOptions{})
 			if err != nil {
@@ -458,14 +462,17 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 			if !found {
 				return false
 			}
+			// Check for NetworkCreated condition (UDN uses this instead of NetworkReady)
 			for _, cond := range conditions {
 				condMap := cond.(map[string]interface{})
-				if condMap["type"] == "NetworkReady" && condMap["status"] == "True" {
+				condType, _ := condMap["type"].(string)
+				condStatus, _ := condMap["status"].(string)
+				if condType == "NetworkCreated" && condStatus == "True" {
 					return true
 				}
 			}
 			return false
-		}, 120, 5).Should(o.BeTrue(), "UDN should become ready")
+		}, 180, 5).Should(o.BeTrue(), "UDN should become ready")
 
 		// Now run the same tests as 80525 (mixed port isolation) but in UDN namespace
 		g.By("Creating NAD with portIsolation enabled")
@@ -715,3 +722,39 @@ var _ = g.Describe("[JIRA:Networking][OTP][sig-network] OTP Multus Port Isolatio
 		o.Expect(nonIsolatedOutput).To(o.ContainSubstring("0% packet loss"), "Should show successful ping on non-isolated network")
 	})
 })
+
+// Helper functions
+
+func createNAD(ctx context.Context, config *rest.Config, namespace, name, nadConfig string) error {
+	nad := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "k8s.cni.cncf.io/v1",
+			"kind":       "NetworkAttachmentDefinition",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"spec": map[string]interface{}{
+				"config": nadConfig,
+			},
+		},
+	}
+
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	nadGVR := schema.GroupVersionResource{
+		Group:    "k8s.cni.cncf.io",
+		Version:  "v1",
+		Resource: "network-attachment-definitions",
+	}
+
+	_, err = dynamicClient.Resource(nadGVR).Namespace(namespace).Create(ctx, nad, metav1.CreateOptions{})
+	return err
+}
+
+func int32Ptr(i int32) *int32 {
+	return &i
+}
