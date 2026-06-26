@@ -2809,7 +2809,7 @@ spec:
     topology: Layer3
     layer3:
       role: Primary
-      subnets: ` + generateCIDRforClusterUDN(cs, primaryLayer3MultiCIDRs(), "")
+      subnets: ` + generateCIDRforClusterUDN(cs, primaryLayer3CIDRs(), "")
 }
 
 func newL2SecondaryUDNManifest(name string) string {
@@ -2836,7 +2836,7 @@ spec:
   topology: Layer3
   layer3:
     role: Primary
-    subnets: ` + generateCIDRforUDN(cs, primaryLayer3MultiCIDRs())
+    subnets: ` + generateCIDRforUDN(cs, primaryLayer3CIDRs())
 }
 
 func generateCIDRforUDN(cs clientset.Interface, cidrs string) string {
