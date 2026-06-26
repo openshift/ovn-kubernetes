@@ -7,18 +7,21 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
@@ -273,6 +276,44 @@ func GetAdvertisedNetworkSubnetsPassACLdbIDs(controller, networkName string, net
 			libovsdbops.ObjectNameKey: networkName,
 			libovsdbops.NetworkKey:    strconv.Itoa(networkID),
 		})
+}
+
+// ConfigureAdvertisedNetworkIsolation ensures the global resources for advertised network isolation exist.
+func ConfigureAdvertisedNetworkIsolation(nbClient libovsdbclient.Client) error {
+	addressSetFactory := addressset.NewOvnAddressSetFactory(nbClient, config.IPv4Mode, config.IPv6Mode)
+	_, err := addressSetFactory.EnsureAddressSet(GetAdvertisedNetworkSubnetsAddressSetDBIDs())
+	return err
+}
+
+// CleanupStaleAdvertisedNetworkSubnets removes subnets from the advertised network subnets address set
+// that are not in validSubnets.
+func CleanupStaleAdvertisedNetworkSubnets(nbClient libovsdbclient.Client, validSubnets sets.Set[string]) error {
+	addressSetFactory := addressset.NewOvnAddressSetFactory(nbClient, config.IPv4Mode, config.IPv6Mode)
+
+	addrSetDBIDs := GetAdvertisedNetworkSubnetsAddressSetDBIDs()
+	addrSet, err := addressSetFactory.GetAddressSet(addrSetDBIDs)
+	if err != nil && !errors.Is(err, libovsdbclient.ErrNotFound) {
+		return fmt.Errorf("failed to get advertised subnets address set %s: %w", addrSetDBIDs, err)
+	}
+	if addrSet == nil {
+		return nil
+	}
+
+	v4Addrs, v6Addrs := addrSet.GetAddresses()
+	var stale []string
+	for _, addr := range append(v4Addrs, v6Addrs...) {
+		if !validSubnets.Has(addr) {
+			stale = append(stale, addr)
+		}
+	}
+	if len(stale) > 0 {
+		if err := addrSet.DeleteAddresses(stale); err != nil {
+			klog.Errorf("Failed to delete stale addresses %q from advertised network subnets address set: %v", stale, err)
+		}
+		klog.Infof("Cleaned up stale advertised addresses %q from advertised network subnets address set", stale)
+	}
+
+	return nil
 }
 
 // BuildAdvertisedNetworkSubnetsDropACL builds the advertised network subnets drop ACL:
