@@ -1284,6 +1284,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				// Let the real code run and ensure OVN database sync
+				if oc.isPodNetworkAdvertisedAtNode(node1.Name) {
+					gomega.Expect(ConfigureAdvertisedNetworkIsolation(nbClient)).To(gomega.Succeed())
+				}
 				gomega.Expect(oc.WatchNodes()).To(gomega.Succeed())
 
 				// add stale SNATs from pods to nodes on wrong node
