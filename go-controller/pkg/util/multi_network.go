@@ -1872,3 +1872,9 @@ func getFirstAvailableIP(subnets []*net.IPNet, excludeIPs sets.Set[string]) net.
 	}
 	return nil
 }
+
+// GetNetworkScopedSwitchToRouterPortNameFromSwitchName returns the
+// router-to-switch port name for the given switch name.
+func GetNetworkScopedSwitchToRouterPortNameFromSwitchName(switchName string) string {
+	return types.SwitchToRouterPrefix + switchName
+}
