@@ -310,20 +310,19 @@ func (pod *PingPodResourceWinNode) CreatePingPodWinNode(oc *exutil.CLI) {
 }
 
 func ApplyResourceFromTemplate(oc *exutil.CLI, parameters ...string) error {
-	var configFile string
+	var processedContent string
 	err := wait.Poll(3*time.Second, 15*time.Second, func() (bool, error) {
-		output, err := oc.Run("process").Args(parameters...).OutputToFile(GetRandomString() + "ping-pod.json")
+		output, err := oc.Run("process").Args(parameters...).Output()
 		if err != nil {
 			e2e.Logf("the err:%v, and try next round", err)
 			return false, nil
 		}
-		configFile = output
+		processedContent = output
 		return true, nil
 	})
 	o.Expect(err).NotTo(o.HaveOccurred(), fmt.Sprintf("fail to process %v", parameters))
 
-	e2e.Logf("the file of resource is %s", configFile)
-	return oc.WithoutNamespace().Run("apply").Args("-f", configFile).Execute()
+	return oc.WithoutNamespace().Run("apply").InputString(processedContent).Args("-f", "-").Execute()
 }
 
 func (egressIP *EgressIPResource1) CreateEgressIPObject1(oc *exutil.CLI) {
@@ -584,20 +583,19 @@ func DoAction(oc *exutil.CLI, action string, asAdmin bool, withoutNamespace bool
 }
 
 func ApplyResourceFromTemplateByAdmin(oc *exutil.CLI, parameters ...string) error {
-	var configFile string
+	var processedContent string
 	err := wait.Poll(3*time.Second, 15*time.Second, func() (bool, error) {
-		output, err := oc.AsAdmin().Run("process").Args(parameters...).OutputToFile(GetRandomString() + "resource.json")
+		output, err := oc.AsAdmin().Run("process").Args(parameters...).Output()
 		if err != nil {
 			e2e.Logf("the err:%v, and try next round", err)
 			return false, nil
 		}
-		configFile = output
+		processedContent = output
 		return true, nil
 	})
 	o.Expect(err).NotTo(o.HaveOccurred(), fmt.Sprintf("as admin fail to process %v", parameters))
 
-	e2e.Logf("the file of resource is %s", configFile)
-	return oc.WithoutNamespace().AsAdmin().Run("apply").Args("-f", configFile).Execute()
+	return oc.WithoutNamespace().AsAdmin().Run("apply").InputString(processedContent).Args("-f", "-").Execute()
 }
 
 func GetRandomString() string {
@@ -1219,7 +1217,7 @@ func GetOVNMetrics(oc *exutil.CLI, url string) string {
 	o.Expect(err).NotTo(o.HaveOccurred())
 	o.Expect(olmToken).NotTo(o.BeEmpty())
 	metricsErr := wait.Poll(5*time.Second, 10*time.Second, func() (bool, error) {
-		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-monitoring", "-c", "prometheus", "prometheus-k8s-0", "--", "env", "-u", "HTTPS_PROXY", "-u", "https_proxy", "curl", "-k", "-H", fmt.Sprintf("Authorization: Bearer %v", olmToken), fmt.Sprintf("%s", url)).OutputToFile("metrics.txt")
+		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-monitoring", "-c", "prometheus", "prometheus-k8s-0", "--", "env", "-u", "HTTPS_PROXY", "-u", "https_proxy", "curl", "-k", "-H", fmt.Sprintf("Authorization: Bearer %v", olmToken), fmt.Sprintf("%s", url)).Output()
 		if err != nil {
 			e2e.Logf("Can't get metrics and try again, the error is:%s", err)
 			return false, nil
@@ -1231,15 +1229,11 @@ func GetOVNMetrics(oc *exutil.CLI, url string) string {
 	return metricsLog
 }
 
-// ExtractMetricValue reads a metrics file and returns the value (second field) from the Nth line
+// ExtractMetricValue parses metrics content and returns the value (second field) from the Nth line
 // matching metricName. This replaces shell pipelines like: cat file | grep metric | awk 'NR==N{print $2}'
-func ExtractMetricValue(filePath, metricName string, matchIndex int) string {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return ""
-	}
+func ExtractMetricValue(content, metricName string, matchIndex int) string {
 	count := 0
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range strings.Split(content, "\n") {
 		if strings.Contains(line, metricName) {
 			count++
 			if count == matchIndex {
@@ -1711,18 +1705,16 @@ func UnorderedEqual(first, second []string) bool {
 }
 
 func CheckovnkubeMasterNetworkProgrammingetrics(oc *exutil.CLI, url string, metrics string) {
-	var metricsOutput []byte
 	olmToken, err := GetSAToken(oc)
 	o.Expect(err).NotTo(o.HaveOccurred())
 	o.Expect(olmToken).NotTo(o.BeEmpty())
 	metricsErr := wait.Poll(5*time.Second, 10*time.Second, func() (bool, error) {
-		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-monitoring", "-c", "prometheus", "prometheus-k8s-0", "--", "curl", "-k", "-H", fmt.Sprintf("Authorization: Bearer %v", olmToken), fmt.Sprintf("%s", url)).OutputToFile("metrics.txt")
+		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-monitoring", "-c", "prometheus", "prometheus-k8s-0", "--", "curl", "-k", "-H", fmt.Sprintf("Authorization: Bearer %v", olmToken), fmt.Sprintf("%s", url)).Output()
 		if err != nil {
 			e2e.Logf("Can't get metrics and try again, the error is:%s", err)
 			return false, nil
 		}
-		metricsOutput, _ = exec.Command("bash", "-c", "cat "+output+" | grep "+metrics+" | awk 'NR==2{print $2}'").Output()
-		metricsValue := strings.TrimSpace(string(metricsOutput))
+		metricsValue := ExtractMetricValue(output, metrics, 2)
 		if metricsValue != "" {
 			e2e.Logf("The output of the metrics for %s is : %v", metrics, metricsValue)
 		} else {
@@ -2640,15 +2632,23 @@ func GetServiceEndpoints(oc *exutil.CLI, serviceName string, serviceNamespace st
 func GetOVNMetricsInSpecificContainer(oc *exutil.CLI, containerName string, podName string, url string, metricName string) string {
 	var metricValue string
 	metricsErr := wait.Poll(5*time.Second, 10*time.Second, func() (bool, error) {
-		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-ovn-kubernetes", "-c", containerName, podName, "--", "curl", url).OutputToFile("metrics.txt")
+		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-ovn-kubernetes", "-c", containerName, podName, "--", "curl", url).Output()
 		if err != nil {
 			e2e.Logf("Can't get metrics and try again, the error is:%s", err)
 			return false, nil
 		}
-		metricOutput, getMetricErr := exec.Command("bash", "-c", "cat "+output+" | grep -e '^"+metricName+" ' | awk 'END {print $2}'").Output()
-		o.Expect(getMetricErr).NotTo(o.HaveOccurred())
-		metricValue = strings.TrimSpace(string(metricOutput))
-		o.Expect(metricValue).ShouldNot(o.BeEmpty())
+		for _, line := range strings.Split(output, "\n") {
+			if strings.HasPrefix(line, metricName+" ") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					metricValue = fields[1]
+				}
+			}
+		}
+		if metricValue == "" {
+			e2e.Logf("Metric %s not found in output, retrying", metricName)
+			return false, nil
+		}
 		e2e.Logf("The output of the %s is : %v", metricName, metricValue)
 		return true, nil
 
