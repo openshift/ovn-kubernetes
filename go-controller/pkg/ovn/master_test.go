@@ -1283,8 +1283,17 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				err = condition(oc)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				if oc.isPodNetworkAdvertisedAtNode(node1.Name) {
+					gomega.Expect(ConfigureAdvertisedNetworkIsolation(nbClient)).To(gomega.Succeed())
+				}
 				// Let the real code run and ensure OVN database sync
 				gomega.Expect(oc.WatchNodes()).To(gomega.Succeed())
+				gomega.Eventually(func() error {
+					_, err := libovsdbops.GetLogicalRouter(nbClient, &nbdb.LogicalRouter{
+						Name: types.GWRouterPrefix + node1.Name,
+					})
+					return err
+				}).Should(gomega.Succeed())
 
 				// add stale SNATs from pods to nodes on wrong node
 				GR := &nbdb.LogicalRouter{
