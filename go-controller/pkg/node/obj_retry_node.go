@@ -266,6 +266,20 @@ func (h *nodeEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) er
 					}
 				}
 			}
+
+			// On the DPU, the host (DPUHost) publishes its primary interface address via the
+			// primary-dpu-host-addr annotation. When it changes we must rebuild
+			// node-primary-ifaddr and l3-gateway-config from it: only the DPU holds the
+			// OVS/OVN state (chassis, bridge, MAC, ofport) required to author l3-gateway-config,
+			// so the host cannot do it. We piggyback on this existing local-node watch rather
+			// than registering a separate node informer handler.
+			if config.OvnKubeNode.Mode == types.NodeModeDPU && util.NodePrimaryDPUHostAddrAnnotationChanged(oldNode, newNode) {
+				if gw, ok := h.nc.Gateway.(*gateway); ok && gw.nodeIPManager != nil {
+					if err := gw.nodeIPManager.updateGatewayAddressAnnotations(); err != nil {
+						return fmt.Errorf("failed to update gateway annotations after primary-dpu-host-addr change for node %s: %w", newNode.Name, err)
+					}
+				}
+			}
 			return nil
 		}
 
