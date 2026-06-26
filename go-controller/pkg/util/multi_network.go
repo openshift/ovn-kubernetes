@@ -2413,3 +2413,12 @@ func CheckSubnetOverlapWithClusterSubnets(subnets []*net.IPNet, subnetsName stri
 	}
 	return nil
 }
+
+// GetNetworkScopedSwitchToRouterPortNameFromSwitchName returns the
+// switch-to-router port name for the given switch name.
+func GetNetworkScopedSwitchToRouterPortNameFromSwitchName(switchName string) string {
+	if strings.HasSuffix(switchName, types.OVNLayer2Switch) && config.Layer2UsesTransitRouter {
+		return types.SwitchToTransitRouterPrefix + switchName
+	}
+	return types.SwitchToRouterPrefix + switchName
+}
