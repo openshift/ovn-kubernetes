@@ -370,6 +370,10 @@ func migrateAdvertisedNetworkDropACLToPortGroup(nbClient libovsdbclient.Client, 
 			return nil, fmt.Errorf("failed to find advertised network drop ACLs: %w", err)
 		}
 	}
+	// shouldn't happen but safe-guard it
+	if len(existingDropACLs) == 0 {
+		return nil, nil
+	}
 
 	dropACL.UUID = existingDropACLs[0].UUID
 
@@ -395,6 +399,10 @@ func migrateAdvertisedNetworkDropACLToPortGroup(nbClient libovsdbclient.Client, 
 	for _, swName := range affectedSwitches {
 		storPortName := types.SwitchToRouterPrefix + swName
 		storLSP, err := libovsdbops.GetLogicalSwitchPort(nbClient, &nbdb.LogicalSwitchPort{Name: storPortName})
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			klog.Warningf("Skipping advertised network isolation port group population for switch %s: stor port %s not found", swName, storPortName)
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to get stor port %s: %w", storPortName, err)
 		}
