@@ -72,6 +72,9 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset)
 	if err := initLocalGatewayIPTables(); err != nil {
 		return err
 	}
+	if err := initGatewayNFTables(); err != nil {
+		return err
+	}
 
 	k := &kube.Kube{KClient: fakeClient.KubeClient}
 	n.nodeIPManager = newAddressManagerInternal(fakeNodeName, k, nil, n.watchFactory, nil, nil, false)
@@ -114,6 +117,9 @@ func startNodePortWatcher(n *nodePortWatcher, fakeClient *util.OVNNodeClientset)
 
 func startNodePortWatcherWithRetry(n *nodePortWatcher, fakeClient *util.OVNNodeClientset, stopChan chan struct{}, wg *sync.WaitGroup) (*retry.RetryFramework, error) {
 	if err := initLocalGatewayIPTables(); err != nil {
+		return nil, err
+	}
+	if err := initGatewayNFTables(); err != nil {
 		return nil, err
 	}
 
@@ -386,7 +392,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
@@ -463,7 +469,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
@@ -539,7 +545,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
@@ -629,7 +635,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
@@ -730,7 +736,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
@@ -828,7 +834,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
@@ -967,7 +973,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-services-v4 { %s . tcp . %d }\n", ep1.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue()))
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-services-v4 { %s . tcp . %d }\n", ep2.Addresses[0], int32(service.Spec.Ports[0].TargetPort.IntValue()))
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
@@ -1019,7 +1025,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT = nftablesRulesBase
+				expectedNFT = nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -1162,7 +1168,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-services-v4 { %s . tcp . %v }\n"+
 					"add element inet ovn-kubernetes mgmtport-no-snat-services-v4 { %s . tcp . %v }\n",
 					endpointSlice.Endpoints[1].Addresses[0],
@@ -1268,7 +1274,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1380,7 +1386,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
@@ -1537,7 +1543,7 @@ var _ = Describe("Node Operations", func() {
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1670,7 +1676,7 @@ var _ = Describe("Node Operations", func() {
 				err = f6.MatchState(expectedTables6, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				Expect(err).NotTo(HaveOccurred())
 
@@ -1772,7 +1778,7 @@ var _ = Describe("Node Operations", func() {
 				err = f6.MatchState(expectedTables6, nil)
 				Expect(err).NotTo(HaveOccurred())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 			}
 			err := app.Run([]string{app.Name})
@@ -1866,7 +1872,7 @@ var _ = Describe("Node Operations", func() {
 					return f6.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -1954,7 +1960,7 @@ var _ = Describe("Node Operations", func() {
 					return f6.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -2451,7 +2457,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}).Should(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).Should(Succeed())
@@ -2491,7 +2497,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT = nftablesRulesBase
+				expectedNFT = nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -2699,6 +2705,10 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				err = f4.MatchState(expectedTables, nil)
 				Expect(err).NotTo(HaveOccurred())
+				// check nftables
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
+				err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
+				Expect(err).NotTo(HaveOccurred())
 
 				// HACK: Fix the service by setting a correct external IP address in newObj field
 				// of the retry entry
@@ -2797,7 +2807,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}).Should(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}).Should(Succeed())
@@ -2837,7 +2847,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT = nftablesRulesBase
+				expectedNFT = nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -2932,7 +2942,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
@@ -2974,7 +2984,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT = nftablesRulesBase
+				expectedNFT = nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -3071,7 +3081,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
@@ -3119,7 +3129,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT = nftablesRulesBase
+				expectedNFT = nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -3221,7 +3231,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
 				expectedFlows := []string{
@@ -3268,7 +3278,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT = nftablesRulesBase
+				expectedNFT = nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -3364,7 +3374,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				expectedNFT += fmt.Sprintf("add element inet ovn-kubernetes mgmtport-no-snat-nodeports { tcp . %v }\n", service.Spec.Ports[0].NodePort)
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
@@ -3412,7 +3422,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT = nftablesRulesBase
+				expectedNFT = nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
@@ -3513,7 +3523,7 @@ var _ = Describe("Node Operations", func() {
 				f4 := iptV4.(*util.FakeIPTables)
 				Expect(f4.MatchState(expectedTables, nil)).To(Succeed())
 
-				expectedNFT := nftablesRulesBase
+				expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
 				Expect(nodenft.MatchNFTRules(expectedNFT, nft.Dump())).To(Succeed())
 
 				expectedFlows := []string{
@@ -3559,7 +3569,7 @@ var _ = Describe("Node Operations", func() {
 					return f4.MatchState(expectedTables, nil)
 				}, "2s").Should(Succeed())
 
-				expectedNFT = nftablesRulesBase
+				expectedNFT = nftablesRulesBase + nftablesRulesGatewayServices
 				Eventually(func() error {
 					return nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 				}, "2s").Should(Succeed())
