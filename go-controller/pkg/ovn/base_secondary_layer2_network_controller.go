@@ -42,9 +42,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) stop() {
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
 
-	if oc.ipamClaimsHandler != nil {
-		oc.watchFactory.RemoveIPAMClaimsHandler(oc.ipamClaimsHandler)
-	}
 	if oc.netPolicyHandler != nil {
 		oc.watchFactory.RemovePolicyHandler(oc.netPolicyHandler)
 	}
@@ -118,17 +115,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) run() error {
 	// dependencies.
 	if err := oc.WatchNamespaces(); err != nil {
 		return err
-	}
-
-	// when on IC, it will be the NetworkController that returns the IPAMClaims
-	// IPs back to the pool
-	if oc.allocatesPodAnnotation() && oc.allowPersistentIPs() {
-		// WatchIPAMClaims should be started before WatchPods to prevent OVN-K
-		// master assigning IPs to pods without taking into account the persistent
-		// IPs set aside for the IPAMClaims
-		if err := oc.WatchIPAMClaims(); err != nil {
-			return err
-		}
 	}
 
 	if err := oc.WatchPods(); err != nil {
@@ -344,18 +330,6 @@ func (oc *BaseLayer2UserDefinedNetworkController) syncNodes(nodes []interface{})
 	}
 
 	return nil
-}
-
-func (oc *BaseLayer2UserDefinedNetworkController) syncIPAMClaims(ipamClaims []interface{}) error {
-	switchName, err := oc.getExpectedSwitchName(dummyPod())
-	if err != nil {
-		return err
-	}
-	return oc.ipamClaimsReconciler.Sync(ipamClaims, oc.lsManager.ForSwitch(switchName))
-}
-
-func dummyPod() *corev1.Pod {
-	return &corev1.Pod{Spec: corev1.PodSpec{NodeName: ""}}
 }
 
 // getDenyARPAndNSOnMACVRF provides ACLs to drop ARP and NS from pods to the

@@ -159,9 +159,9 @@ var _ = ginkgo.Describe("Managed BGP Controller", func() {
 			addresses := []string{baseConfig.Spec.BGP.Routers[0].Neighbors[0].Address, baseConfig.Spec.BGP.Routers[0].Neighbors[1].Address}
 			gomega.Expect(addresses).To(gomega.ConsistOf("10.0.0.1", "10.0.0.2"))
 
-			// Verify DisableMP is set
+			// Verify neighbors use address-family-specific sessions.
 			for _, neighbor := range baseConfig.Spec.BGP.Routers[0].Neighbors {
-				gomega.Expect(neighbor.DisableMP).To(gomega.BeTrue())
+				gomega.Expect(neighbor.DualStackAddressFamily).To(gomega.BeFalse())
 				gomega.Expect(neighbor.ASN).To(gomega.Equal(uint32(64512)))
 			}
 		})
@@ -874,9 +874,9 @@ var _ = ginkgo.Describe("Managed BGP Controller", func() {
 			drifted := baseConfig.DeepCopy()
 			drifted.Labels = map[string]string{"drifted": "true"}
 			drifted.Spec.BGP.Routers[0].Neighbors = []frrtypes.Neighbor{{
-				Address:   "10.0.0.99",
-				ASN:       config.ManagedBGP.ASNumber,
-				DisableMP: false,
+				Address:                "10.0.0.99",
+				ASN:                    config.ManagedBGP.ASNumber,
+				DualStackAddressFamily: true,
 			}}
 			_, err = frrFakeClient.ApiV1beta1().FRRConfigurations(config.ManagedBGP.FRRNamespace).Update(context.TODO(), drifted, metav1.UpdateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -893,7 +893,7 @@ var _ = ginkgo.Describe("Managed BGP Controller", func() {
 					return fmt.Errorf("expected single-node full-mesh config to be restored")
 				}
 				neighbor := cfg.Spec.BGP.Routers[0].Neighbors[0]
-				if neighbor.Address != "10.0.0.1" || !neighbor.DisableMP {
+				if neighbor.Address != "10.0.0.1" || neighbor.DualStackAddressFamily {
 					return fmt.Errorf("base FRRConfiguration not restored")
 				}
 				return nil
