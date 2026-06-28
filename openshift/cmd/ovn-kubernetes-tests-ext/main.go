@@ -14,6 +14,9 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
+	// import OTP (OpenShift Tests Private) migration tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/otp"
+
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
@@ -41,6 +44,36 @@ const (
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
+
+// otpBlockingTests lists the substring patterns for OTP tests that should be blocking
+// NOTE: Per reviewer feedback (anuragthehatter), all OTP tests are marked [informing]
+// for initial rollout. This list is kept for future reference when tests graduate to blocking.
+var otpBlockingTests = []string{
+	// All OTP tests are currently [informing] - uncomment to promote to blocking:
+	// "should not expose API tokens in ovnkube-node logs",
+	// "should have secure permissions on CNI configuration files",
+	// "should handle large IPv6 exclude ranges without timeout",
+	// "should support Dummy CNI plugin with Multus",
+	// "should execute ovn-db-run-command script successfully",
+	// "should create healthy pod with single-stack gateway on dual-stack cluster",
+	// "should show aggregated status from all zones in AdminPolicyBasedExternalRoute",
+	// "should assign dual-stack IPs with Whereabouts IPAM",
+}
+
+// isOTPBlocking checks if an OTP test should be marked as blocking
+// Currently returns false for all tests (all OTP tests are [informing])
+func isOTPBlocking(name string) bool {
+	// All OTP tests marked as [informing] per reviewer feedback
+	return false
+
+	// Original logic (commented out for now):
+	// for _, title := range otpBlockingTests {
+	// 	if strings.Contains(name, title) {
+	// 		return true
+	// 	}
+	// }
+	// return false
+}
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
 // and test labels. When ocpInfra is nil (no cluster access), all tests are included.
@@ -136,8 +169,12 @@ func main() {
 	blockingTests := sets.New(test.BlockingTests...)
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
-		for _, label := range getTestExtensionLabels() {
-			spec.Labels.Insert(label)
+		isOTP := strings.Contains(spec.Name, "[OTP]")
+
+		if !isOTP {
+			for _, label := range getTestExtensionLabels() {
+				spec.Labels.Insert(label)
+			}
 		}
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
@@ -155,9 +192,15 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		if !isOTP {
+			spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		}
 
 		switch {
+		case isOTP && isOTPBlocking(spec.Name):
+			spec.Lifecycle = extensiontests.LifecycleBlocking
+		case isOTP:
+			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case blockingTests.Has(spec.Name):
