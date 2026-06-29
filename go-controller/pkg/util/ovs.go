@@ -40,6 +40,7 @@ const (
 	ovsdbClientCommand = "ovsdb-client"
 	ovsdbToolCommand   = "ovsdb-tool"
 	ipCommand          = "ip"
+	ipsecCommand       = "ipsec"
 	powershellCommand  = "powershell"
 	netshCommand       = "netsh"
 	routeCommand       = "route"
@@ -134,6 +135,7 @@ type execHelper struct {
 	ovsdbToolPath   string
 	ovnRunDir       string
 	ipPath          string
+	ipsecPath       string
 	powershellPath  string
 	netshPath       string
 	routePath       string
@@ -262,6 +264,7 @@ func SetExecWithoutOVS(exec kexec.Interface) error {
 		if err != nil {
 			return err
 		}
+		// Resolve ipsec lazily when the feature/path is actually used.
 		runner.sysctlPath, err = exec.LookPath(sysctlCommand)
 		if err != nil {
 			return err
@@ -609,6 +612,19 @@ func RunNetsh(args ...string) (string, string, error) {
 // RunRoute runs a command via the Windows route utility
 func RunRoute(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.routePath, args...)
+	return strings.TrimSpace(stdout.String()), stderr.String(), err
+}
+
+// RunIPsec runs a command via the Libreswan "ipsec" utility
+func RunIPsec(args ...string) (string, string, error) {
+	if runner.ipsecPath == "" {
+		var err error
+		runner.ipsecPath, err = runner.exec.LookPath(ipsecCommand)
+		if err != nil {
+			return "", "", fmt.Errorf("ipsec binary not found: %v", err)
+		}
+	}
+	stdout, stderr, err := run(runner.ipsecPath, args...)
 	return strings.TrimSpace(stdout.String()), stderr.String(), err
 }
 

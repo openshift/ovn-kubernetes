@@ -289,6 +289,11 @@ spec:
           name: host-var-run-ovs
         - mountPath: /var/run/ovn/
           name: host-var-run-ovs
+        {{- if .Values.global.enableIpsec }}
+        - mountPath: /var/run/pluto/
+          name: host-var-run-pluto
+          readOnly: true
+        {{- end }}
         - mountPath: /ovn-cert
           name: host-ovn-cert
           readOnly: true
@@ -411,6 +416,8 @@ spec:
           value: {{ default 6081 .Values.global.encapPort | quote }}
         - name: OVN_DISABLE_PKT_MTU_CHECK
           value: {{ default "" .Values.global.disablePacketMtuCheck | quote }}
+        - name: ENABLE_IPSEC
+          value: {{ hasKey .Values.global "enableIpsec" | ternary .Values.global.enableIpsec false | quote }}
         - name: OVN_NETFLOW_TARGETS
           value: {{ default "" .Values.global.netFlowTargets | quote }}
         - name: OVN_SFLOW_TARGETS
@@ -639,6 +646,11 @@ spec:
       - name: host-var-run-ovs
         hostPath:
           path: /var/run/openvswitch
+      {{- if .Values.global.enableIpsec }}
+      - name: host-var-run-pluto
+        hostPath:
+          path: /var/run/pluto
+      {{- end }}
       - name: host-ovn-cert
         hostPath:
           path: /etc/ovn
