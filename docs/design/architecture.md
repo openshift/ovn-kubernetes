@@ -21,6 +21,10 @@ which is super lightweight and running only on the control plane nodes in your c
         * Allocates transit subnet IP to each node
         * Consolidates zone statuses across all nodes for features like EgressFirewall
         and EgressQoS
+* ovnkube-identity pod
+    * Runs only on control-plane nodes
+    * Provides certificate-based identity for node authentication
+    * Ensures requests from ovnkube-node pods are authenticated and authorized
 
 The data plane includes the `ovnkube-node` and `ovs-node` pods in the `ovn-kubernetes`
 namespace running on all your nodes in the cluster making this architecture localized

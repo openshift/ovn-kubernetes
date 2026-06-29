@@ -38,6 +38,7 @@ import (
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	addressset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/address_set"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -52,7 +53,7 @@ const (
 type InitClusterEgressPoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
 	ni util.NetInfo, clusterSubnets []*net.IPNet, controllerName, routerName string) error
 type EnsureNoRerouteNodePoliciesFunc func(client libovsdbclient.Client, addressSetFactory addressset.AddressSetFactory,
-	networkName, controllerName, clusterRouter string, nodeLister corelisters.NodeLister, v4, v6 bool) error
+	networkName, clusterRouter, controllerName string, clusterNodesAddressSets addressset.AddressSet, v4, v6 bool) error
 type DeleteLegacyDefaultNoRerouteNodePoliciesFunc func(nbClient libovsdbclient.Client, clusterRouter, nodeName string) error
 type CreateDefaultRouteToExternalFunc func(nbClient libovsdbclient.Client, clusterRouter, gwRouterName string, clusterSubnets []config.CIDRNetworkEntry, gatewayIPs []*net.IPNet) error
 
@@ -90,8 +91,9 @@ type Controller struct {
 
 	// An address set factory that creates address sets
 	addressSetFactory addressset.AddressSetFactory
-
-	zone string
+	// Shared address set manager that owns cluster-wide node IP address sets.
+	addressSetManager *addresssetmanager.AddressSetManager
+	zone              string
 }
 
 type svcState struct {
@@ -123,6 +125,7 @@ func NewController(
 	client kubernetes.Interface,
 	nbClient libovsdbclient.Client,
 	addressSetFactory addressset.AddressSetFactory,
+	addressSetManager *addresssetmanager.AddressSetManager,
 	initClusterEgressPolicies InitClusterEgressPoliciesFunc,
 	ensureNoRerouteNodePolicies EnsureNoRerouteNodePoliciesFunc,
 	createDefaultRouteToExternalForIC CreateDefaultRouteToExternalFunc,
@@ -140,6 +143,7 @@ func NewController(
 		client:                            client,
 		nbClient:                          nbClient,
 		addressSetFactory:                 addressSetFactory,
+		addressSetManager:                 addressSetManager,
 		initClusterEgressPolicies:         initClusterEgressPolicies,
 		ensureNoRerouteNodePolicies:       ensureNoRerouteNodePolicies,
 		createDefaultRouteToExternalForIC: createDefaultRouteToExternalForIC,

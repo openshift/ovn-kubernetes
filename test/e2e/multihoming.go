@@ -1423,7 +1423,9 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						Expect(err).NotTo(HaveOccurred())
 
 						By("asserting the *client* pod can contact the underlay service after deleting the policy")
-						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+						Eventually(func() error {
+							return connectToServer(clientPodConfig, underlayServiceIP, servicePort)
+						}, 30*time.Second, time.Second).Should(Succeed())
 					})
 
 					It("can not communicate over a localnet secondary network from pod to the underlay service", func() {
@@ -1446,7 +1448,9 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						Expect(err).NotTo(HaveOccurred())
 
 						By("asserting the *client* pod cannot contact the underlay service after creating the policy")
-						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(MatchError(ContainSubstring("exit code 28")))
+						Eventually(func() error {
+							return connectToServer(clientPodConfig, underlayServiceIP, servicePort)
+						}, 30*time.Second, time.Second).Should(MatchError(ContainSubstring("exit code 28")))
 					})
 				})
 
@@ -1480,9 +1484,13 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						Expect(err).NotTo(HaveOccurred())
 
 						if mnp.Name != denyAllEgress {
-							Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+							Eventually(func() error {
+								return connectToServer(clientPodConfig, underlayServiceIP, servicePort)
+							}, 30*time.Second, time.Second).Should(Succeed())
 						} else {
-							Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Not(Succeed()))
+							Eventually(func() error {
+								return connectToServer(clientPodConfig, underlayServiceIP, servicePort)
+							}, 30*time.Second, time.Second).Should(MatchError(ContainSubstring("exit code 28")))
 						}
 
 						By("deleting the multi-network policy")
@@ -1493,7 +1501,9 @@ var _ = Describe("Multi Homing", feature.MultiHoming, func() {
 						)).To(Succeed())
 
 						By("asserting the *client* pod can contact the underlay service after deleting the policy")
-						Expect(connectToServer(clientPodConfig, underlayServiceIP, servicePort)).To(Succeed())
+						Eventually(func() error {
+							return connectToServer(clientPodConfig, underlayServiceIP, servicePort)
+						}, 30*time.Second, time.Second).Should(Succeed())
 					},
 						XEntry(
 							"ingress denyall, ingress policy should have no impact on egress",
@@ -1711,7 +1721,9 @@ ip a add %[4]s/24 dev %[2]s
 					}, 2*time.Minute, 6*time.Second).Should(Succeed())
 
 					By("asserting the *blocked-client* pod **cannot** contact the server pod exposed endpoint")
-					Expect(connectToServer(blockedClientPodConfig, serverIP, port)).To(MatchError(ContainSubstring("exit code 28")))
+					Eventually(func() error {
+						return connectToServer(blockedClientPodConfig, serverIP, port)
+					}, 2*time.Minute, 6*time.Second).Should(MatchError(ContainSubstring("exit code 28")))
 				},
 				Entry(
 					"using pod selectors for a pure L2 overlay",
