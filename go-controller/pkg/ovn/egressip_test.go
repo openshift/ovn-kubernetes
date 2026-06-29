@@ -438,7 +438,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 			i, n, _ := net.ParseCIDR(podV4IP + "/23")
 			n.IP = i
-			fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+			fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			node1Switch.QOSRules = []string{"default-QoS-UUID"}
@@ -649,7 +649,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 			i, n, _ := net.ParseCIDR(podV4IP + "/23")
 			n.IP = i
-			fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+			fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			node1MgntIP, err := getSwitchManagementPortIP(&node1)
@@ -911,7 +911,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					node1Switch.QOSRules = []string{"default-QoS-UUID"}
@@ -1277,7 +1277,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 					retry.CheckRetryObjectEventually(key2, false, fakeOvn.controller.retryEgressNodes)
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					expectedNatLogicalPort := "k8s-node2"
@@ -1691,7 +1691,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 					retry.CheckRetryObjectEventually(key2, false, fakeOvn.controller.retryEgressNodes)
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 					gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 					node2MgntIP, err := getSwitchManagementPortIP(&node2)
@@ -2003,7 +2003,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2419,7 +2419,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 						i, n, err := net.ParseCIDR(p.podIP + "/23")
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						n.IP = i
-						fakeOvn.controller.logicalPortCache.add(&p.Pod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+						fakeOvn.controller.logicalPortCache.add(&p.Pod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					}
 					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2851,7 +2851,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -3273,7 +3273,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -3554,7 +3554,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				}
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.controller.WatchEgressIPNamespaces()
@@ -3785,7 +3785,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 					}
 					i, n, _ := net.ParseCIDR(podV6IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 					err := fakeOvn.controller.WatchEgressIPPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -4057,7 +4057,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV6IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					// hack pod to be in the provided zone
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, true)
@@ -4277,7 +4277,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				i, n, _ := net.ParseCIDR(podV6IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -4666,7 +4666,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 					}
 					i, n, _ := net.ParseCIDR(podV6IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					// hack pod to be in the provided zone
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, true)
@@ -4897,7 +4897,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV6IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					// hack pod to be in the provided zone
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, true)
@@ -5125,7 +5125,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV6IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 					// hack pod to be in the provided zone
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
@@ -5363,7 +5363,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV6IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					// hack pod to be in the provided zone
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, true)
@@ -5750,7 +5750,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					if interconnect && node1Zone != node2Zone {
 						fakeOvn.controller.zone = "local"
 						fakeOvn.controller.eIPC.zone = "local"
@@ -6209,8 +6209,8 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				i, n, _ := net.ParseCIDR(podV6IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 				// hack pod to be in the provided zone
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, true)
@@ -9103,7 +9103,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -9553,7 +9553,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -10523,7 +10523,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				)
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -10720,7 +10720,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 				err := fakeOvn.controller.WatchPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -11043,7 +11043,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 					n.IP = i
 					ipv6, ipv6net, _ := net.ParseCIDR(podV6IP + "/23")
 					ipv6net.IP = ipv6
-					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n, ipv6net})
+					fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n, ipv6net})
 
 					err = fakeOvn.controller.WatchPods()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -11391,10 +11391,10 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 				i, n, _ = net.ParseCIDR(podV4IP2 + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod2, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod2, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
@@ -11905,13 +11905,13 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 					i, n, _ := net.ParseCIDR(podV4IP + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod3, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod3, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					if pendingScheduledPodWithNoIP != nil {
-						fakeOvn.controller.logicalPortCache.add(pendingScheduledPodWithNoIP, "", types.DefaultNetworkName, "", nil, []*net.IPNet{})
+						fakeOvn.controller.logicalPortCache.add(pendingScheduledPodWithNoIP, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{})
 					}
 					i, n, _ = net.ParseCIDR(podV4IP2 + "/23")
 					n.IP = i
-					fakeOvn.controller.logicalPortCache.add(&egressPod4, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+					fakeOvn.controller.logicalPortCache.add(&egressPod4, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
 					fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, true)
 					if isPodRemote {
@@ -12387,7 +12387,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 						defer wg.Done()
 						i, n, _ := net.ParseCIDR(podV4IP + "/23")
 						n.IP = i
-						fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+						fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 						_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod.Namespace).Create(context.TODO(), &egressPod, metav1.CreateOptions{})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					}()
@@ -12396,7 +12396,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 						defer wg.Done()
 						i, n, _ := net.ParseCIDR(podV4IP2 + "/23")
 						n.IP = i
-						fakeOvn.controller.logicalPortCache.add(&egressPod2, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+						fakeOvn.controller.logicalPortCache.add(&egressPod2, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 						_, err := fakeOvn.fakeClient.KubeClient.CoreV1().Pods(egressPod2.Namespace).Create(context.TODO(), &egressPod2, metav1.CreateOptions{})
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					}()
@@ -12802,10 +12802,10 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod1, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod1, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 				i, n, _ = net.ParseCIDR("10.128.0.16" + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod2, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod2, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -13933,7 +13933,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 
 				i, n, _ := net.ParseCIDR(podV4IP + "/23")
 				n.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod1, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+				fakeOvn.controller.logicalPortCache.add(&egressPod1, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 				err := fakeOvn.controller.WatchEgressIPPods()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -14624,7 +14624,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				)
 				i, podIPv4Net, _ := net.ParseCIDR(podIP + mask)
 				podIPv4Net.IP = i
-				fakeOvn.controller.logicalPortCache.add(egressPod, "", types.DefaultNetworkName, "",
+				fakeOvn.controller.logicalPortCache.add(egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "",
 					nil, []*net.IPNet{podIPv4Net})
 
 				err := fakeOvn.controller.WatchEgressIPPods()
@@ -14857,7 +14857,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				podIPv4Net.IP = i
 				i, podIPv6Net, _ := net.ParseCIDR(podV6IP + "/23")
 				podIPv6Net.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{podIPv4Net, podIPv6Net})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{podIPv4Net, podIPv6Net})
 
 				// hack pod to be in the provided zone
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
@@ -15143,7 +15143,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 				podIPv4Net.IP = i
 				i, podIPv6Net, _ := net.ParseCIDR(podV6IP + "/23")
 				podIPv6Net.IP = i
-				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{podIPv4Net, podIPv6Net})
+				fakeOvn.controller.logicalPortCache.add(&egressPod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{podIPv4Net, podIPv6Net})
 
 				// hack pod to be in the provided zone
 				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
@@ -15406,7 +15406,7 @@ var _ = ginkgo.Describe("OVN EgressIP Operations cluster default network", func(
 			i, n, err := net.ParseCIDR(podV4IP + "/23")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			n.IP = i
-			fakeOvn.controller.logicalPortCache.add(pod, "", types.DefaultNetworkName, "", nil, []*net.IPNet{n})
+			fakeOvn.controller.logicalPortCache.add(pod, "", types.DefaultNetworkName, types.DefaultNetworkName, "", nil, []*net.IPNet{n})
 
 			fakeOvn.controller.eIPC.nodeZoneState.Store(node.Name, true)
 
