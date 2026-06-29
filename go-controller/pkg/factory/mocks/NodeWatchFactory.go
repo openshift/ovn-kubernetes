@@ -251,26 +251,6 @@ func (_m *NodeWatchFactory) ClusterNetworkConnectInformer() clusternetworkconnec
 	return r0
 }
 
-// ClusterUserDefinedNetworkInformer provides a mock function with no fields
-func (_m *NodeWatchFactory) ClusterUserDefinedNetworkInformer() userdefinednetworkv1.ClusterUserDefinedNetworkInformer {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for ClusterUserDefinedNetworkInformer")
-	}
-
-	var r0 userdefinednetworkv1.ClusterUserDefinedNetworkInformer
-	if rf, ok := ret.Get(0).(func() userdefinednetworkv1.ClusterUserDefinedNetworkInformer); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(userdefinednetworkv1.ClusterUserDefinedNetworkInformer)
-		}
-	}
-
-	return r0
-}
-
 // EgressIPInformer provides a mock function with no fields
 func (_m *NodeWatchFactory) EgressIPInformer() egressipv1.EgressIPInformer {
 	ret := _m.Called()
