@@ -403,18 +403,20 @@ func (vrfm *Controller) DeleteVRF(name string) (err error) {
 	defer func() {
 		if err == nil && vrfLink != nil {
 			delete(vrfm.vrfs, vrfLink.Attrs().Index)
+			klog.Infof("VRF Manager: successfully deleted VRF %s", name)
 		}
 		vrfm.mu.Unlock()
 	}()
 	vrfLink, err = util.GetNetLinkOps().LinkByName(name)
 	if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+		klog.Infof("VRF Manager: VRF %s not found on host, nothing to delete", name)
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("failed to retrieve VRF device %s, err: %v", name, err)
 	}
 	vrf, ok := vrfm.vrfs[vrfLink.Attrs().Index]
 	if !ok {
-		klog.V(5).Infof("VRF Manager: VRF %s not found in cache for deletion", name)
+		klog.Warningf("VRF Manager: VRF %s exists on host (index %d) but not found in cache, skipping deletion", name, vrfLink.Attrs().Index)
 		return nil
 	}
 

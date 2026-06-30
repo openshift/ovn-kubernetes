@@ -351,6 +351,7 @@ func (udng *UserDefinedNetworkGateway) GetNetworkRuleMetadata() string {
 func (udng *UserDefinedNetworkGateway) DelNetwork() error {
 	var errs []error
 	vrfDeviceName := util.GetNetworkVRFName(udng.NetInfo)
+	klog.Infof("DelNetwork for %s: deleting VRF %s, mgmtPort=%v", udng.GetNetworkName(), vrfDeviceName, udng.mgmtPortController != nil)
 	if config.IsModeDPUHost() || config.IsModeFull() {
 		// delete the iprules for this network
 		if err := udng.ruleManager.DeleteWithMetadata(udng.GetNetworkRuleMetadata()); err != nil {

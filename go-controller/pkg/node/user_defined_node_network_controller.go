@@ -114,12 +114,16 @@ func (nc *UserDefinedNodeNetworkController) Stop() {
 
 // Cleanup cleans up node entities for the given user-defined network
 func (nc *UserDefinedNodeNetworkController) Cleanup() error {
+	klog.Infof("Cleaning up UDN node network controller for network %s (gateway=%v)", nc.GetNetworkName(), nc.gateway != nil)
 	var errors []error
 	var err error
 
 	if nc.gateway != nil {
 		if err = nc.gateway.DelNetwork(); err != nil {
+			klog.Warningf("Failed to delete network gateway for network %s: %v", nc.GetNetworkName(), err)
 			errors = append(errors, fmt.Errorf("deleting network gateway for network %s failed: %v", nc.GetNetworkName(), err))
+		} else {
+			klog.Infof("Successfully deleted network gateway for network %s", nc.GetNetworkName())
 		}
 	}
 	if nc.mpdm != nil && util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
