@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	exutil "github.com/openshift/origin/test/extended/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
@@ -11,6 +12,8 @@ import (
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	// import OTP migrated tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/otp"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
@@ -35,6 +38,21 @@ import (
 )
 
 var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
+
+var otpBlockingTests = []string{
+	"Add OVN flow count metric",
+	"Record update to cache versus port binding",
+	"Add mechanism to record duration for k8 kinds",
+}
+
+func isOTPBlocking(name string) bool {
+	for _, title := range otpBlockingTests {
+		if strings.Contains(name, title) {
+			return true
+		}
+	}
+	return false
+}
 
 const (
 	// Feature labels used for test categorization and filtering
@@ -130,14 +148,19 @@ func main() {
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
 		}
+		exutil.WithCleanup(func() {})
 	})
 
 	informingTests := sets.New(test.InformingTests...)
 	blockingTests := sets.New(test.BlockingTests...)
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
-		for _, label := range getTestExtensionLabels() {
-			spec.Labels.Insert(label)
+		isOTP := strings.Contains(spec.Name, "[OTP]")
+
+		if !isOTP {
+			for _, label := range getTestExtensionLabels() {
+				spec.Labels.Insert(label)
+			}
 		}
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
@@ -150,14 +173,24 @@ func main() {
 			spec.Name += " " + annotations
 		}
 
-		// prepend other labels by matching on existing spec labels
-		for _, label := range getPrependLabels(spec.Labels) {
-			spec.Labels.Insert(label)
+		if isOTP {
+			if spec.Labels.Has("Level0") {
+				spec.Name = "[Level0] " + spec.Name
+			}
+		} else {
+			// prepend other labels by matching on existing spec labels
+			for _, label := range getPrependLabels(spec.Labels) {
+				spec.Labels.Insert(label)
+			}
+
+			spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
-
 		switch {
+		case isOTP && isOTPBlocking(spec.Name):
+			spec.Lifecycle = extensiontests.LifecycleBlocking
+		case isOTP:
+			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case blockingTests.Has(spec.Name):
