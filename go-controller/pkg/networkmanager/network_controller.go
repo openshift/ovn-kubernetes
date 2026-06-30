@@ -494,6 +494,9 @@ func (c *networkController) deleteNetwork(network string) error {
 	c.Lock()
 	have := c.networkControllers[network]
 	if have == nil || have.controller == nil {
+		if c.node != "" {
+			klog.Infof("%s: deleteNetwork %s: controller is nil, skipping cleanup", c.name, network)
+		}
 		c.Unlock()
 		c.clearPendingNetworkRefNodes(network)
 		c.clearNetworkRefState(network)
@@ -508,9 +511,18 @@ func (c *networkController) deleteNetwork(network string) error {
 		ctrl.Stop()
 	}
 
+	if c.node != "" {
+		klog.Infof("%s: deleteNetwork %s: calling Cleanup (alreadyStopping=%v)", c.name, network, alreadyStopping)
+	}
 	err := ctrl.Cleanup()
 	if err != nil {
+		if c.node != "" {
+			klog.Warningf("%s: deleteNetwork %s: Cleanup failed: %v", c.name, network, err)
+		}
 		return fmt.Errorf("%s: failed to cleanup network %s: %w", c.name, network, err)
+	}
+	if c.node != "" {
+		klog.Infof("%s: deleteNetwork %s: Cleanup succeeded", c.name, network)
 	}
 
 	c.setNetworkState(network, nil)
