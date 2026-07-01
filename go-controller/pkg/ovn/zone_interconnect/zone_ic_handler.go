@@ -586,9 +586,7 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 		// external-ids, skip types.NetworkExternalID check in the predicate function to replace existing static route
 		// with correct external-ids on an upgrade scenario.
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-			return lrsr.IPPrefix == prefix &&
-				lrsr.Nexthop == nexthop &&
-				lrsr.ExternalIDs["ic-node"] == node.Name
+			return lrsr.IPPrefix == prefix
 		}
 		var err error
 		ops, err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicateOps(zic.nbClient, ops, zic.networkClusterRouterName, &logicalRouterStaticRoute, p)
