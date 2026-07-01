@@ -383,6 +383,70 @@ func ListInterfaces(ovsClient libovsdbclient.Client) ([]*vswitchd.Interface, err
 	return searchedInterfaces, err
 }
 
+// InterfaceStats holds aggregated interface statistics from a direct OVSDB query.
+type InterfaceStats struct {
+	Count      int
+	LinkResets float64
+	RxDropped  float64
+	TxDropped  float64
+	RxErrors   float64
+	TxErrors   float64
+	Collisions float64
+}
+
+// SelectInterfaceStats queries OVSDB directly (bypassing cache) for interface
+// statistics and link_resets columns, and returns aggregated totals.
+func SelectInterfaceStats(ovsClient libovsdbclient.Client) (*InterfaceStats, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+	defer cancel()
+	results, err := ovsClient.Transact(ctx, ovsdb.Operation{
+		Op:      ovsdb.OperationSelect,
+		Table:   vswitchd.InterfaceTable,
+		Columns: []string{"statistics", "link_resets"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 || results[0].Error != "" {
+		errMsg := "empty result"
+		if len(results) > 0 {
+			errMsg = results[0].Error
+		}
+		return nil, fmt.Errorf("select Interface statistics: %s", errMsg)
+	}
+	stats := &InterfaceStats{Count: len(results[0].Rows)}
+	for _, row := range results[0].Rows {
+		if lr, ok := row["link_resets"]; ok {
+			if v, ok := lr.(float64); ok {
+				stats.LinkResets += v
+			}
+		}
+		statsMap, ok := row["statistics"]
+		if !ok {
+			continue
+		}
+		if m, ok := statsMap.(ovsdb.OvsMap); ok {
+			for k, v := range m.GoMap {
+				name, _ := k.(string)
+				val, _ := v.(float64)
+				switch name {
+				case "rx_dropped":
+					stats.RxDropped += val
+				case "tx_dropped":
+					stats.TxDropped += val
+				case "rx_errors":
+					stats.RxErrors += val
+				case "tx_errors":
+					stats.TxErrors += val
+				case "collisions":
+					stats.Collisions += val
+				}
+			}
+		}
+	}
+	return stats, nil
+}
+
 // FindInterfacesWithPredicate returns all OVS interfaces in the cache that
 // match the predicate. This is the libovsdb equivalent of
 // `ovs-vsctl find Interface <conditions>`.

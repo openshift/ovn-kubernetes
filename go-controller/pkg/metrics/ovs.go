@@ -279,15 +279,7 @@ var metricOvsTcPolicy = prometheus.NewGauge(prometheus.GaugeOpts{
 
 type ovsClient func(args ...string) (string, string, error)
 
-func convertToFloat64(val *int) float64 {
-	var value float64
-	if val != nil {
-		value = float64(*val)
-	} else {
-		value = 0
-	}
-	return value
-}
+
 
 func getOvsVersionInfo(ovsDBClient libovsdbclient.Client) {
 	openvSwitch, err := ovsops.GetOpenvSwitch(ovsDBClient)
@@ -489,50 +481,22 @@ func getOvsBridgeOpenFlowsCount(ovsOfctl ovsClient, bridgeName string) (float64,
 		"flow_count field", bridgeName)
 }
 
-// updateOvsInterfaceMetrics updates the ovs interface metrics obtained from ovsdb
+// updateOvsInterfaceMetrics updates the ovs interface metrics obtained from ovsdb.
+// Uses a direct OVSDB select (bypassing cache) for statistics and link_resets,
+// since those ephemeral columns are excluded from the monitor to avoid
+// continuous update churn.
 func updateOvsInterfaceMetrics(ovsDBClient libovsdbclient.Client) error {
-	interfaceList, err := ovsops.ListInterfaces(ovsDBClient)
+	stats, err := ovsops.SelectInterfaceStats(ovsDBClient)
 	if err != nil {
-		return fmt.Errorf("failed to get ovsdb interface table :(%v)", err)
+		return fmt.Errorf("failed to get ovsdb interface stats: %v", err)
 	}
-	var interfaceStats = []string{
-		"rx_dropped",
-		"rx_errors",
-		"tx_dropped",
-		"tx_errors",
-		"collisions",
-	}
-
-	var linkReset, rxDropped, txDropped, rxErr, txErr, collisions, statValue float64
-	for _, intf := range interfaceList {
-		linkReset += convertToFloat64(intf.LinkResets)
-
-		for _, statName := range interfaceStats {
-			statValue = 0
-			if value, ok := intf.Statistics[statName]; ok {
-				statValue = float64(value)
-			}
-			switch statName {
-			case "rx_dropped":
-				rxDropped += statValue
-			case "tx_dropped":
-				txDropped += statValue
-			case "rx_errors":
-				rxErr += statValue
-			case "tx_errors":
-				txErr += statValue
-			case "collisions":
-				collisions += statValue
-			}
-		}
-	}
-	metricOvsInterfaceTotal.Set(float64(len(interfaceList)))
-	metricOvsInterfaceResetsTotal.Set(linkReset)
-	metricOvsInterfaceRxDroppedTotal.Set(rxDropped)
-	metricOvsInterfaceTxDroppedTotal.Set(txDropped)
-	metricOvsInterfaceRxErrorsTotal.Set(rxErr)
-	metricOvsInterfaceTxErrorsTotal.Set(txErr)
-	metricOvsInterfaceCollisionsTotal.Set(collisions)
+	metricOvsInterfaceTotal.Set(float64(stats.Count))
+	metricOvsInterfaceResetsTotal.Set(stats.LinkResets)
+	metricOvsInterfaceRxDroppedTotal.Set(stats.RxDropped)
+	metricOvsInterfaceTxDroppedTotal.Set(stats.TxDropped)
+	metricOvsInterfaceRxErrorsTotal.Set(stats.RxErrors)
+	metricOvsInterfaceTxErrorsTotal.Set(stats.TxErrors)
+	metricOvsInterfaceCollisionsTotal.Set(stats.Collisions)
 	return nil
 }
 

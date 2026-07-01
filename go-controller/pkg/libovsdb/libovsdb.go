@@ -233,12 +233,23 @@ func NewOVSClientWithEndpoint(endpoint string, stopCh <-chan struct{}) (client.C
 		c.Close()
 	}()
 
+	iface := vswitchd.Interface{}
 	_, err = c.Monitor(ctx,
 		c.NewMonitor(
 			client.WithTable(&vswitchd.OpenvSwitch{}),
 			client.WithTable(&vswitchd.Bridge{}),
 			client.WithTable(&vswitchd.Port{}),
-			client.WithTable(&vswitchd.Interface{}),
+			// Only monitor columns used by CNI and controller logic.
+			// Excludes statistics (ephemeral, updated every few seconds by OVS)
+			// which would otherwise cause continuous monitor churn and CPU burn.
+			client.WithTable(&iface,
+				&iface.Name,
+				&iface.ExternalIDs,
+				&iface.Type,
+				&iface.Options,
+				&iface.MTURequest,
+				&iface.Ofport,
+			),
 		),
 	)
 	if err != nil {
