@@ -131,6 +131,7 @@ func main() {
 		} else {
 			ocpInfra = infra
 			infraprovider.Set(ocpInfra)
+			deploymentconfig.Set(ocpdeploymentconfig.New())
 		}
 	}
 
