@@ -18,6 +18,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodetypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -35,7 +36,8 @@ type openflowManager struct {
 	exGWFlowCache   map[string][]string
 	exGWFlowMutex   sync.Mutex
 	// channel to indicate we need to update flows immediately
-	flowChan chan struct{}
+	flowChan  chan struct{}
+	ovsClient libovsdbclient.Client
 }
 
 var openFlowGroupIDRegexp = regexp.MustCompile(`(?:^|,)group_id=([^,]+)`)
@@ -284,7 +286,7 @@ func flattenFlowCacheEntries(flowCache map[string][]string) []string {
 //
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeconfig.BridgeConfiguration) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeconfig.BridgeConfiguration, ovsClient libovsdbclient.Client) (*openflowManager, error) {
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
 		defaultBridge:         gwBridge,
@@ -297,6 +299,7 @@ func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeconfig.BridgeConfigur
 		exGWFlowCache:         make(map[string][]string),
 		exGWFlowMutex:         sync.Mutex{},
 		flowChan:              make(chan struct{}, 1),
+		ovsClient:             ovsClient,
 	}
 
 	// defer flowSync until syncService() to prevent the existing service OpenFlows being deleted
@@ -315,13 +318,15 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 			select {
 			case <-timer.C:
 
-				if err := checkPorts(c.getDefaultBridgePortConfigurations()); err != nil {
+				netConfigs, physIntf, ofPortPhys := c.getDefaultBridgePortConfigurations()
+				if err := checkPorts(c.ovsClient, netConfigs, physIntf, ofPortPhys); err != nil {
 					klog.Errorf("Checkports failed %v", err)
 					continue
 				}
 
 				if c.externalGatewayBridge != nil {
-					if err := checkPorts(c.getExGwBridgePortConfigurations()); err != nil {
+					netConfigs, physIntf, ofPortPhys = c.getExGwBridgePortConfigurations()
+					if err := checkPorts(c.ovsClient, netConfigs, physIntf, ofPortPhys); err != nil {
 						klog.Errorf("Checkports failed %v", err)
 						continue
 					}
@@ -376,17 +381,20 @@ func (c *openflowManager) updateBridgeFlowCache(hostIPs []net.IP, hostSubnets []
 	return nil
 }
 
-func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys string) error {
+func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys string) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
 	for _, netConfig := range netConfigs {
 		if netConfig.OfPortPatch == "" {
 			continue
 		}
-		curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", netConfig.PatchPort, "ofport")
+		iface, err := ovsops.GetOVSInterface(ovsClient, netConfig.PatchPort)
 		if err != nil {
-			return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", netConfig.PatchPort, stderr, err)
-
+			return fmt.Errorf("failed to get ofport of %s: %w", netConfig.PatchPort, err)
+		}
+		curOfportPatch := ""
+		if iface.Ofport != nil {
+			curOfportPatch = fmt.Sprintf("%d", *iface.Ofport)
 		}
 		if netConfig.OfPortPatch != curOfportPatch {
 			if netConfig.IsDefaultNetwork() {
@@ -401,9 +409,13 @@ func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofP
 
 	// it could be that someone removed the physical interface and added it back on the OVS host
 	// bridge, as a result the ofport number changed for that physical interface
-	curOfportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", physIntf, "ofport")
+	physIface, err := ovsops.GetOVSInterface(ovsClient, physIntf)
 	if err != nil {
-		return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", physIntf, stderr, err)
+		return fmt.Errorf("failed to get ofport of %s: %w", physIntf, err)
+	}
+	curOfportPhys := ""
+	if physIface.Ofport != nil {
+		curOfportPhys = fmt.Sprintf("%d", *physIface.Ofport)
 	}
 	if ofPortPhys != curOfportPhys {
 		klog.Errorf("Fatal error: phys port %s ofport changed from %s to %s",

@@ -1828,7 +1828,7 @@ func newGateway(
 			}
 		}
 
-		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge)
+		gw.openflowManager, err = newGatewayOpenFlowManager(gwBridge, exGwBridge, ovsClient)
 		if err != nil {
 			return err
 		}
