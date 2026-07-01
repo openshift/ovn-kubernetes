@@ -383,9 +383,8 @@ func (c *networkController) syncAll() error {
 	start := time.Now()
 	klog.Infof("%s: syncing all networks", c.name)
 	for _, network := range validNetworks {
-		err := c.syncNetwork(network.GetNetworkName())
-		if err != nil {
-			return fmt.Errorf("failed to sync network %s: %w", network.GetNetworkName(), err)
+		if err := c.syncNetwork(network.GetNetworkName()); err != nil {
+			klog.Errorf("%s: failed to sync network %s: %v", c.name, network.GetNetworkName(), err)
 		}
 	}
 	klog.Infof("%s: finished syncing all networks. Time taken: %s", c.name, time.Since(start))
