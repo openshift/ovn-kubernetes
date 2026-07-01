@@ -5,10 +5,8 @@
 tags:
   ovs-node: false
   ovn-ipsec: false
-  ovnkube-node: false
   ovnkube-control-plane: false
   ovnkube-node-dpu-host: false
-  ovnkube-node-dpu: false
   ovnkube-single-node-zone: false
 
 # -- Whether or not call `lookup` Helm function, set it to `true` if you want to run `helm dry-run/template/lint`
@@ -110,7 +108,7 @@ global:
   enablePersistentIPs: false
   # -- Configure to use DNSNameResolver feature with ovn-kubernetes
   enableDNSNameResolver: false
-  # -- Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+  # -- Whether to disable SNAT of egress traffic in namespaces with external gateways configured via AdminPolicyBasedExternalRoute CRs
   disableSnatMultipleGws: ""
   # -- Controls if forwarding is allowed on OVNK controlled interfaces
   # @default -- false

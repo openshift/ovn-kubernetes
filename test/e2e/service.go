@@ -980,7 +980,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		ginkgo.It("should listen on each host addresses", func() {
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
-			nodesHostnames := sets.NewString()
+			nodesHostnames := sets.New[string]()
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			framework.ExpectNoError(err)
 
@@ -1024,7 +1024,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 
 			ginkgo.By("Selecting additional IP addresses for each node")
 			// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
-			toCurlAddresses := sets.NewString()
+			toCurlAddresses := sets.New[string]()
 			primaryIPv4Subnet, ipv6, err := primaryProviderNetwork.IPv4IPv6Subnets()
 			framework.ExpectNoError(err, "must get primary provider network subnets")
 			primaryNetworkSubnet := primaryIPv4Subnet
@@ -1142,7 +1142,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 						toCurlPort = int32(udpNodePort)
 					}
 
-					for _, address := range toCurlAddresses.List() {
+					for _, address := range sets.List(toCurlAddresses) {
 						if !isIPv6Cluster && utilnet.IsIPv6String(address) {
 							continue
 						}
@@ -1162,7 +1162,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		ginkgo.It("should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP", func() {
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
-			nodesHostnames := sets.NewString()
+			nodesHostnames := sets.New[string]()
 			isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
 
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1301,7 +1301,7 @@ spec:
 			}
 			_, secondarySubnet, err := net.ParseCIDR(secondarySubnetStr)
 			framework.ExpectNoError(err, "must parse secondary subnet %q", secondarySubnetStr)
-			toCurlAddressesSecondary := sets.NewString()
+			toCurlAddressesSecondary := sets.New[string]()
 			for i, node := range nodes.Items {
 				addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-cidrs"]
 				gomega.Expect(ok).To(gomega.BeTrue())
@@ -1405,7 +1405,7 @@ spec:
 				"a network that is a secondary host network and verify that the src IP is the expected egressIP %s, failed: %v",
 				egressPod.Namespace, egressPod.Name, egressIP, err)
 
-			externalSvcClientIPs := sets.NewString(serverExternalContainerIP)
+			externalSvcClientIPs := sets.New(serverExternalContainerIP)
 			for _, serviceSpec := range []*v1.Service{etpLocalSvc, etpClusterSvc} {
 				tcpNodePort, udpNodePort := nodePortsFromService(serviceSpec)
 
@@ -1414,7 +1414,7 @@ spec:
 					if protocol == "udp" {
 						toCurlPort = int32(udpNodePort)
 					}
-					for _, address := range toCurlAddressesSecondary.List() {
+					for _, address := range sets.List(toCurlAddressesSecondary) {
 						if !isIPv6Cluster && utilnet.IsIPv6String(address) {
 							continue
 						}
@@ -2192,8 +2192,8 @@ spec:
 				Namespace: namespace,
 			},
 			Spec: v1.ServiceSpec{
-				Selector: labels,
-				Type:     v1.ServiceTypeNodePort,
+				Selector:              labels,
+				Type:                  v1.ServiceTypeNodePort,
 				IPFamilyPolicy:        ptr.To(v1.IPFamilyPolicyPreferDualStack),
 				ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
 				Ports: []v1.ServicePort{
@@ -2366,8 +2366,8 @@ spec:
 				Namespace: namespace,
 			},
 			Spec: v1.ServiceSpec{
-				Selector: labels,
-				Type:     v1.ServiceTypeNodePort,
+				Selector:              labels,
+				Type:                  v1.ServiceTypeNodePort,
 				IPFamilyPolicy:        ptr.To(v1.IPFamilyPolicyPreferDualStack),
 				ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
 				Ports: []v1.ServicePort{

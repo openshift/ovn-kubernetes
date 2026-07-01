@@ -301,7 +301,7 @@ func (mp *udnManagementPortOVS) create() error {
 	// STEP3
 	// IPv6 forwarding is enabled globally
 	if ipv4, _ := mp.IPMode(); ipv4 {
-		err = util.SetforwardingModeForInterface(mp.ifName)
+		err = util.SetForwardingModeForInterface(mp.ifName)
 		if err != nil {
 			return err
 		}
@@ -365,7 +365,7 @@ func (mp *udnManagementPortNetdev) create() error {
 	}
 
 	if ipv4, _ := mp.IPMode(); ipv4 {
-		err = util.SetforwardingModeForInterface(mp.ifName)
+		err = util.SetForwardingModeForInterface(mp.ifName)
 		if err != nil {
 			return err
 		}

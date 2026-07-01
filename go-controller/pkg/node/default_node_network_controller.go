@@ -37,6 +37,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/informer"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressip"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/egressservice"
@@ -76,6 +77,10 @@ type BaseNodeNetworkController struct {
 
 	// networkManager used for getting network information
 	networkManager networkmanager.Interface
+
+	// ovsClient is the libovsdb client connected to the local ovsdb-server.
+	// Used by DPU representor cleanup and other OVS-aware bookkeeping.
+	ovsClient client.Client
 
 	// podNADToDPUCDMap tracks the NAD/DPU_ConnectionDetails mapping for all NADs that each pod requests.
 	// Key is pod.UUID; value is nadToDPUCDMap (of map[string]*util.DPUConnectionDetails). Key of nadToDPUCDMap
@@ -141,8 +146,6 @@ type DefaultNodeNetworkController struct {
 
 	nodeAddress net.IP
 	sbZone      string
-
-	ovsClient client.Client
 }
 
 func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, stopChan chan struct{},
@@ -155,9 +158,9 @@ func newDefaultNodeNetworkController(cnnci *CommonNodeNetworkControllerInfo, sto
 			networkManager:                  networkManager,
 			stopChan:                        stopChan,
 			wg:                              wg,
+			ovsClient:                       ovsClient,
 		},
 		routeManager: routeManager,
-		ovsClient:    ovsClient,
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && (config.IsModeDPUHost() || config.IsModeFull()) {
 		c.udnHostIsolationManager = NewUDNHostIsolationManager(config.IPv4Mode, config.IPv6Mode,
@@ -547,7 +550,7 @@ func setEncapPort(ctx context.Context) error {
 	return nil
 }
 
-func isOVNControllerReady() (bool, error) {
+func isOVNControllerReady(ovsClient client.Client) (bool, error) {
 	// check node's connection status
 	ret, _, err := util.RunOVNControllerAppCtl("connection-status")
 	if err != nil {
@@ -559,8 +562,10 @@ func isOVNControllerReady() (bool, error) {
 	}
 
 	// check whether br-int exists on node
-	_, _, err = util.RunOVSVsctl("--", "br-exists", "br-int")
-	if err != nil {
+	if _, err := ovsops.GetBridge(ovsClient, "br-int"); err != nil {
+		if !errors.Is(err, client.ErrNotFound) {
+			return false, fmt.Errorf("could not check br-int bridge existence: %w", err)
+		}
 		return false, nil
 	}
 
@@ -756,7 +761,7 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	if config.IsModeDPU() || config.IsModeFull() {
 		// Bootstrap flows in OVS if just normal flow is present
-		if err := bootstrapOVSFlows(nc.name); err != nil {
+		if err := bootstrapOVSFlows(nc.ovsClient, nc.name); err != nil {
 			return fmt.Errorf("failed to bootstrap OVS flows: %w", err)
 		}
 	}
@@ -864,7 +869,11 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 		if !ok {
 			return fmt.Errorf("cannot get kubeclient for starting CNI server")
 		}
-		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager, nc.ovsClient, nc.dpuNodeLeaseManager)
+		var dpuHealth cni.DPUStatusProvider
+		if nc.dpuNodeLeaseManager != nil {
+			dpuHealth = nc.dpuNodeLeaseManager
+		}
+		cniServer, err = cni.NewCNIServer(nc.watchFactory, kclient.KClient, nc.networkManager, nc.ovsClient, dpuHealth)
 		if err != nil {
 			return err
 		}
@@ -1042,13 +1051,11 @@ func (nc *DefaultNodeNetworkController) Start(ctx context.Context) error {
 		}(nc.stopChan)
 	} else if config.IsModeDPU() || config.IsModeFull() {
 		// attempt to cleanup the possibly stale bridge
-		_, stderr, err := util.RunOVSVsctl("--if-exists", "del-br", "br-ext")
-		if err != nil {
-			klog.Errorf("Deletion of bridge br-ext failed: %v (%v)", err, stderr)
+		if err := ovsops.DeleteBridge(nc.ovsClient, "br-ext"); err != nil {
+			klog.Errorf("Deletion of bridge br-ext failed: %v", err)
 		}
-		_, stderr, err = util.RunOVSVsctl("--if-exists", "del-port", "br-int", "int")
-		if err != nil {
-			klog.Errorf("Deletion of port int on  br-int failed: %v (%v)", err, stderr)
+		if err := ovsops.DeletePortWithInterfaces(nc.ovsClient, "br-int", "int"); err != nil {
+			klog.Errorf("Deletion of port int on br-int failed: %v", err)
 		}
 	}
 
@@ -1312,28 +1319,34 @@ func exGatewayPodsAnnotationsChanged(oldNs, newNs *corev1.Namespace) bool {
 	// In reality we only care about exgw pod deletions, however since the list of IPs is not expected to change
 	// that often, let's check for *any* changes to these annotations compared to their previous state and trigger
 	// the logic for checking if we need to delete any conntrack entries
-	return (oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]) ||
-		(oldNs.Annotations[util.RoutingExternalGWsAnnotation] != newNs.Annotations[util.RoutingExternalGWsAnnotation])
+	return oldNs.Annotations[util.ExternalGatewayPodIPsAnnotation] != newNs.Annotations[util.ExternalGatewayPodIPsAnnotation]
 }
 
 func (nc *DefaultNodeNetworkController) checkAndDeleteStaleConntrackEntries() {
 	namespaces, err := nc.watchFactory.GetNamespaces()
 	if err != nil {
-		klog.Errorf("Unable to get pods from informer: %v", err)
+		klog.Errorf("Unable to get namespaces from informer: %v", err)
 	}
 	for _, namespace := range namespaces {
-		_, foundRoutingExternalGWsAnnotation := namespace.Annotations[util.RoutingExternalGWsAnnotation]
-		_, foundExternalGatewayPodIPsAnnotation := namespace.Annotations[util.ExternalGatewayPodIPsAnnotation]
-		if foundRoutingExternalGWsAnnotation || foundExternalGatewayPodIPsAnnotation {
-			pods, err := nc.watchFactory.GetPods(namespace.Name)
-			if err != nil {
-				klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
-			}
-			if len(pods) > 0 || err != nil {
-				// we only need to proceed if there is at least one pod in this namespace on this node
-				// OR if we couldn't fetch the pods for some reason at this juncture
-				_ = nc.syncConntrackForExternalGateways(namespace)
-			}
+		// Only namespaces targeted by an AdminPolicyBasedExternalRoute can have
+		// external-gateway ECMP conntrack entries to reconcile (the legacy
+		// routing-external-gws annotation is no longer supported).
+		gatewayIPs, err := nc.apbExternalRouteNodeController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(namespace.Name)
+		if err != nil {
+			klog.Errorf("Unable to retrieve gateway IPs for Admin Policy Based External Route objects for namespace %s: %v", namespace.Name, err)
+			continue
+		}
+		if gatewayIPs.Len() == 0 {
+			continue
+		}
+		pods, err := nc.watchFactory.GetPods(namespace.Name)
+		if err != nil {
+			klog.Warningf("Unable to get pods from informer for namespace %s: %v", namespace.Name, err)
+		}
+		if len(pods) > 0 || err != nil {
+			// we only need to proceed if there is at least one pod in this namespace on this node
+			// OR if we couldn't fetch the pods for some reason at this juncture
+			_ = nc.syncConntrackForExternalGateways(namespace)
 		}
 	}
 }
@@ -1343,10 +1356,8 @@ func (nc *DefaultNodeNetworkController) syncConntrackForExternalGateways(newNs *
 	if err != nil {
 		return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects: %w", err)
 	}
-	// loop through all the IPs on the annotations; ARP for their MACs and form an allowlist
-	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.ExternalGatewayPodIPsAnnotation], ",")...)
-	gatewayIPs = gatewayIPs.Insert(strings.Split(newNs.Annotations[util.RoutingExternalGWsAnnotation], ",")...)
-
+	// ARP for the gateway IPs' MACs to form an allowlist; conntrack entries whose
+	// destination MAC is no longer valid (e.g. after a gateway MAC change) are removed.
 	return util.SyncConntrackForExternalGateways(gatewayIPs, nil, func() ([]*corev1.Pod, error) {
 		return nc.watchFactory.GetPods(newNs.Name)
 	})

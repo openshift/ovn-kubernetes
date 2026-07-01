@@ -15,6 +15,7 @@ import (
 
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	vtepapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/applyconfiguration/vtep/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 )
 
 const (
@@ -29,6 +30,8 @@ const (
 	reasonEVPNIPv6NotSupported    = "EVPNIPv6NotSupported"
 )
 
+// updateStatusCondition applies the status condition to the VTEP resource.
+// The API update is skipped if the condition already matches.
 func (c *Controller) updateStatusCondition(vtep *vtepv1.VTEP, conditionType string, status metav1.ConditionStatus, reason, message string) error {
 	const maxMessageLen = 32768
 	if len(message) >= maxMessageLen {
@@ -40,6 +43,10 @@ func (c *Controller) updateStatusCondition(vtep *vtepv1.VTEP, conditionType stri
 		existingCondition.Status == status &&
 		existingCondition.Reason == reason &&
 		existingCondition.Message == message {
+		// Record the metric from the existing API-confirmed condition so it is
+		// populated after controller restarts, where the informer fires synthetic
+		// creates for all VTEPs but the condition hasn't changed.
+		metrics.RecordVTEPCondition(vtep.Name, conditionType, status)
 		return nil
 	}
 
@@ -74,5 +81,6 @@ func (c *Controller) updateStatusCondition(vtep *vtepv1.VTEP, conditionType stri
 		klog.Errorf("Failed to update status condition %q for VTEP %s: %v", conditionType, vtep.Name, err)
 		return fmt.Errorf("failed to update status condition %q for VTEP %s: %w", conditionType, vtep.Name, err)
 	}
+	metrics.RecordVTEPCondition(vtep.Name, conditionType, status)
 	return nil
 }

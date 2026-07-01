@@ -284,7 +284,7 @@ func (na *NodeAllocator) NeedsNodeCleanup(node *corev1.Node) (bool, error) {
 			node.Name, networkName, err)
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+	if na.HasNodeTunnelIDAllocation() {
 		if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName); err == nil {
 			return true, nil
 		} else if !util.IsAnnotationNotSetError(err) {
@@ -378,7 +378,7 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 		}
 	}
 	newTunnelID := types.NoTunnelID
-	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+	if na.HasNodeTunnelIDAllocation() {
 		existingTunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName)
 		if err != nil && !util.IsAnnotationNotSetError(err) {
 			return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %v",
@@ -440,7 +440,7 @@ func (na *NodeAllocator) CleanupNode(nodeName string, node *corev1.Node) error {
 					node.Name, networkName, err)
 			}
 		}
-		if !needsUpdate && util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+		if !needsUpdate && na.HasNodeTunnelIDAllocation() {
 			if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName); err == nil {
 				needsUpdate = true
 			} else if !util.IsAnnotationNotSetError(err) {
@@ -465,7 +465,7 @@ func (na *NodeAllocator) CleanupNode(nodeName string, node *corev1.Node) error {
 		na.clusterSubnetAllocator.ReleaseAllNetworks(nodeName)
 		na.recordSubnetUsage()
 	}
-	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+	if na.HasNodeTunnelIDAllocation() {
 		na.idAllocator.ReleaseID(networkName + "_" + nodeName)
 	}
 
@@ -721,9 +721,18 @@ func (na *NodeAllocator) HasNodeSubnetAllocation() bool {
 }
 
 func (na *NodeAllocator) HasNodeTunnelIDAllocation() bool {
-	return util.IsNetworkSegmentationSupportEnabled() &&
+	result := util.IsNetworkSegmentationSupportEnabled() &&
 		na.netInfo.IsPrimaryNetwork() &&
-		util.DoesNetworkRequireTunnelIDs(na.netInfo)
+		util.DoesNetworkRequireTunnelIDs(na.netInfo) &&
+		!config.Layer2UsesTransitRouter
+	klog.V(4).Infof("HasNodeTunnelIDAllocation(%s): segmentation=%v primary=%v requiresTunnelIDs=%v layer2UsesTransitRouter=%v => %v",
+		na.netInfo.GetNetworkName(),
+		util.IsNetworkSegmentationSupportEnabled(),
+		na.netInfo.IsPrimaryNetwork(),
+		util.DoesNetworkRequireTunnelIDs(na.netInfo),
+		config.Layer2UsesTransitRouter,
+		result)
+	return result
 }
 
 func (na *NodeAllocator) markAllocatedNetworksForUnmanagedHONode(node *corev1.Node) error {

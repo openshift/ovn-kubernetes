@@ -30,6 +30,14 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	// defaultNetworkReconcilerThreadiness defines the number of worker goroutines
+	// for processing network reconciliation events. Value of 5 provides good
+	// parallelism for bulk UDN creation while controlling resource consumption.
+	// Aligns with Kubernetes controller-manager conventions and UDN service controller.
+	defaultNetworkReconcilerThreadiness = 5
+)
+
 func newNetworkController(name, zone, node string, cm ControllerManager, wf watchFactory) *networkController {
 	nc := &networkController{
 		name:                   fmt.Sprintf("[%s network controller]", name),
@@ -48,7 +56,7 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 	networkConfig := &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
 		Reconcile:   nc.syncNetwork,
-		Threadiness: 1,
+		Threadiness: defaultNetworkReconcilerThreadiness,
 		MaxAttempts: controller.InfiniteAttempts,
 	}
 	nc.networkReconciler = controller.NewReconciler(
@@ -375,9 +383,8 @@ func (c *networkController) syncAll() error {
 	start := time.Now()
 	klog.Infof("%s: syncing all networks", c.name)
 	for _, network := range validNetworks {
-		err := c.syncNetwork(network.GetNetworkName())
-		if err != nil {
-			return fmt.Errorf("failed to sync network %s: %w", network.GetNetworkName(), err)
+		if err := c.syncNetwork(network.GetNetworkName()); err != nil {
+			klog.Errorf("%s: failed to sync network %s: %v", c.name, network.GetNetworkName(), err)
 		}
 	}
 	klog.Infof("%s: finished syncing all networks. Time taken: %s", c.name, time.Since(start))
@@ -486,6 +493,9 @@ func (c *networkController) deleteNetwork(network string) error {
 	c.Lock()
 	have := c.networkControllers[network]
 	if have == nil || have.controller == nil {
+		if c.node != "" {
+			klog.Infof("%s: deleteNetwork %s: controller is nil, skipping cleanup", c.name, network)
+		}
 		c.Unlock()
 		c.clearPendingNetworkRefNodes(network)
 		c.clearNetworkRefState(network)
@@ -500,9 +510,18 @@ func (c *networkController) deleteNetwork(network string) error {
 		ctrl.Stop()
 	}
 
+	if c.node != "" {
+		klog.Infof("%s: deleteNetwork %s: calling Cleanup (alreadyStopping=%v)", c.name, network, alreadyStopping)
+	}
 	err := ctrl.Cleanup()
 	if err != nil {
+		if c.node != "" {
+			klog.Warningf("%s: deleteNetwork %s: Cleanup failed: %v", c.name, network, err)
+		}
 		return fmt.Errorf("%s: failed to cleanup network %s: %w", c.name, network, err)
+	}
+	if c.node != "" {
+		klog.Infof("%s: deleteNetwork %s: Cleanup succeeded", c.name, network)
 	}
 
 	c.setNetworkState(network, nil)

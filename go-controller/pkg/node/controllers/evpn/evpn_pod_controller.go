@@ -64,28 +64,32 @@ func (c *Controller) podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 	return oldAnnot != newAnnot
 }
 
-// handleLiveMigrationTargetReady is called when a non-local kubevirt migration target pod
-// becomes ready. It finds the local source pod and removes its neighbor/FDB entries so
-// FRR withdraws the Type-2 routes from this node.
-func (c *Controller) handleLiveMigrationTargetReady(targetPod *corev1.Pod) error {
-	migrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(c.podLister, targetPod)
-	if err != nil {
-		return fmt.Errorf("failed to discover live migration status: %w", err)
+// shouldDeleteNeighbors returns true when a pod's neighbor/FDB entries should be removed.
+// This happens when the pod has completed, or when this node is the migration source
+// and the target domain is ready (so FRR withdraws the Type-2 routes from this node).
+func (c *Controller) shouldDeleteNeighbors(migrationStatus *kubevirt.LiveMigrationStatus, pod *corev1.Pod) bool {
+	if util.PodCompleted(pod) {
+		return true
 	}
 	if migrationStatus == nil || !migrationStatus.IsTargetDomainReady() {
-		return nil
+		return false
 	}
-	if migrationStatus.SourcePod.Spec.NodeName != c.nodeName {
-		return nil
-	}
+	return migrationStatus.SourcePod.Spec.NodeName == c.nodeName
+}
 
-	key, err := cache.MetaNamespaceKeyFunc(migrationStatus.SourcePod)
-	if err != nil {
-		return err
+// shouldEnsureNeighbors returns true when a pod's PERMANENT neighbor entries should be
+// programmed. For non-kubevirt pods (migrationStatus==nil) it always returns true.
+// During live migration, it returns true only on the target node after the target
+// domain is ready, ensuring neighbors are programmed after the source has withdrawn
+// its routes and zebra's extern_learn entries are gone.
+func (c *Controller) shouldEnsureNeighbors(migrationStatus *kubevirt.LiveMigrationStatus) bool {
+	if migrationStatus == nil {
+		return true
 	}
-	klog.Infof("Live migration target %s/%s ready, removing entries for local source pod %s",
-		targetPod.Namespace, targetPod.Name, key)
-	return c.deletePodNeighbors(key)
+	if !migrationStatus.IsTargetDomainReady() {
+		return false
+	}
+	return migrationStatus.TargetPod.Spec.NodeName == c.nodeName
 }
 
 func (c *Controller) reconcilePod(key string) error {
@@ -102,13 +106,12 @@ func (c *Controller) reconcilePod(key string) error {
 		return err
 	}
 
-	if pod.Spec.NodeName != c.nodeName {
-		// Non-local pod: this is a kubevirt migration target whose ready timestamp changed.
-		// Find the local source pod and remove its entries so FRR withdraws the Type-2 routes.
-		return c.handleLiveMigrationTargetReady(pod)
+	migrationStatus, err := kubevirt.DiscoverLiveMigrationStatus(c.podLister, pod)
+	if err != nil {
+		return fmt.Errorf("failed to discover live migration status: %w", err)
 	}
 
-	if util.PodCompleted(pod) {
+	if c.shouldDeleteNeighbors(migrationStatus, pod) {
 		return c.deletePodNeighbors(key)
 	}
 
@@ -119,7 +122,7 @@ func (c *Controller) reconcilePod(key string) error {
 	c.podNeighLock.Lock()
 	existing, hasExisting := c.podNeighbors[key]
 	c.podNeighLock.Unlock()
-	if hasExisting && existing.uid == pod.UID {
+	if hasExisting && existing.uid == pod.UID && c.shouldEnsureNeighbors(migrationStatus) {
 		return c.ensurePodNeighbors(existing)
 	}
 
@@ -155,8 +158,11 @@ func (c *Controller) reconcilePod(key string) error {
 	for _, ipNet := range podAnnotation.IPs {
 		entries.ips = append(entries.ips, ipNet.IP)
 	}
-	if err := c.ensurePodNeighbors(entries); err != nil {
-		return err
+
+	if c.shouldEnsureNeighbors(migrationStatus) {
+		if err := c.ensurePodNeighbors(entries); err != nil {
+			return err
+		}
 	}
 
 	c.podNeighLock.Lock()
@@ -178,14 +184,12 @@ func (c *Controller) ensurePodNeighbors(entries *neighEntries) error {
 	if err != nil {
 		return fmt.Errorf("failed to get OVS port %s: %w", entries.ovsPortName, err)
 	}
-	if err := util.LinkFDBAdd(ovsPort, entries.mac, entries.macvrfVID); err != nil {
-		if !errors.Is(err, syscall.EEXIST) {
-			return fmt.Errorf("failed to add FDB entry for %s on %s: %w", entries.mac, entries.ovsPortName, err)
-		}
+	if err := util.LinkFDBSet(ovsPort, entries.mac, entries.macvrfVID); err != nil {
+		return fmt.Errorf("failed to set FDB entry for %s on %s: %w", entries.mac, entries.ovsPortName, err)
 	}
 	klog.V(5).Infof("Configured FDB %s vlan %d on %s", entries.mac, entries.macvrfVID, entries.ovsPortName)
 	for _, ip := range entries.ips {
-		if err := util.LinkNeighAdd(svi, ip, entries.mac); err != nil {
+		if err := util.LinkNeighSet(svi, ip, entries.mac); err != nil {
 			return fmt.Errorf("failed to add neighbor %s on %s: %w", ip, entries.sviName, err)
 		}
 		klog.V(5).Infof("Configured neighbor %s lladdr %s on %s", ip, entries.mac, entries.sviName)

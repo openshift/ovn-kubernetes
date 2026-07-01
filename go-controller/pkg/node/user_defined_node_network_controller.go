@@ -11,6 +11,8 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
@@ -43,6 +45,7 @@ func NewUserDefinedNodeNetworkController(
 	ruleManager *iprulemanager.Controller,
 	mpdm *managementport.MgmtPortDeviceManager,
 	defaultNetworkGateway Gateway,
+	ovsClient client.Client,
 ) (*UserDefinedNodeNetworkController, error) {
 
 	snnc := &UserDefinedNodeNetworkController{
@@ -52,6 +55,7 @@ func NewUserDefinedNodeNetworkController(
 			stopChan:                        make(chan struct{}),
 			wg:                              &sync.WaitGroup{},
 			networkManager:                  networkManager,
+			ovsClient:                       ovsClient,
 		},
 		mpdm: mpdm,
 	}
@@ -110,12 +114,16 @@ func (nc *UserDefinedNodeNetworkController) Stop() {
 
 // Cleanup cleans up node entities for the given user-defined network
 func (nc *UserDefinedNodeNetworkController) Cleanup() error {
+	klog.Infof("Cleaning up UDN node network controller for network %s (gateway=%v)", nc.GetNetworkName(), nc.gateway != nil)
 	var errors []error
 	var err error
 
 	if nc.gateway != nil {
 		if err = nc.gateway.DelNetwork(); err != nil {
+			klog.Warningf("Failed to delete network gateway for network %s: %v", nc.GetNetworkName(), err)
 			errors = append(errors, fmt.Errorf("deleting network gateway for network %s failed: %v", nc.GetNetworkName(), err))
+		} else {
+			klog.Infof("Successfully deleted network gateway for network %s", nc.GetNetworkName())
 		}
 	}
 	if nc.mpdm != nil && util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {

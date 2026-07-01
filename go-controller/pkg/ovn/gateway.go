@@ -190,57 +190,68 @@ func (gw *GatewayManager) cleanupStalePodSNATs(nodeName string, nodeIPs []*net.I
 	if gw.netInfo.IsUserDefinedNetwork() && gw.getNetworkNameForNADKey == nil {
 		return fmt.Errorf("missing NAD resolver for network %q", gw.netInfo.GetNetworkName())
 	}
-	// collect all the pod IPs for which we should be doing the SNAT;
-	// if DisableSNATMultipleGWs==false we consider all
-	// the SNATs stale
-	podIPsWithSNAT := sets.New[string]()
-	if config.Gateway.DisableSNATMultipleGWs {
-		pods, err := gw.watchFactory.GetAllPods()
-		if err != nil {
-			return fmt.Errorf("unable to list existing pods on node: %s, %w",
-				nodeName, err)
-		}
-		for _, pod := range pods {
-			pod := *pod
-			if !util.PodScheduled(&pod) { //if the pod is not scheduled we should not remove the nat
-				continue
-			}
-			if pod.Spec.NodeName != nodeName {
-				continue
-			}
-			if util.PodCompleted(&pod) {
-				collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "", gw.getNetworkNameForNADKey) //even if a pod is completed we should still delete the nat if the ip is not in use anymore
-				if err != nil {
-					return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
-				}
-				if collidingPod != nil { //if the ip is in use we should not remove the nat
-					continue
-				}
-			}
-			podIPs, err := util.GetPodIPsOfNetwork(&pod, gw.netInfo, gw.getNetworkNameForNADKey)
-			if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
-				// It is possible that the pod is scheduled during this time, but the LSP add or
-				// IP Allocation has not happened and it is waiting for the WatchPods to start
-				// after WatchNodes completes (This function is called during syncNodes). So since
-				// the pod doesn't have any IPs, there is no SNAT here to keep for this pod so we skip
-				// this pod from processing and move onto the next one.
-				klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-				continue // no-op
-			} else if err != nil {
-				return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
-			}
-			for _, podIP := range podIPs {
-				podIPsWithSNAT.Insert(podIP.String())
-			}
-		}
-	}
 
 	gatewayRouter := &nbdb.LogicalRouter{
 		Name: gw.gwRouterName,
 	}
 	routerNATs, err := libovsdbops.GetRouterNATs(gw.nbClient, gatewayRouter)
-	if err != nil && errors.Is(err, libovsdbclient.ErrNotFound) {
+	if err != nil {
+		if  errors.Is(err, libovsdbclient.ErrNotFound) {
+			// router not found, nothing to clean up
+			return nil
+		}
 		return fmt.Errorf("unable to get NAT entries for router %s on node %s: %w", gatewayRouter.Name, nodeName, err)
+	}
+	if len(routerNATs) == 0 {
+		// no nats, nothing to clean up
+		return nil
+	}
+
+	// collect all the pod IPs for which we should be doing the SNAT;
+	// if DisableSNATMultipleGWs==false we consider all
+	// the SNATs stale
+	podIPsWithSNAT := sets.New[string]()
+	if config.Gateway.DisableSNATMultipleGWs {
+		// For UDNs, only scan namespaces attached to this network.
+		// For the default network NADNamespaces is empty; GetPods("")
+		// falls back to listing all pods (ListAllByNamespace on "").
+		nadNamespaces := gw.netInfo.GetNADNamespaces()
+		if len(nadNamespaces) == 0 {
+			nadNamespaces = []string{""}
+		}
+		for _, ns := range nadNamespaces {
+			pods, err := gw.watchFactory.GetPods(ns)
+			if err != nil {
+				return fmt.Errorf("unable to list existing pods in namespace %q: %w", ns, err)
+			}
+			for _, pod := range pods {
+				if !util.PodScheduled(pod) {
+					continue
+				}
+				if pod.Spec.NodeName != nodeName {
+					continue
+				}
+				if util.PodCompleted(pod) {
+					collidingPod, err := findPodWithIPAddresses(gw.watchFactory, gw.netInfo, []net.IP{utilnet.ParseIPSloppy(pod.Status.PodIP)}, "", gw.getNetworkNameForNADKey)
+					if err != nil {
+						return fmt.Errorf("lookup for pods with same ip as %s %s failed: %w", pod.Namespace, pod.Name, err)
+					}
+					if collidingPod != nil {
+						continue
+					}
+				}
+				podIPs, err := util.GetPodIPsOfNetwork(pod, gw.netInfo, gw.getNetworkNameForNADKey)
+				if err != nil && errors.Is(err, util.ErrNoPodIPFound) {
+					klog.Warningf("Unable to fetch podIPs for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+					continue
+				} else if err != nil {
+					return fmt.Errorf("unable to fetch podIPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+				}
+				for _, podIP := range podIPs {
+					podIPsWithSNAT.Insert(podIP.String())
+				}
+			}
+		}
 	}
 
 	nodeIPset := sets.New(util.IPNetsIPToStringSlice(nodeIPs)...)
@@ -521,7 +532,21 @@ func (gw *GatewayManager) updateGWRouterStaticRoutes(gwConfig *GatewayConfig, ex
 	gwRouter *nbdb.LogicalRouter) error {
 	if len(gwConfig.ovnClusterLRPToJoinIfAddrs) > 0 {
 		// this is only the case for layer3 topology
-		for _, entry := range gwConfig.clusterSubnets {
+		//
+		// In overlay mode the gateway router routes the whole cluster subnet(s)
+		// towards the ovn_cluster_router so it can reach pods on every node
+		// through the distributed router (over the transit switch).
+		//
+		// In no-overlay mode there is no transit switch: traffic destined to pods
+		// on other nodes must leave through the default route to the physical
+		// network instead of being forwarded to the ovn_cluster_router. So the
+		// gateway router should only route this node's local host subnet(s)
+		// towards the ovn_cluster_router (to reach pods local to this node).
+		drRoutedSubnets := gwConfig.clusterSubnets
+		if gw.netInfo.Transport() == types.NetworkTransportNoOverlay {
+			drRoutedSubnets = gwConfig.hostSubnets
+		}
+		for _, entry := range drRoutedSubnets {
 			drLRPIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(entry), gwConfig.ovnClusterLRPToJoinIfAddrs)
 			if err != nil {
 				return fmt.Errorf("failed to add a static route in GR %s with distributed "+
@@ -560,6 +585,38 @@ func (gw *GatewayManager) updateGWRouterStaticRoutes(gwConfig *GatewayConfig, ex
 				&lrsr.Nexthop)
 			if err != nil {
 				return fmt.Errorf("failed to add a static route %+v in GR %s with distributed router as the nexthop, err: %v", lrsr, gw.gwRouterName, err)
+			}
+		}
+		// The set of subnets routed towards the ovn_cluster_router differs
+		// between overlay and no-overlay mode (see above), so on a transition
+		// between the two transports (e.g. an upgrade) the gateway router can be
+		// left with stale routes from the previous mode. Remove them so the
+		// gateway router converges to the correct set of distributed-router
+		// routes for the current transport.
+		if gw.netInfo.Transport() == types.NetworkTransportNoOverlay {
+			// We now only route this node's host subnet(s) towards the
+			// ovn_cluster_router. Remove any stale full cluster-subnet route
+			// pointing at the distributed router (programmed previously in
+			// overlay mode), so the gateway router does not forward off-node pod
+			// traffic to the ovn_cluster_router.
+			hostSubnetSet := sets.New[string]()
+			for _, hostSubnet := range gwConfig.hostSubnets {
+				hostSubnetSet.Insert(hostSubnet.String())
+			}
+			if err := gw.deleteStaleDRRoutes(gwConfig, gwConfig.clusterSubnets, hostSubnetSet); err != nil {
+				return err
+			}
+		} else {
+			// We now route the whole cluster subnet(s) towards the
+			// ovn_cluster_router. Remove any stale per-host subnet route pointing
+			// at the distributed router (programmed previously in no-overlay
+			// mode), so it does not shadow the cluster-subnet route.
+			clusterSubnetSet := sets.New[string]()
+			for _, clusterSubnet := range gwConfig.clusterSubnets {
+				clusterSubnetSet.Insert(clusterSubnet.String())
+			}
+			if err := gw.deleteStaleDRRoutes(gwConfig, gwConfig.hostSubnets, clusterSubnetSet); err != nil {
+				return err
 			}
 		}
 	}
@@ -649,6 +706,34 @@ func (gw *GatewayManager) updateGWRouterStaticRoutes(gwConfig *GatewayConfig, ex
 			p, &lrsr.Nexthop)
 		if err != nil {
 			return fmt.Errorf("error creating static route %+v in GR %s: %v", lrsr, gw.gwRouterName, err)
+		}
+	}
+	return nil
+}
+
+// deleteStaleDRRoutes removes routes on the gateway router that point at the
+// distributed router (ovn_cluster_router) for any subnet in staleSubnets,
+// skipping subnets present in keepSubnets. It is used to clean up routes left
+// over from the previous network transport when transitioning between overlay
+// and no-overlay mode (the two modes route a different set of subnets towards
+// the distributed router).
+func (gw *GatewayManager) deleteStaleDRRoutes(gwConfig *GatewayConfig, staleSubnets []*net.IPNet, keepSubnets sets.Set[string]) error {
+	for _, subnet := range staleSubnets {
+		if keepSubnets.Has(subnet.String()) {
+			continue
+		}
+		drLRPIfAddr, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(subnet), gwConfig.ovnClusterLRPToJoinIfAddrs)
+		if err != nil {
+			continue
+		}
+		prefix := subnet.String()
+		nexthop := drLRPIfAddr.IP.String()
+		p := func(item *nbdb.LogicalRouterStaticRoute) bool {
+			return item.IPPrefix == prefix && item.Nexthop == nexthop && item.OutputPort == nil
+		}
+		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(gw.nbClient, gw.gwRouterName, p); err != nil {
+			return fmt.Errorf("failed to delete stale route %s via %s in GR %s: %v",
+				prefix, nexthop, gw.gwRouterName, err)
 		}
 	}
 	return nil

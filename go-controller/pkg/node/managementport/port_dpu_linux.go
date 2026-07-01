@@ -20,7 +20,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
@@ -92,7 +92,7 @@ func (mp *managementPortRepresentor) checkRepresentorPortHealth() error {
 		// Get management port representor by name
 		link, err := util.GetNetLinkOps().LinkByName(mp.repDevName)
 		if err != nil {
-			return fmt.Errorf("failed to get link device %s: %w", mp.repDevName, err)
+			klog.Fatalf("Can't find neither renamed management port %s nor original representor device %s: %v, inconsistent state, crashing to recover with fresh start", mp.ifName, mp.repDevName, err)
 		}
 		err = bringupManagementPortLink(types.DefaultNetworkName, link, nil, mp.ifName, config.Default.MTU)
 		if err != nil {
