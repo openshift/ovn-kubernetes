@@ -95,6 +95,12 @@ type BaseNetworkController struct {
 
 	// retry framework for pods
 	retryPods *ovnretry.RetryFramework
+	// retry framework for nodes
+	retryNodes *ovnretry.RetryFramework
+
+	// pod batch processor for high-volume pod operations
+	podBatchProcessor  *PodBatchProcessor
+	podBatchingEnabled bool
 	// retry framework for namespaces
 	retryNamespaces *ovnretry.RetryFramework
 	// retry framework for network policies
