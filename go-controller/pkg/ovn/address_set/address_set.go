@@ -647,15 +647,12 @@ func (as *ovnAddressSet) hasOnlyAddresses(addresses ...string) bool {
 		return false
 	}
 
+	existing := make(map[string]struct{}, len(existingAddresses))
+	for _, a := range existingAddresses {
+		existing[a] = struct{}{}
+	}
 	for _, address := range addresses {
-		found := false
-		for _, existingAddress := range existingAddresses {
-			if existingAddress == address {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if _, ok := existing[address]; !ok {
 			return false
 		}
 	}
