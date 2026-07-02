@@ -53,6 +53,18 @@ var AppendedAnnotations = map[string]string{
 
 	"ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly": "[Disabled:Unimplemented]",
 
+	"BGP: For BGP configured networks EVPN BFD failover with dual-spine Layer 2 CUDN EVPN MAC-VRF Connectivity survives single spine failure When the networks are IPv4": "[Suite:openshift/conformance/serial]",
+
+	"BGP: For BGP configured networks EVPN BFD failover with dual-spine Layer 2 CUDN EVPN MAC-VRF Connectivity survives single spine failure When the networks are IPv6": "[Suite:openshift/conformance/serial]",
+
+	"BGP: For BGP configured networks EVPN BFD failover with dual-spine Layer 2 CUDN EVPN MAC-VRF and IP-VRF Connectivity survives single spine failure When the networks are IPv4": "[Suite:openshift/conformance/serial]",
+
+	"BGP: For BGP configured networks EVPN BFD failover with dual-spine Layer 2 CUDN EVPN MAC-VRF and IP-VRF Connectivity survives single spine failure When the networks are IPv6": "[Suite:openshift/conformance/serial]",
+
+	"BGP: For BGP configured networks EVPN BFD failover with dual-spine Layer 3 CUDN EVPN IP-VRF Connectivity survives single spine failure When the networks are IPv4": "[Suite:openshift/conformance/serial]",
+
+	"BGP: For BGP configured networks EVPN BFD failover with dual-spine Layer 3 CUDN EVPN IP-VRF Connectivity survives single spine failure When the networks are IPv6": "[Suite:openshift/conformance/serial]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
