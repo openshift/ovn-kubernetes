@@ -103,3 +103,46 @@ func BroadcastGARP(interfaceName string, garp GARP) error {
 	klog.Infof("BroadcastGARP: completed GARP broadcast for IP %s on interface %s with MAC: %s", garp.IP().String(), interfaceName, mac.String())
 	return nil
 }
+
+// SendReleaseGARP sends a gratuitous ARP with zero MAC address to signal that
+// this node is releasing ownership of the IP. This helps prevent duplicate IP
+// detection when the IP is being moved to another node.
+//
+// The release GARP uses MAC address 00:00:00:00:00:00 as the source hardware
+// address, which is a well-known technique for releasing IP ownership on the
+// network layer. This proactively clears ARP caches on switches/routers and
+// prevents the old node from continuing to defend the IP after deletion.
+//
+// This function sends both ARP request and reply operations (similar to
+// BroadcastGARP) since some systems respond to request and others to reply.
+func SendReleaseGARP(interfaceName string, garp GARP) error {
+	iface, err := net.InterfaceByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed finding interface %s: %v", interfaceName, err)
+	}
+
+	srcIP := netip.AddrFrom4(garp.IPv4())
+	// Use zero MAC to signal IP release
+	zeroMAC := net.HardwareAddr{0, 0, 0, 0, 0, 0}
+
+	c, err := arp.Dial(iface)
+	if err != nil {
+		return fmt.Errorf("failed dialing %q: %v", interfaceName, err)
+	}
+	defer c.Close()
+
+	// Send both request and reply with zero MAC to ensure maximum compatibility
+	for _, op := range []arp.Operation{arp.OperationRequest, arp.OperationReply} {
+		p, err := arp.NewPacket(op, zeroMAC /* srcHw */, srcIP, net.HardwareAddr{0, 0, 0, 0, 0, 0}, srcIP)
+		if err != nil {
+			return fmt.Errorf("failed creating %q release GARP %+v: %w", op, garp, err)
+		}
+
+		if err := c.WriteTo(p, net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}); err != nil {
+			return fmt.Errorf("failed sending %q release GARP %+v: %w", op, garp, err)
+		}
+	}
+
+	klog.Infof("SendReleaseGARP: completed release GARP for IP %s on interface %s with zero MAC", garp.IP().String(), interfaceName)
+	return nil
+}
