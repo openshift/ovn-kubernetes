@@ -148,7 +148,24 @@ func (c *Controller) DelAddress(address netlink.Addr) error {
 		}
 		return fmt.Errorf("no valid link associated with addresses %s: %v", address.String(), err)
 	}
-	klog.Infof("Link manager: deleting address %s from link %s", address.String(), link.Attrs().Name)
+	linkName := link.Attrs().Name
+	klog.Infof("Link manager: deleting address %s from link %s", address.String(), linkName)
+
+	// Send release GARP before deleting the address to signal that this node is
+	// releasing ownership of the IP. This prevents duplicate IP detection when
+	// the IP is being moved to another node (e.g., during EgressIP failover).
+	if utilnet.IsIPv4(address.IP) {
+		garp, err := util.NewGARP(address.IP, nil)
+		if err != nil {
+			klog.Warningf("Link manager: failed to create release GARP for %s: %v (continuing with deletion)", address.IP, err)
+		} else {
+			// Best effort - if release GARP fails, log but still proceed with deletion
+			if err := util.SendReleaseGARP(linkName, garp); err != nil {
+				klog.Warningf("Link manager: failed to send release GARP for %s on link %s: %v (continuing with deletion)", address.IP, linkName, err)
+			}
+		}
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := util.GetNetLinkOps().AddrDel(link, &address); err != nil {
@@ -156,7 +173,7 @@ func (c *Controller) DelAddress(address netlink.Addr) error {
 			return fmt.Errorf("failed to delete address %s: %v", address.String(), err)
 		}
 	}
-	c.delAddressFromStore(link.Attrs().Name, address)
+	c.delAddressFromStore(linkName, address)
 	return nil
 }
 
