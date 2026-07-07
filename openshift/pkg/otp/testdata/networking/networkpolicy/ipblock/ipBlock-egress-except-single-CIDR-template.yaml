@@ -1,7 +1,7 @@
 apiVersion: template.openshift.io/v1
 kind: Template
 metadata:
-  name: ipBlockEgressSingle_cidr_template
+  name: ipBlockEgressExceptSingle_cidr_template
 objects:
 - kind: NetworkPolicy
   apiVersion: networking.k8s.io/v1

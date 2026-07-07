@@ -68,26 +68,34 @@ func CreateMachineSetFromExisting(oc *exutil.CLI, name string, replicas int) {
 	err = json.Unmarshal([]byte(machineSetJSON), &ms)
 	o.Expect(err).NotTo(o.HaveOccurred())
 
-	metadata := ms["metadata"].(map[string]interface{})
+	metadata, ok := ms["metadata"].(map[string]interface{})
+	o.Expect(ok).To(o.BeTrue(), "unexpected machineset JSON: missing metadata object")
 	metadata["name"] = name
 	delete(metadata, "resourceVersion")
 	delete(metadata, "uid")
 	delete(metadata, "creationTimestamp")
 	delete(metadata, "generation")
 
-	spec := ms["spec"].(map[string]interface{})
+	spec, ok := ms["spec"].(map[string]interface{})
+	o.Expect(ok).To(o.BeTrue(), "unexpected machineset JSON: missing spec object")
 	spec["replicas"] = float64(replicas)
 
-	selector := spec["selector"].(map[string]interface{})
-	matchLabels := selector["matchLabels"].(map[string]interface{})
+	selector, ok := spec["selector"].(map[string]interface{})
+	o.Expect(ok).To(o.BeTrue(), "unexpected machineset JSON: missing spec.selector object")
+	matchLabels, ok := selector["matchLabels"].(map[string]interface{})
+	o.Expect(ok).To(o.BeTrue(), "unexpected machineset JSON: missing spec.selector.matchLabels object")
 	matchLabels["machine.openshift.io/cluster-api-machineset"] = name
 
-	tmpl := spec["template"].(map[string]interface{})
-	tmplMeta := tmpl["metadata"].(map[string]interface{})
-	tmplLabels := tmplMeta["labels"].(map[string]interface{})
+	tmpl, ok := spec["template"].(map[string]interface{})
+	o.Expect(ok).To(o.BeTrue(), "unexpected machineset JSON: missing spec.template object")
+	tmplMeta, ok := tmpl["metadata"].(map[string]interface{})
+	o.Expect(ok).To(o.BeTrue(), "unexpected machineset JSON: missing spec.template.metadata object")
+	tmplLabels, ok := tmplMeta["labels"].(map[string]interface{})
+	o.Expect(ok).To(o.BeTrue(), "unexpected machineset JSON: missing spec.template.metadata.labels object")
 	tmplLabels["machine.openshift.io/cluster-api-machineset"] = name
 
-	tmplSpec := tmpl["spec"].(map[string]interface{})
+	tmplSpec, ok := tmpl["spec"].(map[string]interface{})
+	o.Expect(ok).To(o.BeTrue(), "unexpected machineset JSON: missing spec.template.spec object")
 	tmplSpec["taints"] = []interface{}{
 		map[string]interface{}{
 			"effect": "NoSchedule",
@@ -174,7 +182,7 @@ func WaitForMachineSetNodesReady(oc *exutil.CLI, name string) {
 
 func WaitForMachineSetDeleted(oc *exutil.CLI, name string) {
 	e2e.Logf("Waiting for MachineSet %s machines to disappear...", name)
-	wait.Poll(60*time.Second, 1200*time.Second, func() (bool, error) {
+	err := wait.Poll(60*time.Second, 1200*time.Second, func() (bool, error) {
 		machineNames, _ := oc.AsAdmin().WithoutNamespace().Run("get").Args(MapiMachine, "-o=jsonpath={.items[*].metadata.name}", "-l", "machine.openshift.io/cluster-api-machineset="+name, "-n", MachineAPINamespace).Output()
 		if machineNames != "" {
 			e2e.Logf("Machines still exist, waiting...")
@@ -182,6 +190,7 @@ func WaitForMachineSetDeleted(oc *exutil.CLI, name string) {
 		}
 		return true, nil
 	})
+	o.Expect(err).NotTo(o.HaveOccurred(), fmt.Sprintf("machines for MachineSet %s did not disappear in time", name))
 }
 
 func GetMachineNamesFromMachineSet(oc *exutil.CLI, machineSetName string) []string {
@@ -265,7 +274,17 @@ func GetFirstLinuxWorkerNode(oc *exutil.CLI) (string, error) {
 }
 
 func GetFirstCoreOsWorkerNode(oc *exutil.CLI) (string, error) {
-	return GetFirstLinuxWorkerNode(oc)
+	nodes, err := GetSchedulableLinuxWorkerNodes(oc)
+	if err != nil {
+		return "", err
+	}
+	for _, node := range nodes {
+		osImage, oErr := oc.AsAdmin().WithoutNamespace().Run("get").Args("node", node, "-o=jsonpath={.status.nodeInfo.osImage}").Output()
+		if oErr == nil && strings.Contains(osImage, "Red Hat Enterprise Linux CoreOS") {
+			return node, nil
+		}
+	}
+	return "", fmt.Errorf("no schedulable RHCOS worker nodes found")
 }
 
 func AssertPodToBeReady(oc *exutil.CLI, podName string, namespace string) {
