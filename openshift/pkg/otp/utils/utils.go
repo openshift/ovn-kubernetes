@@ -655,7 +655,7 @@ func WaitPodReady(oc *exutil.CLI, namespace string, podName string) {
 	if err != nil {
 		podDescribe := DescribePod(oc, namespace, podName)
 		e2e.Logf("oc describe pod %v.", podName)
-		e2e.Logf(podDescribe)
+		e2e.Logf("%s", podDescribe)
 	}
 	o.Expect(err).NotTo(o.HaveOccurred(), fmt.Sprintf("pod %v is not ready", podName))
 }
@@ -1309,10 +1309,10 @@ func UpdateEgressIPObject(oc *exutil.CLI, egressIPObjectName string, egressIP st
 		}
 		if !strings.Contains(output, egressIP) {
 			e2e.Logf("Wait for new IP %s applied,try next round.", egressIP)
-			e2e.Logf(output)
+			e2e.Logf("%s", output)
 			return false, nil
 		}
-		e2e.Logf(output)
+		e2e.Logf("%s", output)
 		return true, nil
 	})
 	o.Expect(egressipErr).NotTo(o.HaveOccurred(), fmt.Sprintf("Failed to apply new egressIP %s:%v", egressIP, egressipErr))
@@ -1889,7 +1889,7 @@ func CheckLogMessageInPod(oc *exutil.CLI, namespace string, containerName string
 		return true, nil
 	})
 	if checkErr != nil {
-		return podLogs, fmt.Errorf(fmt.Sprintf("fail to get expected log in pod %v, err: %v", podName, err))
+		return podLogs, fmt.Errorf("fail to get expected log in pod %v, err: %v", podName, err)
 	}
 	return podLogs, nil
 }
@@ -2057,7 +2057,7 @@ func GetRouterID(oc *exutil.CLI, nodeName string) (string, error) {
 			routerID = cmdOutputLines[1]
 			return true, nil
 		}
-		e2e.Logf("%v,Waiting for expected result to be synced, try again ...,")
+		e2e.Logf("Waiting for expected result to be synced, try again ...")
 		return false, nil
 	})
 	if checkOVNDbErr != nil {
@@ -2373,7 +2373,7 @@ func GetHostsubnetByEIP(oc *exutil.CLI, expectedEIP string) string {
 		ip, err := GetEgressIPByKind(oc, "hostsubnet", nodeList.Items[i].Name, 1)
 		o.Expect(err).NotTo(o.HaveOccurred())
 		if ip[0] == expectedEIP {
-			e2e.Logf("Found node %v host egressip %v ", v.Name)
+			e2e.Logf("Found node %v host egressip %v ", v.Name, ip[0])
 			nodeHostsEIP = nodeList.Items[i].Name
 			break
 		}
@@ -2786,7 +2786,7 @@ func ConfigIPSecAtRuntime(oc *exutil.CLI, targetStatus string) (err error) {
 		e2e.Logf("Both IPsec container and host pods will be launched.")
 		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("ds", "-n", "openshift-ovn-kubernetes").Output()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		e2e.Logf("The ds in openshift-ovn-kubernetes are : \n", output)
+		e2e.Logf("The ds in openshift-ovn-kubernetes are : \n%s", output)
 		o.Expect(strings.Contains(output, "ovn-ipsec-containerized")).Should(o.BeTrue())
 		o.Expect(strings.Contains(output, "ovn-ipsec-host")).Should(o.BeTrue())
 		e2e.Logf("Verify CNO status shows progress state")
@@ -2801,7 +2801,7 @@ func ConfigIPSecAtRuntime(oc *exutil.CLI, targetStatus string) (err error) {
 		o.Eventually(func() bool {
 			output, err = oc.AsAdmin().WithoutNamespace().Run("get").Args("ds", "-n", "openshift-ovn-kubernetes").Output()
 			o.Expect(err).NotTo(o.HaveOccurred())
-			e2e.Logf("The ds in openshift-ovn-kubernetes are : \n", output)
+			e2e.Logf("The ds in openshift-ovn-kubernetes are : \n%s", output)
 			return !strings.Contains(output, "ovn-ipsec-containerized")
 		}, "300s", "30s").ShouldNot(o.BeNil(), "Timeout for waiting ovn-ipsec-containerized being removed!")
 		e2e.Logf("Wait ipsec host pods running in openshift-ovn-kubernetes")
@@ -2993,7 +2993,7 @@ func CheckAllClusterOperatorsState(oc *exutil.CLI, interval int, timeout int) {
 				return false, err
 			}
 			if matched, _ := regexp.MatchString("True.*False.*False", output); !matched {
-				e2e.Logf("Operator %s on hosted cluster is in state:%s", output)
+				e2e.Logf("Operator %s on hosted cluster is in state:%s", clusterOperator, output)
 				return false, nil
 			}
 			return true, nil
@@ -3128,7 +3128,7 @@ func WaitMachineOnROSAReady(oc *exutil.CLI, machineName string, namespace string
 			return false, nil
 		}
 		if !strings.Contains(status, "Running") {
-			e2e.Logf("Machine %v is in %v, not in Running state, retrying...", status)
+			e2e.Logf("Machine %v is in %v, not in Running state, retrying...", machineName, status)
 			return false, nil
 		}
 		return true, nil
@@ -3231,7 +3231,7 @@ func DisableNodeIdentityWebhook(oc *exutil.CLI, namespace string, cmName string)
 		result := true
 		_, cmErr := oc.AsAdmin().Run("get").Args("configmap/"+cmName, "-n", namespace).Output()
 		if cmErr != nil {
-			e2e.Logf(fmt.Sprintf("Wait for configmap/%s to be created", cmName))
+			e2e.Logf("Wait for configmap/%s to be created", cmName)
 			result = false
 		}
 		return result
@@ -3278,10 +3278,10 @@ func GetlrPolicyList(oc *exutil.CLI, nodeName, tableID string, expected bool) ([
 // Create a kubeconfig that impersonates ovnkube-node
 func GenerateKubeConfigFileForContext(oc *exutil.CLI, nodeName string, ovnKubeNodePod string, kubeConfigFilePath string, userContext string) bool {
 	var (
-		pemFile     = "/etc/ovn/ovnkube-node-certs/ovnkube-client-current.pem"
-		certFile    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-		clusterName = "default-cluster"
-		userName    = "default-user"
+		pemFile        = "/etc/ovn/ovnkube-node-certs/ovnkube-client-current.pem"
+		certFile       = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+		clusterName    = "default-cluster"
+		kubeConfigUser = "default-user"
 	)
 
 	baseDomain, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("dns/cluster", "-o=jsonpath={.spec.baseDomain}").Output()
@@ -3293,8 +3293,8 @@ func GenerateKubeConfigFileForContext(oc *exutil.CLI, nodeName string, ovnKubeNo
 	apiServerFQDN := fmt.Sprintf("api.%s", baseDomain)
 
 	setUpClusterCmd := fmt.Sprintf("export KUBECONFIG=%s; kubectl config set-cluster %s --server=https://%s:6443 --certificate-authority %s --embed-certs", kubeConfigFilePath, clusterName, apiServerFQDN, certFile)
-	setUserCredentialsCmd := fmt.Sprintf("export KUBECONFIG=%s; kubectl config set-credentials %s --client-key %s --client-certificate %s --embed-certs", kubeConfigFilePath, userName, pemFile, pemFile)
-	setContextCmd := fmt.Sprintf("export KUBECONFIG=%s; kubectl config set-context %s --cluster %s --user %s", kubeConfigFilePath, userContext, clusterName, userName)
+	setUserCredentialsCmd := fmt.Sprintf("export KUBECONFIG=%s; kubectl config set-credentials %s --client-key %s --client-certificate %s --embed-certs", kubeConfigFilePath, kubeConfigUser, pemFile, pemFile)
+	setContextCmd := fmt.Sprintf("export KUBECONFIG=%s; kubectl config set-context %s --cluster %s --user %s", kubeConfigFilePath, userContext, clusterName, kubeConfigUser)
 	testContextCmd := fmt.Sprintf("export KUBECONFIG=%s; kubectl config use-context %s; oc get nodes", kubeConfigFilePath, userContext)
 
 	cmdOutput, cmdErr := RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKubeNodePod, "ovnkube-controller", setUpClusterCmd)
@@ -3305,7 +3305,7 @@ func GenerateKubeConfigFileForContext(oc *exutil.CLI, nodeName string, ovnKubeNo
 	e2e.Logf("Cluster set - %v", cmdOutput)
 
 	cmdOutput, cmdErr = RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKubeNodePod, "ovnkube-controller", setUserCredentialsCmd)
-	if cmdErr != nil || !strings.Contains(cmdOutput, "User "+"\""+userName+"\""+" set.") {
+	if cmdErr != nil || !strings.Contains(cmdOutput, "User "+"\""+kubeConfigUser+"\""+" set.") {
 		e2e.Logf("Setting user credentials for impersonation failed %v.", cmdErr)
 		return false
 	}
@@ -3535,7 +3535,7 @@ func CheckNodeAccessibilityFromAPod(oc *exutil.CLI, nodeName, ns, podName string
 		for _, nodeIPv4Addr := range allNodeIPsv4 {
 			_, err := e2eoutput.RunHostCmd(ns, podName, "ping -c 2 "+nodeIPv4Addr)
 			if err != nil {
-				e2e.Logf(fmt.Sprintf("Access to node %s failed at interface %s", nodeName, nodeIPv4Addr))
+				e2e.Logf("Access to node %s failed at interface %s", nodeName, nodeIPv4Addr)
 				return false
 			}
 		}
@@ -3544,7 +3544,7 @@ func CheckNodeAccessibilityFromAPod(oc *exutil.CLI, nodeName, ns, podName string
 		for _, nodeIPv6Addr := range allNodeIPsv6 {
 			_, err := e2eoutput.RunHostCmd(ns, podName, "ping -c 2 "+nodeIPv6Addr)
 			if err != nil {
-				e2e.Logf(fmt.Sprintf("Access to node %s failed at interface %s", nodeName, nodeIPv6Addr))
+				e2e.Logf("Access to node %s failed at interface %s", nodeName, nodeIPv6Addr)
 				return false
 			}
 		}
@@ -3652,7 +3652,7 @@ func GetIPv4AndIPWithPrefixForNICOnNode(oc *exutil.CLI, node, nic string) (strin
 	matches := re.FindStringSubmatch(output)
 	o.Expect(len(matches) > 1).Should(o.BeTrue())
 	ipAddressWithPrefix := matches[1]
-	e2e.Logf("IP address with prefix:", ipAddressWithPrefix)
+	e2e.Logf("IP address with prefix: %s", ipAddressWithPrefix)
 
 	ipParts := strings.Split(ipAddressWithPrefix, "/")
 	ipAddress := ipParts[0]
@@ -3884,7 +3884,7 @@ func CheckIPv6PublicAccess(oc *exutil.CLI) bool {
 	curlCMD := "curl -6 www.google.com --connect-timeout 5 -I"
 	output, err := DebugNode(oc, workNode, "bash", "-c", curlCMD)
 	if !strings.Contains(output, "HTTP") || err != nil {
-		e2e.Logf(output)
+		e2e.Logf("%s", output)
 		e2e.Logf("Unable to access the public Internet with IPv6 from the cluster.")
 		return false
 	}
@@ -4126,7 +4126,7 @@ func VerifyPodConnCrossNodesSpecNS(oc *exutil.CLI, namespace, podLabel string) b
 					o.Expect(err).NotTo(o.HaveOccurred())
 					e2e.Logf("Checking the if the pods's located nodes in SchedulingDisabled or NotReady status.")
 					output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("node", srcNode, dstNode).Output()
-					e2e.Logf(output)
+					e2e.Logf("%s", output)
 					o.Expect(err).NotTo(o.HaveOccurred())
 					if strings.Contains(output, "SchedulingDisabled") || strings.Contains(output, "NotReady") {
 						continue
@@ -4145,7 +4145,7 @@ func VerifyPodConnCrossNodesSpecNS(oc *exutil.CLI, namespace, podLabel string) b
 						o.Expect(err).NotTo(o.HaveOccurred())
 						e2e.Logf("Checking the if the pods's located nodes in SchedulingDisabled or NotReady status.")
 						output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("node", srcNode, dstNode).Output()
-						e2e.Logf(output)
+						e2e.Logf("%s", output)
 						o.Expect(err).NotTo(o.HaveOccurred())
 						if strings.Contains(output, "SchedulingDisabled") || strings.Contains(output, "NotReady") {
 							continue
@@ -4269,7 +4269,7 @@ func GetNodeMTU(oc *exutil.CLI, nodeName string) int {
 	cmdMTU := `ip a show br-ex |grep mtu`
 	out, err := DebugNodeWithChroot(oc, nodeName, "bash", "-c", cmdMTU)
 	o.Expect(err).NotTo(o.HaveOccurred())
-	e2e.Logf(out)
+	e2e.Logf("%s", out)
 	// Define regex to  capute mtu value
 	re := regexp.MustCompile(`mtu (\d+)`)
 	match := re.FindStringSubmatch(out)
@@ -4549,7 +4549,6 @@ func SetupOperatorCatalogSource(oc *exutil.CLI, operatorName, defaultCatalogSour
 	return defaultCatalogSourceName
 }
 
-
 // --- Helper functions migrated from openshift-tests-private ---
 
 // SshClient is a simple SSH client struct
@@ -4753,18 +4752,20 @@ func AssertOrCheckMCP(oc *exutil.CLI, pool string, interval time.Duration, timeo
 }
 
 func GetIfaddrFromNode(nodeName string, oc *exutil.CLI) string {
-	output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("node", nodeName, "-o=jsonpath={.status.addresses[?(@.type==\"InternalIP\")].address}").Output()
+	annotation, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("node", nodeName,
+		"-o=jsonpath={.metadata.annotations.cloud\\.network\\.openshift\\.io/egress-ipconfig}").Output()
 	o.Expect(err).NotTo(o.HaveOccurred())
-	if output == "" {
-		return ""
+	if annotation != "" {
+		var configs []map[string]interface{}
+		if jsonErr := json.Unmarshal([]byte(annotation), &configs); jsonErr == nil && len(configs) > 0 {
+			if ifaddr, ok := configs[0]["ifaddr"].(map[string]interface{}); ok {
+				if ipv4, ok := ifaddr["ipv4"].(string); ok && ipv4 != "" {
+					return ipv4
+				}
+			}
+		}
 	}
-	// Get the subnet from the IP
-	ip := strings.Split(output, " ")[0]
-	parts := strings.Split(ip, ".")
-	if len(parts) == 4 {
-		return strings.Join(parts[:3], ".")
-	}
-	return ip
+	return ""
 }
 
 func EstimateTimeoutForEgressIP(oc *exutil.CLI) time.Duration {
