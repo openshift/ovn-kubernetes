@@ -86,6 +86,7 @@ nav:
     - ExternalIPs/LoadBalancerIngress: design/external-ip-and-loadbalancer-ingress.md
     - DPU Host No-Overlay Routing: design/dpu-host-no-overlay-routing.md
     - Internal Subnets: design/ovn-kubernetes-subnets.md
+    - Bridge Flows: design/bridge-flows.md
     - Kubevirt VM Live Migration: features/live-migration.md
   - Getting Started:
     - Launching OVN-Kubernetes sandbox env: installation/launching-ovn-kubernetes-on-kind.md
