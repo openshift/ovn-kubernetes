@@ -101,6 +101,32 @@ var _ = g.Describe("[OTP] OVN Networking Tools", func() {
 			"Output doesn't appear to be valid OVN database content: %s", output)
 	})
 
+	g.It("55890-should verify network-tools ovn-get script functionality", func() {
+		// FIXME: Implementation Needed
+		//
+		// This test requires the network-tools container image which contains the ovn-get script.
+		// ovn-get is NOT available in ovnkube pods - it's part of the must-gather tooling.
+		//
+		// Test Requirements (from OCP-55890):
+		// - Via network-tools container image verify that ovn-get bash script works well
+		// - Test ovn-get -h (help)
+		// - Test ovn-get leaders (shows ovn-k master, nbdb, sbdb leaders)
+		// - Test ovn-get mode (shows ovn-ic vs legacy mode)
+		//
+		// Possible approaches:
+		// 1. Deploy a network-tools pod using the network-tools image and exec into it
+		// 2. Use oc adm must-gather programmatically (if API available)
+		// 3. Check how other tests deploy helper pods with specific images
+		//
+		// Manual validation on 4.22 cluster shows all commands work correctly:
+		// - ovn-get -h: Shows help with leaders, dbs, mode commands
+		// - ovn-get leaders: Shows "ovn-k master leader ovnkube-control-plane-c897dd5f8-5tjqc"
+		// - ovn-get mode: Shows "cluster is running in multi-zone (ovn-interconnect / ovn-ic)"
+		//
+		// Marking as [informing] until proper implementation is available.
+		g.Skip("Test requires network-tools container image deployment - implementation pending")
+	})
+
 	g.It("67625-should trace pod-to-pod traffic successfully", func() {
 		// FIXME: RBAC Issue - This test requires pods/exec permission for ovn-kubernetes-node service account
 		//
@@ -335,6 +361,44 @@ func runOVNKubeTrace(ctx context.Context, clientset *kubernetes.Clientset, confi
 		VersionedParams(&corev1.PodExecOptions{
 			Container: "ovnkube-controller",
 			Command:   execCmd,
+			Stdout:    true,
+			Stderr:    true,
+		}, runtime.NewParameterCodec(scheme))
+
+	exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
+	if err != nil {
+		return "", err
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		return stdout.String() + "\n" + stderr.String(), err
+	}
+
+	return stdout.String(), nil
+}
+
+// execCommandInPod executes a command in a specific pod/container
+func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config,
+	namespace, podName, containerName string, command []string) (string, error) {
+
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		return "", err
+	}
+
+	req := clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: containerName,
+			Command:   command,
 			Stdout:    true,
 			Stderr:    true,
 		}, runtime.NewParameterCodec(scheme))
