@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -185,8 +186,19 @@ func setOvsVSwitchdCPUAffinity(set *cpuset.CPUSet, ovsClient libovsdbclient.Clie
 
 	dpdkEnabled := isDPDKEnabled(ovsClient)
 
+	// When DPDK is enabled, remove the CPUs dedicated to PMD threads from the
+	// affinity set so that non-PMD OVS threads don't compete with them.
+	affinitySet := *set
+	if dpdkEnabled {
+		pmdCPUs := getPmdCPUs(ovsClient)
+		if !pmdCPUs.IsEmpty() {
+			affinitySet = set.Difference(pmdCPUs)
+			klog.V(5).Infof("Excluding PMD CPUs %s from ovs-vswitchd affinity", pmdCPUs)
+		}
+	}
+
 	klog.V(5).Infof("Managing ovs-vswitchd[%s] daemon CPU affinity (dpdk=%v)", ovsVSwitchdPID, dpdkEnabled)
-	return setProcessCPUAffinity(ovsVSwitchdPID, set, dpdkEnabled)
+	return setProcessCPUAffinity(ovsVSwitchdPID, &affinitySet, dpdkEnabled)
 }
 
 func setOvsDBServerCPUAffinity(set *cpuset.CPUSet) error {
@@ -504,4 +516,49 @@ func isDPDKEnabled(ovsClient libovsdbclient.Client) bool {
 		return false
 	}
 	return ovs.DpdkInitialized
+}
+
+func getPmdCPUs(ovsClient libovsdbclient.Client) cpuset.CPUSet {
+	if ovsClient == nil {
+		return cpuset.New()
+	}
+	ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+	if err != nil {
+		klog.V(5).Infof("Cannot read Open_vSwitch table for pmd-cpu-mask: %v", err)
+		return cpuset.New()
+	}
+	mask, ok := ovs.OtherConfig["pmd-cpu-mask"]
+	if !ok || mask == "" {
+		return cpuset.New()
+	}
+	pmdCPUs, err := parsePmdCpuMask(mask)
+	if err != nil {
+		klog.Warningf("Failed to parse pmd-cpu-mask %q: %v", mask, err)
+		return cpuset.New()
+	}
+	return pmdCPUs
+}
+
+// parsePmdCpuMask parses a hex bitmask string (e.g. "0xc", "C", "0x0006")
+// into a cpuset.CPUSet.
+func parsePmdCpuMask(mask string) (cpuset.CPUSet, error) {
+	mask = strings.TrimSpace(mask)
+	mask = strings.TrimPrefix(mask, "0x")
+	mask = strings.TrimPrefix(mask, "0X")
+	if mask == "" {
+		return cpuset.New(), nil
+	}
+
+	v := new(big.Int)
+	if _, ok := v.SetString(mask, 16); !ok {
+		return cpuset.New(), fmt.Errorf("invalid hex mask: %q", mask)
+	}
+
+	var positions []int
+	for i := 0; i < v.BitLen(); i++ {
+		if v.Bit(i) == 1 {
+			positions = append(positions, i)
+		}
+	}
+	return cpuset.New(positions...), nil
 }
