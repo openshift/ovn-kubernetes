@@ -86,7 +86,7 @@ func main() {
 		Parents: []string{
 			"openshift/conformance/serial",
 		},
-		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`labels.exists(l, l == "Serial") && !labels.exists(l, l == "Feature:VirtualMachineSupport")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
@@ -94,7 +94,19 @@ func main() {
 		Parents: []string{
 			"openshift/conformance/parallel",
 		},
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`!labels.exists(l, l == "Serial") && !labels.exists(l, l == "Feature:VirtualMachineSupport")`},
+	})
+
+	// Kubevirt tests run in the virtualization suite (used by the
+	// baremetalds-e2e-ovn-bgp-virt-* jobs with TEST_SUITE=openshift/network/virtualization)
+	// instead of the conformance suites; live-migration tests are too heavy for
+	// openshift/conformance/parallel parallelism.
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name: "ovn-kubernetes/network/virtualization",
+		Parents: []string{
+			"openshift/network/virtualization",
+		},
+		Qualifiers: []string{`labels.exists(l, l == "Feature:VirtualMachineSupport")`},
 	})
 
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())

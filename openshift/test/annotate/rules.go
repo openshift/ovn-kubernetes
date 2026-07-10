@@ -9,6 +9,12 @@ var (
 	// LabelToLabelMaps label -> label (ginkgo label)
 	// E2E tests are written with the support of ginkgo. ginkgo tests may contain Labels.
 	LabelToLabelMaps = map[string][]string{
+		// Kubevirt tests run in the virtualization suite (parallelism 3)
+		// instead of openshift/conformance/parallel, matching the
+		// baremetalds-e2e-ovn-bgp-virt-* jobs (TEST_SUITE=openshift/network/virtualization).
+		"[Suite:openshift/network/virtualization]": {
+			`[Feature:VirtualMachineSupport]`,
+		},
 		"[Disabled:Unimplemented]": {
 			`[Feature:Service]`,
 			`[Feature:NetworkPolicy]`,
@@ -20,7 +26,6 @@ var (
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
-			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
 			`[Feature:Multicast]`,
 			`[Feature:MultiHoming]`,
@@ -33,6 +38,8 @@ var (
 	// if a test name partially or fully contains one of the map value strings, then add the label to the test
 	// label -> partial or full test name or regex to match a test name
 	LabelToTestNameMatchMaps = map[string][]string{
+		// Kubevirt tests run in the virtualization suite, see LabelToLabelMaps.
+		"[Suite:openshift/network/virtualization]": {},
 		// alpha features that are not gated
 		"[Disabled:Alpha]": {},
 		// tests for features that are not implemented in openshift
