@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	osExec "os/exec"
 	"strings"
+	"time"
 
 	g "github.com/onsi/ginkgo/v2"
 	o "github.com/onsi/gomega"
@@ -102,60 +104,107 @@ var _ = g.Describe("[OTP] OVN Networking Tools", func() {
 	})
 
 	g.It("55890-should verify network-tools ovn-get script functionality", func() {
-		// FIXME: Implementation Needed
-		//
-		// This test requires the network-tools container image which contains the ovn-get script.
-		// ovn-get is NOT available in ovnkube pods - it's part of the must-gather tooling.
-		//
-		// Test Requirements (from OCP-55890):
-		// - Via network-tools container image verify that ovn-get bash script works well
-		// - Test ovn-get -h (help)
-		// - Test ovn-get leaders (shows ovn-k master, nbdb, sbdb leaders)
-		// - Test ovn-get mode (shows ovn-ic vs legacy mode)
-		//
-		// Possible approaches:
-		// 1. Deploy a network-tools pod using the network-tools image and exec into it
-		// 2. Use oc adm must-gather programmatically (if API available)
-		// 3. Check how other tests deploy helper pods with specific images
-		//
-		// Manual validation on 4.22 cluster shows all commands work correctly:
-		// - ovn-get -h: Shows help with leaders, dbs, mode commands
-		// - ovn-get leaders: Shows "ovn-k master leader ovnkube-control-plane-c897dd5f8-5tjqc"
-		// - ovn-get mode: Shows "cluster is running in multi-zone (ovn-interconnect / ovn-ic)"
-		//
-		// Marking as [informing] until proper implementation is available.
-		g.Skip("Test requires network-tools container image deployment - implementation pending")
+		const testNS = "test-network-tools-55890"
+		const podName = "network-tools-test"
+		const containerName = "network-tools"
+		const crbName = "test-network-tools-55890-admin"
+
+		g.By("Creating test namespace")
+		ns := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: testNS,
+				Labels: map[string]string{
+					"pod-security.kubernetes.io/enforce": "privileged",
+					"pod-security.kubernetes.io/audit":   "privileged",
+					"pod-security.kubernetes.io/warn":    "privileged",
+				},
+			},
+		}
+		_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+		o.Expect(err).NotTo(o.HaveOccurred())
+
+		defer func() {
+			_ = osExec.CommandContext(ctx, "oc", "delete", "clusterrolebinding", crbName, "--ignore-not-found").Run()
+			_ = clientset.CoreV1().Namespaces().Delete(ctx, testNS, metav1.DeleteOptions{})
+		}()
+
+		g.By("Setting up RBAC for network-tools pod")
+		rbacCmd := osExec.CommandContext(ctx, "oc", "create", "clusterrolebinding", crbName,
+			"--clusterrole=cluster-admin",
+			fmt.Sprintf("--serviceaccount=%s:default", testNS))
+		rbacOut, err := rbacCmd.CombinedOutput()
+		o.Expect(err).NotTo(o.HaveOccurred(), "Failed to create ClusterRoleBinding: %s", string(rbacOut))
+
+		g.By("Getting network-tools image from imagestream")
+		imageCmd := osExec.CommandContext(ctx, "oc", "get", "istag", "network-tools:latest",
+			"-n", "openshift", "-o", "jsonpath={.image.dockerImageReference}")
+		imageOut, err := imageCmd.CombinedOutput()
+		o.Expect(err).NotTo(o.HaveOccurred(), "Failed to get network-tools image: %s", string(imageOut))
+		networkToolsImage := strings.TrimSpace(string(imageOut))
+		o.Expect(networkToolsImage).NotTo(o.BeEmpty(), "network-tools image reference is empty")
+
+		g.By(fmt.Sprintf("Creating network-tools pod with image %s", networkToolsImage))
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      podName,
+				Namespace: testNS,
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:    containerName,
+						Image:   networkToolsImage,
+						Command: []string{"sleep", "3600"},
+					},
+				},
+				RestartPolicy: corev1.RestartPolicyNever,
+			},
+		}
+		_, err = clientset.CoreV1().Pods(testNS).Create(ctx, pod, metav1.CreateOptions{})
+		o.Expect(err).NotTo(o.HaveOccurred())
+
+		g.By("Waiting for network-tools pod to be ready")
+		o.Eventually(func() bool {
+			p, getErr := clientset.CoreV1().Pods(testNS).Get(ctx, podName, metav1.GetOptions{})
+			if getErr != nil {
+				return false
+			}
+			return p.Status.Phase == corev1.PodRunning
+		}, 120, 5).Should(o.BeTrue(), "network-tools pod did not reach Running state")
+
+		const networkToolsBin = "/opt/bin/network-tools"
+
+		g.By("Testing ovn-get -h (help)")
+		helpOutput, err := execCommandInPod(ctx, clientset, config, testNS, podName, containerName,
+			[]string{networkToolsBin, "ovn-get", "-h"})
+		o.Expect(err).NotTo(o.HaveOccurred(), "ovn-get -h failed: %s", helpOutput)
+		o.Expect(helpOutput).To(o.ContainSubstring("leaders"), "Help output should mention 'leaders' command")
+		o.Expect(helpOutput).To(o.ContainSubstring("mode"), "Help output should mention 'mode' command")
+
+		g.By("Testing ovn-get leaders")
+		leadersOutput, err := execCommandInPod(ctx, clientset, config, testNS, podName, containerName,
+			[]string{networkToolsBin, "ovn-get", "leaders"})
+		o.Expect(err).NotTo(o.HaveOccurred(), "ovn-get leaders failed: %s", leadersOutput)
+		o.Expect(leadersOutput).To(o.ContainSubstring("leader"), "Leaders output should contain leader information")
+
+		g.By("Testing ovn-get mode")
+		modeOutput, err := execCommandInPod(ctx, clientset, config, testNS, podName, containerName,
+			[]string{networkToolsBin, "ovn-get", "mode"})
+		o.Expect(err).NotTo(o.HaveOccurred(), "ovn-get mode failed: %s", modeOutput)
+		hasMode := strings.Contains(modeOutput, "multi-zone") ||
+			strings.Contains(modeOutput, "interconnect") ||
+			strings.Contains(modeOutput, "ovn-ic") ||
+			strings.Contains(modeOutput, "legacy") ||
+			strings.Contains(modeOutput, "single-zone")
+		o.Expect(hasMode).To(o.BeTrue(), "Mode output should indicate cluster mode: %s", modeOutput)
 	})
 
 	g.It("67625-should trace pod-to-pod traffic successfully", func() {
-		// FIXME: RBAC Issue - This test requires pods/exec permission for ovn-kubernetes-node service account
-		//
-		// ovnkube-trace tool needs the following permissions:
-		//   - pods (get, list) - cluster-wide (already exists in openshift-ovn-kubernetes-node-limited)
-		//   - nodes (get, list) - cluster-wide (already exists in openshift-ovn-kubernetes-node-limited)
-		//   - pods/exec (create) - MISSING - needed to exec into ovnkube-node pods to run ovnkube-trace
-		//
-		// TODO: Determine proper solution with OTP team:
-		//   1. How did original OTP tests handle this RBAC requirement?
-		//   2. Should there be a permanent ClusterRole for test environments?
-		//   3. Should tests use a different service account with required permissions?
-		//   4. Should this be added to openshift-ovn-kubernetes-node-limited role for test environments?
-		//
-		// Current status: Test will FAIL with "pods/exec is forbidden" until RBAC is resolved.
-		// This test is marked [informing] so it won't block CI, but the issue needs proper resolution.
-		//
-		// See: Anurag/Arti for guidance on how OTP handled ovnkube-trace RBAC requirements.
-
 		var err error
-		g.By("Finding ovnkube-node pods")
-		pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
-		})
-		o.Expect(err).NotTo(o.HaveOccurred())
-		o.Expect(len(pods.Items)).To(o.BeNumerically(">=", 2), "Need at least 2 nodes for pod-to-pod test")
+		const traceNS = "test-ovnkube-trace-67625"
+		const crbName = "test-ovnkube-trace-67625-admin"
 
 		g.By("Creating test namespace for trace pods")
-		const traceNS = "test-ovnkube-trace-67625"
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: traceNS,
@@ -170,8 +219,16 @@ var _ = g.Describe("[OTP] OVN Networking Tools", func() {
 		o.Expect(err).NotTo(o.HaveOccurred())
 
 		defer func() {
+			_ = osExec.CommandContext(ctx, "oc", "delete", "clusterrolebinding", crbName, "--ignore-not-found").Run()
 			_ = clientset.CoreV1().Namespaces().Delete(ctx, traceNS, metav1.DeleteOptions{})
 		}()
+
+		g.By("Setting up RBAC for trace runner pod")
+		rbacCmd := osExec.CommandContext(ctx, "oc", "create", "clusterrolebinding", crbName,
+			"--clusterrole=cluster-admin",
+			fmt.Sprintf("--serviceaccount=%s:default", traceNS))
+		rbacOut, err := rbacCmd.CombinedOutput()
+		o.Expect(err).NotTo(o.HaveOccurred(), "Failed to create ClusterRoleBinding: %s", string(rbacOut))
 
 		g.By("Creating source pod")
 		srcPod := &corev1.Pod{
@@ -219,7 +276,7 @@ var _ = g.Describe("[OTP] OVN Networking Tools", func() {
 		}, 60, 5).Should(o.BeTrue(), "Pods did not reach Running state")
 
 		g.By("Running ovnkube-trace from src to dst pod")
-		output, err := runOVNKubeTrace(ctx, clientset, config,
+		output, err := runOVNKubeTrace(ctx, clientset, config, traceNS,
 			traceNS, "src-pod",
 			traceNS, "dst-pod",
 			"tcp", "8080")
@@ -231,12 +288,11 @@ var _ = g.Describe("[OTP] OVN Networking Tools", func() {
 	})
 
 	g.It("67648-should trace pod-to-hostnetworkpod traffic successfully", func() {
-		// FIXME: RBAC Issue - Same as test 67625 - requires pods/exec permission
-		// See test 67625 for detailed explanation of RBAC requirements and TODO items.
-
 		var err error
-		g.By("Creating test namespace")
 		const traceNS = "test-ovnkube-trace-67648"
+		const crbName = "test-ovnkube-trace-67648-admin"
+
+		g.By("Creating test namespace")
 		ns := &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: traceNS,
@@ -251,8 +307,16 @@ var _ = g.Describe("[OTP] OVN Networking Tools", func() {
 		o.Expect(err).NotTo(o.HaveOccurred())
 
 		defer func() {
+			_ = osExec.CommandContext(ctx, "oc", "delete", "clusterrolebinding", crbName, "--ignore-not-found").Run()
 			_ = clientset.CoreV1().Namespaces().Delete(ctx, traceNS, metav1.DeleteOptions{})
 		}()
+
+		g.By("Setting up RBAC for trace runner pod")
+		rbacCmd := osExec.CommandContext(ctx, "oc", "create", "clusterrolebinding", crbName,
+			"--clusterrole=cluster-admin",
+			fmt.Sprintf("--serviceaccount=%s:default", traceNS))
+		rbacOut, err := rbacCmd.CombinedOutput()
+		o.Expect(err).NotTo(o.HaveOccurred(), "Failed to create ClusterRoleBinding: %s", string(rbacOut))
 
 		g.By("Creating source pod (regular overlay pod)")
 		srcPod := &corev1.Pod{
@@ -301,41 +365,93 @@ var _ = g.Describe("[OTP] OVN Networking Tools", func() {
 		}, 60, 5).Should(o.BeTrue(), "Pods did not reach Running state")
 
 		g.By("Running ovnkube-trace from overlay pod to host-network pod")
-		output, err := runOVNKubeTrace(ctx, clientset, config,
+		output, err := runOVNKubeTrace(ctx, clientset, config, traceNS,
 			traceNS, "src-pod",
 			traceNS, "dst-hostnet-pod",
 			"tcp", "22")
 		o.Expect(err).NotTo(o.HaveOccurred(), "ovnkube-trace failed with output:\n%s", output)
 
 		g.By("Verifying trace shows routing to host network")
-		// Trace should show packet reaching the node (might show different path than pod-to-pod)
 		o.Expect(output).NotTo(o.BeEmpty(), "Trace should produce output")
 		o.Expect(output).To(o.ContainSubstring("indicates success"), "Trace should indicate success")
-		// Host-network traffic bypasses some OVN overlay, so just verify no hard drops
 		o.Expect(output).NotTo(o.ContainSubstring("policy drop"), "Should not be blocked by policy")
 	})
 
 })
 
-// runOVNKubeTrace executes ovnkube-trace in an ovnkube-node pod
+// runOVNKubeTrace creates a trace runner pod with the OVN image and executes ovnkube-trace.
+// The traceNS must have a default SA with cluster-admin ClusterRoleBinding (set up by the caller).
+// ovnkube-trace needs cluster-wide pods list/get, nodes list/get, and pods/exec in the OVN namespace.
 func runOVNKubeTrace(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config,
-	srcNS, srcPod, dstNS, dstPod, protocol, port string) (string, error) {
+	traceNS, srcNS, srcPod, dstNS, dstPod, protocol, port string) (string, error) {
 
-	// Find an ovnkube-node pod
-	pods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
+	const tracePodName = "ovnkube-trace-runner"
+	const traceContainer = "trace"
+
+	// Get OVN image from an existing ovnkube-node pod
+	ovnPods, err := clientset.CoreV1().Pods("openshift-ovn-kubernetes").List(ctx, metav1.ListOptions{
 		LabelSelector: "app=ovnkube-node",
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to list ovnkube-node pods: %v", err)
 	}
-	if len(pods.Items) == 0 {
+	if len(ovnPods.Items) == 0 {
 		return "", fmt.Errorf("no ovnkube-node pods found in openshift-ovn-kubernetes namespace")
 	}
 
-	nodePod := pods.Items[0].Name
+	var ovnImage string
+	for _, container := range ovnPods.Items[0].Spec.Containers {
+		if container.Name == "ovnkube-controller" || container.Name == "ovnkube-node" {
+			ovnImage = container.Image
+			break
+		}
+	}
+	if ovnImage == "" {
+		return "", fmt.Errorf("could not find ovnkube-controller or ovnkube-node container in pod %s", ovnPods.Items[0].Name)
+	}
 
-	// Build ovnkube-trace command
-	execCmd := []string{
+	// Create a trace runner pod using the OVN image (which contains ovnkube-trace binary)
+	tracePod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      tracePodName,
+			Namespace: traceNS,
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:    traceContainer,
+					Image:   ovnImage,
+					Command: []string{"sleep", "3600"},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}
+	_, err = clientset.CoreV1().Pods(traceNS).Create(ctx, tracePod, metav1.CreateOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to create trace runner pod: %v", err)
+	}
+	defer func() {
+		_ = clientset.CoreV1().Pods(traceNS).Delete(ctx, tracePodName, metav1.DeleteOptions{})
+	}()
+
+	// Wait for trace runner pod to be running
+	for i := 0; i < 24; i++ {
+		p, getErr := clientset.CoreV1().Pods(traceNS).Get(ctx, tracePodName, metav1.GetOptions{})
+		if getErr == nil && p.Status.Phase == corev1.PodRunning {
+			break
+		}
+		if i == 23 {
+			return "", fmt.Errorf("trace runner pod did not reach Running state within 120s")
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+	}
+
+	traceCmd := []string{
 		"ovnkube-trace",
 		"-src-namespace", srcNS,
 		"-src", srcPod,
@@ -346,41 +462,9 @@ func runOVNKubeTrace(ctx context.Context, clientset *kubernetes.Clientset, confi
 		"-loglevel", "2",
 	}
 
-	scheme := runtime.NewScheme()
-	if err := corev1.AddToScheme(scheme); err != nil {
-		return "", err
-	}
-
-	// ovnkube-trace is in the ovnkube-controller container within ovnkube-node pod
-	// Note: Container structure changed - ovnkube-controller is now part of ovnkube-node pod
-	req := clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(nodePod).
-		Namespace("openshift-ovn-kubernetes").
-		SubResource("exec").
-		VersionedParams(&corev1.PodExecOptions{
-			Container: "ovnkube-controller",
-			Command:   execCmd,
-			Stdout:    true,
-			Stderr:    true,
-		}, runtime.NewParameterCodec(scheme))
-
-	exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
-	if err != nil {
-		return "", err
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-	if err != nil {
-		return stdout.String() + "\n" + stderr.String(), err
-	}
-
-	return stdout.String(), nil
+	return execCommandInPod(ctx, clientset, config, traceNS, tracePodName, traceContainer, traceCmd)
 }
+
 
 // execCommandInPod executes a command in a specific pod/container
 func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, config *rest.Config,
