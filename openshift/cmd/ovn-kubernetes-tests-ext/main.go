@@ -80,7 +80,12 @@ func main() {
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
 	ovnTestsExtension := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
-	// TODO: register test images using tests extension
+	ovnTestsExtension.RegisterImage(extension.Image{
+		Index:    -1,
+		Registry: "quay.io",
+		Name:     "openshifttest/hello-sdn",
+		Version:  "1.2.0",
+	})
 	// add ovn-kubernetes test suites into openshift suites
 	// by default, we treat all tests as parallel and only expose tests as Serial if the appropriate label is added - "Serial"
 	ovnTestsExtension.AddSuite(extension.Suite{
