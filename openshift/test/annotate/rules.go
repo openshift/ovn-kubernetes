@@ -128,7 +128,14 @@ var (
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			// localnet kubevirt tests mutate shared node state via
+			// SetupUnderlay (OVS bridge + ovn-bridge-mappings), run them
+			// serialized to avoid concurrent bridge-mappings updates.
+			`should maintain tcp connection with minimal downtime`,
+			`should start multiple VMs with same hostname`,
+			`Secondary/Localnet`,
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)

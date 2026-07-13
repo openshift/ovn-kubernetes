@@ -1203,13 +1203,13 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress routed over evpn": "[Suite:openshift/network/virtualization]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Suite:openshift/network/virtualization]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Serial][Suite:openshift/network/virtualization]",
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 ingress snat": "[Suite:openshift/network/virtualization]",
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Layer2 ingress snat": "[Suite:openshift/network/virtualization]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Localnet ingress snat": "[Suite:openshift/network/virtualization]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Localnet ingress snat": "[Serial][Suite:openshift/network/virtualization]",
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress routed": "[Suite:openshift/network/virtualization]",
 
@@ -1223,23 +1223,23 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Layer2 ingress snat": "[Suite:openshift/network/virtualization]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Suite:openshift/network/virtualization]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Serial][Suite:openshift/network/virtualization]",
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 ingress snat": "[Suite:openshift/network/virtualization]",
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Layer2 ingress snat": "[Suite:openshift/network/virtualization]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Localnet ingress snat": "[Suite:openshift/network/virtualization]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Localnet ingress snat": "[Serial][Suite:openshift/network/virtualization]",
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress snat": "[Suite:openshift/network/virtualization]",
 
 	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress snat": "[Suite:openshift/network/virtualization]",
 
-	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after failed live migration": "[Suite:openshift/network/virtualization]",
+	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after failed live migration": "[Serial][Suite:openshift/network/virtualization]",
 
-	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after succeeded live migration": "[Suite:openshift/network/virtualization]",
+	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after succeeded live migration": "[Serial][Suite:openshift/network/virtualization]",
 
-	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should start multiple VMs with same hostname": "[Suite:openshift/network/virtualization]",
+	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should start multiple VMs with same hostname": "[Serial][Suite:openshift/network/virtualization]",
 
 	"Load Balancer Service Tests with MetalLB Should ensure connectivity works on an external service when mtu changes in intermediate node": "[Disabled:Unimplemented]",
 
