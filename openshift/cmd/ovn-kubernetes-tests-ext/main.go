@@ -13,6 +13,7 @@ import (
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	kubevirttest "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/kubevirt"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -75,6 +76,15 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 }
 
 func main() {
+	// Use the fedora-with-test-tooling containerdisk image mirrored for OpenShift
+	// CI (registered in openshift/origin test/extended/util/image) so kubevirt
+	// tests do not pull unmirrored images, which trips the openshift-tests
+	// known-image-checker monitor and does not work in disconnected environments.
+	// FEDORA_WITH_TEST_TOOLING_IMAGE still takes precedence when set.
+	if os.Getenv("FEDORA_WITH_TEST_TOOLING_IMAGE") == "" {
+		kubevirttest.FedoraWithTestToolingContainerDiskImage = "quay.io/openshift/community-e2e-images:e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-20241024_891122a6fc-IycYTh-87XrXse4E"
+	}
+
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
 	ovnTestsExtension := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
