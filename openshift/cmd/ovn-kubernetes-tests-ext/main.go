@@ -80,9 +80,18 @@ func main() {
 	// CI (registered in openshift/origin test/extended/util/image) so kubevirt
 	// tests do not pull unmirrored images, which trips the openshift-tests
 	// known-image-checker monitor and does not work in disconnected environments.
-	// FEDORA_WITH_TEST_TOOLING_IMAGE still takes precedence when set.
+	// openshift-tests exports KUBE_TEST_REPO with the --from-repository value
+	// (e.g. the local dev-scripts registry on baremetalds jobs); the mirror tag
+	// is deterministic (see origin test/extended/util/image GetMappedImages), so
+	// only the repository part changes. FEDORA_WITH_TEST_TOOLING_IMAGE still
+	// takes precedence when set.
 	if os.Getenv("FEDORA_WITH_TEST_TOOLING_IMAGE") == "" {
-		kubevirttest.FedoraWithTestToolingContainerDiskImage = "quay.io/openshift/community-e2e-images:e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-20241024_891122a6fc-IycYTh-87XrXse4E"
+		const mirroredFedoraTag = "e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-20241024_891122a6fc-IycYTh-87XrXse4E"
+		repo := os.Getenv("KUBE_TEST_REPO")
+		if repo == "" {
+			repo = "quay.io/openshift/community-e2e-images"
+		}
+		kubevirttest.FedoraWithTestToolingContainerDiskImage = repo + ":" + mirroredFedoraTag
 	}
 
 	// Create our registry of openshift-tests extensions
