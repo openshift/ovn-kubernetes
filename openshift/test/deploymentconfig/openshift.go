@@ -4,11 +4,19 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
+
+var deploymentConfig api.DeploymentConfig
+
+func init() {
+	deploymentConfig = openshift{}
+	deploymentconfig.Set(deploymentConfig)
+}
 
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -31,7 +39,7 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 type openshift struct{}
 
 func New() api.DeploymentConfig {
-	return openshift{}
+	return deploymentConfig
 }
 
 func (m openshift) OVNKubernetesNamespace() string {
@@ -56,4 +64,8 @@ func (m openshift) GetAgnHostContainerImage() string {
 	// use downloadable image for external container.
 	// ref: https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L197
 	return "registry.k8s.io/e2e-test-images/agnhost:2.40"
+}
+
+func (m openshift) IsConfigurationEnabled(config api.Config) bool {
+	return false
 }
