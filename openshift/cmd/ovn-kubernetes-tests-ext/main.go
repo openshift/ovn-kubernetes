@@ -5,13 +5,12 @@ import (
 	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
-	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -115,7 +114,6 @@ func main() {
 		} else {
 			ocpInfra = infra
 			infraprovider.Set(ocpInfra)
-			deploymentconfig.Set(ocpdeploymentconfig.New())
 		}
 	}
 
