@@ -95,7 +95,7 @@ func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 		// The E2E utility method isLocalGWModeEnabled depends on the
 		// OVN_GATEWAY_MODE environment variable. All EVPN tests must
 		// satisfy this condition; otherwise, they will be skipped.
-		os.Setenv("OVN_GATEWAY_MODE", "local")
+		_ = os.Setenv("OVN_GATEWAY_MODE", "local")
 	}
 }
 
