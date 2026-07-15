@@ -109,8 +109,8 @@ if [ "$OVN_GATEWAY_MODE" == "local" ]; then
 fi
 
 # skipping the egress ip legacy health check test because it requires two
-# sequenced rollouts of both ovnkube-node and ovnkube-master that take a lot of
-# time.
+# sequenced rollouts of OVN-Kubernetes control plane components that take a lot
+# of time.
 skip "disabling egress nodes impeding Legacy health check"
 
 if [ "$ENABLE_MULTI_NET" != "true" ]; then
@@ -125,12 +125,6 @@ fi
 IP_MIGRATION_TESTS="Node IP and MAC address migration"
 if [[ "${WHAT}" != "${IP_MIGRATION_TESTS}"* ]]; then
   skip "Node IP and MAC address migration"
-fi
-
-# Only run Multi node zones interconnect tests if they are explicitly requested
-MULTI_NODE_ZONES_TESTS="Multi node zones interconnect"
-if [[ "${WHAT}" != "${MULTI_NODE_ZONES_TESTS}"* ]]; then
-  skip "Multi node zones interconnect"
 fi
 
 # Only run external gateway tests if they are explicitly requested
@@ -267,7 +261,7 @@ pushd e2e
 
 go mod download
 
-if [ "$ENABLE_EVPN" = true ]; then
+if [ "$ENABLE_EVPN" = true ] && [[ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}"* ]]; then
   # EVPN tests are parallel-safe (unique per-test resource names, randomized
   # subnets). Use the ginkgo CLI so that -procs=3 spawns 3 coordinated worker
   # processes — one per DescribeTable entry.  go test cannot drive Ginkgo

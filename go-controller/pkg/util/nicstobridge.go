@@ -12,7 +12,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/vishvananda/netlink"
 
 	"k8s.io/klog/v2"
@@ -359,31 +358,4 @@ func BridgeToNic(bridge string) error {
 	}
 	klog.Infof("Successfully deleted OVS bridge %q", bridge)
 	return nil
-}
-
-// GetDPUHostInterface returns the host representor interface attached to bridge
-func GetDPUHostInterface(bridgeName string) (string, error) {
-	portsToInterfaces, err := getBridgePortsInterfaces(bridgeName)
-	if err != nil {
-		return "", err
-	}
-
-	for _, ifaces := range portsToInterfaces {
-		for _, iface := range ifaces {
-			stdout, stderr, err := RunOVSVsctl("get", "Interface", strings.TrimSpace(iface), "Name")
-			if err != nil {
-				return "", fmt.Errorf("failed to get Interface %q Name on bridge %q:, stderr: %q, error: %v",
-					iface, bridgeName, stderr, err)
-
-			}
-			flavor, err := GetSriovnetOps().GetRepresentorPortFlavour(stdout)
-			if err == nil && flavor == sriovnet.PORT_FLAVOUR_PCI_PF {
-				// host representor interface found
-				return stdout, nil
-			}
-			continue
-		}
-	}
-	// No host interface found in provided bridge
-	return "", fmt.Errorf("dpu host interface was not found for bridge %q", bridgeName)
 }

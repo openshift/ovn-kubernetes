@@ -116,7 +116,7 @@ var _ = Describe("VTEPNotifier", func() {
 		}), "should record additional two events, following VTEP deletion")
 	})
 
-	It("should NOT notify VTEP update events (spec/status changes)", func() {
+	It("should NOT notify on VTEP spec-only changes", func() {
 		Eventually(func() map[string]int64 {
 			return s.GetReconciledKeys()
 		}).Should(Equal(map[string]int64{
@@ -125,21 +125,103 @@ var _ = Describe("VTEPNotifier", func() {
 			"test-vtep-2": 1,
 		}))
 
-		// Update VTEP spec (change CIDRs)
+		// Update VTEP spec (change CIDRs) without changing Accepted condition
 		vtep, err := vtepClient.K8sV1().VTEPs().Get(context.Background(), "test-vtep-1", metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 		vtep.Spec.CIDRs = []vtepv1.CIDR{"192.168.0.0/24"}
 		_, err = vtepClient.K8sV1().VTEPs().Update(context.Background(), vtep, metav1.UpdateOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
-		// Updates should NOT trigger notification (needUpdate returns false for updates)
 		Consistently(func() map[string]int64 {
 			return s.GetReconciledKeys()
 		}).Should(Equal(map[string]int64{
 			"test-vtep-0": 1,
 			"test-vtep-1": 1,
 			"test-vtep-2": 1,
-		}), "should NOT record additional events following VTEP update")
+		}), "should NOT record additional events following spec-only VTEP update")
+	})
+
+	It("should notify when VTEP Accepted condition changes", func() {
+		Eventually(func() map[string]int64 {
+			return s.GetReconciledKeys()
+		}).Should(Equal(map[string]int64{
+			"test-vtep-0": 1,
+			"test-vtep-1": 1,
+			"test-vtep-2": 1,
+		}))
+
+		// Set Accepted=True on test-vtep-1
+		vtep, err := vtepClient.K8sV1().VTEPs().Get(context.Background(), "test-vtep-1", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		vtep.Status.Conditions = []metav1.Condition{{
+			Type:               "Accepted",
+			Status:             metav1.ConditionTrue,
+			Reason:             "Allocated",
+			Message:            "VTEP allocation succeeded",
+			LastTransitionTime: metav1.Now(),
+		}}
+		_, err = vtepClient.K8sV1().VTEPs().UpdateStatus(context.Background(), vtep, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() map[string]int64 {
+			return s.GetReconciledKeys()
+		}).Should(Equal(map[string]int64{
+			"test-vtep-0": 1,
+			"test-vtep-1": 2,
+			"test-vtep-2": 1,
+		}), "should record additional event when VTEP becomes Accepted")
+	})
+
+	It("should notify when VTEP Accepted condition transitions from True to False", func() {
+		Eventually(func() map[string]int64 {
+			return s.GetReconciledKeys()
+		}).Should(Equal(map[string]int64{
+			"test-vtep-0": 1,
+			"test-vtep-1": 1,
+			"test-vtep-2": 1,
+		}))
+
+		// First set Accepted=True
+		vtep, err := vtepClient.K8sV1().VTEPs().Get(context.Background(), "test-vtep-0", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		vtep.Status.Conditions = []metav1.Condition{{
+			Type:               "Accepted",
+			Status:             metav1.ConditionTrue,
+			Reason:             "Allocated",
+			Message:            "VTEP allocation succeeded",
+			LastTransitionTime: metav1.Now(),
+		}}
+		_, err = vtepClient.K8sV1().VTEPs().UpdateStatus(context.Background(), vtep, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() map[string]int64 {
+			return s.GetReconciledKeys()
+		}).Should(Equal(map[string]int64{
+			"test-vtep-0": 2,
+			"test-vtep-1": 1,
+			"test-vtep-2": 1,
+		}))
+
+		// Now set Accepted=False
+		vtep, err = vtepClient.K8sV1().VTEPs().Get(context.Background(), "test-vtep-0", metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		vtep.Status.Conditions = []metav1.Condition{{
+			Type:               "Accepted",
+			Status:             metav1.ConditionFalse,
+			Reason:             "AllocationFailed",
+			Message:            "allocation failed",
+			LastTransitionTime: metav1.Now(),
+		}}
+		_, err = vtepClient.K8sV1().VTEPs().UpdateStatus(context.Background(), vtep, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		Eventually(func() map[string]int64 {
+			return s.GetReconciledKeys()
+		}).Should(Equal(map[string]int64{
+			"test-vtep-0": 3,
+			"test-vtep-1": 1,
+			"test-vtep-2": 1,
+		}), "should record additional event when VTEP transitions from Accepted to not Accepted")
 	})
 
 	It("should notify multiple subscribers", func() {
