@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package subnet
 
 import (
@@ -288,6 +291,11 @@ func (allocator *allocator) AllocateIPPerSubnet(name string, ips []*net.IPNet) e
 					break
 				}
 			}
+		}
+
+		if !allocated {
+			err = fmt.Errorf("failed to allocate IP %s for %s: not contained in any known subnet", ipnet.IP, name)
+			return err
 		}
 	}
 	return nil

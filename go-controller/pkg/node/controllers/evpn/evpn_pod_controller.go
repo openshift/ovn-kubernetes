@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package evpn
 
 import (
@@ -47,7 +50,7 @@ func (c *Controller) podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 		if oldObj.Spec.NodeName != c.nodeName {
 			return false
 		}
-		oldAnnot = oldObj.Annotations[util.OvnPodAnnotationName]
+		oldAnnot = oldObj.Annotations[types.OvnPodAnnotationName]
 	}
 	if newObj != nil {
 		if newObj.Spec.NodeName != c.nodeName {
@@ -56,7 +59,7 @@ func (c *Controller) podNeedsUpdate(oldObj, newObj *corev1.Pod) bool {
 		if util.PodCompleted(newObj) {
 			return true
 		}
-		newAnnot = newObj.Annotations[util.OvnPodAnnotationName]
+		newAnnot = newObj.Annotations[types.OvnPodAnnotationName]
 	}
 	return oldAnnot != newAnnot
 }

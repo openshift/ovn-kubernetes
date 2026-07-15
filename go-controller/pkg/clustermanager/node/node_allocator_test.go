@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -15,8 +18,10 @@ import (
 	listersv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	sharednode "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -449,9 +454,102 @@ func TestController_CleanupStaleAnnotation(t *testing.T) {
 	}
 }
 
-// TestNodeAllocator_HandleDeleteNode verifies that HandleDeleteNode correctly releases
-// both standard cluster subnets and hybrid overlay subnets (if enabled) when a node is deleted.
-func TestNodeAllocator_HandleDeleteNode(t *testing.T) {
+func TestNodeAllocatorNeedsNodeAllocationForIPModeChange(t *testing.T) {
+	origClusterSubnets := config.Default.ClusterSubnets
+	t.Cleanup(func() {
+		config.Default.ClusterSubnets = origClusterSubnets
+	})
+
+	tests := []struct {
+		name             string
+		clusterSubnets   []string
+		clusterSubnetLen []int
+		nodeSubnets      []string
+		want             bool
+	}{
+		{
+			name:             "single stack annotation requires reconcile after dual stack conversion",
+			clusterSubnets:   []string{"10.244.0.0/16", "fd00:10:244::/48"},
+			clusterSubnetLen: []int{24, 64},
+			nodeSubnets:      []string{"10.244.2.0/24"},
+			want:             true,
+		},
+		{
+			name:             "dual stack annotation requires reconcile after single stack conversion",
+			clusterSubnets:   []string{"10.244.0.0/16"},
+			clusterSubnetLen: []int{24},
+			nodeSubnets:      []string{"10.244.2.0/24", "fd00:10:244:2::/64"},
+			want:             true,
+		},
+		{
+			name:             "dual stack annotation satisfies dual stack cluster",
+			clusterSubnets:   []string{"10.244.0.0/16", "fd00:10:244::/48"},
+			clusterSubnetLen: []int{24, 64},
+			nodeSubnets:      []string{"10.244.2.0/24", "fd00:10:244:2::/64"},
+			want:             false,
+		},
+		{
+			name:             "single stack annotation satisfies single stack cluster",
+			clusterSubnets:   []string{"10.244.0.0/16"},
+			clusterSubnetLen: []int{24},
+			nodeSubnets:      []string{"10.244.2.0/24"},
+			want:             false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := config.PrepareTestConfig(); err != nil {
+				t.Fatalf("PrepareTestConfig() failed: %v", err)
+			}
+
+			ranges, err := rangesFromStrings(tt.clusterSubnets, tt.clusterSubnetLen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.Default.ClusterSubnets = ranges
+			config.IPv4Mode = false
+			config.IPv6Mode = false
+			for _, subnet := range ranges {
+				if subnet.CIDR.IP.To4() != nil {
+					config.IPv4Mode = true
+				} else {
+					config.IPv6Mode = true
+				}
+			}
+
+			netInfo, err := util.NewNetInfo(
+				&ovncnitypes.NetConf{
+					NetConf: cnitypes.NetConf{Name: types.DefaultNetworkName},
+				},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			annotations, err := util.UpdateNodeHostSubnetAnnotation(map[string]string{}, ovntest.MustParseIPNets(tt.nodeSubnets...), types.DefaultNetworkName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "node1",
+					Annotations: annotations,
+				},
+			}
+
+			na := &NodeAllocator{netInfo: netInfo}
+			state := sharednode.NewNodeAnnotationCache().UpdateNodeAnnotationState(node, true)
+			if got := na.NeedsNodeAllocationWithState(node, state); got != tt.want {
+				t.Fatalf("NeedsNodeAllocationWithState() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNodeAllocator_CleanupNodeWithoutNodeObject verifies that CleanupNode correctly releases
+// allocator state when the node object is unavailable (true delete case).
+func TestNodeAllocator_CleanupNodeWithoutNodeObject(t *testing.T) {
 	origHybridEnabled := config.HybridOverlay.Enabled
 	origHybridSubnets := config.HybridOverlay.ClusterSubnets
 	origClusterSubnets := config.Default.ClusterSubnets
@@ -534,8 +632,8 @@ func TestNodeAllocator_HandleDeleteNode(t *testing.T) {
 		},
 	}
 
-	if err := na.HandleDeleteNode(node); err != nil {
-		t.Fatalf("HandleDeleteNode failed: %v", err)
+	if err := na.CleanupNode(node.Name, nil); err != nil {
+		t.Fatalf("CleanupNode failed: %v", err)
 	}
 
 	v4usedAfter, _ := na.clusterSubnetAllocator.Usage()
@@ -548,5 +646,146 @@ func TestNodeAllocator_HandleDeleteNode(t *testing.T) {
 		if hoUsedAfter != 0 {
 			t.Errorf("Hybrid overlay subnet leak detected! Expected 0 allocated subnets, got %d", hoUsedAfter)
 		}
+	}
+}
+
+func TestController_CleanupNodeRemovesUDNAnnotations(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatal(err)
+	}
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+
+	netConf := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "udn1",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: types.Layer3Topology,
+		Role:     types.NetworkRolePrimary,
+		Subnets:  "10.1.0.0/16",
+	}
+	netInfo, err := util.NewNetInfo(netConf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	networkName := netInfo.GetNetworkName()
+
+	nodeSubnet := ovntest.MustParseIPNet("10.1.0.0/24")
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node1",
+			Annotations: map[string]string{},
+		},
+	}
+	node.Annotations, err = util.UpdateNodeHostSubnetAnnotation(node.Annotations, []*net.IPNet{nodeSubnet}, networkName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node.Annotations, err = util.UpdateNetworkIDAnnotation(node.Annotations, networkName, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeClient := fake.NewClientset(node)
+	kube := &kube.Kube{KClient: fakeClient}
+
+	na := &NodeAllocator{
+		nodeLister:             newFakeNodeLister([]*corev1.Node{node}),
+		kube:                   kube,
+		netInfo:                netInfo,
+		clusterSubnetAllocator: NewSubnetAllocator(),
+	}
+	_, subnetCIDR, err := net.ParseCIDR("10.1.0.0/16")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := na.clusterSubnetAllocator.AddNetworkRange(subnetCIDR, 24); err != nil {
+		t.Fatal(err)
+	}
+	if err := na.clusterSubnetAllocator.MarkAllocatedNetworks(node.Name, nodeSubnet); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := na.CleanupNode(node.Name, node); err != nil {
+		t.Fatalf("CleanupNode failed: %v", err)
+	}
+
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if util.HasNodeHostSubnetAnnotation(updatedNode, networkName) {
+		t.Fatalf("expected host subnet annotation to be removed for network %s", networkName)
+	}
+	if _, err := util.ParseNetworkIDAnnotation(updatedNode, networkName); !util.IsAnnotationNotSetError(err) {
+		t.Fatalf("expected network ID annotation to be removed for network %s, got: %v", networkName, err)
+	}
+	v4used, v6used := na.clusterSubnetAllocator.Usage()
+	if v4used != 0 || v6used != 0 {
+		t.Fatalf("expected subnet allocation to be released, got v4=%d v6=%d", v4used, v6used)
+	}
+}
+
+func TestController_CleanupNodeReleasesTunnelIDs(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatal(err)
+	}
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableInterconnect = true
+
+	netConf := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "udn2",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: types.Layer2Topology,
+		Role:     types.NetworkRolePrimary,
+	}
+	netInfo, err := util.NewNetInfo(netConf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	networkName := netInfo.GetNetworkName()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node1",
+			Annotations: map[string]string{},
+		},
+	}
+	node.Annotations, err = util.UpdateUDNLayer2NodeGRLRPTunnelIDs(node.Annotations, networkName, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeClient := fake.NewClientset(node)
+	kube := &kube.Kube{KClient: fakeClient}
+
+	na := &NodeAllocator{
+		nodeLister:             newFakeNodeLister([]*corev1.Node{node}),
+		kube:                   kube,
+		netInfo:                netInfo,
+		clusterSubnetAllocator: NewSubnetAllocator(),
+		idAllocator:            id.NewIDAllocator("tunnel-ids", 1024),
+	}
+	if err := na.idAllocator.ReserveID(networkName+"_"+node.Name, 42); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := na.CleanupNode(node.Name, node); err != nil {
+		t.Fatalf("CleanupNode failed: %v", err)
+	}
+
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(updatedNode, networkName); !util.IsAnnotationNotSetError(err) {
+		t.Fatalf("expected tunnel ID annotation to be removed for network %s, got: %v", networkName, err)
+	}
+	if gotID := na.idAllocator.GetID(networkName + "_" + node.Name); gotID != types.InvalidID {
+		t.Fatalf("expected tunnel ID to be released, got %d", gotID)
 	}
 }

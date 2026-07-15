@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package services
 
 import (
@@ -116,7 +119,7 @@ func makeNodeRouterTargetIPs(service *corev1.Service, node *nodeInfo, c *lbConfi
 
 	// TODO: For all scenarios the lbAddress should be set to hostAddressesStr but this is breaking CI needs more investigation
 	lbAddresses := node.hostAddressesStr()
-	if config.OvnKubeNode.Mode == types.NodeModeFull {
+	if config.IsModeFull() {
 		lbAddresses = node.l3gatewayAddressesStr()
 	}
 

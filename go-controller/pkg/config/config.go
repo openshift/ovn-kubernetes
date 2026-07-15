@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package config
 
 import (
@@ -77,7 +80,7 @@ var (
 	// ovn-kubernetes build date
 	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
-	Version = "1.2.0"
+	Version = "1.3.0"
 	// version of the go runtime used to compile ovn-kubernetes
 	GoVersion = runtime.Version()
 	// os and architecture used to build ovn-kubernetes
@@ -544,6 +547,12 @@ type GatewayConfig struct {
 	// on the external bridge. The Host IP would be on this device.
 	// Should be used mutually exclusive to the `--gateway-interface` flag.
 	GatewayAcceleratedInterface string `gcfg:"gateway-accelerated-interface"`
+	// DPUHostGatewayRepresentorInterface is the DPU-side representor of the host's
+	// uplink (PF). For some DPUs this is discovered automatically via
+	// phys_port_name via switchdev metadata. In simulated environments or other
+	// interpretations of DPUs, it must be specified explicitly
+	// because the interface has no switchdev metadata.
+	DPUHostGatewayRepresentorInterface string `gcfg:"dpu-host-gateway-representor-interface"`
 	// Egress gateway interface is the optional network interface to use for external gw pods traffic.
 	EgressGWInterface string `gcfg:"egw-interface"`
 	// NextHop is the gateway IP address of Interface; will be autodetected if not given
@@ -1644,6 +1653,13 @@ var OVNGatewayFlags = []cli.Flag{
 			"This is typically a VF or SF device. When specified it would be used as the in_port for Openflow rules " +
 			"on the external bridge. The Host IP would be on this device.",
 		Destination: &cliConfig.Gateway.GatewayAcceleratedInterface,
+	},
+	&cli.StringFlag{
+		Name: "dpu-host-gateway-representor-interface",
+		Usage: "The DPU-side representor interface for the host's uplink (PF). For some DPUs this is discovered " +
+			"automatically via phys_port_name via switchdev metadata. In simulated environments or other interpretations of " +
+			"DPUs, it must be specified explicitly because the interface has no switchdev metadata.",
+		Destination: &cliConfig.Gateway.DPUHostGatewayRepresentorInterface,
 	},
 	&cli.StringFlag{
 		Name: "exgw-interface",
@@ -3186,6 +3202,18 @@ func ovnKubeNodeModeSupported(mode string) error {
 	return nil
 }
 
+func IsModeFull() bool {
+	return OvnKubeNode.Mode == types.NodeModeFull
+}
+
+func IsModeDPU() bool {
+	return OvnKubeNode.Mode == types.NodeModeDPU
+}
+
+func IsModeDPUHost() bool {
+	return OvnKubeNode.Mode == types.NodeModeDPUHost
+}
+
 // buildOvnKubeNodeConfig updates OvnKubeNode config from cli and config file
 func buildOvnKubeNodeConfig(cli, file *config) error {
 	// Copy config file values over default values
@@ -3204,7 +3232,7 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	}
 
 	// ovnkube-node-mode dpu/dpu-host does not support hybrid overlay
-	if OvnKubeNode.Mode != types.NodeModeFull && HybridOverlay.Enabled {
+	if (IsModeDPU() || IsModeDPUHost()) && HybridOverlay.Enabled {
 		return fmt.Errorf("hybrid overlay is not supported with ovnkube-node mode %s", OvnKubeNode.Mode)
 	}
 
@@ -3231,13 +3259,13 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	// when DPU is used, management port is always backed by a representor. On the
 	// host side, it needs to be provided through --ovnkube-node-mgmt-port-netdev.
 	// On the DPU, it is derrived from the annotation exposed on the host side.
-	if OvnKubeNode.Mode == types.NodeModeDPU && !(OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "") {
+	if IsModeDPU() && !(OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "") {
 		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided")
 	}
-	if OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
+	if IsModeDPUHost() && OvnKubeNode.MgmtPortNetdev == "" && OvnKubeNode.MgmtPortDPResourceName == "" {
 		return fmt.Errorf("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided")
 	}
-	if OVNKubernetesFeature.EnableNetworkSegmentation && OvnKubeNode.Mode == types.NodeModeDPUHost && OvnKubeNode.MgmtPortDPResourceName == "" {
+	if OVNKubernetesFeature.EnableNetworkSegmentation && IsModeDPUHost() && OvnKubeNode.MgmtPortDPResourceName == "" {
 		return fmt.Errorf("ovnkube-node-mgmt-port-dp-resource-name must be provided on dpu-host mode if network segmentation is enabled")
 	}
 	return nil

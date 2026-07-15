@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package factory
 
 import (
@@ -212,7 +215,6 @@ func SetEventQueueSize(newEventQueueSize uint32) {
 }
 
 // types for dynamic handlers created when adding a network policy
-type peerNamespaceSelector struct{}
 type localPodSelector struct{}
 
 // types for handlers related to egress IP
@@ -245,7 +247,6 @@ var (
 	EgressServiceType               reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
 	AdminNetworkPolicyType          reflect.Type = reflect.TypeOf(&anpapi.AdminNetworkPolicy{})
 	BaselineAdminNetworkPolicyType  reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
-	PeerNamespaceSelectorType       reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	LocalPodSelectorType            reflect.Type = reflect.TypeOf(&localPodSelector{})
 	NetworkAttachmentDefinitionType reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType          reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
@@ -926,7 +927,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to know what is the primary network for a namespace on the CNI side, which
 	// needs the NAD factory whenever the UDN feature is used.
-	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || config.OvnKubeNode.Mode == types.NodeModeDPU) {
+	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || config.IsModeDPU()) {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(eventQueueSize,
 			NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(),
@@ -1291,7 +1292,7 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // Priority of the handler is what determine which handler would get an event first
 // This is relevant only for handlers that are sharing the same resources:
 // Pods: shared by PodType (0), EgressIPPodType (1), LocalPodSelectorType (3)
-// Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (2)
+// Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1)
 // Nodes: shared by NodeType (0), EgressNodeType (1)
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
 // Example: EgressIPPodType will always get the pod event after PodType
@@ -1304,8 +1305,6 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 		return 3
 	case EgressIPNamespaceType:
 		return 1
-	case PeerNamespaceSelectorType:
-		return 2
 	case EgressNodeType:
 		return 1
 	default:
@@ -1346,7 +1345,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
-	case PeerNamespaceSelectorType, EgressIPNamespaceType:
+	case EgressIPNamespaceType:
 		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil

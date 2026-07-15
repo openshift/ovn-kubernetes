@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package cni
 
 import (
@@ -66,7 +69,7 @@ func NewCNIServer(
 ) (*Server, error) {
 	var nadLister nadv1Listers.NetworkAttachmentDefinitionLister
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
 
@@ -290,7 +293,7 @@ func (s *Server) handleCNIMetrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) checkDPUHealth(req *PodRequest) error {
-	if s.dpuHealth == nil || config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if s.dpuHealth == nil || config.IsModeDPU() || config.IsModeFull() {
 		return nil
 	}
 

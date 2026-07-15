@@ -111,9 +111,7 @@ spec:
             memory: 300Mi
             {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
             {{ .Values.mgmtPortVFResourceName }}: {{ .Values.mgmtPortVFsCount }}
-            {{- end }}
           limits:
-            {{- if and (.Values.global.enableNetworkSegmentation) (.Values.mgmtPortVFResourceName) (.Values.mgmtPortVFsCount) }}
             {{ .Values.mgmtPortVFResourceName }}: {{ .Values.mgmtPortVFsCount }}
             {{- end }}
         env:
@@ -122,7 +120,7 @@ spec:
           value: "crash"
         {{ end -}}
         - name: OVN_DAEMONSET_VERSION
-          value: "1.2.0"
+          value: "1.3.0"
         - name: OVNKUBE_LOGLEVEL
           value: {{ default 4 .Values.logLevel | quote }}
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -168,7 +166,7 @@ spec:
         - name: OVN_GATEWAY_MODE
           value: {{ default "shared" .Values.global.gatewayMode }}
         - name: OVN_GATEWAY_OPTS
-          value: {{ default "" .Values.global.gatewayOpts | quote }}
+          value: {{ .Values.gatewayOpts | default .Values.global.gatewayOpts | default "" | quote }}
         - name: OVN_HYBRID_OVERLAY_ENABLE
           value: {{ default "" .Values.global.enableHybridOverlay | quote }}
         - name: OVN_ADMIN_NETWORK_POLICY_ENABLE
@@ -179,6 +177,8 @@ spec:
           value: {{ default "" .Values.global.egressIpHealthCheckPort | quote }}
         - name: OVN_EGRESSSERVICE_ENABLE
           value: {{ default "" .Values.global.enableEgressService | quote }}
+        - name: OVN_ENABLE_MULTI_EXTERNAL_GATEWAY
+          value: {{ default "" .Values.global.enableMultiExternalGateway | quote }}
         - name: OVN_HYBRID_OVERLAY_NET_CIDR
           value: {{ default "" .Values.global.hybridOverlayNetCidr | quote }}
         - name: OVN_DISABLE_SNAT_MULTIPLE_GWS

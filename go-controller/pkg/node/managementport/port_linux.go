@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build linux
 // +build linux
 
@@ -75,9 +78,9 @@ func NewManagementPortController(
 
 	var hasOVS, hasNetdev, hasRepresentor bool
 	switch {
-	case config.OvnKubeNode.Mode == types.NodeModeDPU:
+	case config.IsModeDPU():
 		hasRepresentor = true
-	case config.OvnKubeNode.Mode == types.NodeModeDPUHost:
+	case config.IsModeDPUHost():
 		hasNetdev = true
 	case config.OvnKubeNode.MgmtPortNetdev != "":
 		hasRepresentor = true
@@ -151,7 +154,7 @@ func (c *managementPortController) start(stopChan <-chan struct{}) error {
 	}
 
 	if config.Gateway.NodeportEnable {
-		if config.OvnKubeNode.Mode == types.NodeModeFull {
+		if config.IsModeFull() {
 			// (TODO): Internal Traffic Policy is not supported in DPU mode
 			if err := initMgmPortRoutingRules(c.cfg); err != nil {
 				return err
@@ -214,7 +217,7 @@ func tearDownManagementPortConfig(link netlink.Link) error {
 		return err
 	}
 
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		return nil
 	}
 	nft, err := nodenft.GetNFTablesHelper()
@@ -641,7 +644,7 @@ func unconfigureMgmtNetdevicePort(mgmtPortName string) error {
 	}
 
 	savedName := ""
-	if config.OvnKubeNode.Mode != types.NodeModeDPUHost {
+	if config.IsModeDPU() || config.IsModeFull() {
 		// Get original interface name saved at OVS database
 		stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".", "external-ids:ovn-orig-mgmt-port-netdev-name")
 		if err != nil {

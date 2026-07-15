@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package config
 
 import (
@@ -9,7 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/containernetworking/cni/libcni"
-	"github.com/containernetworking/cni/pkg/types"
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
@@ -27,7 +30,7 @@ const CNISpecVersion = "1.1.0"
 // be written.
 func WriteCNIConfig() error {
 	netConf := &ovncnitypes.NetConf{
-		NetConf: types.NetConf{
+		NetConf: cnitypes.NetConf{
 			CNIVersion: CNISpecVersion,
 			Name:       "ovn-kubernetes",
 			Type:       CNI.Plugin,

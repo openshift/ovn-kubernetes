@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # This script will run a bunch of ovnkube-trace commands to make rudimentary
 # testing easier and to provide a bunch of example pods, services and parameters
 # for testing. This should help verify that ovnkube-trace still works well when changes

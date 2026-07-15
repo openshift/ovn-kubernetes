@@ -1,10 +1,13 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package main
 
 import (
 	"os"
 
 	"github.com/containernetworking/cni/pkg/skel"
-	"github.com/containernetworking/cni/pkg/types"
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/version"
 	bv "github.com/containernetworking/plugins/pkg/utils/buildversion"
 	"github.com/urfave/cli/v2"
@@ -35,9 +38,9 @@ func main() {
 
 	if err := c.Run(os.Args); err != nil {
 		// Print the error to stdout in conformance with the CNI spec
-		e, ok := err.(*types.Error)
+		e, ok := err.(*cnitypes.Error)
 		if !ok {
-			e = &types.Error{Code: 100, Msg: err.Error()}
+			e = &cnitypes.Error{Code: 100, Msg: err.Error()}
 		}
 		e.Print()
 	}

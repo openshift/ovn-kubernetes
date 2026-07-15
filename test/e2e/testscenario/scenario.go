@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package testscenario
 
 // ValidateCRScenario represent test scenario where a manifest is applied and failed with the expected error.

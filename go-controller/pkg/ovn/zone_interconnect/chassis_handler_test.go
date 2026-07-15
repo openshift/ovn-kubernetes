@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package zoneinterconnect
 
 import (
@@ -125,7 +128,6 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			var libovsdbOvnSBClient libovsdbclient.Client
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
@@ -172,7 +174,6 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 			config.Default.EncapPort = 9880
 
 			var libovsdbOvnSBClient libovsdbclient.Client
@@ -214,7 +215,6 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			var libovsdbOvnSBClient libovsdbclient.Client
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
@@ -267,7 +267,6 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			var libovsdbOvnSBClient libovsdbclient.Client
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
@@ -316,7 +315,6 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			var libovsdbOvnSBClient libovsdbclient.Client
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
@@ -370,7 +368,6 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			var libovsdbOvnSBClient libovsdbclient.Client
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
@@ -432,7 +429,6 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			var libovsdbOvnSBClient libovsdbclient.Client
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
@@ -480,7 +476,6 @@ var _ = ginkgo.Describe("Zone Interconnect Chassis Operations", func() {
 
 			_, err := config.InitConfig(ctx, nil, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			config.Kubernetes.HostNetworkNamespace = ""
 
 			var libovsdbOvnSBClient libovsdbclient.Client
 			_, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)

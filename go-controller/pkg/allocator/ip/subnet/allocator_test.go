@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package subnet
 
 import (
@@ -240,6 +243,19 @@ var _ = ginkgo.Describe("Subnet IP allocator operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = allocator.AllocateIPPerSubnet(subnetName, ovntest.MustParseIPNets(expectedIPs...))
 			gomega.Expect(err).To(gomega.MatchError(ipam.ErrAllocated))
+		})
+
+		ginkgo.It("fails to allocate IP not contained in any known subnet", func() {
+			err := allocator.AddOrUpdateSubnet(SubnetConfig{
+				Name:    subnetName,
+				Subnets: ovntest.MustParseIPNets("10.1.1.0/24"),
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Try to allocate an IP from a completely different subnet
+			outOfRangeIPs := ovntest.MustParseIPNets("10.2.0.50/24")
+			err = allocator.AllocateIPPerSubnet(subnetName, outOfRangeIPs)
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("not contained in any known subnet")))
 		})
 
 	})

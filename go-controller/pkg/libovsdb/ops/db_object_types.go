@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ops
 
 import "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -126,6 +129,7 @@ var AddressSetNetworkPolicy = newObjectIDsType(addressSet, NetworkPolicyOwnerTyp
 	IPFamilyKey,
 })
 
+// deprecated, should only be used for sync.
 var AddressSetNamespace = newObjectIDsType(addressSet, NamespaceOwnerType, []ExternalIDKey{
 	// namespace
 	ObjectNameKey,

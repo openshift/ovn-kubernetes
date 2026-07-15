@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package node
 
 import (
@@ -145,5 +148,36 @@ func TestParseSubnetMapValueRejectsEmptySubnetEntry(t *testing.T) {
 	_, err := parseSubnetMapValue(types.NodeSubnetsAnnotation, `{"isolatednet":[]}`)
 	if err == nil {
 		t.Fatal("expected empty subnet entry to be rejected")
+	}
+}
+
+func TestGatewayAnnotationChangedForNetworkWithState(t *testing.T) {
+	cache := NewNodeAnnotationCache()
+
+	oldNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Annotations: map[string]string{
+				util.OvnNodeL3GatewayConfig: `{"default":{"mode":"shared","mac-address":"0a:58:0a:01:01:01","ip-address":"192.168.1.2/24","next-hop":"192.168.1.1"},"blue":{"mode":"shared","mac-address":"0a:58:0a:01:01:02","ip-address":"10.0.0.2/24","next-hop":"10.0.0.1"}}`,
+			},
+		},
+	}
+	newNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-a",
+			Annotations: map[string]string{
+				util.OvnNodeL3GatewayConfig: `{"default":{"mode":"shared","mac-address":"0a:58:0a:01:01:01","ip-address":"192.168.1.2/24","next-hop":"192.168.1.1"},"blue":{"mode":"shared","mac-address":"0a:58:0a:01:01:02","ip-address":"10.0.1.2/24","next-hop":"10.0.1.1"}}`,
+			},
+		},
+	}
+
+	oldState := cache.UpdateNodeAnnotationState(oldNode, false)
+	newState := cache.UpdateNodeAnnotationState(newNode, true)
+
+	if GatewayAnnotationChangedForNetworkWithState(oldState, newState, types.DefaultNetworkName) {
+		t.Fatal("expected default network gateway state to remain unchanged when only another network changed")
+	}
+	if !GatewayAnnotationChangedForNetworkWithState(oldState, newState, "blue") {
+		t.Fatal("expected blue network gateway state change to be detected")
 	}
 }

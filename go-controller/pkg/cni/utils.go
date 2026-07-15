@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package cni
 
 import (
@@ -11,7 +14,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -142,7 +144,7 @@ func PodAnnotation2PodInfo(podAnnotation map[string]string, podNADAnnotation *ut
 		RoutableMTU:          config.Default.RoutableMTU, // TBD, configurable for UDNs?
 		Ingress:              ingress,
 		Egress:               egress,
-		IsDPUHostMode:        config.OvnKubeNode.Mode == types.NodeModeDPUHost,
+		IsDPUHostMode:        config.IsModeDPUHost(),
 		PodUID:               podUID,
 		NetdevName:           netdevname,
 		NetName:              netName,

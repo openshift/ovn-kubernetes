@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 
 # run on master to configure ovn-kubernetes
 # The /etc/openvswitch/ovn_k8s.conf and /etc/sysconfig/ovn-kubernetes

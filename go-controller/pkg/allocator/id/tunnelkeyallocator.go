@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package id
 
 // TunnelKeysAllocator is used to allocate tunnel Keys for distributed OVN datapaths.

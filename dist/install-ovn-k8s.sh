@@ -1,4 +1,7 @@
 #!/usr/bin/env bash -ex
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # shellcheck disable=SC2016
 
 SCRIPTS_DIR=$(dirname "${BASH_SOURCE[0]}")

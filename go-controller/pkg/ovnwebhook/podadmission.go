@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovnwebhook
 
 import (
@@ -24,7 +27,7 @@ type checkPodAnnot func(nodeLister listers.NodeLister, v annotationChange, pod *
 
 // interconnectPodAnnotationChecks holds annotations allowed for ovnkube-node:<nodeName> users in IC environments
 var interconnectPodAnnotations = map[string]checkPodAnnot{
-	util.OvnPodAnnotationName: func(nodeLister listers.NodeLister, v annotationChange, pod *corev1.Pod, nodeName string) error {
+	types.OvnPodAnnotationName: func(nodeLister listers.NodeLister, v annotationChange, pod *corev1.Pod, nodeName string) error {
 		// Ignore kubevirt pods with live migration, the IP can cross node-subnet boundaries
 		if kubevirt.IsPodLiveMigratable(pod) {
 			return nil
@@ -34,8 +37,11 @@ var interconnectPodAnnotations = map[string]checkPodAnnot{
 			return fmt.Errorf("the annotation is not allowed on host networked pods")
 		}
 
-		podAnnot, err := util.UnmarshalPodAnnotation(map[string]string{util.OvnPodAnnotationName: v.value}, types.DefaultNetworkName)
+		podAnnot, err := util.UnmarshalPodAnnotation(map[string]string{types.OvnPodAnnotationName: v.value}, types.DefaultNetworkName)
 		if err != nil {
+			if util.IsAnnotationNotSetError(err) {
+				return nil
+			}
 			return err
 		}
 		node, err := nodeLister.Get(nodeName)

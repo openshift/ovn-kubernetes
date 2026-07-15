@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 
 # Install Prometheus on infra nodes in kind cluster
 # This script installs the kube-prometheus-stack helm chart on infra nodes

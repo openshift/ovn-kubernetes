@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package evpn
 
 import (
@@ -172,14 +175,16 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, kube kube.Inter
 	return c, nil
 }
 
-func (c *Controller) Start() error {
+func (c *Controller) Start() (err error) {
 	klog.Info("Starting EVPN node controller")
 
-	id, err := c.networkMgr.RegisterNADReconciler(c.nadReconciler)
-	if err != nil {
-		return fmt.Errorf("failed to register the EVPN NAD reconciler: %v", err)
-	}
-	c.nadReconcilerID = id
+	c.nadReconcilerID = c.networkMgr.RegisterNADReconciler(c.nadReconciler)
+	defer func() {
+		if err != nil {
+			c.networkMgr.DeRegisterNADReconciler(c.nadReconcilerID)
+			c.nadReconcilerID = 0
+		}
+	}()
 	return controller.StartWithInitialSync(c.initialSync, c.vtepController, c.nadReconciler, c.podController)
 }
 
@@ -241,9 +246,7 @@ func (c *Controller) Stop() {
 	}
 
 	if c.nadReconcilerID != 0 {
-		if err := c.networkMgr.DeRegisterNADReconciler(c.nadReconcilerID); err != nil {
-			klog.Warningf("Failed to deregister EVPN NAD reconciler: %v", err)
-		}
+		c.networkMgr.DeRegisterNADReconciler(c.nadReconcilerID)
 	}
 
 	controller.Stop(c.vtepController, c.nadReconciler, c.podController)

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package ovn
 
 import (
@@ -19,6 +22,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
 	libovsdbutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
@@ -97,16 +101,6 @@ func (oc *DefaultNetworkController) recordPodEvent(reason string, addErr error, 
 	}
 }
 
-func (oc *DefaultNetworkController) recordNodeEvent(reason string, addErr error, node *corev1.Node) {
-	nodeRef, err := ref.GetReference(scheme.Scheme, node)
-	if err != nil {
-		klog.Errorf("Couldn't get a reference to node %s to post an event: '%v'", node.Name, err)
-	} else {
-		klog.V(5).Infof("Posting a %s event for node %s", corev1.EventTypeWarning, node.Name)
-		oc.recorder.Eventf(nodeRef, corev1.EventTypeWarning, reason, addErr.Error())
-	}
-}
-
 func exGatewayAnnotationsChanged(oldPod, newPod *corev1.Pod) bool {
 	return oldPod.Annotations[util.RoutingNamespaceAnnotation] != newPod.Annotations[util.RoutingNamespaceAnnotation] ||
 		oldPod.Annotations[util.RoutingNetworkAnnotation] != newPod.Annotations[util.RoutingNetworkAnnotation] ||
@@ -129,12 +123,6 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *corev1.Pod, addPort b
 		return nil
 	}
 
-	// Add podIPs on no host subnet Nodes to the namespace address_set
-	switchName := pod.Spec.NodeName
-	if oc.lsManager.IsNonHostSubnetSwitch(switchName) {
-		return oc.ensureRemotePodIP(oldPod, pod, addPort)
-	}
-
 	// If an external gateway pod is in terminating or not ready state then remove the
 	// routes for the external gateway pod
 	if util.PodTerminating(pod) || !v1pod.IsPodReadyConditionTrue(pod.Status) {
@@ -149,7 +137,7 @@ func (oc *DefaultNetworkController) ensurePod(oldPod, pod *corev1.Pod, addPort b
 	}
 
 	klog.V(5).Infof("Ensuring zone remote for Pod %s/%s in node %s", pod.Namespace, pod.Name, pod.Spec.NodeName)
-	return oc.ensureRemoteZonePod(oldPod, pod, addPort)
+	return oc.ensureRemoteZonePod(oldPod, pod)
 }
 
 // ensureLocalZonePod tries to set up a local zone pod. It returns nil on success and error on failure; failure
@@ -215,30 +203,12 @@ func (oc *DefaultNetworkController) ensureLocalZonePod(oldPod, pod *corev1.Pod, 
 	return nil
 }
 
-func (oc *DefaultNetworkController) ensureRemotePodIP(oldPod, pod *corev1.Pod, addPort bool) error {
-	if (addPort || (oldPod != nil && len(pod.Status.PodIPs) != len(oldPod.Status.PodIPs))) && !util.PodWantsHostNetwork(pod) {
-		podIfAddrs, err := util.GetPodCIDRsWithFullMask(pod, oc.GetNetInfo(), nil)
-		if err != nil {
-			// not finding pod IPs on a remote pod is common until the other node wires the pod, suppress it
-			return fmt.Errorf("failed to obtain IPs to add remote pod %s/%s: %w",
-				pod.Namespace, pod.Name, ovntypes.NewSuppressedError(err))
-		}
-		if err := oc.addRemotePodToNamespace(pod.Namespace, podIfAddrs); err != nil {
-			return fmt.Errorf("failed to add remote pod %s/%s to namespace: %w", pod.Namespace, pod.Name, err)
-		}
-	}
-	return nil
-}
-
 // ensureRemoteZonePod tries to set up remote zone pod bits required to interconnect it.
-//   - Adds the remote pod ips to the pod namespace address set for network policy and egress gw
+//   - Reconciles external-gateway annotations on the remote pod
+//   - For live-migratable VMs, ensures remote-zone pod-to-node routes
 //
 // It returns nil on success and error on failure; failure indicates the pod set up should be retried later.
-func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *corev1.Pod, addPort bool) error {
-	if err := oc.ensureRemotePodIP(oldPod, pod, addPort); err != nil {
-		return err
-	}
-
+func (oc *DefaultNetworkController) ensureRemoteZonePod(oldPod, pod *corev1.Pod) error {
 	//FIXME: Update comments & reduce code duplication.
 	// check if this remote pod is serving as an external GW.
 	if oldPod != nil && (exGatewayAnnotationsChanged(oldPod, pod) || networkStatusAnnotationsChanged(oldPod, pod)) {
@@ -332,10 +302,6 @@ func (oc *DefaultNetworkController) removeRemoteZonePod(pod *corev1.Pod) error {
 		return nil
 	}
 
-	if err := oc.removeRemoteZonePodFromNamespaceAddressSet(pod); err != nil {
-		return fmt.Errorf("failed to remove the remote zone pod: %w", err)
-	}
-
 	// FIXME: there are other things we are probably leaving behind and should
 	// be removed for completed VMs, like per-pod SNAT. Also
 	// removeRemoteZonePodFromNamespaceAddressSet above should probably not be
@@ -410,23 +376,18 @@ func (oc *DefaultNetworkController) syncNodeGateway(node *corev1.Node) error {
 	return oc.deleteAdvertisedNetworkIsolation(node.Name)
 }
 
-// gatewayChanged() compares old annotations to new and returns true if something has changed.
-func gatewayChanged(oldNode, newNode *corev1.Node) bool {
-	return oldNode.Annotations[util.OvnNodeL3GatewayConfig] != newNode.Annotations[util.OvnNodeL3GatewayConfig] ||
-		oldNode.Annotations[util.OvnNodeChassisID] != newNode.Annotations[util.OvnNodeChassisID]
+// gatewayChanged compares the per-network gateway annotation between node
+// revisions. Chassis changes are handled separately by callers that need them.
+func gatewayChanged(oldNode, newNode *corev1.Node, oldState, newState *nodecontroller.NodeAnnotationState, netName string) bool {
+	if oldState != nil && newState != nil {
+		return nodecontroller.GatewayAnnotationChangedForNetworkWithState(oldState, newState, netName)
+	}
+	return oldNode.Annotations[util.OvnNodeL3GatewayConfig] != newNode.Annotations[util.OvnNodeL3GatewayConfig]
 }
 
 // hostCIDRsChanged compares old annotations to new and returns true if the something has changed.
 func hostCIDRsChanged(oldNode, newNode *corev1.Node) bool {
 	return util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
-}
-
-func nodeSubnetChanged(oldNode, node *corev1.Node, netName string) bool {
-	if !util.NodeSubnetAnnotationChanged(oldNode, node) {
-		return false
-	}
-
-	return util.NodeSubnetAnnotationChangedForNetwork(oldNode, node, netName)
 }
 
 func primaryAddrChanged(oldNode, newNode *corev1.Node) bool {

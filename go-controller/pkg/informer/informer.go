@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 // Package informer provides a wrapper around a client-go SharedIndexInformer
 // for event handling. It removes a lot of boilerplate code that is required
 // when using workqueues
