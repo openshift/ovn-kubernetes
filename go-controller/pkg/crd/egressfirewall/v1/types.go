@@ -40,7 +40,6 @@ type EgressFirewall struct {
 type EgressFirewallStatus struct {
 	// +optional
 	Status string `json:"status,omitempty"`
-	// +patchStrategy=merge
 	// +listType=set
 	// +optional
 	Messages []string `json:"messages,omitempty"`
