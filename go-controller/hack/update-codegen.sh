@@ -59,7 +59,7 @@ for crd in ${crds}; do
   
   api_version=$(get_crd_version "${crd}")
 
-  # Clean up previously generated files to avoid stale copies
+  # Clean up previously generated files to avoid stale copies.
   echo "Cleaning up existing generated files for $crd ($api_version)"
   rm -rf "${SCRIPT_ROOT}"/pkg/crd/$crd/${api_version}/apis
 
