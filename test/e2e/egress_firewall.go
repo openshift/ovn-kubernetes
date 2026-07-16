@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
@@ -152,13 +153,20 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				f.Namespace = namespace
 				framework.ExpectNoError(err)
 
-				userDefinedNetworkIPv4Subnet := "172.31.0.0/16"
-				userDefinedNetworkIPv6Subnet := "2014:100:200::0/60"
+				userDefinedNetworkIPv4Subnets, userDefinedNetworkIPv6Subnets := allocators.GetNthFirstUDNSubnets(1)
+				cidr := joinStrings(joinStrings(userDefinedNetworkIPv4Subnets...), joinStrings(userDefinedNetworkIPv6Subnets...))
+				if udnTopology == "layer3" {
+					// For Layer 3, use multiple CIDRs per IP family. The first
+					// CIDR is just big enough to allocate hostSubnets for the
+					// first two nodes, remaining nodes will be allocated
+					// hostSubnets from the second CIDR
+					cidr = primaryLayer3MultiCIDRs()
+				}
 
 				nadCfg := networkAttachmentConfigParams{
 					name:     "tenant-red",
 					topology: udnTopology,
-					cidr:     joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
+					cidr:     cidr,
 					role:     "primary",
 				}
 
@@ -167,10 +175,10 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				switch strings.ToLower(udnTopology) {
 				case "layer2":
 					createLayer2PrimaryUDNWithSubnets(f.ClientSet, f.Namespace.Name, netConfig.name,
-						userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet)
+						userDefinedNetworkIPv4Subnets, userDefinedNetworkIPv6Subnets)
 				case "layer3":
-					createLayer3PrimaryUDNWithSubnets(f.ClientSet, f.Namespace.Name, netConfig.name,
-						userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet)
+					createPrimaryUDNWithSubnets(f.ClientSet, f.Namespace.Name, netConfig.name, "Layer3",
+						userDefinedNetworkIPv4Subnets, userDefinedNetworkIPv6Subnets)
 				default:
 					framework.Failf("unsupported UDN topology %q", udnTopology)
 				}

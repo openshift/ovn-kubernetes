@@ -22,6 +22,16 @@ const (
 	protoPrefixV6 = "ipv6"
 )
 
+func matchIPNetFamily(isIPv6 bool, ipnets []*net.IPNet) []*net.IPNet {
+	var matches []*net.IPNet
+	for _, ipnet := range ipnets {
+		if utilnet.IsIPv6CIDR(ipnet) == isIPv6 {
+			matches = append(matches, ipnet)
+		}
+	}
+	return matches
+}
+
 func (b *BridgeConfiguration) DefaultBridgeFlows(hostSubnets []*net.IPNet, extraIPs []net.IP) ([]string, error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
@@ -141,6 +151,22 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 				"actions=ct(zone=%d,nat,table=5)",
 				nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefixV4, protoPrefixV4,
 				config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String(), config.Default.OVNMasqConntrackZone))
+
+		for _, netConfig := range b.patchedNetConfigs() {
+			if !isLocalGatewayNoOverlayUDN(netConfig) {
+				continue
+			}
+			// table 0, reply traffic from host back to OVN for no-overlay UDN
+			// service hairpins. Table 4 SNATs the forward direction to this
+			// UDN's gateway router masquerade IP; use the OVN masquerade CT
+			// zone to unSNAT replies and then continue reply service handling
+			// in table 5.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s,"+
+					"actions=ct(zone=%d,nat,table=5)",
+					nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefixV4, protoPrefixV4,
+					netConfig.V4MasqIPs.GatewayRouter.IP.String(), config.Default.OVNMasqConntrackZone))
+		}
 	}
 	if config.IPv6Mode {
 		if ofPortPhys != "" {
@@ -206,6 +232,22 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 				"actions=ct(zone=%d,nat,table=5)",
 				nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefixV6, protoPrefixV6,
 				config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String(), config.Default.OVNMasqConntrackZone))
+
+		for _, netConfig := range b.patchedNetConfigs() {
+			if !isLocalGatewayNoOverlayUDN(netConfig) {
+				continue
+			}
+			// table 0, reply traffic from host back to OVN for no-overlay UDN
+			// service hairpins. Table 4 SNATs the forward direction to this
+			// UDN's gateway router masquerade IP; use the OVN masquerade CT
+			// zone to unSNAT replies and then continue reply service handling
+			// in table 5.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=500, in_port=%s, %s, %s_dst=%s,"+
+					"actions=ct(zone=%d,nat,table=5)",
+					nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefixV6, protoPrefixV6,
+					netConfig.V6MasqIPs.GatewayRouter.IP.String(), config.Default.OVNMasqConntrackZone))
+		}
 	}
 
 	var protoPrefix, masqIP, masqSubnet string
@@ -252,20 +294,20 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 						for _, clusterEntry := range netConfig.Subnets {
 							udnAdvertisedSubnets = append(udnAdvertisedSubnets, clusterEntry.CIDR)
 						}
-						// Filter subnets based on the clusterIP service family
-						// NOTE: We don't support more than 1 subnet CIDR of same family type; we only pick the first one
-						matchingIPFamilySubnet, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(svcCIDR), udnAdvertisedSubnets)
-						if err != nil {
-							klog.Infof("Unable to determine UDN subnet for the provided family isIPV6: %t, %v", utilnet.IsIPv6CIDR(svcCIDR), err)
+						matchingIPFamilySubnets := matchIPNetFamily(utilnet.IsIPv6CIDR(svcCIDR), udnAdvertisedSubnets)
+						if len(matchingIPFamilySubnets) == 0 {
+							klog.Infof("Unable to determine UDN subnet for the provided family isIPV6: %t", utilnet.IsIPv6CIDR(svcCIDR))
 							continue
 						}
 
-						// Use the filtered subnet for the flow compute instead of the masqueradeIP
-						dftFlows = append(dftFlows,
-							fmt.Sprintf("cookie=%s, priority=550, in_port=%s, %s, %s_src=%s, %s_dst=%s, "+
-								"actions=ct(commit,zone=%d,table=2)",
-								nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix,
-								matchingIPFamilySubnet.String(), protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone))
+						for _, matchingIPFamilySubnet := range matchingIPFamilySubnets {
+							// Use the filtered subnet for the flow compute instead of the masqueradeIP
+							dftFlows = append(dftFlows,
+								fmt.Sprintf("cookie=%s, priority=550, in_port=%s, %s, %s_src=%s, %s_dst=%s, "+
+									"actions=ct(commit,zone=%d,table=2)",
+									nodetypes.DefaultOpenFlowCookie, ofPortHost, protoPrefix, protoPrefix,
+									matchingIPFamilySubnet.String(), protoPrefix, svcCIDR, config.Default.HostMasqConntrackZone))
+						}
 					}
 				}
 			}
@@ -387,21 +429,21 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 				for _, clusterEntry := range netConfig.Subnets {
 					udnAdvertisedSubnets = append(udnAdvertisedSubnets, clusterEntry.CIDR)
 				}
-				// Filter subnets based on the clusterIP service family
-				// NOTE: We don't support more than 1 subnet CIDR of same family type; we only pick the first one
-				matchingIPFamilySubnet, err := util.MatchFirstIPNetFamily(false, udnAdvertisedSubnets)
-				if err != nil {
-					klog.Infof("Unable to determine IPV4 UDN subnet for the provided family isIPV6: %v", err)
+				matchingIPFamilySubnets := matchIPNetFamily(false, udnAdvertisedSubnets)
+				if len(matchingIPFamilySubnets) == 0 {
+					klog.Infof("Unable to determine IPV4 UDN subnet")
 					continue
 				}
 				// In addition to the masqueradeIP based flows, we also need the podsubnet based flows for
 				// advertised networks since UDN pod to clusterIP is unSNATed and we need this traffic to be taken into
 				// the correct patch port of it's own network where it's a deadend if the clusterIP is not part of
 				// that UDN network and works if it is part of the UDN network.
-				dftFlows = append(dftFlows,
-					fmt.Sprintf("cookie=%s, priority=200, table=2, %s, %s_src=%s, "+
-						"actions=drop",
-						nodetypes.DefaultOpenFlowCookie, protoPrefixV4, protoPrefixV4, matchingIPFamilySubnet.String()))
+				for _, matchingIPFamilySubnet := range matchingIPFamilySubnets {
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=200, table=2, %s, %s_src=%s, "+
+							"actions=drop",
+							nodetypes.DefaultOpenFlowCookie, protoPrefixV4, protoPrefixV4, matchingIPFamilySubnet.String()))
+				}
 			}
 			// Drop traffic coming from the masquerade IP or the UDN subnet(for advertised UDNs) to ensure that
 			// isolation between networks is enforced. This handles the case where a pod on the UDN subnet is sending traffic to
@@ -430,19 +472,19 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 				for _, clusterEntry := range netConfig.Subnets {
 					udnAdvertisedSubnets = append(udnAdvertisedSubnets, clusterEntry.CIDR)
 				}
-				// Filter subnets based on the clusterIP service family
-				// NOTE: We don't support more than 1 subnet CIDR of same family type; we only pick the first one
-				matchingIPFamilySubnet, err := util.MatchFirstIPNetFamily(true, udnAdvertisedSubnets)
-				if err != nil {
-					klog.Infof("Unable to determine IPV6 UDN subnet for the provided family isIPV6: %v", err)
+				matchingIPFamilySubnets := matchIPNetFamily(true, udnAdvertisedSubnets)
+				if len(matchingIPFamilySubnets) == 0 {
+					klog.Infof("Unable to determine IPV6 UDN subnet")
 					continue
 				}
 
-				dftFlows = append(dftFlows,
-					fmt.Sprintf("cookie=%s, priority=200, table=2, %s, %s_src=%s, "+
-						"actions=drop",
-						nodetypes.DefaultOpenFlowCookie, protoPrefixV6, protoPrefixV6,
-						matchingIPFamilySubnet.String()))
+				for _, matchingIPFamilySubnet := range matchingIPFamilySubnets {
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=200, table=2, %s, %s_src=%s, "+
+							"actions=drop",
+							nodetypes.DefaultOpenFlowCookie, protoPrefixV6, protoPrefixV6,
+							matchingIPFamilySubnet.String()))
+				}
 			}
 			dftFlows = append(dftFlows,
 				fmt.Sprintf("cookie=%s, priority=200, table=2, %s, %s_src=%s, "+
@@ -466,31 +508,121 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 	// table 4, hairpinned pkts that need to go from OVN -> Host
 	// We need to SNAT and masquerade OVN GR IP, send to table 3 for dispatch to Host
 	if config.IPv4Mode {
+		for _, netConfig := range b.patchedNetConfigs() {
+			if !isLocalGatewayNoOverlayUDN(netConfig) {
+				continue
+			}
+			// table 4, forward traffic for no-overlay UDN service hairpins
+			// from OVN to host. The UDN GR already SNATed to the node IP due to
+			// lb_force_snat_ip=router_ip; SNAT again to this UDN's gateway
+			// router masquerade IP so replies can be steered back to the same
+			// UDN. Match UDN pod CIDRs so ordinary UDN traffic to node IPs, such
+			// as NodePort requests on a different node, keeps the default table
+			// 4 behavior.
+			var udnSubnets []*net.IPNet
+			for _, clusterEntry := range netConfig.Subnets {
+				udnSubnets = append(udnSubnets, clusterEntry.CIDR)
+			}
+			for _, subnet := range matchIPNetFamily(false, udnSubnets) {
+				dftFlows = append(dftFlows,
+					fmt.Sprintf("cookie=%s, priority=100, table=4, in_port=%s, %s, %s_dst=%s, "+
+						"actions=ct(commit,zone=%d,nat(src=%s),exec(set_field:%s->ct_mark),table=3)",
+						nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefixV4, protoPrefixV4,
+						subnet.String(), config.Default.OVNMasqConntrackZone,
+						netConfig.V4MasqIPs.GatewayRouter.IP.String(), netConfig.MasqCTMark))
+			}
+		}
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, table=4,%s,"+
+			fmt.Sprintf("cookie=%s, priority=0, table=4,%s,"+
 				"actions=ct(commit,zone=%d,nat(src=%s),table=3)",
 				nodetypes.DefaultOpenFlowCookie, protoPrefixV4, config.Default.OVNMasqConntrackZone, config.Gateway.MasqueradeIPs.V4OVNMasqueradeIP.String()))
 	}
 	if config.IPv6Mode {
+		for _, netConfig := range b.patchedNetConfigs() {
+			if !isLocalGatewayNoOverlayUDN(netConfig) {
+				continue
+			}
+			// table 4, forward traffic for no-overlay UDN service hairpins
+			// from OVN to host. The UDN GR already SNATed to the node IP due to
+			// lb_force_snat_ip=router_ip; SNAT again to this UDN's gateway
+			// router masquerade IP so replies can be steered back to the same
+			// UDN. Match UDN pod CIDRs so ordinary UDN traffic to node IPs, such
+			// as NodePort requests on a different node, keeps the default table
+			// 4 behavior.
+			var udnSubnets []*net.IPNet
+			for _, clusterEntry := range netConfig.Subnets {
+				udnSubnets = append(udnSubnets, clusterEntry.CIDR)
+			}
+			for _, subnet := range matchIPNetFamily(true, udnSubnets) {
+				dftFlows = append(dftFlows,
+					fmt.Sprintf("cookie=%s, priority=100, table=4, in_port=%s, %s, %s_dst=%s, "+
+						"actions=ct(commit,zone=%d,nat(src=%s),exec(set_field:%s->ct_mark),table=3)",
+						nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, protoPrefixV6, protoPrefixV6,
+						subnet.String(), config.Default.OVNMasqConntrackZone,
+						netConfig.V6MasqIPs.GatewayRouter.IP.String(), netConfig.MasqCTMark))
+			}
+		}
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, table=4,%s, "+
+			fmt.Sprintf("cookie=%s, priority=0, table=4,%s, "+
 				"actions=ct(commit,zone=%d,nat(src=%s),table=3)",
 				nodetypes.DefaultOpenFlowCookie, protoPrefixV6, config.Default.OVNMasqConntrackZone, config.Gateway.MasqueradeIPs.V6OVNMasqueradeIP.String()))
 	}
 	// table 5, Host Reply traffic to hairpinned svc, need to unDNAT, send to table 2
 	if config.IPv4Mode {
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, table=5, %s, "+
+			fmt.Sprintf("cookie=%s, priority=0, table=5, %s, "+
 				"actions=ct(commit,zone=%d,nat,table=2)",
 				nodetypes.DefaultOpenFlowCookie, protoPrefixV4, config.Default.HostMasqConntrackZone))
+		for _, netConfig := range b.patchedNetConfigs() {
+			if !isLocalGatewayNoOverlayUDN(netConfig) {
+				continue
+			}
+			// table 5, finish reply service unNAT for no-overlay UDN service
+			// hairpins and dispatch directly to the UDN patch port. Sending
+			// these replies through table 2 would hit the advertised-UDN source
+			// isolation drops after unNAT.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=100, table=5, %s, ct_mark=%s, "+
+					"actions=ct(commit,zone=%d,nat),"+
+					"set_field:%s->eth_dst,%soutput:%s",
+					nodetypes.DefaultOpenFlowCookie, protoPrefixV4, netConfig.MasqCTMark,
+					config.Default.HostMasqConntrackZone, bridgeMacAddress, mod_vlan_id, netConfig.OfPortPatch))
+		}
 	}
 	if config.IPv6Mode {
 		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, table=5, %s, "+
+			fmt.Sprintf("cookie=%s, priority=0, table=5, %s, "+
 				"actions=ct(commit,zone=%d,nat,table=2)",
 				nodetypes.DefaultOpenFlowCookie, protoPrefixV6, config.Default.HostMasqConntrackZone))
+		for _, netConfig := range b.patchedNetConfigs() {
+			if !isLocalGatewayNoOverlayUDN(netConfig) {
+				continue
+			}
+			// table 5, finish reply service unNAT for no-overlay UDN service
+			// hairpins and dispatch directly to the UDN patch port. Sending
+			// these replies through table 2 would hit the advertised-UDN source
+			// isolation drops after unNAT.
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=100, table=5, %s, ct_mark=%s, "+
+					"actions=ct(commit,zone=%d,nat),"+
+					"set_field:%s->eth_dst,%soutput:%s",
+					nodetypes.DefaultOpenFlowCookie, protoPrefixV6, netConfig.MasqCTMark,
+					config.Default.HostMasqConntrackZone, bridgeMacAddress, mod_vlan_id, netConfig.OfPortPatch))
+		}
 	}
 	return dftFlows, nil
+}
+
+// isLocalGatewayNoOverlayUDN filters UDN-specific service hairpin flows that
+// SNAT to the UDN gateway router masquerade IP. Today those flows are only
+// needed for local gateway no-overlay UDNs, where service traffic can hairpin
+// through breth0 on the underlay. If UDNs later support underlay-routed
+// service backends in Geneve mode, such as host-networked pods, this predicate
+// should be updated to include those paths.
+func isLocalGatewayNoOverlayUDN(netConfig *BridgeUDNConfiguration) bool {
+	return !netConfig.IsDefaultNetwork() &&
+		netConfig.Transport == types.NetworkTransportNoOverlay &&
+		config.Gateway.Mode == config.GatewayModeLocal
 }
 
 // getMaxFrameLength returns the maximum frame size (ignoring VLAN header) that a gateway can handle
@@ -605,6 +737,22 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 		}
 		if ofPortPhys != "" {
 			for _, netConfig := range b.patchedNetConfigs() {
+				// table0, for SGW UDN no-overlay networks, handle cross-node traffic
+				// that has already been SNATed to node IP by the gateway router.
+				if !netConfig.IsDefaultNetwork() && netConfig.Transport == types.NetworkTransportNoOverlay && config.Gateway.Mode == config.GatewayModeShared {
+					// Commit to conntrack and send directly to the physical port.
+					// SNAT to the node IP may already have happened on the UDN GW
+					// router because lb_force_snat_ip=router_ip. SNAT to the same
+					// node IP again here so zone 64000 can resolve source-port collisions.
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=99, in_port=%s, dl_src=%s, %s, nw_src=%s, "+
+							"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+							nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress, protoPrefixV4,
+							physicalIP.IP, config.Default.ConntrackZone,
+							physicalIP.IP,
+							netConfig.MasqCTMark, ofPortPhys))
+				}
+
 				// table0, packets coming from egressIP pods that have mark 1008 on them
 				// will be SNAT-ed a final time into nodeIP to maintain consistency in traffic even if the GR
 				// SNATs these into egressIP prior to reaching external bridge.
@@ -706,6 +854,22 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 		}
 		if ofPortPhys != "" {
 			for _, netConfig := range b.patchedNetConfigs() {
+				// table0, for SGW UDN no-overlay networks, handle cross-node traffic
+				// that has already been SNATed to node IP by the gateway router.
+				if !netConfig.IsDefaultNetwork() && netConfig.Transport == types.NetworkTransportNoOverlay && config.Gateway.Mode == config.GatewayModeShared {
+					// Commit to conntrack and send directly to the physical port.
+					// SNAT to the node IP may already have happened on the UDN GW
+					// router because lb_force_snat_ip=router_ip. SNAT to the same
+					// node IP again here so zone 64000 can resolve source-port collisions.
+					dftFlows = append(dftFlows,
+						fmt.Sprintf("cookie=%s, priority=99, in_port=%s, dl_src=%s, %s, %s_src=%s, "+
+							"actions=ct(commit, zone=%d, nat(src=%s), exec(set_field:%s->ct_mark)), output:%s",
+							nodetypes.DefaultOpenFlowCookie, netConfig.OfPortPatch, bridgeMacAddress, protoPrefixV6,
+							protoPrefixV6, physicalIP.IP, config.Default.ConntrackZone,
+							physicalIP.IP,
+							netConfig.MasqCTMark, ofPortPhys))
+				}
+
 				// table0, packets coming from egressIP pods that have mark 1008 on them
 				// will be DNAT-ed a final time into nodeIP to maintain consistency in traffic even if the GR
 				// DNATs these into egressIP prior to reaching external bridge.
