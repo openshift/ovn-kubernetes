@@ -138,6 +138,60 @@ var _ = Describe("Run", func() {
 				"Server should be using new certificate after rotation")
 		}).Within(3 * time.Second).ProbeEvery(200 * time.Millisecond).Should(Succeed())
 	})
+
+	Context("with applied TLS config options", func() {
+		BeforeEach(func() {
+			config.ApplyTLSOptions = func(tlsConfig *tls.Config) {
+				tlsConfig.MinVersion = tls.VersionTLS12
+				tlsConfig.CipherSuites = []uint16{
+					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				}
+			}
+		})
+
+		Specify("the HTTP server should offer the applied TLS options", func() {
+			Eventually(func(g Gomega) {
+				conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", config.Host, config.Port), &tls.Config{
+					InsecureSkipVerify: true,
+					MaxVersion:         tls.VersionTLS12, // Force TLS 1.2 to test minimum version
+					NextProtos:         []string{"h2"},   // Request HTTP/2 via ALPN
+				})
+
+				g.Expect(err).NotTo(HaveOccurred())
+				defer conn.Close()
+
+				err = conn.Handshake()
+				g.Expect(err).NotTo(HaveOccurred())
+
+				state := conn.ConnectionState()
+
+				// For Intermediate profile with MaxVersion TLS 1.2, should negotiate exactly TLS 1.2
+				g.Expect(int(state.Version)).To(Equal(tls.VersionTLS12))
+				g.Expect(state.CipherSuite).To(Equal(tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256))
+				g.Expect(state.NegotiatedProtocol).To(Equal("h2"))
+			}).Within(5 * time.Second).ProbeEvery(100 * time.Millisecond).Should(Succeed())
+		})
+
+		Specify("the HTTP server should reject TLS versions below the minimum", func() {
+			Eventually(func(g Gomega) {
+				// Attempt to connect with TLS 1.1 (below the server's minimum of TLS 1.2)
+				conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", config.Host, config.Port), &tls.Config{
+					InsecureSkipVerify: true,
+					MinVersion:         tls.VersionTLS10,
+					MaxVersion:         tls.VersionTLS11, // Restrict client to TLS 1.1 or below
+				})
+
+				if err == nil {
+					err = conn.Handshake()
+					conn.Close()
+				}
+
+				// The connection or handshake should fail because the server requires TLS 1.2+
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("protocol version"))
+			}).Within(5 * time.Second).ProbeEvery(100 * time.Millisecond).Should(Succeed())
+		})
+	})
 })
 
 func newWebhookConfig(port int) webhook.Config {
@@ -160,9 +214,10 @@ func newWebhookConfig(port int) webhook.Config {
 	Expect(os.WriteFile(keyPath, keyPEM, 0600)).To(Succeed())
 
 	return webhook.Config{
-		CertDir: tempDir,
-		Host:    "localhost",
-		Port:    port,
+		CertDir:         tempDir,
+		Host:            "localhost",
+		Port:            port,
+		ApplyTLSOptions: func(*tls.Config) {},
 		NewKubernetesClient: func(_ *rest.Config) (kubernetes.Interface, error) {
 			return k8sfake.NewClientset(), nil
 		},

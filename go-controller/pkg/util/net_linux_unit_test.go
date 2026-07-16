@@ -818,7 +818,7 @@ func TestLinkRouteExists(t *testing.T) {
 	}
 }
 
-func TestLinkNeighAdd(t *testing.T) {
+func TestLinkNeighSet(t *testing.T) {
 	mockNetLinkOps := new(mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)
 	// below is defined in net_linux.go
@@ -861,7 +861,7 @@ func TestLinkNeighAdd(t *testing.T) {
 			ovntest.ProcessMockFnList(&mockNetLinkOps.Mock, tc.onRetArgsNetLinkLibOpers)
 			ovntest.ProcessMockFnList(&mockLink.Mock, tc.onRetArgsLinkIfaceOpers)
 
-			err := LinkNeighAdd(tc.inputLink, tc.inputNeigIP, tc.inputMacAddr)
+			err := LinkNeighSet(tc.inputLink, tc.inputNeigIP, tc.inputMacAddr)
 			t.Log(err)
 			if tc.errExp {
 				require.Error(t, err)

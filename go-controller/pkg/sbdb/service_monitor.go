@@ -13,31 +13,39 @@ const ServiceMonitorTable = "Service_Monitor"
 type (
 	ServiceMonitorProtocol = string
 	ServiceMonitorStatus   = string
+	ServiceMonitorType     = string
 )
 
 var (
-	ServiceMonitorProtocolTCP   ServiceMonitorProtocol = "tcp"
-	ServiceMonitorProtocolUDP   ServiceMonitorProtocol = "udp"
-	ServiceMonitorStatusOnline  ServiceMonitorStatus   = "online"
-	ServiceMonitorStatusOffline ServiceMonitorStatus   = "offline"
-	ServiceMonitorStatusError   ServiceMonitorStatus   = "error"
+	ServiceMonitorProtocolTCP           ServiceMonitorProtocol = "tcp"
+	ServiceMonitorProtocolUDP           ServiceMonitorProtocol = "udp"
+	ServiceMonitorProtocolICMP          ServiceMonitorProtocol = "icmp"
+	ServiceMonitorStatusOnline          ServiceMonitorStatus   = "online"
+	ServiceMonitorStatusOffline         ServiceMonitorStatus   = "offline"
+	ServiceMonitorStatusError           ServiceMonitorStatus   = "error"
+	ServiceMonitorTypeLoadBalancer      ServiceMonitorType     = "load-balancer"
+	ServiceMonitorTypeNetworkFunction   ServiceMonitorType     = "network-function"
+	ServiceMonitorTypeLogicalSwitchPort ServiceMonitorType     = "logical-switch-port"
 )
 
 // ServiceMonitor defines an object in Service_Monitor table
 type ServiceMonitor struct {
-	UUID        string                  `ovsdb:"_uuid"`
-	ChassisName string                  `ovsdb:"chassis_name"`
-	ExternalIDs map[string]string       `ovsdb:"external_ids"`
-	IcLearned   bool                    `ovsdb:"ic_learned"`
-	IP          string                  `ovsdb:"ip"`
-	LogicalPort string                  `ovsdb:"logical_port"`
-	Options     map[string]string       `ovsdb:"options"`
-	Port        int                     `ovsdb:"port"`
-	Protocol    *ServiceMonitorProtocol `ovsdb:"protocol"`
-	Remote      bool                    `ovsdb:"remote"`
-	SrcIP       string                  `ovsdb:"src_ip"`
-	SrcMAC      string                  `ovsdb:"src_mac"`
-	Status      *ServiceMonitorStatus   `ovsdb:"status"`
+	UUID             string                  `ovsdb:"_uuid"`
+	ChassisName      string                  `ovsdb:"chassis_name"`
+	ExternalIDs      map[string]string       `ovsdb:"external_ids"`
+	IcLearned        bool                    `ovsdb:"ic_learned"`
+	IP               string                  `ovsdb:"ip"`
+	LogicalInputPort string                  `ovsdb:"logical_input_port"`
+	LogicalPort      string                  `ovsdb:"logical_port"`
+	MAC              string                  `ovsdb:"mac"`
+	Options          map[string]string       `ovsdb:"options"`
+	Port             int                     `ovsdb:"port"`
+	Protocol         *ServiceMonitorProtocol `ovsdb:"protocol"`
+	Remote           bool                    `ovsdb:"remote"`
+	SrcIP            string                  `ovsdb:"src_ip"`
+	SrcMAC           string                  `ovsdb:"src_mac"`
+	Status           *ServiceMonitorStatus   `ovsdb:"status"`
+	Type             *ServiceMonitorType     `ovsdb:"type"`
 }
 
 func (a *ServiceMonitor) GetUUID() string {
@@ -86,8 +94,16 @@ func (a *ServiceMonitor) GetIP() string {
 	return a.IP
 }
 
+func (a *ServiceMonitor) GetLogicalInputPort() string {
+	return a.LogicalInputPort
+}
+
 func (a *ServiceMonitor) GetLogicalPort() string {
 	return a.LogicalPort
+}
+
+func (a *ServiceMonitor) GetMAC() string {
+	return a.MAC
 }
 
 func (a *ServiceMonitor) GetOptions() map[string]string {
@@ -180,12 +196,35 @@ func equalServiceMonitorStatus(a, b *ServiceMonitorStatus) bool {
 	return *a == *b
 }
 
+func (a *ServiceMonitor) GetType() *ServiceMonitorType {
+	return a.Type
+}
+
+func copyServiceMonitorType(a *ServiceMonitorType) *ServiceMonitorType {
+	if a == nil {
+		return nil
+	}
+	b := *a
+	return &b
+}
+
+func equalServiceMonitorType(a, b *ServiceMonitorType) bool {
+	if (a == nil) != (b == nil) {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return *a == *b
+}
+
 func (a *ServiceMonitor) DeepCopyInto(b *ServiceMonitor) {
 	*b = *a
 	b.ExternalIDs = copyServiceMonitorExternalIDs(a.ExternalIDs)
 	b.Options = copyServiceMonitorOptions(a.Options)
 	b.Protocol = copyServiceMonitorProtocol(a.Protocol)
 	b.Status = copyServiceMonitorStatus(a.Status)
+	b.Type = copyServiceMonitorType(a.Type)
 }
 
 func (a *ServiceMonitor) DeepCopy() *ServiceMonitor {
@@ -209,14 +248,17 @@ func (a *ServiceMonitor) Equals(b *ServiceMonitor) bool {
 		equalServiceMonitorExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
 		a.IcLearned == b.IcLearned &&
 		a.IP == b.IP &&
+		a.LogicalInputPort == b.LogicalInputPort &&
 		a.LogicalPort == b.LogicalPort &&
+		a.MAC == b.MAC &&
 		equalServiceMonitorOptions(a.Options, b.Options) &&
 		a.Port == b.Port &&
 		equalServiceMonitorProtocol(a.Protocol, b.Protocol) &&
 		a.Remote == b.Remote &&
 		a.SrcIP == b.SrcIP &&
 		a.SrcMAC == b.SrcMAC &&
-		equalServiceMonitorStatus(a.Status, b.Status)
+		equalServiceMonitorStatus(a.Status, b.Status) &&
+		equalServiceMonitorType(a.Type, b.Type)
 }
 
 func (a *ServiceMonitor) EqualsModel(b model.Model) bool {

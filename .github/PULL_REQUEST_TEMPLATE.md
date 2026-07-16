@@ -29,8 +29,10 @@ which areas of the code were changed as it's easier to assign reviewers
 <!-- Make sure your pr passes the CI checks and do check the following fields as needed - -->
 - [ ] My code requires changes to the documentation
 - [ ] if so, I have updated the documentation as required
+- [ ] My code does not require changes to the documentation
 - [ ] My code requires tests
 - [ ] if so, I have added and/or updated the tests as required
+- [ ] My code does not require tests
 - [ ] All the tests have passed in the CI <!-- If not leave a comment as to why the CI is red and if you need help understanding what's wrong -->
 
 ## How to verify it

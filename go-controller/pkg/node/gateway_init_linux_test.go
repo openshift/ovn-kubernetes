@@ -144,7 +144,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:0a:01:01:02\" type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mpPortLegacyName,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/forwarding=1",
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 			Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 		})
 
@@ -174,7 +174,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
+				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding = 1",
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
@@ -198,7 +198,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: fmt.Sprintf("%t", hwOffload),
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			"ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add breth0 breth0 0 " + eth0MAC,
+			fmt.Sprintf("ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add breth0 breth0 %d %s", gatewayVLANID, eth0MAC),
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_node1-to-br-int ofport",
@@ -221,7 +221,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			Output: "0",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/rp_filter=2",
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -655,7 +655,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net/ipv4/conf/brp0/forwarding=1",
+				Cmd:    "sysctl -w net.ipv4.conf.brp0.forwarding = 1",
 				Output: "net.ipv4.conf.brp0.forwarding = 1",
 			})
 		}
@@ -689,7 +689,7 @@ func shareGatewayInterfaceDPUTest(app *cli.App, testNS ns.NetNS,
 			Output: "false",
 		})
 		fexec.AddFakeCmdsNoOutputNoError([]string{
-			fmt.Sprintf("ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add %s %s 0 %s", brphys, brphys, hostMAC),
+			fmt.Sprintf("ovs-appctl -t /var/run/openvswitch/ovs-vswitchd.1234.ctl fdb/add %s %s %d %s", brphys, hostRep, gatewayVLANID, hostMAC),
 		})
 		// GetDPUHostRepInterface
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -1108,7 +1108,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:0a:01:01:02\" type=internal mtu_request=" + mtu + " external-ids:iface-id=" + mpPortLegacyName,
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/forwarding=1",
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 			Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 		})
 
@@ -1147,7 +1147,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		})
 		if config.IPv4Mode {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
+				Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding = 1",
 				Output: "net.ipv4.conf.breth0.forwarding = 1",
 			})
 		}
@@ -1196,7 +1196,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 			Output: "0",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/rp_filter=2",
+			Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 			Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 		})
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -1943,6 +1943,52 @@ var _ = Describe("Gateway unit tests", func() {
 			}()
 			err = configureSvcRouteViaInterface(rm, "ens1f0", gwIPs)
 			Expect(err).To(HaveOccurred())
+		})
+	})
+
+	Context("configureDPUHostNoOverlayPodCIDRRoute", func() {
+		It("configures pod CIDR routes on interface without a route source", func() {
+			_, ipnet, err := net.ParseCIDR("10.244.0.0/16")
+			Expect(err).ToNot(HaveOccurred())
+			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{CIDR: ipnet, HostSubnetLength: 24}}
+			gwIPs := []net.IP{net.ParseIP("169.254.0.4")}
+
+			lnk := &linkMock.Link{}
+			lnkAttr := &netlink.LinkAttrs{
+				Name:  "ens1f0",
+				Index: 5,
+			}
+			expectedRoute := &netlink.Route{
+				Dst:       ipnet,
+				LinkIndex: 5,
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gwIPs[0],
+				MTU:       config.Default.MTU,
+				Table:     syscall.RT_TABLE_MAIN,
+			}
+
+			lnk.On("Attrs").Return(lnkAttr)
+			netlinkMock.On("LinkByName", lnkAttr.Name).Return(lnk, nil)
+			netlinkMock.On("LinkByIndex", lnkAttr.Index).Return(lnk, nil)
+			netlinkMock.On("LinkSetUp", mock.Anything).Return(nil)
+			netlinkMock.On("RouteReplace", expectedRoute).Return(nil)
+
+			wg := &sync.WaitGroup{}
+			rm := routemanager.NewController()
+			util.SetNetLinkOpMockInst(netlinkMock)
+			stopCh := make(chan struct{})
+			wg.Add(1)
+			go func() {
+				rm.Run(stopCh, 10*time.Second)
+				wg.Done()
+			}()
+			defer func() {
+				close(stopCh)
+				wg.Wait()
+			}()
+
+			err = configureDPUHostNoOverlayPodCIDRRoute(rm, "ens1f0", gwIPs)
+			Expect(err).ToNot(HaveOccurred())
 		})
 	})
 

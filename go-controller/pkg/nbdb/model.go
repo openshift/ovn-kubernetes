@@ -16,47 +16,51 @@ import (
 // FullDatabaseModel returns the DatabaseModel object to be used in libovsdb
 func FullDatabaseModel() (model.ClientDBModel, error) {
 	return model.NewClientDBModel("OVN_Northbound", map[string]model.Model{
-		"ACL":                         &ACL{},
-		"Address_Set":                 &AddressSet{},
-		"BFD":                         &BFD{},
-		"Chassis_Template_Var":        &ChassisTemplateVar{},
-		"Connection":                  &Connection{},
-		"Copp":                        &Copp{},
-		"DHCP_Options":                &DHCPOptions{},
-		"DHCP_Relay":                  &DHCPRelay{},
-		"DNS":                         &DNS{},
-		"Forwarding_Group":            &ForwardingGroup{},
-		"Gateway_Chassis":             &GatewayChassis{},
-		"HA_Chassis":                  &HAChassis{},
-		"HA_Chassis_Group":            &HAChassisGroup{},
-		"Load_Balancer":               &LoadBalancer{},
-		"Load_Balancer_Group":         &LoadBalancerGroup{},
-		"Load_Balancer_Health_Check":  &LoadBalancerHealthCheck{},
-		"Logical_Router":              &LogicalRouter{},
-		"Logical_Router_Policy":       &LogicalRouterPolicy{},
-		"Logical_Router_Port":         &LogicalRouterPort{},
-		"Logical_Router_Static_Route": &LogicalRouterStaticRoute{},
-		"Logical_Switch":              &LogicalSwitch{},
-		"Logical_Switch_Port":         &LogicalSwitchPort{},
-		"Meter":                       &Meter{},
-		"Meter_Band":                  &MeterBand{},
-		"Mirror":                      &Mirror{},
-		"Mirror_Rule":                 &MirrorRule{},
-		"NAT":                         &NAT{},
-		"NB_Global":                   &NBGlobal{},
-		"Port_Group":                  &PortGroup{},
-		"QoS":                         &QoS{},
-		"SSL":                         &SSL{},
-		"Sample":                      &Sample{},
-		"Sample_Collector":            &SampleCollector{},
-		"Sampling_App":                &SamplingApp{},
-		"Static_MAC_Binding":          &StaticMACBinding{},
+		"ACL":                              &ACL{},
+		"Address_Set":                      &AddressSet{},
+		"BFD":                              &BFD{},
+		"Chassis_Template_Var":             &ChassisTemplateVar{},
+		"Connection":                       &Connection{},
+		"Copp":                             &Copp{},
+		"DHCP_Options":                     &DHCPOptions{},
+		"DHCP_Relay":                       &DHCPRelay{},
+		"DNS":                              &DNS{},
+		"Forwarding_Group":                 &ForwardingGroup{},
+		"Gateway_Chassis":                  &GatewayChassis{},
+		"HA_Chassis":                       &HAChassis{},
+		"HA_Chassis_Group":                 &HAChassisGroup{},
+		"Load_Balancer":                    &LoadBalancer{},
+		"Load_Balancer_Group":              &LoadBalancerGroup{},
+		"Load_Balancer_Health_Check":       &LoadBalancerHealthCheck{},
+		"Logical_Router":                   &LogicalRouter{},
+		"Logical_Router_Policy":            &LogicalRouterPolicy{},
+		"Logical_Router_Port":              &LogicalRouterPort{},
+		"Logical_Router_Static_Route":      &LogicalRouterStaticRoute{},
+		"Logical_Switch":                   &LogicalSwitch{},
+		"Logical_Switch_Port":              &LogicalSwitchPort{},
+		"Logical_Switch_Port_Health_Check": &LogicalSwitchPortHealthCheck{},
+		"Meter":                            &Meter{},
+		"Meter_Band":                       &MeterBand{},
+		"Mirror":                           &Mirror{},
+		"Mirror_Rule":                      &MirrorRule{},
+		"NAT":                              &NAT{},
+		"NB_Global":                        &NBGlobal{},
+		"Network_Function":                 &NetworkFunction{},
+		"Network_Function_Group":           &NetworkFunctionGroup{},
+		"Network_Function_Health_Check":    &NetworkFunctionHealthCheck{},
+		"Port_Group":                       &PortGroup{},
+		"QoS":                              &QoS{},
+		"SSL":                              &SSL{},
+		"Sample":                           &Sample{},
+		"Sample_Collector":                 &SampleCollector{},
+		"Sampling_App":                     &SamplingApp{},
+		"Static_MAC_Binding":               &StaticMACBinding{},
 	})
 }
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "7.12.0",
+  "version": "7.18.0",
   "tables": {
     "ACL": {
       "columns": {
@@ -134,6 +138,17 @@ var schema = `{
               "type": "string",
               "minLength": 63,
               "maxLength": 63
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "network_function_group": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Network_Function_Group",
+              "refType": "strong"
             },
             "min": 0,
             "max": 1
@@ -1113,6 +1128,17 @@ var schema = `{
             "max": "unlimited"
           }
         },
+        "output_port": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Logical_Router_Port",
+              "refType": "weak"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
         "priority": {
           "type": {
             "key": {
@@ -1545,6 +1571,17 @@ var schema = `{
             "max": 1
           }
         },
+        "health_checks": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Logical_Switch_Port_Health_Check",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
         "mirror_rules": {
           "type": {
             "key": {
@@ -1638,6 +1675,69 @@ var schema = `{
           "name"
         ]
       ]
+    },
+    "Logical_Switch_Port_Health_Check": {
+      "columns": {
+        "address": {
+          "type": "string"
+        },
+        "options": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "port": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 0,
+              "maxInteger": 65535
+            }
+          }
+        },
+        "protocol": {
+          "type": {
+            "key": {
+              "type": "string",
+              "enum": [
+                "set",
+                [
+                  "tcp",
+                  "udp",
+                  "icmp"
+                ]
+              ]
+            }
+          }
+        },
+        "src_ip": {
+          "type": "string"
+        },
+        "status": {
+          "type": {
+            "key": {
+              "type": "string",
+              "enum": [
+                "set",
+                [
+                  "online",
+                  "offline",
+                  "error"
+                ]
+              ]
+            },
+            "min": 0,
+            "max": 1
+          }
+        }
+      }
     },
     "Meter": {
       "columns": {
@@ -2030,6 +2130,195 @@ var schema = `{
         }
       },
       "isRoot": true
+    },
+    "Network_Function": {
+      "columns": {
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "health_check": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Network_Function_Health_Check",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "id": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1,
+              "maxInteger": 255
+            }
+          }
+        },
+        "inport": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Logical_Switch_Port",
+              "refType": "strong"
+            },
+            "min": 1,
+            "max": 1
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "outport": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Logical_Switch_Port",
+              "refType": "strong"
+            },
+            "min": 1,
+            "max": 1
+          }
+        }
+      },
+      "indexes": [
+        [
+          "name"
+        ],
+        [
+          "id"
+        ]
+      ],
+      "isRoot": true
+    },
+    "Network_Function_Group": {
+      "columns": {
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "fallback": {
+          "type": {
+            "key": {
+              "type": "string",
+              "enum": [
+                "set",
+                [
+                  "fail-open",
+                  "fail-close"
+                ]
+              ]
+            },
+            "min": 0,
+            "max": 1
+          }
+        },
+        "id": {
+          "type": {
+            "key": {
+              "type": "integer",
+              "minInteger": 1,
+              "maxInteger": 255
+            }
+          }
+        },
+        "mode": {
+          "type": {
+            "key": {
+              "type": "string",
+              "enum": "inline"
+            }
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "network_function": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Network_Function",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "network_function_active": {
+          "type": {
+            "key": {
+              "type": "uuid",
+              "refTable": "Network_Function",
+              "refType": "strong"
+            },
+            "min": 0,
+            "max": 1
+          }
+        }
+      },
+      "indexes": [
+        [
+          "name"
+        ],
+        [
+          "id"
+        ]
+      ],
+      "isRoot": true
+    },
+    "Network_Function_Health_Check": {
+      "columns": {
+        "external_ids": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        },
+        "name": {
+          "type": "string"
+        },
+        "options": {
+          "type": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "min": 0,
+            "max": "unlimited"
+          }
+        }
+      },
+      "indexes": [
+        [
+          "name"
+        ]
+      ]
     },
     "Port_Group": {
       "columns": {

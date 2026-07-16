@@ -392,6 +392,7 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 				},
 			},
 		)
+		DeferCleanup(fakeOVN.shutdown)
 		Expect(fakeOVN.NewUserDefinedNetworkController(nad)).To(Succeed())
 		controller, ok := fakeOVN.userDefinedNetworkControllers["bluenet"]
 		Expect(ok).To(BeTrue())
@@ -411,6 +412,55 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 		var initialPodList []interface{}
 		initialPodList = append(initialPodList, podWithNoNamespace)
 
+		err = controller.bnc.syncPodsForUserDefinedNetwork(initialPodList)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("should not fail to sync pods if namespace has primary UDN label but NAD not ready", func() {
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		fakeOVN := NewFakeOVN(false)
+		// Create namespace with primary UDN label but no NAD
+		namespace := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-namespace",
+				Labels: map[string]string{
+					types.RequiredUDNNamespaceLabel: "",
+				},
+			},
+		}
+		fakeOVN.start(
+			&corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "worker1",
+					Annotations: map[string]string{
+						"k8s.ovn.org/network-ids": `{"other": "3"}`,
+					},
+				},
+			},
+			namespace,
+		)
+		DeferCleanup(fakeOVN.shutdown)
+		Expect(fakeOVN.NewUserDefinedNetworkController(nad)).To(Succeed())
+		controller, ok := fakeOVN.userDefinedNetworkControllers["bluenet"]
+		Expect(ok).To(BeTrue())
+		// inject a real networkManager so GetActiveNetworkForNamespace will get called
+		nadController, err := networkmanager.NewForZone("dummyZone", nil, fakeOVN.watcher)
+		Expect(err).NotTo(HaveOccurred())
+		controller.bnc.networkManager = nadController.Interface()
+
+		// Pod in namespace with primary UDN label but no NAD causes InvalidPrimaryNetworkError
+		podInLabeledNamespace := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "test-namespace",
+				Name:      "test-pod",
+			},
+		}
+
+		var initialPodList []interface{}
+		initialPodList = append(initialPodList, podInLabeledNamespace)
+
+		// Should skip pod without error when GetActiveNetworkForNamespace returns InvalidPrimaryNetworkError
 		err = controller.bnc.syncPodsForUserDefinedNetwork(initialPodList)
 		Expect(err).NotTo(HaveOccurred())
 	})

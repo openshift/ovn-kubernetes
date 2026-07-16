@@ -618,8 +618,10 @@ func LinkRouteGetByDstAndGw(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (
 	return route, err
 }
 
-// LinkFDBAdd adds a static FDB entry on the bridge that owns the given port.
-func LinkFDBAdd(port netlink.Link, mac net.HardwareAddr, vlan int) error {
+// LinkFDBSet adds or replaces a static FDB entry on the bridge that owns the given port.
+// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so it succeeds whether
+// the entry is new or already exists.
+func LinkFDBSet(port netlink.Link, mac net.HardwareAddr, vlan int) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    port.Attrs().Index,
 		Family:       syscall.AF_BRIDGE,
@@ -628,8 +630,8 @@ func LinkFDBAdd(port netlink.Link, mac net.HardwareAddr, vlan int) error {
 		Vlan:         vlan,
 		HardwareAddr: mac,
 	}
-	if err := netLinkOps.NeighAdd(neigh); err != nil {
-		return fmt.Errorf("failed to add FDB entry %s vlan %d on %s: %w", mac, vlan, port.Attrs().Name, err)
+	if err := netLinkOps.NeighSet(neigh); err != nil {
+		return fmt.Errorf("failed to set FDB entry %s vlan %d on %s: %w", mac, vlan, port.Attrs().Name, err)
 	}
 	return nil
 }
@@ -663,10 +665,10 @@ func LinkNeighDel(link netlink.Link, neighIP net.IP) error {
 	return nil
 }
 
-// LinkNeighAdd adds or replaces MAC/IP bindings for the given link.
-// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so that existing entries
-// (e.g. extern_learn from EVPN) are replaced with the desired state.
-func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
+// LinkNeighSet adds or replaces MAC/IP bindings for the given link.
+// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so it succeeds whether
+// the entry is new or already exists (e.g. zebra's extern_learn).
+func LinkNeighSet(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,
 		Family:       getFamily(neighIP),
@@ -1010,29 +1012,34 @@ func ipAddrExistsAtInterface(ipAddr net.IP, iface net.Interface) (bool, error) {
 	return false, nil
 }
 
-// SetforwardingModeForInterface update the forwarding options for the specified interface
-func SetforwardingModeForInterface(ifName string) error {
-	// we use forward slash as path separator to allow dotted interfaceName e.g. foo.200
-	stdout, stderr, err := RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/forwarding=1", ifName))
-	// systctl output enforces dot as path separator
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", strings.ReplaceAll(ifName, ".", "/")) {
+// The sysctl fs interface uses slash as the path separator and allows interface names to
+// contain dots. But the CLI uses dots as the separator and expects interface names to
+// have been rewritten to use slashes instead.
+func sysctlIfName(ifName string) string {
+	return strings.ReplaceAll(ifName, ".", "/")
+}
+
+// SetForwardingModeForInterface updates the forwarding options for the specified interface
+func SetForwardingModeForInterface(ifName string) error {
+	setVal := fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", sysctlIfName(ifName))
+	stdout, stderr, err := RunSysctl("-w", setVal)
+	if err != nil || stdout != setVal {
 		return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
 			ifName, stdout, stderr, err)
 	}
 	return nil
 }
 
-// SetRPFilterLooseModeForInterface update the reverse path filtering options for the specified interface
+const rpFilterLooseMode = "2"
+
+// SetRPFilterLooseModeForInterface updates the reverse path filtering options for the
+// specified interface to avoid dropping packets with masqueradeIP coming out of
+// managementport interface.
+// NOTE: v6 doesn't have rp_filter strict mode block
 func SetRPFilterLooseModeForInterface(ifName string) error {
-	// update the reverse path filtering options for the specified interface to avoid dropping packets with masqueradeIP
-	// coming out of managementport interface
-	// NOTE: v6 doesn't have rp_filter strict mode block
-	rpFilterLooseMode := "2"
-	// TODO: Convert testing framework to mock golang module utilities. Example:
-	// we use forward slash as path separator to allow dotted mgmtPortName e.g. foo.200
-	stdout, stderr, err := RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/rp_filter=%s", ifName, rpFilterLooseMode))
-	// systctl output enforces dot as path separator
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", strings.ReplaceAll(ifName, ".", "/"), rpFilterLooseMode) {
+	setVal := fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", sysctlIfName(ifName), rpFilterLooseMode)
+	stdout, stderr, err := RunSysctl("-w", setVal)
+	if err != nil || stdout != setVal {
 		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
 			ifName, stdout, stderr, err)
 	}

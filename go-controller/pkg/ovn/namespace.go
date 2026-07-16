@@ -5,79 +5,34 @@ package ovn
 
 import (
 	"fmt"
-	"net"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
-func (oc *DefaultNetworkController) getRoutingExternalGWs(nsInfo *namespaceInfo) *gatewayInfo {
-	res := gatewayInfo{}
-	// return a copy of the object so it can be handled without the
-	// namespace locked
-	res.bfdEnabled = nsInfo.routingExternalGWs.bfdEnabled
-	res.gws = sets.New(nsInfo.routingExternalGWs.gws.UnsortedList()...)
-	return &res
-}
-
-// wrapper function to log if there are duplicate gateway IPs present in the cache
-func validateRoutingPodGWs(podGWs map[string]gatewayInfo) error {
-	// map to hold IP/podName
-	ipTracker := make(map[string]string)
-	for podName, gwInfo := range podGWs {
-		for _, gwIP := range gwInfo.gws.UnsortedList() {
-			if foundPod, ok := ipTracker[gwIP]; ok {
-				return fmt.Errorf("duplicate IP found in ECMP Pod route cache! IP: %q, first pod: %q, second "+
-					"pod: %q", gwIP, podName, foundPod)
-			}
-			ipTracker[gwIP] = podName
-		}
-	}
-	return nil
-}
-
-func (oc *DefaultNetworkController) getRoutingPodGWs(nsInfo *namespaceInfo) map[string]gatewayInfo {
-	// return a copy of the object so it can be handled without the
-	// namespace locked
-	res := make(map[string]gatewayInfo)
-	for k, v := range nsInfo.routingExternalPodGWs {
-		item := gatewayInfo{
-			bfdEnabled: v.bfdEnabled,
-			gws:        sets.New(v.gws.UnsortedList()...),
-		}
-		res[k] = item
-	}
-	return res
-}
-
-// addLocalPodToNamespace returns pod's routing gateway info and the ops needed
-// to add pod's IP to the namespace's address set and port group.
-func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, portUUID string) (*gatewayInfo, map[string]gatewayInfo, []ovsdb.Operation, error) {
-	var err error
+// addLocalPodToNamespace returns the ops needed to add pod's IP to the
+// namespace's address set and port group.
+func (oc *DefaultNetworkController) addLocalPodToNamespace(ns string, portUUID string) ([]ovsdb.Operation, error) {
 	nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(ns, true, nil)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
+		return nil, fmt.Errorf("failed to ensure namespace locked: %v", err)
 	}
 
 	defer nsUnlock()
 
 	ops, err := oc.addLocalPodToNamespaceLocked(nsInfo, portUUID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	return oc.getRoutingExternalGWs(nsInfo), oc.getRoutingPodGWs(nsInfo), ops, nil
+	return ops, nil
 }
 
 func isNamespaceMulticastEnabled(annotations map[string]string) bool {
@@ -106,22 +61,6 @@ func (oc *DefaultNetworkController) AddNamespace(ns *corev1.Namespace) error {
 func (oc *DefaultNetworkController) configureNamespace(nsInfo *namespaceInfo, ns *corev1.Namespace) error {
 	var errors []error
 
-	if annotation, ok := ns.Annotations[util.RoutingExternalGWsAnnotation]; ok {
-		exGateways, err := util.ParseRoutingExternalGWAnnotation(annotation)
-		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to parse external gateway annotation (%v)", err))
-		} else {
-			_, bfdEnabled := ns.Annotations[util.BfdAnnotation]
-			err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: bfdEnabled}, nsInfo, ns.Name)
-			if err != nil {
-				errors = append(errors, fmt.Errorf("failed to add external gateway for namespace %s (%v)", ns.Name, err))
-			}
-		}
-		if _, ok := ns.Annotations[util.BfdAnnotation]; ok {
-			nsInfo.routingExternalGWs.bfdEnabled = true
-		}
-	}
-
 	if err := oc.configureNamespaceCommon(nsInfo, ns); err != nil {
 		errors = append(errors, err)
 	}
@@ -139,120 +78,6 @@ func (oc *DefaultNetworkController) updateNamespace(old, newer *corev1.Namespace
 	}
 	defer nsUnlock()
 
-	gwAnnotation := newer.Annotations[util.RoutingExternalGWsAnnotation]
-	oldGWAnnotation := old.Annotations[util.RoutingExternalGWsAnnotation]
-	_, newBFDEnabled := newer.Annotations[util.BfdAnnotation]
-	_, oldBFDEnabled := old.Annotations[util.BfdAnnotation]
-
-	if gwAnnotation != oldGWAnnotation || newBFDEnabled != oldBFDEnabled {
-		// if old gw annotation was empty, new one must not be empty, so we should remove any per pod SNAT towards nodeIP
-		if oldGWAnnotation == "" {
-			if config.Gateway.DisableSNATMultipleGWs {
-				existingPods, err := oc.watchFactory.GetPods(old.Name)
-				if err != nil {
-					errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
-				}
-				for _, pod := range existingPods {
-					if !oc.isPodScheduledinLocalZone(pod) {
-						continue
-					}
-
-					logicalPort := util.GetLogicalPortName(pod.Namespace, pod.Name)
-					if util.PodWantsHostNetwork(pod) {
-						continue
-					}
-					podIPs, err := util.GetPodIPsOfNetwork(pod, oc.GetNetInfo(), nil)
-					if err != nil {
-						errors = append(errors, fmt.Errorf("unable to get pod %q IPs for SNAT rule removal err (%v)", logicalPort, err))
-					}
-					ips := make([]*net.IPNet, 0, len(podIPs))
-					for _, podIP := range podIPs {
-						ips = append(ips, &net.IPNet{IP: podIP})
-					}
-					if len(ips) > 0 {
-						if extIPs, err := getExternalIPsGR(oc.watchFactory, pod.Spec.NodeName); err != nil {
-							errors = append(errors, err)
-						} else if err = oc.deletePodSNAT(pod.Spec.NodeName, extIPs, ips); err != nil {
-							errors = append(errors, err)
-						}
-					}
-				}
-			}
-		} else {
-			if err := oc.deleteGWRoutesForNamespace(old.Name, nil); err != nil {
-				errors = append(errors, err)
-			}
-			nsInfo.routingExternalGWs = gatewayInfo{}
-		}
-		exGateways, err := util.ParseRoutingExternalGWAnnotation(gwAnnotation)
-		if err != nil {
-			errors = append(errors, err)
-		} else {
-			if exGateways.Len() != 0 {
-				err = oc.addExternalGWsForNamespace(gatewayInfo{gws: exGateways, bfdEnabled: newBFDEnabled}, nsInfo, old.Name)
-				if err != nil {
-					errors = append(errors, err)
-				}
-			}
-		}
-		if oc.zone != types.OvnDefaultZone {
-			// In multi-zone interconnect, ovnkube-controller flushes conntrack
-			// directly here rather than using the "k8s.ovn.org/external-gw-pod-ips"
-			// namespace annotation that ovnkube-node watches in single-zone
-			// deployments.
-			gatewayIPs, err := oc.apbExternalRouteController.GetAdminPolicyBasedExternalRouteIPsForTargetNamespace(old.Name)
-			if err != nil {
-				return fmt.Errorf("unable to retrieve gateway IPs for Admin Policy Based External Route objects for namespace %s: %w", old.Name, err)
-			}
-			for _, gwInfo := range nsInfo.routingExternalPodGWs {
-				gatewayIPs.Insert(gwInfo.gws.UnsortedList()...)
-			}
-			gatewayIPs.Insert(nsInfo.routingExternalGWs.gws.UnsortedList()...)
-			err = oc.syncConntrackForExternalGateways(old.Name, gatewayIPs) // best effort
-			if err != nil {
-				klog.Errorf("Syncing conntrack entries for egressGWs %+v serving the namespace %s failed: %v",
-					gatewayIPs, old.Name, err)
-			}
-		}
-		// if new annotation is empty, exgws were removed, may need to add SNAT per pod
-		// check if there are any pod gateways serving this namespace as well
-		if gwAnnotation == "" && len(nsInfo.routingExternalPodGWs) == 0 && config.Gateway.DisableSNATMultipleGWs {
-			existingPods, err := oc.watchFactory.GetPods(old.Name)
-			if err != nil {
-				errors = append(errors, fmt.Errorf("failed to get all the pods (%v)", err))
-			}
-			for _, pod := range existingPods {
-				if !oc.isPodScheduledinLocalZone(pod) && !util.PodNeedsSNAT(pod) {
-					continue
-				}
-				podAnnotation, err := util.UnmarshalPodAnnotation(pod.Annotations, types.DefaultNetworkName)
-				if err != nil {
-					errors = append(errors, err)
-				} else {
-					// Helper function to handle the complex SNAT operations
-					handleSNATOps := func() error {
-						ops, err := oc.AddPodSNATOps(pod.Spec.NodeName, podAnnotation.IPs)
-						if err != nil {
-							return err
-						}
-
-						// Execute all operations in a single transaction
-						if len(ops) > 0 {
-							_, err = libovsdbops.TransactAndCheck(oc.nbClient, ops)
-							if err != nil {
-								return fmt.Errorf("failed to update SNAT for pod %s on router %s: %v", pod.Name, oc.GetNetworkScopedGWRouterName(pod.Spec.NodeName), err)
-							}
-						}
-						return nil
-					}
-
-					if err := handleSNATOps(); err != nil {
-						errors = append(errors, err)
-					}
-				}
-			}
-		}
-	}
 	aclAnnotation := newer.Annotations[util.AclLoggingAnnotation]
 	oldACLAnnotation := old.Annotations[util.AclLoggingAnnotation]
 	// support for ACL logging update, if new annotation is empty, make sure we propagate new setting

@@ -66,14 +66,14 @@ func getCreationFakeCommands(fexec *ovntest.FakeExec, mgtPort, mgtPortMAC, netNa
 	})
 
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net/ipv4/conf/" + mgtPort + "/forwarding=1",
+		Cmd:    "sysctl -w net.ipv4.conf." + mgtPort + ".forwarding = 1",
 		Output: "net.ipv4.conf." + mgtPort + ".forwarding = 1",
 	})
 }
 
 func getRPFilterLooseModeFakeCommands(fexec *ovntest.FakeExec) {
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp3/rp_filter=2",
+		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp3.rp_filter = 2",
 		Output: "net.ipv4.conf.ovn-k8s-mp3.rp_filter = 2",
 	})
 }
@@ -101,7 +101,7 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 		"ovs-vsctl --timeout=15 -- --if-exists del-port br-int " + mpPortLegacyName + " -- --may-exist add-port br-int " + mpPortName + " -- set interface " + mpPortName + " mac=\"0a:58:64:80:00:02\" type=internal mtu_request=1400 external-ids:iface-id=" + mpPortLegacyName,
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/forwarding=1",
+		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 		Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
@@ -131,7 +131,7 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 		Output: "0",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/rp_filter=2",
+		Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 		Output: "net.ipv4.conf.ovn-k8s-mp0.rp_filter = 2",
 	})
 }
@@ -161,7 +161,7 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	})
 	if config.IPv4Mode {
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd:    "sysctl -w net/ipv4/conf/breth0/forwarding=1",
+			Cmd:    "sysctl -w net.ipv4.conf.breth0.forwarding = 1",
 			Output: "net.ipv4.conf.breth0.forwarding = 1",
 		})
 	}
@@ -1443,7 +1443,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 			Expect(udnGateway.AddNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(80))                                      // 18 UDN Flows, 5 advertisedUDN flows, and 2 packet mark flows (IPv4+IPv6) are added by default
+			Expect(flowMap["DEFAULT"]).To(HaveLen(78))                                      // 18 UDN Flows, 3 advertisedUDN flows, and 2 packet mark flows (IPv4+IPv6) are added by default (management-port ingress is no longer carved out to LOCAL)
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("default")
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("bluenet")

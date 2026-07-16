@@ -25,11 +25,11 @@ require (
 	github.com/k8snetworkplumbingwg/ipamclaims v0.5.1-alpha
 	github.com/k8snetworkplumbingwg/multi-networkpolicy v1.0.1
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v1.7.7
-	github.com/k8snetworkplumbingwg/sriovnet v1.2.1-0.20250818105516-24ab680f94f3
+	github.com/k8snetworkplumbingwg/sriovnet v1.3.0
 	github.com/mdlayher/arp v0.0.0-20220512170110-6706a2966875
 	github.com/mdlayher/ndp v1.0.1
 	github.com/mdlayher/socket v0.5.1
-	github.com/metallb/frr-k8s v0.0.21
+	github.com/metallb/frr-k8s v0.0.0-20260603082256-b43efcb206be
 	github.com/miekg/dns v1.1.31
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/moby/sys/userns v0.1.0
@@ -42,18 +42,17 @@ require (
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2
 	github.com/safchain/ethtool v0.6.2
-	github.com/spf13/afero v1.14.0
+	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.2
 	github.com/vishvananda/netlink v1.3.2-0.20260320193013-72a8cd7e0a73
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	golang.org/x/net v0.48.0
 	golang.org/x/sync v0.19.0
-	golang.org/x/sys v0.39.0
+	golang.org/x/sys v0.40.0
 	golang.org/x/time v0.11.0
 	google.golang.org/grpc v1.79.3
 	google.golang.org/grpc/security/advancedtls v0.0.0-20240425232638-1e8b9b7fc655
-	google.golang.org/protobuf v1.36.11
 	gopkg.in/gcfg.v1 v1.2.3
 	gopkg.in/k8snetworkplumbingwg/multus-cni.v4 v4.2.5-0.20260316195000-6eb8514eef3c
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -61,6 +60,7 @@ require (
 	k8s.io/apimachinery v0.35.1
 	k8s.io/apiserver v0.35.1
 	k8s.io/client-go v0.35.1
+	k8s.io/component-base v0.35.1
 	k8s.io/component-helpers v0.35.1
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kubelet v0.35.1
@@ -135,8 +135,8 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20240312152122-5f08fbb34913 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	go.opentelemetry.io/otel v1.39.0 // indirect
-	go.opentelemetry.io/otel/trace v1.39.0 // indirect
+	go.opentelemetry.io/otel v1.41.0 // indirect
+	go.opentelemetry.io/otel/trace v1.41.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
@@ -147,12 +147,12 @@ require (
 	golang.org/x/tools v0.39.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.35.1 // indirect
-	k8s.io/component-base v0.35.1 // indirect
 	k8s.io/controller-manager v0.35.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20260304202019-5b3e3fdb0acf // indirect
 	kubevirt.io/containerized-data-importer-api v1.55.0 // indirect
