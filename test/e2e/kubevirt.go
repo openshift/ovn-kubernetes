@@ -423,17 +423,21 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 		startNorthSouthIngressIperfTraffic = func(container infraapi.ExternalContainer, addresses []string, port int32, stage string) error {
 			GinkgoHelper()
 			execFn := func(cmd string) (string, error) {
-				return infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", cmd})
+				return infraprovider.Get().ExecExternalContainerCommand(container, []string{"sh", "-c", cmd})
 			}
 			return startNorthSouthIperfTraffic(execFn, addresses, port, "ingress", stage)
 		}
 
+		// iperfServerScript is POSIX sh and busybox compatible (no bash, jq or
+		// "ip -j") so it can run unmodified on different images (netshoot,
+		// quay.io/openshifttest/iperf3, Fedora VMs, ...).
 		iperfServerScript = `
-#!/bin/bash -xe
-iface=$(ip -j link show | jq -r '.[].ifname | select(. != "eth0" and . != "lo")' | head -1)
+#!/bin/sh
+set -xe
+iface=$(ip link show | awk -F': ' '/^[0-9]+:/{print $2}' | cut -d@ -f1 | grep -v -e '^eth0$' -e '^lo$' | head -1)
 iface=${iface:-eth0}
 
-ipv4=$(ip -j -4 addr show dev $iface | jq -r '.[0].addr_info[0].local // empty')
+ipv4=$(ip -4 addr show dev $iface | awk '/inet /{sub(/\/.*/,"",$2); print $2; exit}')
 if [ "$ipv4" != "" ]; then
 	iperf3 -s -D --bind $ipv4 --logfile /tmp/test_${ipv4}_iperf3.log
 	sleep 1
@@ -443,9 +447,10 @@ if [ "$ipv4" != "" ]; then
 	fi
 fi
 
+ipv6=""
 cnt=0
-while [ "$ipv6" == "" -a $cnt -lt 10 ]; do
-	ipv6=$(ip -j -6 addr show dev $iface | jq -r '.[0].addr_info[] | select(.local | startswith("fe80") | not) | .local' | head -1)
+while [ -z "$ipv6" ] && [ $cnt -lt 10 ]; do
+	ipv6=$(ip -6 addr show dev $iface | awk '/inet6/ && $2 !~ /^fe80/{sub(/\/.*/,"",$2); print $2; exit}')
 	sleep 1
 	cnt=$((cnt+1))
 done
@@ -463,7 +468,7 @@ fi
 			GinkgoHelper()
 			Expect(macVRFContainerIPs).NotTo(BeEmpty())
 			// Start iperf3 server on the external container using the same script as pods
-			output, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", iperfServerScript})
+			output, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{"sh", "-c", iperfServerScript})
 			if err != nil {
 				return fmt.Errorf("failed starting iperf3 server on external container: %s: %w", output, err)
 			}
@@ -495,7 +500,7 @@ fi
 			for _, ip := range addresses {
 				iperfLogFile := fmt.Sprintf("/tmp/ingress_test_%s_%d_iperf3.log", ip, port)
 				execFn := func(cmd string) (string, error) {
-					return infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", cmd})
+					return infraprovider.Get().ExecExternalContainerCommand(container, []string{"sh", "-c", cmd})
 				}
 				checkIperfTraffic(iperfLogFile, execFn, stage)
 			}
@@ -1420,7 +1425,7 @@ passwd:
 						IPRequest: staticIPs,
 					}
 				}
-				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, []string{"bash", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
+				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, []string{"sh", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
 					if nse != nil {
 						pod.Annotations = networkSelectionElements(*nse)
 					}
@@ -2103,7 +2108,7 @@ write_files:
 				frrExternalContainerInterface, err := infraprovider.Get().GetExternalContainerNetworkInterface(frrExternalContainer, frrNetwork)
 				Expect(err).NotTo(HaveOccurred(), "must fetch FRR container network interface attached to secondary network")
 
-				output, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"bash", "-c", fmt.Sprintf(`
+				output, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"sh", "-c", fmt.Sprintf(`
 set -xe
 ip route add %[1]s via %[2]s
 ip route add %[3]s via %[4]s
@@ -2198,13 +2203,13 @@ ip route add %[3]s via %[4]s
 				checkNorthSouthIngressIperfTraffic(externalContainer, serverIPs, serverPort, step)
 				checkNorthSouthEgressICMPTraffic(vmi, externalContainerIPs, step)
 				if td.ingress == "routed" {
-					_, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"bash", "-c", iperfServerScript})
+					_, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"sh", "-c", iperfServerScript})
 					Expect(err).NotTo(HaveOccurred(), step)
 					Expect(startNorthSouthEgressIperfTraffic(vmi, externalContainerIPs, iperf3DefaultPort, step)).To(Succeed())
 					By("Check egress src ip is not node IP on 'routed' ingress mode")
 					for _, vmAddress := range expectedAddreses {
 						output, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{
-							"bash", "-c", fmt.Sprintf("grep 'connected to %s' /tmp/test_*", vmAddress),
+							"sh", "-c", fmt.Sprintf("grep 'connected to %s' /tmp/test_*", vmAddress),
 						})
 						Expect(err).NotTo(HaveOccurred(), step+": "+output)
 					}
