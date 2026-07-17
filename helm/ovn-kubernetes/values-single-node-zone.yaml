@@ -4,8 +4,6 @@
 # -- list of dependent subcharts that need to be installed for the given deployment mode, these subcharts haven't been tested yet.
 tags:
   ovn-ipsec: false
-  ovnkube-node: false
-  ovnkube-node-dpu: false
   ovnkube-single-node-zone-dpu: false
   ovnkube-node-dpu-host: false
 
@@ -127,7 +125,7 @@ global:
   enableDNSNameResolver: false
   # -- Configure to allow ICMP and ICMPv6 traffic to bypass NetworkPolicy deny rules
   allowICMPNetworkPolicy: false
-  # -- Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+  # -- Whether to disable SNAT of egress traffic in namespaces with external gateways configured via AdminPolicyBasedExternalRoute CRs
   disableSnatMultipleGws: ""
   # -- Controls if forwarding is allowed on OVNK controlled interfaces
   # @default -- false

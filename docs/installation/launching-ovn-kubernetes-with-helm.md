@@ -61,13 +61,6 @@ The chart uses `values-single-node-zone.yaml` by default.
 ## Step-by-step install
 
 
-- Set the zone label on each node (required for interconnect mode):
-```
-for n in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
-  kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
-done
-```
-
 - Run `helm install` with the appropriate `k8sAPIServer`, image repo and tag:
 ```
 # cd helm/ovn-kubernetes

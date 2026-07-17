@@ -330,8 +330,10 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nod
 	}
 	addrSetKey = getInternalKey(podSelector, namespaceSelector, nodeSelector, namespace, controllerName, legacyNetpolMode)
 
+	var found bool
 	err = m.addressSets.DoWithLock(addrSetKey, func(key string) error {
-		psAddrSet, found := m.addressSets.Load(key)
+		var psAddrSet *podSelectorAddressSet
+		psAddrSet, found = m.addressSets.Load(key)
 		if !found {
 			addrSetDbIDs := GetPodSelectorAddrSetDbIDs(podSelector, namespaceSelector, nodeSelector, namespace, controllerName, legacyNetpolMode)
 			ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -343,6 +345,8 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nod
 				addrSet, err = m.addressSetFactoryV6.EnsureAddressSet(addrSetDbIDs)
 			case ipv4Mode && ipv6Mode:
 				addrSet, err = m.addressSetFactoryDualstack.EnsureAddressSet(addrSetDbIDs)
+			default:
+				return fmt.Errorf("neither IPv4 nor IPv6 mode is enabled")
 			}
 			// if the first step of creating address set fails, return error since there is nothing to cleanup
 			if err != nil {
@@ -365,14 +369,26 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nod
 				},
 			}
 			m.addressSets.LoadOrStore(key, psAddrSet)
-			// this only puts key to the queue, no lock
-			m.addressSetReconciler.Reconcile(key)
 		}
 		// psAddrSet is successfully init-ed
 		psAddrSet.backRefs[backRef] = true
 		psAddrSetHashV4, psAddrSetHashV6 = psAddrSet.addressSet.GetASHashNames()
 		return nil
 	})
+	if err != nil {
+		return
+	}
+	if !found {
+		// Populate a newly created address set before returning hashes to the caller.
+		// Until reconcile runs, the NB object is empty while ACLs may already reference it
+		// (e.g. on DB ID change or first ensure). This is a one-time sync on creation;
+		// existing sets are kept up to date by the async reconciler on pod/namespace/node events.
+		if reconcileErr := m.reconcileAddressSet(addrSetKey); reconcileErr != nil {
+			klog.Errorf("Failed to reconcile address set %s on ensure: %v", addrSetKey, reconcileErr)
+			// this only puts key to the queue, no lock
+			m.addressSetReconciler.Reconcile(addrSetKey)
+		}
+	}
 	return
 }
 

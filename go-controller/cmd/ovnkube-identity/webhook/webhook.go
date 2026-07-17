@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/scheme"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/csrapprover"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovnwebhook"
+	ovntls "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/tls"
 )
 
 var logger = klog.NewKlogr()
@@ -42,6 +43,7 @@ type Config struct {
 	CertDir                 string
 	Host                    string
 	Port                    int
+	ApplyTLSOptions         ovntls.ApplyConfigOptions
 
 	// This field is a constructor used for creating clients and is intended for testing.
 	NewKubernetesClient func(*rest.Config) (kubernetes.Interface, error)
@@ -111,18 +113,19 @@ func Run(ctx context.Context, restCfg *rest.Config, config Config) error {
 	}
 	webhookMux.Handle("/pod", podHandler)
 
-	cfg := &tls.Config{
-		NextProtos: []string{"h2"},
-		MinVersion: tls.VersionTLS12,
-	}
-
 	certPath := filepath.Join(config.CertDir, "tls.crt")
 	keyPath := filepath.Join(config.CertDir, "tls.key")
 	certWatcher, err := certwatcher.New(certPath, keyPath)
 	if err != nil {
 		return fmt.Errorf("failed to setup certwatcher: %v", err)
 	}
-	cfg.GetCertificate = certWatcher.GetCertificate
+
+	cfg := &tls.Config{
+		NextProtos:     []string{"h2"},
+		GetCertificate: certWatcher.GetCertificate,
+	}
+
+	config.ApplyTLSOptions(cfg)
 
 	go func() {
 		if err := certWatcher.Start(ctx); err != nil {

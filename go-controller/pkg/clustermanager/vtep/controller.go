@@ -35,6 +35,7 @@ import (
 	vtepscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/scheme"
 	vteplisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/listers/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -260,6 +261,7 @@ func (c *Controller) handleVTEPDeletion(vtep *vtepv1.VTEP) error {
 		return fmt.Errorf("failed to remove finalizer from VTEP %s: %w", vtep.Name, err)
 	}
 	klog.Infof("Removed finalizer from VTEP %s, deletion unblocked", vtep.Name)
+	metrics.DeleteVTEPCondition(vtep.Name)
 	return nil
 }
 

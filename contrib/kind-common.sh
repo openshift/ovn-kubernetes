@@ -93,6 +93,9 @@ set_common_default_params() {
   OVN_IMAGE=${OVN_IMAGE:-local}
   OVN_REPO=${OVN_REPO:-""}
   OVN_GITREF=${OVN_GITREF:-""}
+  # Pods to force-delete on --deploy so they respawn with the kind-loaded image.
+  # ovs-node excluded: restarting it under live ovnkube-node pods breaks the cluster.
+  OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-identity ovnkube-control-plane ovnkube-node"}
 
   # Subnet params
   # Input not currently validated. Modify outside script at your own risk.
@@ -333,8 +336,10 @@ build_ovn_image() {
 }
 
 run_kubectl() {
-  # Skip kubeconfig export in container mode - it overwrites container IPs with localhost.
-  if [ "$RUN_IN_CONTAINER" != true ]; then
+  # In deploy mode, KUBECONFIG points at an existing cluster and must not be
+  # merged with `kind export kubeconfig`; repeated merges can duplicate entries.
+  # In container mode, export would also overwrite reachable container IPs with localhost.
+  if [ "$RUN_IN_CONTAINER" != true ] && [ "${KIND_CREATE:-true}" == true ]; then
     kind export kubeconfig --name ${KIND_CLUSTER_NAME}
   fi
 
@@ -735,42 +740,81 @@ delete_metallb_dir() {
   rm -rf "${METALLB_DIR}"
 }
 
-# kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6. It will first wait for all
-# DaemonSets to complete with kubectl rollout. This command will block until all pods of the DS are actually up.
-# Next, it waits for ovnkube-control-plane pods to post "Ready".
-# Last, it will do the same with all pods in the kube-system namespace.
+wait_for_ovn_daemonset() {
+  local ds=$1
+  local required=${2:-true}
+  local endtime=$3
+
+  if ! kubectl -n ovn-kubernetes get daemonset "${ds}" >/dev/null 2>&1; then
+    if [ "${required}" = true ]; then
+      echo "DaemonSet ${ds} was not found in namespace ovn-kubernetes" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  local timeout
+  timeout=$(calculate_timeout ${endtime})
+  echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
+  # `kubectl rollout status` errors on DaemonSets with updateStrategy=OnDelete
+  # (upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
+  # OVS out from under still-running ovnkube-node pods). For OnDelete DSes
+  # we can't observe rollout progress; just wait for pods to be Ready.
+  local strategy
+  strategy=$(kubectl -n ovn-kubernetes get daemonset ${ds} \
+    -o=jsonpath='{.spec.updateStrategy.type}' 2>/dev/null)
+  if [ "${strategy}" = "OnDelete" ]; then
+    kubectl wait -n ovn-kubernetes --for=condition=ready pods \
+      -l app=${ds} --timeout=${timeout}s
+  else
+    kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
+  fi
+}
+
+# kubectl_wait_pods will set a total timeout of 300s for IPv4 and 480s for IPv6,
+# unless KIND_HELM_OVN_TIMEOUT is set. It will first wait for all DaemonSets to
+# complete with kubectl rollout. This command will block until all pods of the
+# DS are actually up. Next, it waits for ovnkube-control-plane pods to post
+# "Ready" when that deployment is part of the mode. Last, it will do the same
+# with all pods in the kube-system namespace.
 kubectl_wait_pods() {
   # IPv6 cluster seems to take a little longer to come up, so extend the wait time.
-  OVN_TIMEOUT=300
+  OVN_TIMEOUT=${KIND_HELM_OVN_TIMEOUT:-300}
+  if ! [[ "${OVN_TIMEOUT}" =~ ^[0-9]+$ ]]; then
+    echo "Invalid KIND_HELM_OVN_TIMEOUT: ${OVN_TIMEOUT}"
+    exit 1
+  fi
   if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
-    OVN_TIMEOUT=480
+    OVN_TIMEOUT=${KIND_HELM_OVN_TIMEOUT:-480}
   fi
 
   # We will make sure that we timeout all commands at current seconds + the desired timeout.
   endtime=$(( SECONDS + OVN_TIMEOUT ))
 
-  for ds in ovnkube-node ovs-node; do
-    timeout=$(calculate_timeout ${endtime})
-    echo "Waiting for k8s to launch all ${ds} pods (timeout ${timeout})..."
-    # `kubectl rollout status` errors on DaemonSets with updateStrategy=OnDelete
-    # (upgrade-ovn.sh sets ovs-node to OnDelete so helm upgrade doesn't roll
-    # OVS out from under still-running ovnkube-node pods). For OnDelete DSes
-    # we can't observe rollout progress; just wait for pods to be Ready.
-    strategy=$(kubectl -n ovn-kubernetes get daemonset ${ds} \
-      -o=jsonpath='{.spec.updateStrategy.type}' 2>/dev/null)
-    if [ "${strategy}" = "OnDelete" ]; then
-      kubectl wait -n ovn-kubernetes --for=condition=ready pods \
-        -l app=${ds} --timeout=${timeout}s
-    else
-      kubectl rollout status daemonset -n ovn-kubernetes ${ds} --timeout ${timeout}s
-    fi
-  done
+  case "${DPU_MODE:-none}" in
+    dpu)
+      wait_for_ovn_daemonset ovnkube-node-dpu true ${endtime}
+      ;;
+    host)
+      wait_for_ovn_daemonset ovnkube-node-dpu-host true ${endtime}
+      wait_for_ovn_daemonset ovnkube-node false ${endtime}
+      wait_for_ovn_daemonset ovs-node false ${endtime}
+      ;;
+    *)
+      wait_for_ovn_daemonset ovnkube-node true ${endtime}
+      wait_for_ovn_daemonset ovs-node true ${endtime}
+      ;;
+  esac
 
-  for name in ovnkube-control-plane; do
+  if [ "${DPU_MODE:-none}" != "dpu" ]; then
+    local name
+    name=ovnkube-control-plane
     timeout=$(calculate_timeout ${endtime})
     echo "Waiting for k8s to create ${name} pods (timeout ${timeout})..."
     kubectl wait pods -n ovn-kubernetes -l name=${name} --for condition=Ready --timeout=${timeout}s
-  done
+  fi
+
+  restart_dpu_sim_multus_after_ovnk
 
   timeout=$(calculate_timeout ${endtime})
   if ! kubectl wait -n kube-system --for=condition=ready pods --all --timeout=${timeout}s ; then
@@ -815,7 +859,7 @@ install_kubevirt() {
     # nightly tag - install specific nightly (i.e 20240910)
     # KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"stable"}
 
-    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"v1.6.2"}
+    KUBEVIRT_VERSION=${KUBEVIRT_VERSION:-"v1.8.4"}
 
     for node in $(kubectl get node --no-headers  -o custom-columns=":metadata.name"); do
         $OCI_BIN exec -t $node bash -c "echo 'fs.inotify.max_user_watches=1048576' >> /etc/sysctl.conf"
@@ -916,7 +960,11 @@ docker_create_second_disconnected_interface() {
 }
 
 enable_multi_net() {
-  install_multus
+  if [ "${DPU_MODE:-none}" == "none" ]; then
+    install_multus
+  else
+    echo "Skipping multus-cni installation; DPU simulator mode expects Multus to be installed by dpu-simulator"
+  fi
   install_mpolicy_crd
   install_ipamclaim_crd
   docker_create_second_disconnected_interface "underlay"  # localnet scenarios require an extra interface
@@ -1027,6 +1075,14 @@ install_jinjanator_renderer() {
 
 install_ovn_image() {
   install_image "${OVN_IMAGE}"
+}
+
+# Force-respawn OVN pods so their controllers pick up the kind-loaded image
+# on --deploy, where helm sees no spec diff (OVN_IMAGE tag is fixed).
+refresh_ovn_pods() {
+  for pod in ${OVN_DEPLOY_PODS}; do
+    kubectl delete pod -n ovn-kubernetes -l name="${pod}" --ignore-not-found
+  done
 }
 
 # install_image accepts the image name along with the tag as an argument and installs it.
@@ -1155,8 +1211,10 @@ get_kubevirt_release_url() {
     echo "$kubevirt_release_url"
 }
 
-readonly FRR_K8S_VERSION=v0.0.21
+readonly FRR_K8S_VERSION=v0.0.0-20260603082256-b43efcb206be
+readonly FRR_K8S_GIT_REF=b43efcb206be
 readonly FRR_K8S_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.1
+readonly FRR_K8S_ALL_IN_ONE_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.3
 readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.6.0
 # Override to test newer FRR builds in the in-cluster frr-k8s daemonset
 # without changing the pinned frr-k8s release.
@@ -1168,13 +1226,20 @@ clone_frr() {
   [ -d "$FRR_TMP_DIR" ] || {
     mkdir -p "$FRR_TMP_DIR" && trap 'rm -rf $FRR_TMP_DIR' EXIT
     pushd "$FRR_TMP_DIR" || exit 1
-    git clone --depth 1 --branch $FRR_K8S_VERSION https://github.com/metallb/frr-k8s
+    git clone --no-tags --single-branch --branch main https://github.com/metallb/frr-k8s
+    pushd frr-k8s
+    git checkout --detach "$FRR_K8S_GIT_REF"
+    popd
 
     # Download the patches
     curl -Ls https://github.com/jcaamano/frr-k8s/archive/refs/heads/ovnk-bgp-v0.0.21.tar.gz | tar xzvf - frr-k8s-ovnk-bgp-v0.0.21/patches --strip-components 1
 
     # Change into the cloned repo directory before applying patches
     pushd frr-k8s
+    # The OVN-K demo patch was authored before upstream bumped the demo
+    # image. Normalize that context before applying the patch; the image is
+    # bumped to FRR_EXTERNAL_DEMO_IMAGE below.
+    sed -i 's|quay.io/frrouting/frr:10.4.3|quay.io/frrouting/frr:9.1.0|g' hack/demo/demo.sh
     git apply ../patches/*
 
     # The upstream frr-k8s demo.sh hardcodes quay.io/frrouting/frr:9.1.0,
@@ -1208,7 +1273,7 @@ deploy_frr_external_container() {
   clone_frr
  
   pushd "$FRR_TMP_DIR" || exit 1
-  run_kubectl apply -f frr-k8s/charts/frr-k8s/charts/crds/templates/frrk8s.metallb.io_frrconfigurations.yaml
+  run_kubectl apply -f frr-k8s/charts/frr-k8s/charts/crds/templates/
   popd || exit 1
  
   # apply the demo which will deploy an external FRR container that the cluster
@@ -1238,8 +1303,29 @@ deploy_frr_external_container() {
     # Add route-reflector-client for IPv6 neighbors
     sed -i '/neighbor fc00.*remote-as 64512/a \ neighbor {{ . }} route-reflector-client' frr/frr.conf.tmpl
   fi
+  if [ "${OCI_BIN}" == "podman" ]; then
+    # frr-k8s' demo script prefers docker when both docker and podman are
+    # installed. Force its podman path, and avoid its host-network fallback
+    # because podman cannot later attach a host-network container to bgpnet.
+    replace_in_file_or_exit \
+      ./demo.sh \
+      'CLI=docker' \
+      'CLI=podman'
+    replace_in_file_or_exit \
+      ./demo.sh \
+      'CLI_BR_NET_BY_SUBNET_FN="docker_get_br_net_by_subnet"' \
+      'CLI_BR_NET_BY_SUBNET_FN="podman_get_br_net_by_subnet"'
+    sed -i '/^pushd \.\/frr\/ && {/i\
+if [ "$CLI" = "podman" ]; then\
+    NETWORK=${FRR_K8S_DEMO_NETWORK:-kind}\
+fi\
+' ./demo.sh
+  fi
   ./demo.sh
   popd || exit 1
+  if frr_k8s_remote_enabled && [ -n "${DPU_SIM_GATEWAY_NETWORK:-}" ]; then
+    configure_dpu_sim_frr_gateway_peers
+  fi
   if  [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
     # Enable IPv6 forwarding in FRR
     $OCI_BIN exec frr sysctl -w net.ipv6.conf.all.forwarding=1
@@ -1370,6 +1456,12 @@ destroy_bgp() {
   fi
 }
 
+install_frr_k8s_crds() {
+  echo "Installing frr-k8s CRDs ..."
+  clone_frr
+  kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/crd/bases/
+}
+
 install_frr_k8s() {
   local bgp_port=${1:-0}
   echo "Installing frr-k8s ..."
@@ -1391,7 +1483,7 @@ install_frr_k8s() {
 
   replace_in_file_or_exit \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml \
-    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${FRR_K8S_ALL_IN_ONE_UPSTREAM_FRR_IMAGE}" \
     "${FRR_K8S_FRR_IMAGE}"
 
   if [ "${bgp_port}" -ne 0 ]; then
@@ -1406,19 +1498,39 @@ install_frr_k8s() {
       exit 1
     }
   fi
+  install_frr_k8s_host_api_crds
   kubectl apply -f "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
+  create_frr_k8s_remote_kubeconfig_secret
+  configure_frr_k8s_remote_daemonsets
 }
 
 wait_for_frr_k8s() {
-  kubectl wait -n frr-k8s-system deployment frr-k8s-statuscleaner --for condition=Available --timeout 2m
-  kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
+  if kubectl -n frr-k8s-system get deployment frr-k8s-statuscleaner >/dev/null 2>&1; then
+    kubectl wait -n frr-k8s-system deployment frr-k8s-statuscleaner --for condition=Available --timeout 2m
+  fi
+  if kubectl -n frr-k8s-system get daemonset frr-k8s-daemon >/dev/null 2>&1; then
+    kubectl rollout status -n frr-k8s-system daemonset frr-k8s-daemon --timeout 2m
+    return
+  fi
+  local ds found=false
+  for ds in $(kubectl -n frr-k8s-system get daemonset -l dpu-sim.ovn.org/frr-remote=true -o name); do
+    found=true
+    kubectl rollout status -n frr-k8s-system "${ds}" --timeout 2m
+  done
+  if [ "${found}" != true ]; then
+    echo "No local or remote FRR-K8S daemonsets were found in namespace frr-k8s-system" >&2
+    return 1
+  fi
 }
 
-configure_frr_k8s() {
+apply_frr_k8s_receive_config() {
   # apply a BGP peer configration with the external gateway that does not
   # exchange routes
   pushd "${FRR_TMP_DIR}"/frr-k8s/hack/demo/configs || exit 1
   sed 's/mode: all/mode: filtered/g' receive_all.yaml > receive_filtered.yaml
+  if frr_k8s_remote_enabled && [ -n "${DPU_SIM_GATEWAY_NETWORK:-}" ]; then
+    configure_dpu_sim_frr_receive_config receive_filtered.yaml
+  fi
   # Allow receiving the bgp external server's prefix
   sed -i '/mode: filtered/a\            prefixes:\n            - prefix: '"${BGP_SERVER_NET_SUBNET_IPV4}"'' receive_filtered.yaml
   # If IPv6 is enabled, add the IPv6 prefix as well
@@ -1434,10 +1546,12 @@ configure_frr_k8s() {
   
   # frr-k8s webhook is declaring readiness before its endpoint is serving.
   # Let's do our own probing. Also will print logs in case of failure so we get
-  # insights on why this is hapenning 
+  # insights on why this is hapenning. In remote mode the host API does not use
+  # the DPU-cluster webhook service, so skip this probe.
   local r
   r=0
-  timeout 60s bash -x <<EOF || r=$?
+  if ! frr_k8s_remote_enabled; then
+    timeout 60s bash -x <<EOF || r=$?
 echo "Attempting to reach frr-k8s webhook"
 kind export kubeconfig --name ovn
 while true; do
@@ -1450,16 +1564,22 @@ echo "Couldn't reach frr-k8s webhook, trying in 1s..."
 sleep 1s
 done
 EOF
+  fi
   echo "r=$r"
   if [ "$r" -ne "0" ]; then
     kubectl describe pod -n frr-k8s-system -l app=frr-k8s-webhook-server
     kubectl logs -n frr-k8s-system -l app=frr-k8s-webhook-server
   fi
 
-  kubectl apply -n frr-k8s-system -f receive_filtered.yaml
+  local kubectl_cmd=(kubectl)
+  if frr_k8s_remote_enabled; then
+    kubectl_cmd=(kubectl --kubeconfig "$(frr_k8s_host_kubeconfig)")
+  fi
+  "${kubectl_cmd[@]}" apply -n frr-k8s-system -f receive_filtered.yaml
   popd || exit 1
+}
 
-  rm -rf "${FRR_TMP_DIR}"
+configure_frr_k8s_routes() {
   # Add routes for pod networks dynamically into the github runner for return traffic to pass back
   if [ "$ADVERTISE_DEFAULT_NETWORK" = "true" ]; then
     echo "Adding routes for Kubernetes pod networks..."
@@ -1496,6 +1616,13 @@ EOF
       fi
     done
   fi
+
+  rm -rf "${FRR_TMP_DIR}"
+}
+
+configure_frr_k8s() {
+  apply_frr_k8s_receive_config
+  configure_frr_k8s_routes
 }
 
 setup_coredumps() {
@@ -1800,13 +1927,6 @@ remove_no_schedule_taint() {
   done
 }
 
-label_ovn_single_node_zones() {
-  KIND_NODES=$(kind_get_nodes)
-  for n in $KIND_NODES; do
-    kubectl label node "${n}" k8s.ovn.org/zone-name=${n} --overwrite
-  done
-}
-
 OPENSSL=""
 set_openssl_binary() {
   for s in openssl openssl3; do
@@ -1831,7 +1951,6 @@ scale_kind_cluster() {
   # change this to https://github.com/lobuhi/kindscaler once PR https://github.com/lobuhi/kindscaler/pull/1 is accepted
   git clone https://github.com/trozet/kindscaler /tmp/kindscaler
   /tmp/kindscaler/kindscaler.sh ${KIND_CLUSTER_NAME} -r worker -c ${KIND_NUM_WORKER}
-  label_ovn_single_node_zones
   if [ "$OVN_IMAGE" == local ]; then
     set_ovn_image
   fi

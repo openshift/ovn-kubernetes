@@ -197,6 +197,24 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		gomega.Consistently(addressSetManager.nbClient, 100*time.Millisecond, 20*time.Millisecond).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{}))
 	})
 
+	ginkgo.It("populates address set synchronously on first ensure", func() {
+		namespace1 := *testing.NewNamespace(namespaceName1)
+		podIP := "10.128.1.3"
+		peer := knet.NetworkPolicyPeer{
+			PodSelector: &metav1.LabelSelector{},
+		}
+		pod := testing.NewPod(namespace1.Name, "pod1", nodeName, podIP)
+		startAddrSetManager(initialDB, []corev1.Namespace{namespace1}, []corev1.Pod{*pod})
+
+		_, _, _, err := addressSetManager.EnsureAddressSet(
+			peer.PodSelector, peer.NamespaceSelector, nil, namespace1.Name, "backRef", controllerName, &util.DefaultNetInfo{}, false)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		dbIDs := GetPodSelectorAddrSetDbIDs(peer.PodSelector, peer.NamespaceSelector, nil, namespace1.Name, controllerName, false)
+		expectedAS, _ := addressset.GetTestDbAddrSets(dbIDs, []string{podIP})
+		gomega.Expect(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{expectedAS}))
+	})
+
 	ginkgo.It("reconciles the registered cluster node IP address set on node events", func() {
 		node1 := corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
@@ -881,7 +899,7 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 			"", "backRef", controllerName, &util.DefaultNetInfo{}, true)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		restartedAS, _ := addressset.GetTestDbAddrSets(hostNSASIDs, []string{node2MgmtIP})
-		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{restartedAS}))
+		gomega.Expect(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{restartedAS}))
 	})
 	ginkgo.It("updates IPs for existing nodes when the host network traffic namespace is created", func() {
 		config.Kubernetes.HostNetworkNamespace = "ovn-host-network"

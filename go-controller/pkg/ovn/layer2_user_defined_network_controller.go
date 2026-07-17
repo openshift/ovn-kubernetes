@@ -38,7 +38,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneinterconnect "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -166,9 +165,6 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interfa
 
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
-
-		case factory.IPAMClaimsType:
-			syncFunc = h.oc.syncIPAMClaims
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
@@ -321,21 +317,11 @@ func NewLayer2UserDefinedNetworkController(
 	}
 
 	if oc.allocatesPodAnnotation() {
-		var claimsReconciler persistentips.PersistentAllocations
-		if oc.allowPersistentIPs() {
-			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
-				oc.kube,
-				oc.GetNetInfo(),
-				oc.watchFactory.IPAMClaimsInformer().Lister(),
-			)
-			oc.ipamClaimsReconciler = ipamClaimsReconciler
-			claimsReconciler = ipamClaimsReconciler
-		}
 		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
 			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
-			claimsReconciler)
+			nil)
 	}
 
 	// enable multicast support for UDN only for primaries + multicast enabled
@@ -463,7 +449,16 @@ func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *Layer2UserDefinedNetworkController) init() error {
+func (oc *Layer2UserDefinedNetworkController) init() (err error) {
+	start := time.Now()
+	defer func() {
+		if err == nil && config.Metrics.EnableScaleMetrics {
+			duration := time.Since(start)
+			metrics.RecordUDNNBDBProgrammedDuration(oc.TopologyType(), duration.Seconds())
+			klog.Infof("Recorded NBDB programmed duration for network %s: %v", oc.GetNetworkName(), duration)
+		}
+	}()
+
 	// Create default Control Plane Protection (COPP) entry for routers
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
@@ -635,9 +630,6 @@ func (oc *Layer2UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) er
 
 func (oc *Layer2UserDefinedNetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
-		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
-	}
 
 	// When a user-defined network is enabled as a primary network for namespace,
 	// then watch for namespace and network policy events.

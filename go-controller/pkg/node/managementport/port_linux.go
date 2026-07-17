@@ -302,7 +302,7 @@ func setupManagementPortIPFamilyConfig(link netlink.Link, mpcfg *managementPortC
 				klog.Warningf("Could not remove remove stale IP neighbor entry for IP %s, on iface %s: %v", cfg.gwIP.String(), types.K8sMgmtIntfName, err)
 			}
 		}
-		err = util.LinkNeighAdd(link, cfg.gwIP, mpcfg.gwMAC)
+		err = util.LinkNeighSet(link, cfg.gwIP, mpcfg.gwMAC)
 	}
 	if err != nil {
 		return err
@@ -315,7 +315,7 @@ func setupManagementPortIPFamilyConfig(link netlink.Link, mpcfg *managementPortC
 
 	// IPv6 forwarding is enabled globally
 	if protocol == iptables.ProtocolIPv4 {
-		err := util.SetforwardingModeForInterface(types.K8sMgmtIntfName)
+		err := util.SetForwardingModeForInterface(types.K8sMgmtIntfName)
 		if err != nil {
 			klog.Warning(err)
 		}

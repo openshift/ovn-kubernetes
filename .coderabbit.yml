@@ -5,12 +5,269 @@ reviews:
   profile: "chill"
   request_changes_workflow: false
   high_level_summary: true
+  # Place the summary in the walkthrough comment instead of editing the PR description
+  # which is pretty invasive
+  high_level_summary_in_walkthrough: true
   poem: true
   review_status: true
   collapse_walkthrough: false
+  slop_detection:
+    enabled: true
+    label: "coderabbit/ai-slop"
   auto_review:
     enabled: true
     drafts: false
+  path_instructions:
+    - path: "**"
+      instructions: |
+        - OVN-Kubernetes is a Kubernetes network plugin built on OVN/OVS.
+          All Go source lives under go-controller/.
+        - Do not approve PRs that add new Go dependencies without
+          clear justification in the PR description.
+        - Generated code (zz_generated*, vendor/) should not be
+          reviewed for style — only verify it was regenerated correctly.
+        - Dual-stack (IPv4+IPv6) must always be considered — flag
+          changes that only handle single-stack.
+        - Every feature or bug fix should include unit tests. Flag PRs
+          that modify behavior without corresponding test updates.
+        - E2E tests are required whenever feasible — be strict. Flag PRs
+          that add or change user-facing behavior without E2E coverage.
+          Do not accept "will add E2E later" — push back on the author
+          to include them in the same PR.
+        - Be strict: docs must be updated in the same PR when relevant.
+          Features need user-facing docs, design decisions and non-obvious
+          bug fixes need developer-guide updates, process changes need
+          contributor-guide updates. "Docs don't exist yet" is not an
+          excuse — do not accept "will add docs later"; push back —
+          missing docs stall releases.
+        - Commit messages should lead with "why", then relevant "what".
+          Flag AI-slop commit messages stuffed with implementation details.
+        - Flag merge commits (e.g. "Merge branch 'master' into ...") in the
+          PR — suggest rebasing without merge commits instead.
+        - Flag references to Jira, downstream issues, or product bugs —
+          suggest cloning to an upstream GitHub issue and linking that instead.
+        - If a PR renames, changes, or removes any code entity (flag,
+          config, CRD, API, binary), flag if existing docs become stale.
+        - Flag PRs over ~7000 lines (additions + deletions) or
+          single-PR full OKEP / large feature implementations touching
+          many unrelated components — suggest splitting into smaller,
+          component-scoped PRs. Exclude legitimately large but
+          tightly-scoped changes (single refactor, codegen, vendor
+          update). Flag PRs that mix unrelated changes in a single
+          commit.
+        - PR description template: "Description", "Additional Information",
+          and "How to verify it" sections must be filled — flag if empty.
+          "Description" must lead with the Why (the problem being solved)
+          before explaining What the PR does — flag if it jumps straight
+          into implementation details without motivation.
+          For trivial PRs, suggest writing "Not Applicable" in sections
+          that genuinely don't apply.
+          Checkboxes: for docs, either "requires docs" + "updated docs"
+          or "does not require docs" must be checked. Same for tests.
+          Ignore "All tests passed" — it is checked after CI completes.
+    - path: "docs/**/*.md"
+      instructions: |
+        - Flag unclear, inaccurate, or incomplete content.
+        - Flag deprecated APIs or outdated behavior.
+        - Project name must be "OVN-Kubernetes" or "ovn-kubernetes". The binary
+          is "ovnkube". Flag variants like "OVN Kubernetes", "ovn-kube",
+          "OVNKubernetes", "ovn-k8s", "ovn-k".
+        - Complex flows or multi-component interactions without diagrams:
+          suggest adding one.
+        - New doc page added without corresponding mkdocs.yml nav update: flag it.
+        - Flag broken or dead links, wrong anchors, outdated URLs.
+        - If a code entity (CRD, field, flag, binary) was renamed or removed,
+          flag stale references in docs.
+    - path: "go-controller/pkg/crd/**"
+      instructions: |
+        - k8s.ovn.org CRD API types and generated client code.
+        - zz_generated* or apis/ files are codegen output — review correctness
+          only, not style.
+        - Hand-written types (types.go, spec.go, etc.): verify godoc, JSON tags,
+          kubebuilder markers, deepcopy.
+        - New/changed fields must have JSON tags and kubebuilder validation markers.
+        - Flag unbounded fields: lists/maps without MaxItems, strings
+          without MaxLength — these need size limits to prevent abuse.
+        - Flag schema changes without Helm CRD manifest update or codegen re-run
+          (update-codegen.sh).
+        - API changes must always be backwards compatible and must not
+          break users — flag removals, type changes, or new required fields.
+        - Any API change must include API reference doc update.
+        - New API must be added to the API reference index page.
+        - CEL validation: flag missing CEL rules where needed, unanchored
+          regex, missing enums, absent dual-stack guards, incomplete
+          cross-field rules.
+        - Flag missing CRD metadata: short names, printer columns, descriptions.
+        - API field naming must be finalized before merge — flag ambiguous or
+          inconsistent names.
+        - Follow kubernetes-sigs/kube-api-linter (KAL) conventions:
+          optional/required markers, SSA listType tags, conditions format,
+          no raw integers (use resource.Quantity or metav1.Duration).
+    - path: "go-controller/**/*_test.go"
+      instructions: |
+        - Flag time.Sleep in tests — use gomega Eventually/Consistently
+          for async assertions instead.
+        - Flag os.Setenv — use t.Setenv (auto-restores on cleanup) to
+          avoid env pollution across tests.
+        - Flag missing cleanup: FakeOVN, fake clients, and other test
+          fixtures must be shut down or cleaned up (defer close/stop).
+        - Tests requiring root/cap_net_admin must use
+          ovntest.OnSupportedPlatformsIt instead of ginkgo.It — flag if missing.
+        - Flag shared mutable state between test cases — common source
+          of data races with fake clients and concurrent reconcilers.
+        - Flag unnecessary deep nesting — tests should be structured
+          for easy addition of new cases (prefer table-driven or flat
+          ginkgo entries over deeply nested contexts).
+        - Flag duplicate tests covering the same scenario.
+        - Flag missing edge cases: nil inputs, empty lists, dual-stack,
+          error paths, and boundary conditions.
+        - Flag test helper/utility duplication — check if similar
+          helpers already exist in pkg/testing/ or other test files
+          in the same package before adding new ones.
+        - Prefer focused It blocks that each test a single piece of logic.
+          Suggest breaking complex multi-step unit tests into multiple It
+          blocks, unless the setup/teardown cost makes that impractical.
+          When an It block must contain multiple steps, suggest using
+          ginkgo.By to document each step.
+        - If multiple It blocks in the same Describe/Context repeat the
+          same setup or teardown logic, suggest extracting it into
+          BeforeEach/AfterEach.
+        - Prefer reusable helpers for libovsdb nb/sb test fixtures
+          (e.g. LogicalRouter, LogicalSwitch) over inline struct
+          literals copied across tests — keeps tests concise and
+          readable. Some older tests do this; new code should not.
+    - path: "go-controller/pkg/**/*.go"
+      instructions: |
+        - Concurrency is the #1 bug source — scrutinize lock ordering,
+          deferred unlocks, deadlock potential, and shared state between
+          controllers. Flag unprotected concurrent map/slice access.
+        - Flag missing nil checks on OVS/OVN DB results, optional
+          Kubernetes fields, and interface type assertions.
+        - Flag resource leaks: unclosed channels, namespace handles,
+          informer factories, or goroutines without shutdown paths.
+        - Use klog for logging (not fmt.Print or log.*). Flag misuse
+          of log levels (e.g. klog.Infof for errors instead of klog.Errorf or klog.Warningf,
+          klog.V(5) for important events that should be at lower verbosity).
+        - Errors must be wrapped with context using fmt.Errorf("...: %w",
+          err) — flag bare error returns without wrapping.
+        - Flag hardcoded values — these must come from
+          config or constants.
+        - Consider performance at scale — flag code that may degrade
+          with many nodes, pods, or network policies (e.g. unbounded
+          list calls, full resyncs, O(n²) loops, unindexed lookups).
+        - Flag err := inside nested blocks that shadow outer err —
+          common source of silently lost errors, especially in long
+          functions.
+        - Verify boolean logic carefully — flag inverted conditions,
+          wrong negations, && vs & operator confusion.
+        - Controller restart/recreation paths must clean up old state
+          (caches, goroutines, watchers) — flag if missing.
+        - Flag bare integers passed as time.Duration — must use
+          explicit units (e.g. 10*time.Second, not 10).
+        - Flag copy-paste code with un-updated variable names,
+          duplicated function calls, or stale references.
+        - Cleanup/delete paths must continue on partial failures —
+          collect errors with kerrors.NewAggregate or errors.Join
+          and return them all, not bail on the first error.
+        - Utility/helper functions belong in pkg/util/ or the relevant
+          package's utils. Flag when helpers are added inline instead
+          of to the shared utils package, or when existing utils are
+          duplicated.
+        - Refactors must clearly state the exact benefits they bring
+          to the project in the PR description. Remind the author to
+          announce significant refactors in community meetings, Slack,
+          or the mailing list.
+        - Feature deprecations or removals: same requirement — must
+          be announced to the community and documented before merge.
+        - Flag comments that merely restate what the code does
+          (e.g. "// set a to b" above "a = b", "// return the error"
+          above "return err", "// create the pod" above CreatePod()).
+          Comments should explain why, not what. Only non-obvious
+          intent, trade-offs, or constraints warrant a comment.
+    - path: "test/e2e/**"
+      instructions: |
+        - E2E tests must be backwards compatible — adding tests for
+          new features must not break existing tests for users who
+          don't use the new feature.
+        - Stop overcomplicated ginkgo nesting — prefer flat structure
+          with ginkgo DescribeTable/Entry over deeply nested
+          Context/When/It blocks.
+        - Flag duplicate tests — new tests covering scenarios already
+          tested (implicitly or explicitly) elsewhere in the suite.
+        - Flag test helpers duplicated across files — shared helpers
+          belong in test/e2e/util.go or a dedicated utils file.
+        - Adding or refactoring tests must not lose coverage for
+          existing scenarios — flag if existing test cases are removed
+          or narrowed without justification.
+        - Tests must be provider-agnostic — flag hardcoded network
+          names, node access methods, container runtime calls, or
+          assumptions that only work on KIND. Tests should run on
+          any provider. Use the infraprovider API and shared test
+          utilities for all infra interactions.
+    - path: "go-controller/pkg/ovn/**"
+      instructions: |
+        - Startup/sync paths: flag changes to Sync*, Start*, or
+          reconciliation loops that may delete resources owned by
+          another controller or not yet populated.
+        - UDN controller lifecycle: flag shared state (address sets,
+          LB groups, caches) that assumes a single controller instance
+          — UDN recreation can leave stale references.
+        - EgressIP: verify both add and remove/failover paths — most
+          bugs are stale SNAT/LRP entries persisting after cleanup.
+        - Lock ordering: flag inconsistent lock acquisition order
+          (node locks, namespace locks) — use deterministic ordering.
+        - Channel/goroutine lifecycle: stopChan must be initialized
+          before goroutines reference it — flag double-close and
+          nil-channel races in Stop() methods.
+        - Services/LB: flag changes to serviceNeedsUpdate or LB
+          template logic that don't handle protocol set changes.
+        - Be strict: OVN DB objects must use proper DbObjectIDs with
+          DB indexes for lookups and ownership — flag random or
+          ad-hoc external IDs. All objects must have proper ownership
+          tracked via ExternalIDs so they can be synced and cleaned.
+    - path: "go-controller/pkg/node/**"
+      instructions: |
+        - Channel and goroutine lifecycle (stopChan, closeChan) are
+          repeat sources of panics and deadlocks — scrutinize any
+          controller start/stop or attach/detach change.
+        - Shared informer cache mutation: always DeepCopy() before
+          modifying objects from the cache — flag direct mutation.
+        - DPU-mode code paths are routinely missed — new gateway or
+          bridge logic needs an explicit "does this apply in DPU
+          mode?" check.
+        - UDN gateway flows have the highest revert rate — changes to
+          nftables, IP rules, or OpenFlow for UDN need strong E2E
+          coverage before merge.
+        - Netlink resource cleanup: flag missing Close()/defer on
+          netns.Get() or netlink.Handle — causes namespace handle
+          and VRF leaks.
+        - OpenFlow correctness: flag wrong byte extraction, wrong
+          protocol prefix (ip vs ip6), wrong port (service port vs
+          endpoint port) in flow match/action expressions.
+    - path: "go-controller/pkg/libovsdb/**"
+      instructions: |
+        - Predicates in CreateOrReplace*WithPredicate: flag predicates
+          that are too narrow (miss stale objects), too broad (clobber
+          unrelated objects), or miss ownership checks.
+        - Typed-nil interface trap: flag *Model passed through
+          interface{} without nil check on the concrete pointer —
+          causes panics inside libovsdb.
+        - Context propagation: every libovsdb op that waits for cache
+          consistency must have a context with timeout — flag use of
+          context.Background() or context.TODO() in production paths.
+        - onModelUpdatesAllNonDefault silently drops zero-value fields
+          — flag if a field legitimately needs to be reset to its
+          zero value (use explicit field lists instead).
+        - DB ordering: flag code that assumes ovn-controller has
+          processed prior NB/SB changes — require hv_cfg/nb_cfg
+          synchronization barriers.
+        - Delete/update ops must verify the target object belongs to
+          the expected parent (e.g. static route on the right router).
+        - Respect OVN schema root/non-root references — non-root
+          objects (e.g. address sets) must be unreferenced before
+          deletion (e.g. remove from ACLs first). Flag operations
+          that delete referenced objects without cleanup.
+        - Changes to this package without unit tests: flag it.
   path_filters:
     - "!**/vendor/**"
 chat:

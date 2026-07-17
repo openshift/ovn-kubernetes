@@ -29,6 +29,7 @@ import (
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
+	nodeutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -213,7 +214,6 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscri
 				if c.gatewayIfIndex != 0 && a.LinkIndex == c.gatewayIfIndex {
 					c.reconcileMasqueradeResources()
 				}
-				continue
 			}
 			addrChanged := false
 			if a.NewAddr {
@@ -320,19 +320,59 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 	}
 }
 
-// updateNodeAddressAnnotations updates all relevant annotations for the node including
-// k8s.ovn.org/host-cidrs, k8s.ovn.org/node-primary-ifaddr, k8s.ovn.org/l3-gateway-config.
+// updateNodeAddressAnnotations updates the node address annotations. In DPUHost mode
+// the host has no gateway bridge and node-primary-ifaddr / l3-gateway-config are owned
+// by the DPU, so only host-cidrs is maintained; in all other modes the full set
+// (k8s.ovn.org/host-cidrs, k8s.ovn.org/node-primary-ifaddr, k8s.ovn.org/l3-gateway-config)
+// is updated.
 func (c *addressManager) updateNodeAddressAnnotations() error {
-	var err error
+	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+		return c.updateDPUHostAddressAnnotations()
+	}
+	return c.updateGatewayAddressAnnotations()
+}
+
+// updateDPUHostAddressAnnotations refreshes the host-owned annotations in DPUHost mode:
+// k8s.ovn.org/host-cidrs and k8s.ovn.org/primary-dpu-host-addr. The latter tracks the
+// gateway interface addresses; node-primary-ifaddr and l3-gateway-config are derived
+// from it by the DPU.
+func (c *addressManager) updateDPUHostAddressAnnotations() error {
+	if err := c.updateHostCIDRs(); err != nil {
+		return err
+	}
+
+	ifAddrs, err := nodeutil.GetNetworkInterfaceIPAddresses(config.Gateway.Interface)
+	if err != nil {
+		return err
+	}
+	if err := util.SetNodePrimaryDPUHostAddr(c.nodeAnnotator, ifAddrs); err != nil {
+		return err
+	}
+
+	return c.nodeAnnotator.Run()
+}
+
+// updateGatewayAddressAnnotations updates k8s.ovn.org/host-cidrs,
+// k8s.ovn.org/node-primary-ifaddr and k8s.ovn.org/l3-gateway-config from the gateway
+// bridge addresses.
+func (c *addressManager) updateGatewayAddressAnnotations() error {
 	var ifAddrs []*net.IPNet
 
-	// Get node information
 	node, err := c.watchFactory.GetNode(c.nodeName)
 	if err != nil {
 		return err
 	}
 
-	if c.useNetlink {
+	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+		// On the DPU, br-dpu has no IP of its own (the address lives on the host and is
+		// conveyed through the primary-dpu-host-addr annotation), so the bridge netlink
+		// path below would fail. Derive the addresses from the annotation, as done at
+		// gateway init.
+		ifAddrs, err = getNodePrimaryIfAddrs(c.watchFactory, c.nodeName, "")
+		if err != nil {
+			return err
+		}
+	} else if c.useNetlink {
 		// get updated interface IP addresses for the gateway bridge
 		ifAddrs, err = c.gatewayBridge.UpdateInterfaceIPAddresses(node)
 		if err != nil {
@@ -358,17 +398,12 @@ func (c *addressManager) updateNodeAddressAnnotations() error {
 		return err
 	}
 	gatewayCfg.IPAddresses = ifAddrs
-	err = util.SetL3GatewayConfig(c.nodeAnnotator, gatewayCfg)
-	if err != nil {
+	if err = util.SetL3GatewayConfig(c.nodeAnnotator, gatewayCfg); err != nil {
 		return err
 	}
 
 	// push all updates to the node
-	err = c.nodeAnnotator.Run()
-	if err != nil {
-		return err
-	}
-	return nil
+	return c.nodeAnnotator.Run()
 }
 
 func (c *addressManager) updateHostCIDRs() error {
@@ -468,9 +503,13 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 		return false
 	}
 	// check CDN management port
-	mgmtPortAddress, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6(addr), c.mgmtPort.GetAddresses())
-	if mgmtPortAddress != nil && addr.Equal(mgmtPortAddress.IP) {
-		return false
+	// mgmtPort is nil in DPUHost mode (the address manager is constructed without one),
+	// so guard against a nil dereference before consulting it.
+	if c.mgmtPort != nil {
+		mgmtPortAddress, _ := util.MatchFirstIPNetFamily(utilnet.IsIPv6(addr), c.mgmtPort.GetAddresses())
+		if mgmtPortAddress != nil && addr.Equal(mgmtPortAddress.IP) {
+			return false
+		}
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
@@ -487,7 +526,10 @@ func (c *addressManager) isValidNodeIP(addr net.IP, linkIndex int) bool {
 	if util.IsAddressReservedForInternalUse(addr) {
 		return false
 	}
-	if config.OVNKubernetesFeature.EnableEgressIP {
+	// Egress IP exclusions don't apply in DPUHost mode, and the address manager there
+	// has no gateway bridge (c.gatewayBridge is nil), so skip this block to avoid a nil
+	// dereference below.
+	if config.OVNKubernetesFeature.EnableEgressIP && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
 		// EIP assigned to the primary interface which selects pods with a role primary user defined network must be excluded.
 		if util.IsNetworkSegmentationSupportEnabled() && config.Gateway.Mode != config.GatewayModeDisabled {
 			// Two methods to lookup EIPs assigned to the gateway bridge. Fast path from a shared cache or slow path from node annotations.
@@ -540,10 +582,6 @@ func (c *addressManager) refreshGatewayIfIndex() {
 
 func (c *addressManager) sync() {
 	if config.IsModeDPU() {
-		return
-	}
-	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
-		c.reconcileMasqueradeResources()
 		return
 	}
 

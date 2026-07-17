@@ -48,7 +48,7 @@ func getExGwPodIPs(gatewayPod *corev1.Pod, networkName string) (sets.Set[string]
 		return getPodIPs(gatewayPod), nil
 	}
 	return nil, fmt.Errorf("ignoring pod %s as an external gateway candidate. Invalid combination "+
-		"of host network: %t and routing-network annotation: %s", gatewayPod.Name, gatewayPod.Spec.HostNetwork,
+		"of host network: %t and network attachment name: %s", gatewayPod.Name, gatewayPod.Spec.HostNetwork,
 		networkName)
 }
 

@@ -53,6 +53,10 @@ const (
 	redirectPort         = "13337"
 	defaultPodInterface  = "eth0"
 	udnPodInterface      = "ovn-udn1"
+
+	localNodePortConvergenceTimeout      = 10 * time.Second
+	localNodePortConvergencePollInterval = 1 * time.Second
+	localNodePortStableProbeCount        = 3
 )
 
 // setupHostRedirectPod
@@ -517,6 +521,60 @@ func IsGatewayModeLocal(cs kubernetes.Interface) bool {
 	return l3Config.Mode == config.GatewayModeLocal
 }
 
+// validateStableLocalEndpointViaExternalContainer probes a NodePort until several consecutive
+// hostname/client-IP response pairs match the expected local endpoint. currentResponses is
+// returned for failure diagnostics only; transient non-local responses do not affect success
+// after the service converges.
+func validateStableLocalEndpointViaExternalContainer(externalContainer infraapi.ExternalContainer, protocol, nodeAddress string, nodePort int32, expectedResponses sets.Set[string]) (sets.Set[string], error) {
+	ginkgo.GinkgoHelper()
+	var currentResponses sets.Set[string]
+	consecutiveMatches := 0
+	var lastErr error
+
+	err := wait.PollUntilContextTimeout(context.Background(), localNodePortConvergencePollInterval, localNodePortConvergenceTimeout, true, func(context.Context) (bool, error) {
+		// hostname and clientip are two separate requests; the consecutive-match
+		// requirement below absorbs any transient mismatch between them.
+		epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress, nodePort, "hostname")
+		rawClientIP := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress, nodePort, "clientip")
+		currentResponses = sets.New[string]()
+
+		matched := false
+		switch {
+		case epHostname == "" || rawClientIP == "":
+			lastErr = fmt.Errorf("empty response hostname=%q clientIP=%q", epHostname, rawClientIP)
+		default:
+			epClientIP, _, err := net.SplitHostPort(rawClientIP)
+			if err != nil {
+				lastErr = fmt.Errorf("failed to parse client ip %q: %w", rawClientIP, err)
+				break
+			}
+			currentResponses.Insert(epHostname, epClientIP)
+			if matched = currentResponses.Equal(expectedResponses); !matched {
+				lastErr = fmt.Errorf("observed responses %v, expected %v", currentResponses, expectedResponses)
+			}
+		}
+
+		if !matched {
+			consecutiveMatches = 0
+			return false, nil
+		}
+		consecutiveMatches++
+		if consecutiveMatches == localNodePortStableProbeCount {
+			return true, nil
+		}
+		lastErr = fmt.Errorf("observed expected responses %v for %d/%d consecutive probes", currentResponses, consecutiveMatches, localNodePortStableProbeCount)
+		return false, nil
+	})
+
+	if err != nil {
+		if lastErr != nil {
+			return currentResponses, fmt.Errorf("timed out waiting for stable local nodeport responses: %w", lastErr)
+		}
+		return currentResponses, err
+	}
+	return currentResponses, nil
+}
+
 // restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
 func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
 	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
@@ -674,12 +732,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}
 
 		controlPlanePodName = "ovnkube-control-plane"
-		// in "one node per zone" config, ovnkube-controller doesn't create leader election lease
-		if !singleNodePerZone() {
-			controlPlaneLeaseName = "ovn-kubernetes-master-ovn-control-plane"
-		} else {
-			controlPlaneLeaseName = "ovn-kubernetes-master"
-		}
+		controlPlaneLeaseName = "ovn-kubernetes-master"
 
 		controlPlanePods, err := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(context.Background(), metav1.ListOptions{
 			LabelSelector: "name=" + controlPlanePodName,
@@ -1166,7 +1219,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	endpointsSelector := map[string]string{"servicebackend": "true"}
 
 	var endPoints []*v1.Pod
-	var nodesHostnames sets.String
+	var nodesHostnames sets.Set[string]
 	var maxTries int
 	var nodes *v1.NodeList
 	var newNodeAddresses []string
@@ -1182,7 +1235,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1262,7 +1315,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							continue
 						}
 
-						responses := sets.NewString()
+						responses := sets.New[string]()
 						valid := false
 						nodePort := nodeTCPPort
 						if protocol == "udp" {
@@ -1410,7 +1463,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							for _, protocol := range []string{"http", "udp"} {
 								port := protocolPorts[protocol]
 								ginkgo.By(fmt.Sprintf("Hitting nodeport %s/%d on %s with IP %s and reaching all the endpoints ", protocol, port, nodeName, address))
-								responses := sets.NewString()
+								responses := sets.New[string]()
 								valid := false
 								for i := 0; i < maxTries; i++ {
 									epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, address, port, "hostname")
@@ -1468,9 +1521,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							continue
 						}
 
-						responses := sets.NewString()
 						// Fill expected responses, it should hit the nodeLocal endpoints and not SNAT packet IP
-						expectedResponses := sets.NewString()
+						expectedResponses := sets.New[string]()
 
 						if utilnet.IsIPv6String(nodeAddress.Address) {
 							expectedResponses.Insert(node.Name+"-ep", externalContainer.GetIPv6())
@@ -1478,33 +1530,16 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							expectedResponses.Insert(node.Name+"-ep", externalContainer.GetIPv4())
 						}
 
-						valid := false
 						nodePort := nodeTCPPort
 						if protocol == "udp" {
 							nodePort = nodeUDPPort
 						}
 
 						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
-
-						for i := 0; i < maxTries; i++ {
-							epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "hostname")
-							epClientIP := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "clientip")
-							if epHostname == "" || epClientIP == "" {
-								continue
-							}
-							epClientIP, _, err = net.SplitHostPort(epClientIP)
-							if err != nil {
-								continue
-							}
-							responses.Insert(epHostname, epClientIP)
-
-							if responses.Equal(expectedResponses) {
-								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s", node.Name, nodeAddress.Address, epClientIP)
-								valid = true
-								break
-							}
-						}
-						gomega.Expect(valid).To(gomega.Equal(true), fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
+						currentResponses, err := validateStableLocalEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, expectedResponses)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Current Responses=%v", node.Name, expectedResponses, currentResponses))
+						framework.Logf("Validated stable local endpoint responses for node %s with address %s", node.Name, nodeAddress.Address)
 					}
 				}
 			}
@@ -1604,7 +1639,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1705,7 +1740,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 			for _, protocol := range []string{"http", "udp"} {
 				for _, externalAddress := range newNodeAddresses {
-					responses := sets.NewString()
+					responses := sets.New[string]()
 					valid := false
 					externalPort := int32(clusterHTTPPort)
 					if protocol == "udp" {
@@ -1747,8 +1782,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 	f := wrappedTestFramework("nodeport-ingress-test")
 	hostNetEndpointsSelector := map[string]string{"hostNetservicebackend": "true"}
 	var endPoints []*v1.Pod
-	var nodesHostnames sets.String
-	maxTries := 0
+	var nodesHostnames sets.Set[string]
 	var nodes *v1.NodeList
 	var providerCtx infraapi.Context
 	var isDualStack bool
@@ -1770,7 +1804,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1803,9 +1837,6 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 				framework.ExpectNoError(err)
 				endPoints = append(endPoints, hostNetPod)
 				nodesHostnames.Insert(hostNetPod.Name)
-
-				// this is arbitrary and mutuated from k8s network e2e tests. We aim to hit all the endpoints at least once
-				maxTries = len(endPoints)*len(endPoints) + 30
 			}
 
 			ginkgo.By("Creating an external container to send the traffic from")
@@ -1851,9 +1882,8 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							continue
 						}
 
-						responses := sets.NewString()
 						// Fill expected responses, it should hit the nodeLocal endpoints and not SNAT packet IP
-						expectedResponses := sets.NewString()
+						expectedResponses := sets.New[string]()
 
 						if utilnet.IsIPv6String(nodeAddress.Address) {
 							expectedResponses.Insert(node.Name, externalContainer.GetIPv6())
@@ -1861,33 +1891,16 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							expectedResponses.Insert(node.Name, externalContainer.GetIPv4())
 						}
 
-						valid := false
 						nodePort := nodeTCPPort
 						if protocol == "udp" {
 							nodePort = nodeUDPPort
 						}
 
 						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
-						for i := 0; i < maxTries; i++ {
-							epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "hostname")
-							epClientIP := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "clientip")
-							if epHostname == "" || epClientIP == "" {
-								continue
-							}
-							epClientIP, _, err = net.SplitHostPort(epClientIP)
-							if err != nil {
-								continue
-							}
-							responses.Insert(epHostname, epClientIP)
-
-							if responses.Equal(expectedResponses) {
-								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s ", node.Name, nodeAddress.Address, epClientIP)
-								valid = true
-								break
-							}
-						}
-						gomega.Expect(valid).To(gomega.Equal(true),
-							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
+						currentResponses, err := validateStableLocalEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, expectedResponses)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Current Responses=%v", node.Name, expectedResponses, currentResponses))
+						framework.Logf("Validated stable local endpoint responses for node %s with address %s", node.Name, nodeAddress.Address)
 					}
 				}
 			}
