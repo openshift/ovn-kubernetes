@@ -263,7 +263,7 @@ func GetAdvertisedNetworkSubnetsAddressSetDBIDs() *libovsdbops.DbObjectIDs {
 
 // GetAdvertisedNetworkSubnetsDropPGdbIDs returns the DB IDs for the advertised network subnets drop port group
 func GetAdvertisedNetworkSubnetsDropPGdbIDs() *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupAdvertisedNetwork, types.DefaultNetworkControllerName,
+	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupAdvertisedNetwork, DefaultNetworkControllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: advertisedNetworkSubnetsKey,
 		})

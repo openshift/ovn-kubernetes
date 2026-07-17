@@ -495,7 +495,7 @@ func (oc *Layer2UserDefinedNetworkController) init() error {
 	excludeSubnets = append(excludeSubnets, oc.InfrastructureSubnets()...)
 
 	_, err = oc.initializeLogicalSwitch(
-		oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+		oc.GetNetworkScopedSwitchName(""),
 		oc.Subnets(),
 		excludeSubnets,
 		oc.ReservedSubnets(),
@@ -632,7 +632,7 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 			for _, subnet := range oc.Subnets() {
 				hostSubnets = append(hostSubnets, subnet.CIDR)
 			}
-			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(""),
 				oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
 				errs = append(errs, err)
 				oc.mgmtPortFailed.Store(node.Name, true)
@@ -713,8 +713,9 @@ func (oc *Layer2UserDefinedNetworkController) addPortForRemoteNodeGR(node *corev
 
 	remotePortAddr := remoteGRPortMac.String() + " " + strings.Join(remoteGRPortNetworks, " ")
 	klog.V(5).Infof("The remote port addresses for node %s in network %s are %s", node.Name, oc.GetNetworkName(), remotePortAddr)
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName("")}
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.SwitchToRouterPrefix + oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch) + "_" + node.Name,
+		Name:      types.SwitchToRouterPrefix + sw.Name + "_" + node.Name,
 		Type:      "remote",
 		Addresses: []string{remotePortAddr},
 	}
@@ -737,7 +738,6 @@ func (oc *Layer2UserDefinedNetworkController) addPortForRemoteNodeGR(node *corev
 		libovsdbops.RequestedTnlKey:  strconv.Itoa(tunnelID),
 		libovsdbops.RequestedChassis: node.Name,
 	}
-	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return fmt.Errorf("failed to create port %v on logical switch %q: %v", logicalSwitchPort, sw.Name, err)

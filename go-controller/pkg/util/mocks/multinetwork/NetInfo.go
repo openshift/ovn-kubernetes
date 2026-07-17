@@ -414,12 +414,48 @@ func (_m *NetInfo) GetNetworkScopedPatchPortName(bridgeID string, nodeName strin
 	return r0
 }
 
+// GetNetworkScopedRouterToSwitchPortName provides a mock function with given fields: nodeName
+func (_m *NetInfo) GetNetworkScopedRouterToSwitchPortName(nodeName string) string {
+	ret := _m.Called(nodeName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNetworkScopedRouterToSwitchPortName")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(nodeName)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
 // GetNetworkScopedSwitchName provides a mock function with given fields: nodeName
 func (_m *NetInfo) GetNetworkScopedSwitchName(nodeName string) string {
 	ret := _m.Called(nodeName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetNetworkScopedSwitchName")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func(string) string); ok {
+		r0 = rf(nodeName)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// GetNetworkScopedSwitchToRouterPortName provides a mock function with given fields: nodeName
+func (_m *NetInfo) GetNetworkScopedSwitchToRouterPortName(nodeName string) string {
+	ret := _m.Called(nodeName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetNetworkScopedSwitchToRouterPortName")
 	}
 
 	var r0 string
