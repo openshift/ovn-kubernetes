@@ -745,6 +745,8 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3": "[Disabled:Unimplemented]",
 
+	"BGP: When an advertised CUDN network is dynamically allocated is accepted when the network is allocated on a subset of the nodes only": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created can connect to an external server and another cluster node after toggling default network advertisement off and back on": "[Disabled:Unimplemented]",
 
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created tests are run towards the external agnhost echo server": "[Disabled:Unimplemented]",
@@ -762,6 +764,8 @@ var AppendedAnnotations = map[string]string{
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
@@ -827,6 +831,8 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
 
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
+
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
@@ -890,6 +896,8 @@ var AppendedAnnotations = map[string]string{
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
@@ -1251,11 +1259,11 @@ var AppendedAnnotations = map[string]string{
 
 	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and session affinity is set": "[Disabled:Unimplemented]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with 0 node ports when ETP=local": "[Disabled:Unimplemented]",
-
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with 0 node ports when named targetPorts are used and ETP=local": "[Disabled:Unimplemented]",
-
 	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with pmtud": "[Disabled:Unimplemented]",
+
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when ETP=local": "[Disabled:Unimplemented]",
+
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when named targetPorts are used and ETP=local": "[Disabled:Unimplemented]",
 
 	"Multi Homing A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
 
@@ -1873,6 +1881,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
@@ -1916,6 +1926,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
@@ -1961,6 +1973,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
@@ -2005,6 +2019,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
@@ -2048,6 +2064,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
