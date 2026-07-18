@@ -111,7 +111,7 @@ func (c *serviceController) close() {
 	c.libovsdbCleanup.Cleanup()
 }
 
-func (c *serviceController) testNodeInfos(nodeInfos ...*nodeInfo) []nodeInfo {
+func (c *serviceController) testNodeInfo(nodeInfos ...*nodeInfo) *nodeInfo {
 	nodeInfoByName := map[string]nodeInfo{}
 	for _, nodeInfo := range nodeInfos {
 		if nodeInfo == nil {
@@ -119,7 +119,7 @@ func (c *serviceController) testNodeInfos(nodeInfos ...*nodeInfo) []nodeInfo {
 		}
 		nodeInfoByName[nodeInfo.name] = *nodeInfo
 	}
-	return zoneNodeInfos(c.zone, nodeInfoByName)
+	return localNodeInfo(c.nodeName, nodeInfoByName)
 }
 
 func setServiceControllerStartupDone(c *Controller, done bool) {
@@ -321,12 +321,11 @@ func TestReconcileNetworkRefreshesNodeProjection(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeA,
 			Annotations: map[string]string{
-				util.OvnNodeZoneName:  nodeA,
 				util.OVNNodeHostCIDRs: `["10.0.0.1/24"]`,
 			},
 		},
 	}
-	controller.zone = nodeA
+	controller.nodeName = nodeA
 	g.Expect(controller.nodeInformer.Informer().GetStore().Add(node)).To(gomega.Succeed())
 
 	g.Expect(controller.RegisterNetwork(initialNetInfo, NetworkOptions{
@@ -1715,7 +1714,7 @@ func TestSyncServices(t *testing.T) {
 				err = controller.serviceStore.Add(tt.service)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 
-				nodeInfos := controller.testNodeInfos(tt.nodeAInfo, tt.nodeBInfo)
+				nodeInfo := controller.testNodeInfo(tt.nodeAInfo, tt.nodeBInfo)
 
 				// Add mirrored endpoint slices when the controller runs on a UDN
 				// Transform endpoint IPs from default cluster subnet to UDN subnet
@@ -1741,7 +1740,7 @@ func TestSyncServices(t *testing.T) {
 				}
 
 				// Trigger services controller
-				controller.RequestFullSync(nodeInfos)
+				controller.RequestFullSync(nodeInfo)
 
 				serviceKey := scopedServiceQueueKey(netInfo.GetNetworkName(), namespacedServiceName(ns, serviceName))
 				err = controller.syncService(serviceKey)

@@ -2454,7 +2454,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			app.Action = func(*cli.Context) error {
 				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
-					"node1",
+					node2Name,
 					"10.128.1.0/24",
 					"10.128.1.2",
 					"10.128.1.1",
@@ -2479,14 +2479,13 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					&corev1.NodeList{
 						Items: []corev1.Node{
 							*newNode(node1Name, "192.168.126.202/24"),
+							*newNode(node2Name, "192.168.126.203/24"),
 						},
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{*myPod},
 					},
 				)
-
-				fakeOvn.controller.nodeName = node2Name
 
 				err := fakeOvn.controller.WatchNamespaces()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2539,7 +2538,7 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 			app.Action = func(*cli.Context) error {
 				namespaceT := *ovntest.NewNamespace("namespace1")
 				t := newTPod(
-					"node1",
+					node2Name,
 					"10.128.1.0/24",
 					"10.128.1.2",
 					"10.128.1.1",
@@ -2561,7 +2560,9 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 						},
 					},
 					&corev1.NodeList{
-						Items: []corev1.Node{},
+						Items: []corev1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
+						},
 					},
 					&corev1.PodList{
 						Items: []corev1.Pod{*myPod},
@@ -2594,10 +2595,11 @@ var _ = ginkgo.Describe("OVN Pod Operations", func() {
 					},
 					&corev1.NodeList{
 						Items: []corev1.Node{
+							*newNode(node1Name, "192.168.126.202/24"),
 							// Add a hybrid overlay node
 							{
 								ObjectMeta: metav1.ObjectMeta{
-									Name: nodeName,
+									Name: node2Name,
 								},
 								Status: corev1.NodeStatus{
 									Conditions: []corev1.NodeCondition{

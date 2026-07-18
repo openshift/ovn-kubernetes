@@ -832,7 +832,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 			fakeOvn.startWithDBSetup(
 				initialDB,
 				&corev1.NamespaceList{Items: []corev1.Namespace{*newUDNNamespace(ns)}},
-				&corev1.NodeList{},
+				&corev1.NodeList{Items: []corev1.Node{*newNode(nodeName, "192.168.126.202/24")}},
 				&corev1.PodList{},
 			)
 
