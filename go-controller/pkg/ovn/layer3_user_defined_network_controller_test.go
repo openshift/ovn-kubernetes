@@ -503,14 +503,11 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR, netInfo)
 			Expect(err).NotTo(HaveOccurred())
 
-			nbZone := &nbdb.NBGlobal{Name: nodeName, UUID: nodeName}
-			// Post-cleanup DB: default net node switch + NB_Global + global entities (Copp, meters) as in Layer2 test.
-			defaultNetExpectations := generateUDNPostInitDB(append(emptyDefaultClusterNetworkNodeSwitch(nodeName), nbZone))
+			// Post-cleanup DB: default net node switch + global entities (Copp, meters) as in Layer2 test.
+			defaultNetExpectations := generateUDNPostInitDB(emptyDefaultClusterNetworkNodeSwitch(nodeName))
 
 			// Minimal initialDB: default net node switch, no UDN entities. The UDN controller's Start()
 			// runs init() which creates cluster router and join switch; then node sync creates per-node entities.
-			initialDB.NBData = append(initialDB.NBData, nbZone)
-
 			fakeOvn.startWithDBSetup(
 				initialDB,
 				&corev1.NamespaceList{Items: []corev1.Namespace{*newUDNNamespace(ns)}},
@@ -1562,12 +1559,16 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 			// Step 4: Create and advertise a pod on the CUDN to trigger gateway SNAT creation
 			By("Starting node watch on L3 UDN controller for shared gateway mode")
 			Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
-			Expect(userDefinedNetController.bnc.WatchPods()).To(Succeed())
 
 			By("Adding node to trigger gateway creation with SNAT+exemption")
 			// Add the node AFTER starting the watch so the watch catches the ADD event
 			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), testNode, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := userDefinedNetController.bnc.GetLocalNode()
+				return err
+			}).WithTimeout(5 * time.Second).Should(Succeed())
+			Expect(userDefinedNetController.bnc.WatchPods()).To(Succeed())
 			By("Node created, gateway should be initialized")
 
 			// Wait for pod and gateway processing to complete
