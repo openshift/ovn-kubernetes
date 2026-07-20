@@ -38,7 +38,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/topology"
 	zoneinterconnect "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -166,9 +165,6 @@ func (h *layer2UserDefinedNetworkControllerEventHandler) SyncFunc(objs []interfa
 
 		case factory.MultiNetworkPolicyType:
 			syncFunc = h.oc.syncMultiNetworkPolicies
-
-		case factory.IPAMClaimsType:
-			syncFunc = h.oc.syncIPAMClaims
 
 		default:
 			return fmt.Errorf("no sync function for object type %s", h.objType)
@@ -321,21 +317,11 @@ func NewLayer2UserDefinedNetworkController(
 	}
 
 	if oc.allocatesPodAnnotation() {
-		var claimsReconciler persistentips.PersistentAllocations
-		if oc.allowPersistentIPs() {
-			ipamClaimsReconciler := persistentips.NewIPAMClaimReconciler(
-				oc.kube,
-				oc.GetNetInfo(),
-				oc.watchFactory.IPAMClaimsInformer().Lister(),
-			)
-			oc.ipamClaimsReconciler = ipamClaimsReconciler
-			claimsReconciler = ipamClaimsReconciler
-		}
 		oc.podAnnotationAllocator = pod.NewPodAnnotationAllocator(
 			oc.GetNetInfo(),
 			cnci.watchFactory.PodCoreInformer().Lister(),
 			cnci.kube,
-			claimsReconciler)
+			nil)
 	}
 
 	// enable multicast support for UDN only for primaries + multicast enabled
@@ -463,7 +449,16 @@ func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 	return nil
 }
 
-func (oc *Layer2UserDefinedNetworkController) init() error {
+func (oc *Layer2UserDefinedNetworkController) init() (err error) {
+	start := time.Now()
+	defer func() {
+		if err == nil && config.Metrics.EnableScaleMetrics {
+			duration := time.Since(start)
+			metrics.RecordUDNNBDBProgrammedDuration(oc.TopologyType(), duration.Seconds())
+			klog.Infof("Recorded NBDB programmed duration for network %s: %v", oc.GetNetworkName(), duration)
+		}
+	}()
+
 	// Create default Control Plane Protection (COPP) entry for routers
 	defaultCOPPUUID, err := EnsureDefaultCOPP(oc.nbClient)
 	if err != nil {
@@ -635,9 +630,6 @@ func (oc *Layer2UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) er
 
 func (oc *Layer2UserDefinedNetworkController) initRetryFramework() {
 	oc.retryPods = oc.newRetryFramework(factory.PodType)
-	if oc.allocatesPodAnnotation() && oc.AllowsPersistentIPs() {
-		oc.retryIPAMClaims = oc.newRetryFramework(factory.IPAMClaimsType)
-	}
 
 	// When a user-defined network is enabled as a primary network for namespace,
 	// then watch for namespace and network policy events.
@@ -1098,8 +1090,11 @@ func (oc *Layer2UserDefinedNetworkController) cleanupInterconnectSetupForRemoteN
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L2 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-// If isUDNAdvertised is true, then we want to SNAT all packets that are coming from pods on this network
-// leaving towards nodeIPs on the cluster to masqueradeIP. If network is advertise then the SNAT looks like this:
+// If isUDNAdvertised is true, then we want to SNAT packets from pods on this network
+// leaving towards cluster node IPs and UDN-enabled service IPs to the masqueradeIP.
+// In shared gateway mode, advertised SNAT keeps NAT.match empty and uses
+// NAT.allowed_ext_ips to point directly at those address sets. Local gateway mode
+// keeps the destination address-set checks in NAT.match, for example:
 // "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/16"
 func (oc *Layer2UserDefinedNetworkController) addOrUpdateUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet,
 	nodeName string, isUDNAdvertised bool) error {
@@ -1209,6 +1204,7 @@ func (oc *Layer2UserDefinedNetworkController) newGatewayManager(nodeName string)
 		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.nodeAnnotationCache,
+		oc.addressSetManager,
 		config.Layer2UsesTransitRouter,
 		oc.gatewayOptions()...,
 	)

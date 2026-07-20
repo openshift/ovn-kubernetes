@@ -70,6 +70,13 @@ type podSelectorAddressSet struct {
 	legacyNetpolMode bool
 }
 
+const (
+	ClusterNodeIPsAddrSetName                = "node-ips"
+	ClusterNodeIPsEgressIPBackRef            = "egressip"
+	ClusterNodeIPsEgressServiceBackRef       = "egressservice"
+	ClusterNodeIPsRouteAdvertisementsBackRef = "route-advertisements"
+)
+
 // AddressSetManager manages shared address sets with pod IPs based on provided pod and namespace selectors.
 // It shared across network controllers.
 type AddressSetManager struct {
@@ -105,6 +112,9 @@ type AddressSetManager struct {
 	hostNetworkNamespaceIPsPerNode map[string][]string
 	// local cache of address sets that select HostNetworkNamespace
 	hostNetworkSelectingAddrSets sets.Set[string]
+
+	clusterNodeIPsLock     sync.RWMutex
+	clusterNodeIPsBackRefs sets.Set[string]
 }
 
 func NewAddressSetManager(podInformer coreinformers.PodInformer, namespaceInformer coreinformers.NamespaceInformer,
@@ -122,6 +132,7 @@ func NewAddressSetManager(podInformer coreinformers.PodInformer, namespaceInform
 		getNetworkNameForNADKey:        getNetworkNameForNADKey,
 		hostNetworkSelectingAddrSets:   sets.New[string](),
 		hostNetworkNamespaceIPsPerNode: make(map[string][]string),
+		clusterNodeIPsBackRefs:         sets.New[string](),
 	}
 	podCfg := &controller.ControllerConfig[corev1.Pod]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
@@ -195,6 +206,79 @@ func (m *AddressSetManager) initialSync() error {
 	return libovsdbutil.DeleteAddrSetsWithoutACLRefAnyController(libovsdbops.AddressSetPodSelector, m.nbClient)
 }
 
+// getClusterNodeIPsAddrSetDbIDs returns the DB IDs for the shared cluster node IP address set.
+func getClusterNodeIPsAddrSetDbIDs() *libovsdbops.DbObjectIDs {
+	return libovsdbops.NewDbObjectIDs(libovsdbops.AddressSetClusterNodeIPs, ovntypes.DefaultNetworkControllerName,
+		map[libovsdbops.ExternalIDKey]string{
+			libovsdbops.ObjectNameKey: ClusterNodeIPsAddrSetName,
+		})
+}
+
+// EnsureClusterNodeIPsAddressSet registers a controller-lifetime user of the
+// shared cluster node IP address set and returns its DB IDs. The address set is
+// populated from node k8s.ovn.org/host-cidrs annotations through
+// util.GetNodeAddresses. Users do not deregister because each backref
+// represents a feature controller, not an individual object.
+func (m *AddressSetManager) EnsureClusterNodeIPsAddressSet(backRef string) (*libovsdbops.DbObjectIDs, error) {
+	dbIDs := getClusterNodeIPsAddrSetDbIDs()
+	if backRef == "" {
+		return nil, fmt.Errorf("cluster node IP address set backref is empty")
+	}
+	m.clusterNodeIPsLock.Lock()
+	defer m.clusterNodeIPsLock.Unlock()
+
+	if m.clusterNodeIPsBackRefs.Has(backRef) {
+		return dbIDs, nil
+	}
+
+	m.clusterNodeIPsBackRefs.Insert(backRef)
+	if err := m.syncClusterNodeIPsAddressSetLocked(); err != nil {
+		m.clusterNodeIPsBackRefs.Delete(backRef)
+		return nil, err
+	}
+	return dbIDs, nil
+}
+
+func (m *AddressSetManager) clusterNodeIPsAddressSetInUse() bool {
+	m.clusterNodeIPsLock.RLock()
+	defer m.clusterNodeIPsLock.RUnlock()
+	return m.clusterNodeIPsBackRefs.Len() > 0
+}
+
+func (m *AddressSetManager) syncClusterNodeIPsAddressSet() error {
+	m.clusterNodeIPsLock.Lock()
+	defer m.clusterNodeIPsLock.Unlock()
+
+	return m.syncClusterNodeIPsAddressSetLocked()
+}
+
+func (m *AddressSetManager) syncClusterNodeIPsAddressSetLocked() error {
+	if m.clusterNodeIPsBackRefs.Len() == 0 {
+		return nil
+	}
+
+	as, err := addressset.NewOvnAddressSetFactory(m.nbClient, config.IPv4Mode, config.IPv6Mode).EnsureAddressSet(getClusterNodeIPsAddrSetDbIDs())
+	if err != nil {
+		return fmt.Errorf("cannot ensure address set %s exists: %w", ClusterNodeIPsAddrSetName, err)
+	}
+
+	nodes, err := m.nodeLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+	v4NodeAddrs, v6NodeAddrs, err := util.GetNodeAddresses(config.IPv4Mode, config.IPv6Mode, nodes...)
+	if err != nil {
+		return fmt.Errorf("failed to get node addresses: %w", err)
+	}
+	allAddresses := make([]net.IP, 0, len(v4NodeAddrs)+len(v6NodeAddrs))
+	allAddresses = append(allAddresses, v4NodeAddrs...)
+	allAddresses = append(allAddresses, v6NodeAddrs...)
+	if err := as.SetAddresses(util.StringSlice(allAddresses)); err != nil {
+		return fmt.Errorf("failed to set node IP address set addresses: %w", err)
+	}
+	return nil
+}
+
 // EnsureAddressSet returns address set for requested (podSelector, namespaceSelector, namespace, nodeSelector).
 // If namespaceSelector is nil, namespace will be used with podSelector statically.
 // podSelector should not be nil, use metav1.LabelSelector{} to match all pods.
@@ -246,8 +330,10 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nod
 	}
 	addrSetKey = getInternalKey(podSelector, namespaceSelector, nodeSelector, namespace, controllerName, legacyNetpolMode)
 
+	var found bool
 	err = m.addressSets.DoWithLock(addrSetKey, func(key string) error {
-		psAddrSet, found := m.addressSets.Load(key)
+		var psAddrSet *podSelectorAddressSet
+		psAddrSet, found = m.addressSets.Load(key)
 		if !found {
 			addrSetDbIDs := GetPodSelectorAddrSetDbIDs(podSelector, namespaceSelector, nodeSelector, namespace, controllerName, legacyNetpolMode)
 			ipv4Mode, ipv6Mode := netInfo.IPMode()
@@ -259,6 +345,8 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nod
 				addrSet, err = m.addressSetFactoryV6.EnsureAddressSet(addrSetDbIDs)
 			case ipv4Mode && ipv6Mode:
 				addrSet, err = m.addressSetFactoryDualstack.EnsureAddressSet(addrSetDbIDs)
+			default:
+				return fmt.Errorf("neither IPv4 nor IPv6 mode is enabled")
 			}
 			// if the first step of creating address set fails, return error since there is nothing to cleanup
 			if err != nil {
@@ -281,14 +369,26 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nod
 				},
 			}
 			m.addressSets.LoadOrStore(key, psAddrSet)
-			// this only puts key to the queue, no lock
-			m.addressSetReconciler.Reconcile(key)
 		}
 		// psAddrSet is successfully init-ed
 		psAddrSet.backRefs[backRef] = true
 		psAddrSetHashV4, psAddrSetHashV6 = psAddrSet.addressSet.GetASHashNames()
 		return nil
 	})
+	if err != nil {
+		return
+	}
+	if !found {
+		// Populate a newly created address set before returning hashes to the caller.
+		// Until reconcile runs, the NB object is empty while ACLs may already reference it
+		// (e.g. on DB ID change or first ensure). This is a one-time sync on creation;
+		// existing sets are kept up to date by the async reconciler on pod/namespace/node events.
+		if reconcileErr := m.reconcileAddressSet(addrSetKey); reconcileErr != nil {
+			klog.Errorf("Failed to reconcile address set %s on ensure: %v", addrSetKey, reconcileErr)
+			// this only puts key to the queue, no lock
+			m.addressSetReconciler.Reconcile(addrSetKey)
+		}
+	}
 	return
 }
 
@@ -511,6 +611,9 @@ func (m *AddressSetManager) nodeNeedUpdate(old, new *corev1.Node) bool {
 		// if node labels change, we need to reconcile address sets that use a node selector
 		return true
 	}
+	if util.NodeHostCIDRsAnnotationChanged(old, new) && m.clusterNodeIPsAddressSetInUse() {
+		return true
+	}
 	// only check annotations that are used in getHostNamespaceAddressesForNode
 	if util.NodeSubnetAnnotationChangedForNetwork(old, new, ovntypes.DefaultNetworkName) || util.NodeIDAnnotationChanged(old, new) ||
 		old.Annotations[util.OvnNodeIfAddr] != new.Annotations[util.OvnNodeIfAddr] {
@@ -527,6 +630,7 @@ func (m *AddressSetManager) reconcileNode(nodeKey string) error {
 	// update host network IPs first to have fresh info for addr set reconcile
 	// don't return error immediately to let other changes like node selector be propagated
 	hostNetworkErr := m.updateHostNetworkIPs(nodeKey)
+	clusterNodeIPsErr := m.syncClusterNodeIPsAddressSet()
 
 	// find address sets that could be affected by this node event
 	// Get all existing keys, then lock address sets per key and check if they are affected.
@@ -560,10 +664,11 @@ func (m *AddressSetManager) reconcileNode(nodeKey string) error {
 			return nil
 		})
 		if err != nil {
-			return fmt.Errorf("failed to reconcile address set %s for node %s: %v", addrSetKey, nodeKey, err)
+			return utilerrors.Join(hostNetworkErr, clusterNodeIPsErr,
+				fmt.Errorf("failed to reconcile address set %s for node %s: %v", addrSetKey, nodeKey, err))
 		}
 	}
-	return hostNetworkErr
+	return utilerrors.Join(hostNetworkErr, clusterNodeIPsErr)
 }
 
 func (m *AddressSetManager) updateHostNetworkIPs(nodeName string) error {

@@ -258,16 +258,14 @@ func (c *Controller) ensureBaseFRRConfiguration(allNodes []*corev1.Node) error {
 		v4, v6 := util.GetNodeInternalAddrs(node)
 		if v4 != nil {
 			neighbors = append(neighbors, frrtypes.Neighbor{
-				Address:   v4.String(),
-				ASN:       config.ManagedBGP.ASNumber,
-				DisableMP: true,
+				Address: v4.String(),
+				ASN:     config.ManagedBGP.ASNumber,
 			})
 		}
 		if v6 != nil {
 			neighbors = append(neighbors, frrtypes.Neighbor{
-				Address:   v6.String(),
-				ASN:       config.ManagedBGP.ASNumber,
-				DisableMP: true,
+				Address: v6.String(),
+				ASN:     config.ManagedBGP.ASNumber,
 			})
 		}
 	}

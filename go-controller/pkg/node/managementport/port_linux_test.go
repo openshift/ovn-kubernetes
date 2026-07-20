@@ -237,7 +237,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/forwarding=1",
+				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
@@ -274,6 +274,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		KubeClient: fakeClient,
 	}
 
+	netInfo.On("Transport").Return("")
 	if isRoutingAdvertised {
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return([]string{"vrf"})
 	} else {
@@ -375,6 +376,7 @@ func testManagementPortDPU(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.
 		KubeClient: fakeClient,
 	}
 
+	netInfo.On("Transport").Return("")
 	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 
 	_, err = config.InitConfig(ctx, fexec, nil)
@@ -471,7 +473,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/forwarding=1",
+				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
@@ -490,6 +492,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		netInfo.On("GetNodeManagementIP", nodeSubnetCIDRs[i]).Return(util.GetNodeManagementIfAddr(nodeSubnetCIDRs[i]))
 	}
 
+	netInfo.On("Transport").Return("")
 	netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", nodeName).Return(nil)
 
 	_, err = config.InitConfig(ctx, fexec, nil)
@@ -743,6 +746,7 @@ var _ = Describe("Management Port tests", func() {
 
 				// Return error here, so we know that function didn't returned earlier
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
+				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 				err := syncMgmtPortInterface(ovsClient, mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
@@ -757,9 +761,26 @@ var _ = Describe("Management Port tests", func() {
 					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
 				})
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
+				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 
 				err := syncMgmtPortInterface(ovsClient, mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
+			})
+
+			It("Succeeds when representor link is already removed", func() {
+				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
+					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
+					Output: "," + mgmtPortName,
+				})
+				execMock.AddFakeCmdsNoOutputNoError([]string{
+					"ovs-vsctl --timeout=15 --if-exists get Interface " + mgmtPortName + " external-ids:ovn-orig-mgmt-port-rep-name",
+					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
+				})
+				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
+				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
+
+				err := syncMgmtPortInterface(ovsClient, mgmtPortName, false)
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("Fails to set representor link down", func() {
@@ -832,6 +853,7 @@ var _ = Describe("Management Port tests", func() {
 				netInfo := &multinetworkmocks.NetInfo{}
 				nodeNet := ovntest.MustParseIPNet("10.1.1.0/24")
 
+				netInfo.On("Transport").Return("")
 				netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "").Return(nil)
 				netInfo.On("GetNodeGatewayIP", nodeNet).Return(util.GetNodeGatewayIfAddr(nodeNet))
 				netInfo.On("GetNodeManagementIP", nodeNet).Return(util.GetNodeManagementIfAddr(nodeNet))
@@ -1242,9 +1264,29 @@ var _ = Describe("Management Port tests", func() {
 		hostSubnets := []*net.IPNet{ovntest.MustParseIPNet("10.1.1.0/24")}
 		netdevName, rep := "ens1f0v0", "ens1f0_0"
 		netInfo := &multinetworkmocks.NetInfo{}
+		netInfo.On("Transport").Return("")
 		netInfo.On("GetPodNetworkAdvertisedOnNodeVRFs", "worker-node").Return(nil)
 		netInfo.On("GetNodeGatewayIP", hostSubnets[0]).Return(util.GetNodeGatewayIfAddr(hostSubnets[0]))
 		netInfo.On("GetNodeManagementIP", hostSubnets[0]).Return(util.GetNodeManagementIfAddr(hostSubnets[0]))
+		It("does not add default cluster subnet routes through the management port for DPU host no-overlay", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPUHost
+			config.Gateway.Mode = config.GatewayModeShared
+			config.Default.Transport = types.NetworkTransportNoOverlay
+			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{{
+				CIDR:             ovntest.MustParseIPNet("10.1.0.0/16"),
+				HostSubnetLength: 24,
+			}}
+
+			cfg, err := newManagementPortIPFamilyConfig(hostSubnets[0], false, netInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			var routeSubnets []string
+			for _, subnet := range cfg.clusterSubnets {
+				routeSubnets = append(routeSubnets, subnet.String())
+			}
+			Expect(routeSubnets).NotTo(ContainElement("10.1.0.0/16"))
+			Expect(routeSubnets).To(ConsistOf(fmt.Sprintf("%s/32", config.Gateway.MasqueradeIPs.V4HostETPLocalMasqueradeIP.String())))
+		})
 		It("Creates managementPort by default", func() {
 			mgmtPort, err := NewManagementPortController(nil, node, hostSubnets, netdevName, rep, nil, netInfo)
 			Expect(err).NotTo(HaveOccurred())

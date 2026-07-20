@@ -6,7 +6,6 @@ package apbroute
 import (
 	"fmt"
 	"net"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -102,20 +101,6 @@ func (m *externalPolicyManager) updateRoutePolicy(existingPolicy *routePolicySta
 			allGWIPsToDelete := sets.New[string]()
 			allGWIPsToKeep := sets.New[string]()
 
-			// Static Hops
-			annotatedNamespaceGWIPs, err := m.calculateAnnotatedNamespaceGatewayIPsForNamespace(targetNamespace)
-			if err != nil {
-				return err
-			}
-
-			// Dynamic Hops
-			annotatedPodGWIPs, err := m.calculateAnnotatedPodGatewayIPsForNamespace(targetNamespace)
-			if err != nil {
-				return err
-			}
-
-			allGWIPsToKeep = allGWIPsToKeep.Union(annotatedNamespaceGWIPs).Union(annotatedPodGWIPs)
-
 			// track which pods should be removed from targetPods
 			podsToDelete := []ktypes.NamespacedName{}
 			for podNamespacedName, existingPodConfig := range targetPods {
@@ -139,10 +124,8 @@ func (m *externalPolicyManager) updateRoutePolicy(existingPolicy *routePolicySta
 						insertSet(gwIPsToLeave, existingGW.Gateways)
 					}
 				}
-				// don't delete ips from annotations
-				ipsToDelete := gwIPsToDelete.Difference(annotatedNamespaceGWIPs)
 
-				insertSet(allGWIPsToDelete, ipsToDelete)
+				insertSet(allGWIPsToDelete, gwIPsToDelete)
 				insertSet(allGWIPsToKeep, gwIPsToLeave)
 
 				// Dynamic Hops
@@ -161,10 +144,8 @@ func (m *externalPolicyManager) updateRoutePolicy(existingPolicy *routePolicySta
 						insertSet(gwIPsToLeave, existingGW.Gateways)
 					}
 				}
-				// don't delete ips from annotations
-				ipsToDelete = gwIPsToDelete.Difference(annotatedPodGWIPs)
 
-				insertSet(allGWIPsToDelete, ipsToDelete)
+				insertSet(allGWIPsToDelete, gwIPsToDelete)
 				insertSet(allGWIPsToKeep, gwIPsToLeave)
 
 				if staticGWsToDelete.Len() > 0 || dynamicGWsToDelete.Len() > 0 {
@@ -263,65 +244,6 @@ func (m *externalPolicyManager) applyPodConfig(pod *corev1.Pod, existingPodConfi
 	}
 	klog.V(4).Infof("Applying policy %s to pod %s", updatedPolicy.policyName, getPodNamespacedName(pod))
 	return nil
-}
-
-// calculateAnnotatedNamespaceGatewayIPsForNamespace retrieves the list of IPs defined by the legacy annotation gateway logic for namespaces.
-// this function is used when deleting gateway IPs to ensure that IPs that overlap with the annotation logic are not deleted from the network resource
-// (north bound or conntrack) when the given IP is deleted when removing the policy that references them.
-func (m *externalPolicyManager) calculateAnnotatedNamespaceGatewayIPsForNamespace(targetNamespace string) (sets.Set[string], error) {
-	namespace, err := m.namespaceLister.Get(targetNamespace)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return sets.New[string](), nil
-		}
-		return nil, err
-	}
-
-	if annotation, ok := namespace.Annotations[util.RoutingExternalGWsAnnotation]; ok {
-		exGateways, err := util.ParseRoutingExternalGWAnnotation(annotation)
-		if err != nil {
-			return nil, err
-		}
-		return exGateways, nil
-	}
-	return sets.New[string](), nil
-
-}
-
-// calculateAnnotatedPodGatewayIPsForNamespace retrieves the list of IPs defined by the legacy annotation gateway logic for pods.
-// this function is used when deleting gateway IPs to ensure that IPs that overlap with the annotation logic are not deleted from the network resource
-// (north bound or conntrack) when the given IP is deleted when removing the policy that references them.
-func (m *externalPolicyManager) calculateAnnotatedPodGatewayIPsForNamespace(targetNamespace string) (sets.Set[string], error) {
-	gwIPs := sets.New[string]()
-	podList, err := m.podLister.Pods(targetNamespace).List(labels.Everything())
-	if err != nil {
-		return nil, err
-	}
-
-	for _, pod := range podList {
-		networkName, ok := pod.Annotations[util.RoutingNetworkAnnotation]
-		if !ok {
-			continue
-		}
-		targetNamespaces, ok := pod.Annotations[util.RoutingNamespaceAnnotation]
-		if !ok {
-			continue
-		}
-		foundGws, err := getExGwPodIPs(pod, networkName)
-		if err != nil {
-			klog.Errorf("Error getting exgw IPs for pod: %s, error: %v", pod.Name, err)
-			return nil, err
-		}
-		if foundGws.Len() == 0 {
-			klog.Errorf("No pod IPs found for pod %s/%s", pod.Namespace, pod.Name)
-			continue
-		}
-		tmpNs := sets.New(strings.Split(targetNamespaces, ",")...)
-		if tmpNs.Has(targetNamespaces) {
-			insertSet(gwIPs, foundGws)
-		}
-	}
-	return gwIPs, nil
 }
 
 func (m *externalPolicyManager) processStaticHopsGatewayInformation(hops []*adminpolicybasedrouteapi.StaticHop) (*gateway_info.GatewayInfoList, error) {

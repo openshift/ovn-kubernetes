@@ -109,6 +109,7 @@ func (defaultSriovnetOps) GetPfPciFromAux(auxDev string) (string, error) {
 }
 
 func (defaultSriovnetOps) GetVfRepresentorDPU(pfID, vfIndex string) (string, error) {
+	//nolint:staticcheck
 	return sriovnet.GetVfRepresentorDPU(pfID, vfIndex)
 }
 
