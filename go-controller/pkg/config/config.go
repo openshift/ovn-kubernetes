@@ -500,7 +500,6 @@ type OVNKubernetesFeatureConfig struct {
 	EnableEVPN                      bool `gcfg:"enable-evpn"`
 	EnableMultiNetworkPolicy        bool `gcfg:"enable-multi-networkpolicy"`
 	EnableStatelessNetPol           bool `gcfg:"enable-stateless-netpol"`
-	EnableInterconnect              bool `gcfg:"enable-interconnect"`
 	EnableMultiExternalGateway      bool `gcfg:"enable-multi-external-gateway"`
 	EnablePersistentIPs             bool `gcfg:"enable-persistent-ips"`
 	EnableDNSNameResolver           bool `gcfg:"enable-dns-name-resolver"`
@@ -651,6 +650,7 @@ type OvnKubeNodeConfig struct {
 	MgmtPortDPResourceName    string `gcfg:"mgmt-port-dp-resource-name"`
 	DPUNodeLeaseRenewInterval int    `gcfg:"dpu-node-lease-renew-interval"`
 	DPUNodeLeaseDuration      int    `gcfg:"dpu-node-lease-duration"`
+	SimulateDPU               bool   `gcfg:"simulate-dpu"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -904,10 +904,6 @@ var cliConfig config
 var CommonFlags = []cli.Flag{
 	// Mode flags
 	&cli.StringFlag{
-		Name:  "init-master",
-		Usage: "initialize master (both cluster-manager and ovnkube-controller), requires the hostname as argument",
-	},
-	&cli.StringFlag{
 		Name:  "init-cluster-manager",
 		Usage: "initialize cluster manager (but not ovnkube-controller), requires the hostname as argument",
 	},
@@ -1059,7 +1055,7 @@ var CommonFlags = []cli.Flag{
 	},
 	&cli.BoolFlag{
 		Name:        "enable-multicast",
-		Usage:       "Adds multicast support. Valid only with --init-master option.",
+		Usage:       "Adds multicast support. Valid only with ovnkube-controller mode.",
 		Destination: &EnableMulticast,
 	},
 	// Logging options
@@ -1286,12 +1282,6 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Allow ICMP/ICMPv6 traffic to bypass NetworkPolicy default-deny rules.",
 		Destination: &cliConfig.OVNKubernetesFeature.AllowICMPNetworkPolicy,
 		Value:       OVNKubernetesFeature.AllowICMPNetworkPolicy,
-	},
-	&cli.BoolFlag{
-		Name:        "enable-interconnect",
-		Usage:       "Enable interconnecting multiple zones.",
-		Destination: &cliConfig.OVNKubernetesFeature.EnableInterconnect,
-		Value:       OVNKubernetesFeature.EnableInterconnect,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-egress-service",
@@ -1870,6 +1860,12 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "Lease duration in seconds before the DPU is considered unhealthy",
 		Value:       OvnKubeNode.DPUNodeLeaseDuration,
 		Destination: &cliConfig.OvnKubeNode.DPUNodeLeaseDuration,
+	},
+	&cli.BoolFlag{
+		Name:        "simulate-dpu",
+		Usage:       "Use simulated DPU operations instead of real SR-IOV/switchdev hardware. Required for Kind and VM-based DPU simulation environments.",
+		Value:       OvnKubeNode.SimulateDPU,
+		Destination: &cliConfig.OvnKubeNode.SimulateDPU,
 	},
 }
 

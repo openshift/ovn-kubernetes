@@ -60,7 +60,6 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 		return nil, err
 	}
 
-	config.OVNKubernetesFeature.EnableInterconnect = true
 	config.OVNKubernetesFeature.EnableMultiNetwork = true
 	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 
@@ -112,8 +111,8 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 	if err = controller.initTopLevelCache(); err != nil {
 		return nil, err
 	}
-	controller.useLBGroups = true
-	controller.useTemplates = true
+	controller.state.useLBGroups = true
+	controller.state.useTemplates = true
 
 	// When testing services on UDN, add a NAD in the same namespace associated to the service
 	if !netInfo.IsDefault() {
@@ -132,6 +131,37 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 
 func (c *serviceController) close() {
 	c.libovsdbCleanup.Cleanup()
+}
+
+func (c *serviceController) testNodeInfos(nodeInfos ...*nodeInfo) []nodeInfo {
+	nodeInfoByName := map[string]nodeInfo{}
+	for _, nodeInfo := range nodeInfos {
+		if nodeInfo == nil {
+			continue
+		}
+		nodeInfoByName[nodeInfo.name] = *nodeInfo
+	}
+	return zoneNodeInfos(c.zone, nodeInfoByName)
+}
+
+func setServiceControllerStartupDone(c *Controller, done bool) {
+	c.startupDoneLock.Lock()
+	defer c.startupDoneLock.Unlock()
+	c.startupDone = done
+}
+
+func drainServiceQueue(c *Controller) []string {
+	keys := []string{}
+	for c.queue.Len() > 0 {
+		key, shutdown := c.queue.Get()
+		if shutdown {
+			break
+		}
+		keys = append(keys, key)
+		c.queue.Done(key)
+		c.queue.Forget(key)
+	}
+	return keys
 }
 
 func getSampleUDNNetInfo(namespace string, topology string) (util.NetInfo, error) {
@@ -162,7 +192,12 @@ func getSampleUDNNetInfo(namespace string, topology string) (util.NetInfo, error
 		NetConf:    cnitypes.NetConf{Name: fmt.Sprintf("net_%s", topology), Type: "ovn-k8s-cni-overlay"},
 		JoinSubnet: "100.66.0.0/16",
 	})
-	return netInfo, err
+	if err != nil {
+		return nil, err
+	}
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.AddNADs(util.GetNADName(namespace, "nad1"))
+	return mutableNetInfo, nil
 }
 
 func addSampleNAD(client *util.OVNKubeControllerClientset, namespace string, netInfo util.NetInfo) error {
@@ -171,6 +206,204 @@ func addSampleNAD(client *util.OVNKubeControllerClientset, namespace string, net
 		kubetest.GenerateNAD(netInfo.GetNetworkName(), netInfo.GetNetworkName(), namespace, netInfo.TopologyType(), netInfo.Subnets()[0].String(), types.NetworkRolePrimary),
 		metav1.CreateOptions{})
 	return err
+}
+
+func TestSharedServiceControllerNetworkRegistration(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	oldIPv4Mode := config.IPv4Mode
+	oldIPv6Mode := config.IPv6Mode
+	config.IPv4Mode = true
+	config.IPv6Mode = false
+	t.Cleanup(func() {
+		config.IPv4Mode = oldIPv4Mode
+		config.IPv6Mode = oldIPv6Mode
+	})
+
+	const (
+		namespace = "shared-services-test"
+		name      = "svc"
+		nadName   = "nad1"
+	)
+	serviceKey := namespacedServiceName(namespace, name)
+	udn, err := getSampleUDNNetInfo(namespace, types.Layer3Topology)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	controller, err := newControllerWithDBSetupForNetwork(libovsdbtest.TestSetup{}, &util.DefaultNetInfo{}, namespace)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	defer controller.close()
+
+	controller.networkManager = (&networkmanager.FakeNetworkManager{
+		PrimaryNetworks: map[string]util.NetInfo{
+			namespace: udn,
+		},
+		NADNetworks: map[string]util.NetInfo{
+			util.GetNADName(namespace, nadName): udn,
+		},
+	}).Interface()
+
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Type:       corev1.ServiceTypeClusterIP,
+			ClusterIP:  "10.96.0.10",
+			ClusterIPs: []string{"10.96.0.10"},
+			Ports: []corev1.ServicePort{{
+				Protocol:   corev1.ProtocolTCP,
+				Port:       80,
+				TargetPort: intstr.FromInt32(8080),
+			}},
+		},
+	}
+	g.Expect(controller.serviceStore.Add(service)).To(gomega.Succeed())
+
+	// A UDN can register while the shared controller is still waiting for its
+	// initial informer sync. The startup sweep must still pick up that network.
+	setServiceControllerStartupDone(controller.Controller, false)
+	g.Expect(controller.RegisterNetwork(udn, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  true,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+	g.Expect(controller.queue.Len()).To(gomega.Equal(0))
+
+	setServiceControllerStartupDone(controller.Controller, true)
+	g.Expect(controller.forEachNetworkState(func(_ string, state *networkState) error {
+		controller.enqueueAllServicesForNetwork(state)
+		return nil
+	})).To(gomega.Succeed())
+	g.Expect(drainServiceQueue(controller.Controller)).To(gomega.ConsistOf(
+		scopedServiceQueueKey(udn.GetNetworkName(), serviceKey),
+	))
+
+	g.Expect(controller.ReconcileNetwork(udn, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  false,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+
+	state, ok := controller.networkStates.Load(udn.GetNetworkName())
+	g.Expect(ok).To(gomega.BeTrue())
+	g.Expect(state.useLBGroups).To(gomega.BeFalse())
+	g.Expect(state.useTemplates).To(gomega.BeFalse())
+	g.Expect(drainServiceQueue(controller.Controller)).To(gomega.ConsistOf(
+		scopedServiceQueueKey(udn.GetNetworkName(), serviceKey),
+	))
+}
+
+func TestReconcileNetworkRefreshesNodeProjection(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	oldIPv4Mode := config.IPv4Mode
+	oldIPv6Mode := config.IPv6Mode
+	config.IPv4Mode = true
+	config.IPv6Mode = false
+	t.Cleanup(func() {
+		config.IPv4Mode = oldIPv4Mode
+		config.IPv6Mode = oldIPv6Mode
+	})
+
+	const (
+		namespace   = "service-reconcile-test"
+		nadName     = "nad1"
+		networkName = "net_l2_reconcile"
+	)
+	netConf := func(subnets string) util.NetInfo {
+		netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
+			Topology:   types.Layer2Topology,
+			NADName:    util.GetNADName(namespace, nadName),
+			MTU:        1400,
+			Role:       types.NetworkRolePrimary,
+			Subnets:    subnets,
+			NetConf:    cnitypes.NetConf{Name: networkName, Type: "ovn-k8s-cni-overlay"},
+			JoinSubnet: "100.66.0.0/16",
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		return netInfo
+	}
+	initialNetInfo := netConf("192.168.200.0/24")
+	updatedNetInfo := netConf("192.168.210.0/24")
+
+	controller, err := newControllerWithDBSetupForNetwork(libovsdbtest.TestSetup{}, &util.DefaultNetInfo{}, namespace)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	defer controller.close()
+
+	controller.networkManager = (&networkmanager.FakeNetworkManager{
+		PrimaryNetworks: map[string]util.NetInfo{
+			namespace: initialNetInfo,
+		},
+		NADNetworks: map[string]util.NetInfo{
+			util.GetNADName(namespace, nadName): initialNetInfo,
+		},
+	}).Interface()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeA,
+			Annotations: map[string]string{
+				util.OvnNodeZoneName:  nodeA,
+				util.OVNNodeHostCIDRs: `["10.0.0.1/24"]`,
+			},
+		},
+	}
+	controller.zone = nodeA
+	g.Expect(controller.nodeInformer.Informer().GetStore().Add(node)).To(gomega.Succeed())
+
+	g.Expect(controller.RegisterNetwork(initialNetInfo, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  true,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+	nodePodSubnet := func(state *networkState) string {
+		state.nodeInfoRWLock.RLock()
+		defer state.nodeInfoRWLock.RUnlock()
+		g.Expect(state.nodeInfosByName[nodeA].podSubnets).To(gomega.HaveLen(1))
+		return state.nodeInfosByName[nodeA].podSubnets[0].String()
+	}
+
+	state, ok := controller.networkStates.Load(initialNetInfo.GetNetworkName())
+	g.Expect(ok).To(gomega.BeTrue())
+	g.Expect(nodePodSubnet(state)).To(gomega.Equal("192.168.200.0/24"))
+
+	g.Expect(controller.ReconcileNetwork(updatedNetInfo, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  true,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+
+	state, ok = controller.networkStates.Load(updatedNetInfo.GetNetworkName())
+	g.Expect(ok).To(gomega.BeTrue())
+	g.Expect(nodePodSubnet(state)).To(gomega.Equal("192.168.210.0/24"))
+}
+
+func TestNodeChangedPredicates(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	oldNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeA,
+			Annotations: map[string]string{
+				types.NodeSubnetsAnnotation: `{"default":["10.128.0.0/24"]}`,
+				util.OVNNodeHostCIDRs:       `["10.0.0.1/24"]`,
+			},
+		},
+	}
+
+	unrelatedChange := oldNode.DeepCopy()
+	unrelatedChange.Annotations["unrelated"] = "changed"
+	g.Expect(nodeChangedForAnyNetwork(oldNode, unrelatedChange)).To(gomega.BeFalse())
+
+	hostCIDRChange := oldNode.DeepCopy()
+	hostCIDRChange.Annotations[util.OVNNodeHostCIDRs] = `["10.0.0.2/24"]`
+	g.Expect(nodeChangedForAnyNetwork(oldNode, hostCIDRChange)).To(gomega.BeTrue())
+	g.Expect(nodeChangedForNetwork(oldNode, hostCIDRChange, &util.DefaultNetInfo{})).To(gomega.BeTrue())
+
+	otherNetworkSubnetChange := oldNode.DeepCopy()
+	otherNetworkSubnetChange.Annotations[types.NodeSubnetsAnnotation] = `{"default":["10.128.0.0/24"],"other":["10.129.0.0/24"]}`
+	g.Expect(nodeChangedForAnyNetwork(oldNode, otherNetworkSubnetChange)).To(gomega.BeTrue())
+	g.Expect(nodeChangedForNetwork(oldNode, otherNetworkSubnetChange, &util.DefaultNetInfo{})).To(gomega.BeFalse())
 }
 
 // TestSyncServices - an end-to-end test for the services controller.
@@ -1522,14 +1755,7 @@ func TestSyncServices(t *testing.T) {
 				err = controller.serviceStore.Add(tt.service)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 
-				// Setup node tracker
-				controller.nodeTracker.nodes = map[string]nodeInfo{}
-				if tt.nodeAInfo != nil {
-					controller.nodeTracker.nodes[nodeA] = *tt.nodeAInfo
-				}
-				if tt.nodeBInfo != nil {
-					controller.nodeTracker.nodes[nodeB] = *tt.nodeBInfo
-				}
+				nodeInfos := controller.testNodeInfos(tt.nodeAInfo, tt.nodeBInfo)
 
 				// Add mirrored endpoint slices when the controller runs on a UDN
 				// Transform endpoint IPs from default cluster subnet to UDN subnet
@@ -1555,9 +1781,10 @@ func TestSyncServices(t *testing.T) {
 				}
 
 				// Trigger services controller
-				controller.RequestFullSync(controller.nodeTracker.getZoneNodes())
+				controller.RequestFullSync(nodeInfos)
 
-				err = controller.syncService(namespacedServiceName(ns, serviceName))
+				serviceKey := scopedServiceQueueKey(netInfo.GetNetworkName(), namespacedServiceName(ns, serviceName))
+				err = controller.syncService(serviceKey)
 				if err != nil {
 					t.Fatalf("syncServices error: %v", err)
 				}
@@ -1565,12 +1792,12 @@ func TestSyncServices(t *testing.T) {
 				// Check OVN DB
 				g.Expect(controller.nbClient).To(libovsdbtest.HaveData(expectedDb))
 
-				// If the test requires a node to be deleted, remove it from the node tracker,
-				// sync the service controller and check the OVN DB
+				// If the test requires a node to be deleted, drive the shared node handler,
+				// sync the service controller and check the OVN DB.
 				if tt.nodeToDelete != "" {
-					controller.nodeTracker.removeNode(tt.nodeToDelete)
+					controller.onNodeDelete(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: tt.nodeToDelete}})
 
-					g.Expect(controller.syncService(namespacedServiceName(ns, serviceName))).To(gomega.Succeed())
+					g.Expect(controller.syncService(serviceKey)).To(gomega.Succeed())
 
 					g.Expect(controller.nbClient).To(libovsdbtest.HaveData(dbStateAfterDeleting))
 				}
@@ -1578,6 +1805,28 @@ func TestSyncServices(t *testing.T) {
 		}
 
 	}
+}
+
+func TestReconcileNetworkSkipsUnregisteredNetwork(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	const namespace = "service-reconcile-unregistered-test"
+	udn, err := getSampleUDNNetInfo(namespace, types.Layer3Topology)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+
+	controller, err := newControllerWithDBSetupForNetwork(libovsdbtest.TestSetup{}, &util.DefaultNetInfo{}, namespace)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	defer controller.close()
+
+	setServiceControllerStartupDone(controller.Controller, true)
+	g.Expect(controller.ReconcileNetwork(udn, NetworkOptions{
+		RunRepair:    false,
+		UseLBGroups:  true,
+		UseTemplates: false,
+	})).To(gomega.Succeed())
+
+	_, ok := controller.networkStates.Load(udn.GetNetworkName())
+	g.Expect(ok).To(gomega.BeFalse())
 }
 
 func nodeLogicalSwitch(nodeName string, lbGroups []string, namespacedServiceNames ...string) *nbdb.LogicalSwitch {

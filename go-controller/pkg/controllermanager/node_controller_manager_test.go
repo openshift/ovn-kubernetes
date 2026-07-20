@@ -18,16 +18,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	factoryMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	nadinformermocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions/k8s.cni.cncf.io/v1"
 	nadlistermocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 	coreinformermocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	corelistermocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -49,13 +54,17 @@ func genDeleteStalePortCmd(ifaces ...string) string {
 	return staleIfacesCmd
 }
 
-func genDeleteStaleRepPortCmd(iface string) string {
-	return fmt.Sprintf("ovs-vsctl --timeout=15 --if-exists --with-iface del-port %s", iface)
+func newTestOVSClient(ovsData []libovsdbtest.TestData) (libovsdbclient.Client, *libovsdbtest.Context) {
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: ovsData,
+	})
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	return ovsClient, testCtx
 }
 
-func genFindInterfaceWithSandboxCmd() string {
-	return fmt.Sprintf("ovs-vsctl --timeout=15 --columns=name,external_ids --data=bare --no-headings " +
-		"--format=csv find Interface external_ids:sandbox!=\"\" external_ids:vf-netdev-name!=\"\"")
+func ovsPortAndInterface(portUUID, ifaceUUID, name string, extIDs map[string]string) (*vswitchd.Port, *vswitchd.Interface) {
+	return &vswitchd.Port{UUID: portUUID, Name: name, Interfaces: []string{ifaceUUID}},
+		&vswitchd.Interface{UUID: ifaceUUID, Name: name, ExternalIDs: extIDs}
 }
 
 var _ = Describe("Healthcheck tests", func() {
@@ -111,8 +120,9 @@ var _ = Describe("Healthcheck tests", func() {
 		})
 	})
 
-	Describe("checkForStaleOVSRepresentorInterfaces", func() {
+	Describe("checkForStaleOVSPodInterfaces", func() {
 		var ncm *NodeControllerManager
+		var ovsCleanup *libovsdbtest.Context
 		nodeName := "localNode"
 		routeManager := routemanager.NewController()
 		podList := []*corev1.Pod{
@@ -140,8 +150,7 @@ var _ = Describe("Healthcheck tests", func() {
 			},
 		}
 
-		BeforeEach(func() {
-			// setup kube output
+		setupNCM := func(ovsData []libovsdbtest.TestData) {
 			factoryMock.On("GetPods", "").Return(podList, nil)
 			nadListerMock := &nadlistermocks.NetworkAttachmentDefinitionLister{}
 			nadInformerMock := &nadinformermocks.NetworkAttachmentDefinitionInformer{}
@@ -153,42 +162,114 @@ var _ = Describe("Healthcheck tests", func() {
 			nodeListerMock.On("List", mock.Anything).Return(nil, nil)
 			nodeInformerMock.On("Lister").Return(nodeListerMock)
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
-			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
+
+			var ovsClient libovsdbclient.Client
+			ovsClient, ovsCleanup = newTestOVSClient(ovsData)
+
+			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, ovsClient)
 			Expect(err).NotTo(HaveOccurred())
+		}
+
+		AfterEach(func() {
+			if ovsCleanup != nil {
+				ovsCleanup.Cleanup()
+			}
 		})
 
 		Context("bridge has stale representor ports", func() {
 			It("removes stale VF rep ports from bridge", func() {
-				// mock call to find OVS interfaces with non-empty external_ids:sandbox
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genFindInterfaceWithSandboxCmd(),
-					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod iface-id-ver=pod-a-uuid-1 vf-netdev-name=blah\n" +
-						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod iface-id-ver=pod-b-uuid-2 vf-netdev-name=blah\n" +
-						"stale-pod-ifc,sandbox=123abcfaa iface-id=stale-ns_stale-pod iface-id-ver=pod-stale-uuid-3 vf-netdev-name=blah\n",
-					Err: nil,
+				portA, ifaceA := ovsPortAndInterface("port-1", "iface-1", "pod-a-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "a-ns_a-pod", "iface-id-ver": "pod-a-uuid-1", "vf-netdev-name": "blah"})
+				portB, ifaceB := ovsPortAndInterface("port-2", "iface-2", "pod-b-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "b-ns_b-pod", "iface-id-ver": "pod-b-uuid-2", "vf-netdev-name": "blah"})
+				portStale, ifaceStale := ovsPortAndInterface("port-3", "iface-3", "stale-pod-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "stale-ns_stale-pod", "iface-id-ver": "pod-stale-uuid-3", "vf-netdev-name": "blah"})
+				setupNCM([]libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+					&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-1", "port-2", "port-3"}},
+					portA, ifaceA, portB, ifaceB, portStale, ifaceStale,
 				})
-				// mock calls to remove only stale-port
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    genDeleteStaleRepPortCmd("stale-pod-ifc"),
-					Output: "",
-					Err:    nil,
-				})
-				ncm.checkForStaleOVSRepresentorInterfaces()
-				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
+				ncm.checkForStaleOVSPodInterfaces()
+				_, err := libovsdbops.GetOVSPort(ncm.ovsClient, "pod-a-ifc")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = libovsdbops.GetOVSPort(ncm.ovsClient, "pod-b-ifc")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = libovsdbops.GetOVSPort(ncm.ovsClient, "stale-pod-ifc")
+				Expect(err).To(HaveOccurred())
 			})
 		})
 
 		Context("bridge does not have stale representor ports", func() {
 			It("does not remove any port from bridge", func() {
-				// ports in br-int
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: genFindInterfaceWithSandboxCmd(),
-					Output: "pod-a-ifc,sandbox=123abcfaa iface-id=a-ns_a-pod iface-id-ver=pod-a-uuid-1 vf-netdev-name=blah\n" +
-						"pod-b-ifc,sandbox=123abcfaa iface-id=b-ns_b-pod iface-id-ver=pod-b-uuid-2 vf-netdev-name=blah\n",
-					Err: nil,
+				portA, ifaceA := ovsPortAndInterface("port-1", "iface-1", "pod-a-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "a-ns_a-pod", "iface-id-ver": "pod-a-uuid-1", "vf-netdev-name": "blah"})
+				portB, ifaceB := ovsPortAndInterface("port-2", "iface-2", "pod-b-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "b-ns_b-pod", "iface-id-ver": "pod-b-uuid-2", "vf-netdev-name": "blah"})
+				setupNCM([]libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+					&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-1", "port-2"}},
+					portA, ifaceA, portB, ifaceB,
 				})
-				ncm.checkForStaleOVSRepresentorInterfaces()
-				Expect(execMock.CalledMatchesExpected()).To(BeTrue(), execMock.ErrorDesc)
+				ncm.checkForStaleOVSPodInterfaces()
+				_, err := libovsdbops.GetOVSPort(ncm.ovsClient, "pod-a-ifc")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = libovsdbops.GetOVSPort(ncm.ovsClient, "pod-b-ifc")
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Context("bridge has stale VFIO representor ports", func() {
+			It("removes stale VFIO rep ports identified by vf-is-vfio=true", func() {
+				portA, ifaceA := ovsPortAndInterface("port-1", "iface-1", "pod-a-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "a-ns_a-pod", "iface-id-ver": "pod-a-uuid-1", "vf-netdev-name": "blah"})
+				portVfio, ifaceVfio := ovsPortAndInterface("port-4", "iface-4", "vfio-pod-ifc", map[string]string{
+					"sandbox": "456defbbb", "iface-id": "vfio-ns_vfio-pod", "iface-id-ver": "pod-vfio-uuid-4", "vf-is-vfio": "true"})
+				setupNCM([]libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+					&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-1", "port-4"}},
+					portA, ifaceA, portVfio, ifaceVfio,
+				})
+				ncm.checkForStaleOVSPodInterfaces()
+				_, err := libovsdbops.GetOVSPort(ncm.ovsClient, "pod-a-ifc")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = libovsdbops.GetOVSPort(ncm.ovsClient, "vfio-pod-ifc")
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("does not remove VFIO rep ports for existing pods", func() {
+				portA, ifaceA := ovsPortAndInterface("port-1", "iface-1", "pod-a-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "a-ns_a-pod", "iface-id-ver": "pod-a-uuid-1", "vf-is-vfio": "true"})
+				portB, ifaceB := ovsPortAndInterface("port-2", "iface-2", "pod-b-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "b-ns_b-pod", "iface-id-ver": "pod-b-uuid-2", "vf-is-vfio": "true"})
+				setupNCM([]libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+					&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-1", "port-2"}},
+					portA, ifaceA, portB, ifaceB,
+				})
+				ncm.checkForStaleOVSPodInterfaces()
+				_, err := libovsdbops.GetOVSPort(ncm.ovsClient, "pod-a-ifc")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = libovsdbops.GetOVSPort(ncm.ovsClient, "pod-b-ifc")
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+
+		Context("bridge has stale veth host-side interfaces", func() {
+			It("removes stale veth interfaces (no representor markers) for gone pods", func() {
+				portVeth, ifaceVeth := ovsPortAndInterface("port-5", "iface-5", "veth-ifc", map[string]string{
+					"sandbox": "789abc", "iface-id": "stale-ns_stale-pod", "iface-id-ver": "pod-stale-uuid-5"})
+				portA, ifaceA := ovsPortAndInterface("port-1", "iface-1", "pod-a-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "a-ns_a-pod", "iface-id-ver": "pod-a-uuid-1"})
+				setupNCM([]libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+					&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-5", "port-1"}},
+					portVeth, ifaceVeth, portA, ifaceA,
+				})
+				ncm.checkForStaleOVSPodInterfaces()
+				_, err := libovsdbops.GetOVSPort(ncm.ovsClient, "pod-a-ifc")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = libovsdbops.GetOVSPort(ncm.ovsClient, "veth-ifc")
+				Expect(err).To(HaveOccurred())
 			})
 		})
 
