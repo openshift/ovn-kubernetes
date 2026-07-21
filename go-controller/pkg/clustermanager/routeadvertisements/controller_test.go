@@ -21,7 +21,6 @@ import (
 	frrfake "github.com/metallb/frr-k8s/pkg/client/clientset/versioned/fake"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
-	"github.com/prometheus/client_golang/prometheus"
 
 	corev1 "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/api/meta"
@@ -42,7 +41,6 @@ import (
 	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -499,11 +497,6 @@ func init() {
 	// an old codegen and the informer has no shutdown method)
 	config.IPv4Mode = true
 
-	// Set feature flags before any test calls RegisterClusterManagerFunctional().
-	// The sync.Once in registration captures whichever flags are set on the first call.
-	config.OVNKubernetesFeature.EnableRouteAdvertisements = true
-	config.OVNKubernetesFeature.EnableEVPN = true
-
 	// Disable WatchListClient feature gate for tests.
 	// Fake clientsets from third-party libraries don't yet support WatchList semantics
 	// introduced in K8s 1.35, causing informers to hang waiting for bookmark events.
@@ -512,8 +505,6 @@ func init() {
 }
 
 func TestController_reconcile(t *testing.T) {
-	metrics.RegisterClusterManagerFunctional()
-
 	frrNamespace := "frrNamespace"
 	tests := []struct {
 		name                 string
@@ -2419,38 +2410,17 @@ exit
 			// we just need the inital sync
 			nm.Stop()
 
-			// Clean up condition metric timeseries from the global Prometheus registry
-			// so they don't leak into subsequent subtests.
-			t.Cleanup(func() { metrics.DeleteRouteAdvertisementCondition(tt.reconcile) })
-
 			if err := c.reconcile(tt.reconcile); (err != nil) != tt.wantErr {
 				t.Fatalf("Controller.reconcile() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
-			// verify RA status and condition metric are set as expected
+			// verify RA status is set as expected
 			if tt.ra != nil {
 				ra, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(context.Background(), tt.reconcile, metav1.GetOptions{})
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 				accepted := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
 				g.Expect(accepted).NotTo(gomega.BeNil())
 				g.Expect(accepted.Status).To(gomega.Equal(tt.expectAcceptedStatus), accepted.Message)
-				// verify condition metric is set as expected
-				expectedTrue := 0.0
-				expectedFalse := 1.0
-				if tt.expectAcceptedStatus == metav1.ConditionTrue {
-					expectedTrue = 1.0
-					expectedFalse = 0.0
-				}
-				valTrue, found := getRAConditionMetricValue(tt.reconcile, "Accepted", "true")
-				g.Expect(found).To(gomega.BeTrue(), "condition metric status=true should exist")
-				g.Expect(valTrue).To(gomega.Equal(expectedTrue))
-				valFalse, found := getRAConditionMetricValue(tt.reconcile, "Accepted", "false")
-				g.Expect(found).To(gomega.BeTrue(), "condition metric status=false should exist")
-				g.Expect(valFalse).To(gomega.Equal(expectedFalse))
-			} else {
-				_, foundTrue := getRAConditionMetricValue(tt.reconcile, "Accepted", "true")
-				_, foundFalse := getRAConditionMetricValue(tt.reconcile, "Accepted", "false")
-				g.Expect(foundTrue || foundFalse).To(gomega.BeFalse(), "condition metrics should not exist for deleted RA")
 			}
 
 			// verify FRRConfigurations have been created/updated/deleted as expected
@@ -2866,9 +2836,4 @@ func TestUpdates(t *testing.T) {
 			g.Consistently(matchReconciledRAs).WithArguments(tt.expectedReconcile).Should(gomega.Succeed())
 		})
 	}
-}
-
-func getRAConditionMetricValue(nameLabel, conditionLabel, statusLabel string) (float64, bool) {
-	metricName := prometheus.BuildFQName(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemClusterManager, "route_advertisement_condition")
-	return ovntest.GetConditionMetricValue(metricName, nameLabel, conditionLabel, statusLabel)
 }

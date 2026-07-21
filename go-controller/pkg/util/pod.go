@@ -47,17 +47,17 @@ func UpdatePodWithRetryOrRollback(podLister listers.PodLister, kube kube.Interfa
 		}
 
 		// Informer cache should not be mutated, so copy the object
-		currentPod := oldPod.DeepCopy()
-		updatedPod, rollback, err := allocate(currentPod)
+		pod = oldPod.DeepCopy()
+		pod, rollback, err := allocate(pod)
 		if err != nil {
 			return err
 		}
 
-		if updatedPod == nil {
+		if pod == nil {
 			return nil
 		}
 
-		err = kube.PatchPodStatusAnnotations(oldPod, updatedPod)
+		err = kube.PatchPodStatusAnnotations(oldPod, pod)
 		if err != nil && rollback != nil {
 			rollback()
 		}

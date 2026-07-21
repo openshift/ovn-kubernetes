@@ -63,7 +63,7 @@ func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIn
 	// FIXME: libovsdb event handlers should be added before the Monitor is set
 	// manually populate the current events. we may get an event twice, but this
 	// shouldn't cause issues as we'll just log an error message
-	klog.Info("Populating initial ControllerEvent events")
+	klog.Info("Populating Initial ContollerEvent events")
 
 	var controllerEvents []sbdb.ControllerEvent
 	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
@@ -78,7 +78,7 @@ func NewController(recorder record.EventRecorder, serviceInformer cache.SharedIn
 		}
 	}()
 
-	// we only process events on unidling, there is no reconciliation
+	// we only process events on unidling, there is no reconcilation
 	klog.Info("Setting up event handlers for services")
 	_, err = serviceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: uc.onServiceAdd,
@@ -195,7 +195,7 @@ func (uc *unidlingController) handleLbEmptyBackendsEvent(event sbdb.ControllerEv
 
 	vip, ok := event.EventInfo["vip"]
 	if !ok {
-		return fmt.Errorf("vip not found in controller event %s with event_info %v", event.UUID, event.EventInfo)
+		return err
 	}
 	proto := event.EventInfo["protocol"]
 	var protocol corev1.Protocol

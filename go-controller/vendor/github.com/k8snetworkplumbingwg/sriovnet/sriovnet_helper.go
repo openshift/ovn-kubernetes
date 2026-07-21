@@ -19,9 +19,8 @@ package sriovnet
 import (
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
-
-	utilfs "github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/filesystem"
 )
 
 const (
@@ -98,25 +97,33 @@ func vfNetdevNameFromParent(pfNetdevName string, vfIndex int) string {
 	return vfNetdev[0]
 }
 
-func getPCIFromDeviceName(netdevName string) (string, error) {
-	symbolicLink := filepath.Join(NetSysDir, netdevName, pcidevPrefix)
-	pciDevDir, err := utilfs.Fs.Readlink(symbolicLink)
-	if err != nil {
-		return "", fmt.Errorf("failed to read symbolic link %s: %v", symbolicLink, err)
+func readPCIsymbolicLink(symbolicLink string) (string, error) {
+	pciDevDir, err := os.Readlink(symbolicLink)
+	//nolint:gomnd
+	if len(pciDevDir) <= 3 {
+		return "", fmt.Errorf("could not find PCI Address")
 	}
-	pciAddress := filepath.Base(pciDevDir)
-	return pciAddress, nil
-}
 
+	return pciDevDir[3:], err
+}
 func vfPCIDevNameFromVfIndex(pfNetdevName string, vfIndex int) (string, error) {
 	symbolicLink := filepath.Join(NetSysDir, pfNetdevName, pcidevPrefix, fmt.Sprintf("%s%v",
 		netDevVfDevicePrefix, vfIndex))
-	pciDevDir, err := utilfs.Fs.Readlink(symbolicLink)
+	pciAddress, err := readPCIsymbolicLink(symbolicLink)
 	if err != nil {
-		return "", fmt.Errorf("failed to read symbolic link %s: %v", symbolicLink, err)
+		err = fmt.Errorf("%v for VF %s%v of PF %s", err,
+			netDevVfDevicePrefix, vfIndex, pfNetdevName)
 	}
-	pciAddress := filepath.Base(pciDevDir)
-	return pciAddress, nil
+	return pciAddress, err
+}
+
+func getPCIFromDeviceName(netdevName string) (string, error) {
+	symbolicLink := filepath.Join(NetSysDir, netdevName, pcidevPrefix)
+	pciAddress, err := readPCIsymbolicLink(symbolicLink)
+	if err != nil {
+		err = fmt.Errorf("%v for netdevice %s", err, netdevName)
+	}
+	return pciAddress, err
 }
 
 func GetVfPciDevList(pfNetdevName string) ([]string, error) {

@@ -46,16 +46,14 @@ import (
 	vteplisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/listers/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 const (
-	generateName          = "ovnk-generated-"
-	fieldManager          = "clustermanager-routeadvertisements-controller"
-	conditionTypeAccepted = "Accepted"
+	generateName = "ovnk-generated-"
+	fieldManager = "clustermanager-routeadvertisements-controller"
 	// rawConfigPriority is set to an arbitrary value that still allows users to
 	// override if needed.
 	rawConfigPriority = 10
@@ -284,10 +282,6 @@ func (c *Controller) reconcile(name string) error {
 	ra, err := c.raLister.Get(name)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get RouteAdvertisements %q: %w", name, err)
-	}
-
-	if ra == nil {
-		metrics.DeleteRouteAdvertisementCondition(name)
 	}
 
 	hadUpdates, err := c.reconcileRouteAdvertisements(name, ra)
@@ -684,11 +678,8 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 				}
 			} else {
 				subnets, err = getHostSubnets(nodeName, network)
-				if err != nil {
+				if err != nil || len(subnets) == 0 {
 					return nil, fmt.Errorf("%w: will wait for subnet annotation to be set for node %q and network %q: %w", errConfig, nodeName, network, err)
-				}
-				if len(subnets) == 0 {
-					return nil, fmt.Errorf("%w: will wait for subnet annotation to be set for node %q and network %q", errConfig, nodeName, network)
 				}
 			}
 
@@ -1402,13 +1393,8 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		return nil
 	}
 
-	cstatus := metav1.ConditionTrue
-	if err != nil {
-		cstatus = metav1.ConditionFalse
-	}
-
 	var updateStatus bool
-	condition := meta.FindStatusCondition(ra.Status.Conditions, conditionTypeAccepted)
+	condition := meta.FindStatusCondition(ra.Status.Conditions, "Accepted")
 	switch {
 	case condition == nil:
 		fallthrough
@@ -1420,18 +1406,16 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		updateStatus = true
 	}
 	if !updateStatus {
-		// Record the metric from the existing API-confirmed condition so it is
-		// populated after controller restarts, where the informer fires synthetic
-		// creates for all RAs but the condition hasn't changed.
-		metrics.RecordRouteAdvertisementCondition(ra.Name, conditionTypeAccepted, cstatus)
 		return nil
 	}
 
 	status := "Accepted"
+	cstatus := metav1.ConditionTrue
 	reason := "Accepted"
 	msg := "ovn-kubernetes cluster-manager validated the resource and requested the necessary configuration changes"
 	if err != nil {
 		status = fmt.Sprintf("Not Accepted: %v", err)
+		cstatus = metav1.ConditionFalse
 		msg = err.Error()
 		switch {
 		case errors.Is(err, errConfig):
@@ -1448,7 +1432,7 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		raapply.RouteAdvertisements(ra.Name).WithStatus(
 			raapply.RouteAdvertisementsStatus().WithStatus(status).WithConditions(
 				metaapply.Condition().
-					WithType(conditionTypeAccepted).
+					WithType("Accepted").
 					WithStatus(cstatus).
 					WithLastTransitionTime(metav1.NewTime(time.Now())).
 					WithReason(reason).
@@ -1463,7 +1447,6 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 	if err != nil {
 		return fmt.Errorf("failed to apply status for RouteAdvertisements %q: %w", ra.Name, err)
 	}
-	metrics.RecordRouteAdvertisementCondition(ra.Name, conditionTypeAccepted, cstatus)
 
 	return nil
 }

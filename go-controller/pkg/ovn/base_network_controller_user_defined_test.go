@@ -392,7 +392,6 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 				},
 			},
 		)
-		DeferCleanup(fakeOVN.shutdown)
 		Expect(fakeOVN.NewUserDefinedNetworkController(nad)).To(Succeed())
 		controller, ok := fakeOVN.userDefinedNetworkControllers["bluenet"]
 		Expect(ok).To(BeTrue())
@@ -440,7 +439,6 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 			},
 			namespace,
 		)
-		DeferCleanup(fakeOVN.shutdown)
 		Expect(fakeOVN.NewUserDefinedNetworkController(nad)).To(Succeed())
 		controller, ok := fakeOVN.userDefinedNetworkControllers["bluenet"]
 		Expect(ok).To(BeTrue())
