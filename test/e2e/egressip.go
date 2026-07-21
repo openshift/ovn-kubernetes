@@ -3149,16 +3149,12 @@ spec:
 				gomega.Expect(podCIDR).NotTo(gomega.BeEmpty(), "pod CIDR must not be empty for node %s", pod1Node.name)
 				monitorFilter := fmt.Sprintf("src net %s and dst host %s", podCIDR, targetIP)
 
-				ctx, ctxCancel := context.WithCancel(context.Background())
-				monitorOutput := ""
-				finishedMonitor := make(chan struct{})
-				go func() {
-					defer close(finishedMonitor)
-					var monitorErr error
-					monitorOutput, monitorErr = monitorTcpdumpOnNode(ctx, f, monitorPodName, egress1Node.name, secondaryIface.InfName,
-						"-n -vv -l", monitorFilter)
-					framework.ExpectNoError(monitorErr, "Failed to read monitor pod logs")
-				}()
+				// Create the monitor pod and wait (up to retryTimeout) until it is Running
+				// (capturing) before generating any traffic, so the capture cannot miss the
+				// EgressIP transition and reading the capture in Step 8 cannot race the pod
+				// startup. A failure or timeout to start aborts the spec here.
+				startTcpdumpMonitorPodOnNode(f, retryTimeout, monitorPodName, egress1Node.name, secondaryIface.InfName,
+					"-n -vv -l", monitorFilter)
 				framework.Logf("Traffic monitor pod started on node %s", egress1Node.name)
 
 				ginkgo.By(fmt.Sprintf("Step 4: Create %d pods FIRST (before EgressIP exists)", numTestPods))
@@ -3323,8 +3319,10 @@ spec:
 
 				ginkgo.By("Step 8: Analyze traffic capture for pod IP leaks during EgressIP application")
 				// This is the critical check: did any traffic leak with pod IPs during the transition?
-				ctxCancel()
-				<-finishedMonitor
+				// tcpdump keeps running; kubectl logs reads the capture so far (line-buffered via -l).
+				monitorOutput, monitorErr := e2ekubectl.NewKubectlCommand(f.Namespace.Name, "logs", monitorPodName).
+					WithTimeout(time.After(retryTimeout)).Exec()
+				framework.ExpectNoError(monitorErr, "Failed to read monitor pod logs")
 				if strings.Contains(monitorOutput, targetIP) {
 					framework.Failf("TRAFFIC LEAK DETECTED! Pod IPs were seen in traffic to %s"+
 						"This indicates traffic leaked with pod source IPs instead of egress IP %s during EgressIP application to existing pods.\ntcpdump output:\n%s",
