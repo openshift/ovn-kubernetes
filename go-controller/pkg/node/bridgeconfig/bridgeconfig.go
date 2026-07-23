@@ -549,7 +549,22 @@ func (b *BridgeConfiguration) SetNetworkOfPatchPort(netName string) error {
 	if !found {
 		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, b.bridgeName)
 	}
-	return netConfig.setOfPatchPort()
+	if err := netConfig.setOfPatchPort(); err != nil {
+		return err
+	}
+
+	// Only set no-flood on bridges that also carry the default network.
+	// The ARP storm occurs because CUDNs share the node IP with the
+	// default GR on the same bridge.
+	if netName != types.DefaultNetworkName && util.IsNetworkSegmentationSupportEnabled() {
+		if _, isSharedBridge := b.netConfig[types.DefaultNetworkName]; isSharedBridge {
+			if err := ovsops.SetPortNoFlood(b.ovsClient, netConfig.PatchPort); err != nil {
+				return fmt.Errorf("failed to set no-flood on port %s of bridge %s: %w",
+					netConfig.PatchPort, b.bridgeName, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (b *BridgeConfiguration) GetInterfaceID() string {
