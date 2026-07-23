@@ -5,6 +5,7 @@
 # The standard name for this image is ovn-kube
 
 # Build RHEL-9 binaries
+# FOOBAR
 FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.22 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
