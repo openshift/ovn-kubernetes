@@ -22,11 +22,10 @@ A single VF net-device or a group of VF net-devices (configured as SR-IOV device
 
 ## K8s Settings on DPU Host
 
-The following node labels must be set on the DPU Host prior to installing OVN K8s CNI
+The following node label must be set on the DPU Host prior to installing OVN K8s CNI
 
 ```yaml
 k8s.ovn.org/dpu-host=
-k8s.ovn.org/zone-name="dpu-host node name"
 ```
 
 ## Launching OVN K8s DPU Host cluster using helm

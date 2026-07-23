@@ -200,13 +200,13 @@ You need:
    strings /coredumps/binaries/ovn-northd | grep -E '{"type":"rpm".*ovn' | head -1
    ```
 
-   Example output: `{"type":"rpm","name":"ovn","version":"25.09.2-2.fc43"...}`
+   Example output: `{"type":"rpm","name":"ovn","version":"26.03.1-50.fc43"...}`
 
 4. **Download and install OVN packages from koji**:
 
    ```bash
    # Download the exact build (replace version as needed)
-   koji download-build ovn-25.09.2-2.fc43 --arch=x86_64
+   koji download-build ovn-26.03.1-50.fc43 --arch=x86_64
 
    # Install with dependency resolution
    dnf install -y ./ovn-*.rpm
@@ -216,7 +216,7 @@ You need:
 
    ```bash
    # Download all debuginfo packages for this OVN build
-   koji download-build ovn-25.09.2-2.fc43 --debuginfo --arch=x86_64
+   koji download-build ovn-26.03.1-50.fc43 --debuginfo --arch=x86_64
 
    # Install all debuginfo packages (important: install ALL of them)
    dnf install -y ./ovn-debuginfo-*.rpm \

@@ -309,6 +309,19 @@ func MatchAllIPNetsStringFamily(isIPv6 bool, ipnets []string) []string {
 	return out
 }
 
+// SplitIPStringByIPFamily splits a slice of IP address strings into IPv4 and IPv6 slices.
+func SplitIPStringByIPFamily(ips []string) (ipsv4, ipsv6 []string) {
+	for _, ip := range ips {
+		switch {
+		case utilnet.IsIPv6String(ip):
+			ipsv6 = append(ipsv6, ip)
+		default:
+			ipsv4 = append(ipsv4, ip)
+		}
+	}
+	return
+}
+
 // IsIPContainedInAnyCIDR returns true if ip is contained in any of the given ipnets
 func IsIPContainedInAnyCIDR(ip net.IP, ipnets ...*net.IPNet) bool {
 	for _, ipnet := range ipnets {

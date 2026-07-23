@@ -154,7 +154,7 @@ func (oc *DefaultNetworkController) syncPods(pods []interface{}) error {
 		}
 		for _, node := range nodes {
 			// allocation also happens during Add/Update Node events we only want to allocate any addresses allocated as hybrid overlay
-			// distributed router ips during a previous run of ovn-k master to ensure that incoming pod events will not take the address that
+			// distributed router ips during a previous run of ovn-k controller to ensure that incoming pod events will not take the address that
 			// the node is expecting as the hybrid overlay DRIP
 			if _, ok := node.Annotations[hotypes.HybridOverlayDRIP]; ok {
 				if err := oc.allocateHybridOverlayDRIP(node); err != nil {
@@ -177,9 +177,6 @@ func (oc *DefaultNetworkController) deleteLogicalPort(pod *corev1.Pod, portInfo 
 	podDesc := pod.Namespace + "/" + pod.Name
 	klog.Infof("Deleting pod: %s", podDesc)
 
-	if err = oc.deletePodExternalGW(pod); err != nil {
-		return fmt.Errorf("unable to delete external gateway routes for pod %s: %w", podDesc, err)
-	}
 	if pod.Spec.HostNetwork {
 		return nil
 	}
@@ -300,39 +297,16 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) 
 	}
 
 	// Ensure the namespace/nsInfo exists
-	routingExternalGWs, routingPodGWs, addOps, err := oc.addLocalPodToNamespace(pod.Namespace, lsp.UUID)
+	addOps, err := oc.addLocalPodToNamespace(pod.Namespace, lsp.UUID)
 	if err != nil {
 		return err
 	}
 	ops = append(ops, addOps...)
 
-	// if we have any external or pod Gateways, add routes
-	gateways := make([]*gatewayInfo, 0, len(routingExternalGWs.gws)+len(routingPodGWs))
-
-	if len(routingExternalGWs.gws) > 0 {
-		gateways = append(gateways, routingExternalGWs)
-	}
-	for key := range routingPodGWs {
-		gw := routingPodGWs[key]
-		if len(gw.gws) > 0 {
-			if err = validateRoutingPodGWs(routingPodGWs); err != nil {
-				klog.Error(err)
-			}
-			gateways = append(gateways, &gw)
-		} else {
-			klog.Warningf("Found routingPodGW with no gateways ip set for namespace %s", pod.Namespace)
-		}
-	}
-
-	if len(gateways) > 0 {
-		podNsName := ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
-		err = oc.addGWRoutesForPod(gateways, podAnnotation.IPs, podNsName, pod.Spec.NodeName)
-		if err != nil {
-			return err
-		}
-	} else if config.Gateway.DisableSNATMultipleGWs {
-		// Add NAT rules to pods if disable SNAT is set and does not have
-		// namespace annotations to go through external egress router
+	if config.Gateway.DisableSNATMultipleGWs {
+		// Add NAT rules to pods if disable SNAT is set. External gateway routes
+		// (and the associated per-pod SNAT removal) are programmed by the
+		// AdminPolicyBasedExternalRoute controller.
 		snatOps, err := oc.AddPodSNATOps(pod.Spec.NodeName, podAnnotation.IPs)
 		if err != nil {
 			return err
@@ -354,12 +328,6 @@ func (oc *DefaultNetworkController) addLogicalPort(pod *corev1.Pod) (err error) 
 	}
 	txOkCallBack()
 	oc.podRecorder.AddLSP(pod.UID, oc.GetNetInfo())
-
-	// check if this pod is serving as an external GW
-	err = oc.addPodExternalGW(pod)
-	if err != nil {
-		return fmt.Errorf("failed to handle external GW check: %v", err)
-	}
 
 	// if somehow lspUUID is empty, there is a bug here with interpreting OVSDB results
 	if len(lsp.UUID) == 0 {

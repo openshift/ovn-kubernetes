@@ -14,9 +14,11 @@ import (
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	netv1clientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned"
 	netv1fakeclientset "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
+	"github.com/prometheus/client_golang/prometheus"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,7 +38,9 @@ import (
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
 	vtepinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 
@@ -59,6 +63,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		// Enable EVPN for EVPN-related tests
 		config.OVNKubernetesFeature.EnableRouteAdvertisements = true
 		config.OVNKubernetesFeature.EnableEVPN = true
+		metrics.RegisterClusterManagerFunctional()
 		// satisfy EVPN LGW restriction, otherwise no effect
 		config.Gateway.Mode = config.GatewayModeLocal
 	})
@@ -126,6 +131,17 @@ var _ = Describe("User Defined Network Controller", func() {
 			}
 			return false
 		}, 2*time.Second, 100*time.Millisecond).Should(BeTrue())
+	}
+
+	// markCUDNForDeletion marks a CUDN for deletion by setting its DeletionTimestamp to the current time.
+	markCUDNForDeletion := func(name string) {
+		GinkgoHelper()
+		cudnObj, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		now := metav1.Now()
+		cudnObj.DeletionTimestamp = &now
+		_, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudnObj, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
 	}
 
 	Context("manager", func() {
@@ -693,12 +709,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				Expect(c.vidAllocator.GetID("evpn-delete-cudn/macvrf")).To(BeNumerically(">=", 0), "VID should be allocated")
 
 				// Trigger deletion by setting DeletionTimestamp and processing
-				now := metav1.Now()
-				cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				cudn.DeletionTimestamp = &now
-				_, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudn, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				markCUDNForDeletion(cudn.Name)
 
 				// Wait for finalizer to be removed (indicating deletion was processed)
 				Eventually(func(g Gomega) {
@@ -732,12 +743,7 @@ var _ = Describe("User Defined Network Controller", func() {
 				Expect(c.vidAllocator.GetID("evpn-irb-delete/ipvrf")).To(Equal(3), "IP-VRF VID should be allocated")
 
 				// Trigger deletion
-				now := metav1.Now()
-				cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				cudn.DeletionTimestamp = &now
-				_, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudn, metav1.UpdateOptions{})
-				Expect(err).NotTo(HaveOccurred())
+				markCUDNForDeletion(cudn.Name)
 
 				// Wait for finalizer to be removed and verify both VIDs are released
 				Eventually(func(g Gomega) {
@@ -2470,7 +2476,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			}
 		})
 
-		It("should not update status for empty transport (defaults to Geneve)", func() {
+		It("should not update status for empty transport (default OVN overlay)", func() {
 			cudn := newCUDNWithTransport("test-cudn", map[string]string{"app": "test"}, "")
 			c = newTestController(template.RenderNetAttachDefManifest, cudn)
 			Expect(c.Run()).To(Succeed())
@@ -2572,6 +2578,187 @@ var _ = Describe("User Defined Network Controller", func() {
 			// Verify status updates to True
 			expectTransportCondition("test-cudn", metav1.ConditionTrue, ReasonEVPNTransportAccepted, "Transport has been configured as 'EVPN'.")
 		})
+	})
+
+	Context("CUDN metrics", func() {
+		var c *Controller
+
+		BeforeEach(func() {
+			metrics.ResetCUDNCount()
+		})
+
+		AfterEach(func() {
+			if c != nil {
+				c.Shutdown()
+			}
+		})
+
+		It("should increment CUDN count on create with default transport", func() {
+			baseVal, _ := getCUDNCountMetricValue("Primary", "Layer3", "Default")
+
+			testNs := testNamespace("metrics-ns")
+			cudn := testLayer3PrimaryClusterUDN("metrics-cudn", testNs.Name)
+			cudn.Finalizers = nil
+			c = newTestController(template.RenderNetAttachDefManifest, cudn, testNs)
+			Expect(c.Run()).To(Succeed())
+			DeferCleanup(metrics.DeleteCUDNCondition, cudn.Name)
+
+			Eventually(func() []metav1.Condition {
+				cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return normalizeConditions(filterTransportConditions(cudn.Status.Conditions))
+			}).Should(Equal([]metav1.Condition{{
+				Type:    "NetworkCreated",
+				Status:  "True",
+				Reason:  "NetworkAttachmentDefinitionCreated",
+				Message: "NetworkAttachmentDefinition has been created in following namespaces: [metrics-ns]",
+			}}))
+
+			val, found := getCUDNCountMetricValue("Primary", "Layer3", "Default")
+			Expect(found).To(BeTrue(), "CUDN count metric should exist for default transport")
+			Expect(val).To(Equal(baseVal + 1))
+		})
+
+		It("should increment CUDN count on create with EVPN transport", func() {
+			baseVal, _ := getCUDNCountMetricValue("Primary", "Layer2", "EVPN")
+
+			testNs := testNamespace("metrics-evpn-ns")
+			vtep := testVTEP("vtep-metrics")
+			cudn := testEVPNClusterUDN("metrics-evpn-cudn", &udnv1.EVPNConfig{VTEP: vtep.Name, MACVRF: &udnv1.VRFConfig{VNI: 100}}, testNs.Name)
+			cudn.Finalizers = nil
+			cudn.Spec.Network.Layer2.Role = udnv1.NetworkRolePrimary
+
+			c = newTestControllerWithNetworkManager(template.RenderNetAttachDefManifest, cudn, testNs, vtep)
+			Expect(c.Run()).To(Succeed())
+			DeferCleanup(metrics.DeleteCUDNCondition, cudn.Name)
+
+			Eventually(func() []metav1.Condition {
+				cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return normalizeConditions(filterTransportConditions(cudn.Status.Conditions))
+			}).Should(Equal([]metav1.Condition{{
+				Type:    "NetworkCreated",
+				Status:  "True",
+				Reason:  "NetworkAttachmentDefinitionCreated",
+				Message: "NetworkAttachmentDefinition has been created in following namespaces: [metrics-evpn-ns]",
+			}}))
+
+			val, found := getCUDNCountMetricValue("Primary", "Layer2", "EVPN")
+			Expect(found).To(BeTrue(), "CUDN count metric should exist for EVPN transport")
+			Expect(val).To(Equal(baseVal + 1))
+		})
+
+		It("should decrement CUDN count on delete", func() {
+			testNs := testNamespace("metrics-del-ns")
+			cudn := testLayer2SecondaryClusterUDN("metrics-del-cudn", testNs.Name)
+			cudn.Finalizers = nil
+			c = newTestController(template.RenderNetAttachDefManifest, cudn, testNs)
+			Expect(c.Run()).To(Succeed())
+			DeferCleanup(metrics.DeleteCUDNCondition, cudn.Name)
+
+			Eventually(func() []metav1.Condition {
+				cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return normalizeConditions(filterTransportConditions(cudn.Status.Conditions))
+			}).Should(Equal([]metav1.Condition{{
+				Type:    "NetworkCreated",
+				Status:  "True",
+				Reason:  "NetworkAttachmentDefinitionCreated",
+				Message: "NetworkAttachmentDefinition has been created in following namespaces: [metrics-del-ns]",
+			}}))
+
+			beforeVal, found := getCUDNCountMetricValue("Secondary", "Layer2", "Default")
+			Expect(found).To(BeTrue())
+
+			markCUDNForDeletion(cudn.Name)
+
+			expected := beforeVal - 1
+			Eventually(func() float64 {
+				val, _ := getCUDNCountMetricValue("Secondary", "Layer2", "Default")
+				return val
+			}).Should(Equal(expected), "CUDN count metric should decrement by exactly one after deletion")
+		})
+
+		It("should record NetworkCreated=True condition metric on successful CUDN creation", func() {
+			testNs := testNamespace("cond-ns")
+			cudn := testLayer2SecondaryClusterUDN("cond-cudn", testNs.Name)
+
+			c = newTestControllerWithNetworkManager(template.RenderNetAttachDefManifest, cudn, testNs)
+			Expect(c.Run()).To(Succeed())
+			DeferCleanup(metrics.DeleteCUDNCondition, cudn.Name)
+
+			Eventually(func(g Gomega) {
+				cudn, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(normalizeConditions(filterTransportConditions(cudn.Status.Conditions))).To(Equal([]metav1.Condition{{
+					Type:    "NetworkCreated",
+					Status:  "True",
+					Reason:  "NetworkAttachmentDefinitionCreated",
+					Message: "NetworkAttachmentDefinition has been created in following namespaces: [cond-ns]",
+				}}))
+			}).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				val, found := getCUDNConditionMetricValue(cudn.Name, "NetworkCreated", "true")
+				g.Expect(found).To(BeTrue(), "condition metric should exist")
+				g.Expect(val).To(Equal(1.0))
+				valFalse, foundFalse := getCUDNConditionMetricValue(cudn.Name, "NetworkCreated", "false")
+				g.Expect(foundFalse).To(BeTrue(), "condition metric status=false should exist")
+				g.Expect(valFalse).To(Equal(0.0))
+			}).Should(Succeed(), "NetworkCreated condition metrics should be recorded")
+		})
+
+		It("should remove condition metrics on CUDN deletion", func() {
+			testNs := testNamespace("cond-del-ns")
+			cudn := testLayer2SecondaryClusterUDN("cond-del-cudn", testNs.Name)
+
+			c = newTestControllerWithNetworkManager(template.RenderNetAttachDefManifest, cudn, testNs)
+			Expect(c.Run()).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				val, found := getCUDNConditionMetricValue(cudn.Name, "NetworkCreated", "true")
+				g.Expect(found).To(BeTrue(), "condition metric should exist")
+				g.Expect(val).To(Equal(1.0))
+			}).Should(Succeed(), "NetworkCreated condition metric status=true should be 1 after creation")
+
+			markCUDNForDeletion(cudn.Name)
+
+			Eventually(func() bool {
+				_, foundTrue := getCUDNConditionMetricValue(cudn.Name, "NetworkCreated", "true")
+				_, foundFalse := getCUDNConditionMetricValue(cudn.Name, "NetworkCreated", "false")
+				return foundTrue || foundFalse
+			}).Should(BeFalse(), "both condition metric timeseries should be removed after deletion")
+		})
+
+		It("should record TransportAccepted condition metric for EVPN CUDN with accepted RA", func() {
+			testNs := testNamespace("cond-evpn-ns")
+			vtep := testVTEP("cond-vtep")
+			cudn := testEVPNClusterUDN("cond-evpn-cudn", &udnv1.EVPNConfig{VTEP: vtep.Name, MACVRF: &udnv1.VRFConfig{VNI: 100}}, testNs.Name)
+
+			c = newTestControllerWithNetworkManager(template.RenderNetAttachDefManifest, cudn, testNs, vtep)
+			Expect(c.Run()).To(Succeed())
+			DeferCleanup(metrics.DeleteCUDNCondition, cudn.Name)
+
+			createAcceptedRA("cond-ra", cudn.Labels)
+
+			Eventually(func(g Gomega) {
+				cudnObj, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+				g.Expect(err).NotTo(HaveOccurred())
+				tc := meta.FindStatusCondition(cudnObj.Status.Conditions, "TransportAccepted")
+				g.Expect(tc).NotTo(BeNil(), "TransportAccepted condition should exist")
+				g.Expect(tc.Status).To(Equal(metav1.ConditionTrue))
+			}).Should(Succeed(), "TransportAccepted status condition should be True")
+
+			Eventually(func(g Gomega) {
+				valTrue, found := getCUDNConditionMetricValue(cudn.Name, "TransportAccepted", "true")
+				g.Expect(found).To(BeTrue(), "condition metric status=true should exist")
+				g.Expect(valTrue).To(Equal(1.0))
+				valFalse, foundFalse := getCUDNConditionMetricValue(cudn.Name, "TransportAccepted", "false")
+				g.Expect(foundFalse).To(BeTrue(), "condition metric status=false should exist")
+				g.Expect(valFalse).To(Equal(0.0))
+			}).Should(Succeed(), "TransportAccepted condition metrics should be recorded")
+		})
+
 	})
 })
 
@@ -2786,6 +2973,32 @@ func testClusterUDN(name string, targetNamespaces ...string) *udnv1.ClusterUserD
 	}
 }
 
+// testLayer3PrimaryClusterUDN returns a CUDN with Layer3 Primary topology and default transport.
+func testLayer3PrimaryClusterUDN(name string, targetNamespaces ...string) *udnv1.ClusterUserDefinedNetwork {
+	cudn := testClusterUDN(name, targetNamespaces...)
+	cudn.Spec.Network = udnv1.NetworkSpec{
+		Topology: udnv1.NetworkTopologyLayer3,
+		Layer3: &udnv1.Layer3Config{
+			Role:    udnv1.NetworkRolePrimary,
+			Subnets: []udnv1.Layer3Subnet{{CIDR: "10.100.0.0/16"}},
+		},
+	}
+	return cudn
+}
+
+// testLayer2SecondaryClusterUDN returns a CUDN with Layer2 Secondary topology and default transport.
+func testLayer2SecondaryClusterUDN(name string, targetNamespaces ...string) *udnv1.ClusterUserDefinedNetwork {
+	cudn := testClusterUDN(name, targetNamespaces...)
+	cudn.Spec.Network = udnv1.NetworkSpec{
+		Topology: udnv1.NetworkTopologyLayer2,
+		Layer2: &udnv1.Layer2Config{
+			Role:    udnv1.NetworkRoleSecondary,
+			Subnets: udnv1.DualStackCIDRs{"10.20.0.0/16"},
+		},
+	}
+	return cudn
+}
+
 func testClusterUdnNAD(name, namespace string) *netv1.NetworkAttachmentDefinition {
 	return &netv1.NetworkAttachmentDefinition{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2974,4 +3187,26 @@ func setNADEVPNVIDs(nad *netv1.NetworkAttachmentDefinition, macVID, ipVID int) e
 	}
 	nad.Spec.Config = string(configBytes)
 	return nil
+}
+
+// getCUDNCountMetricValue returns the current gauge value for the CUDN count metric with the given labels.
+func getCUDNCountMetricValue(role, topology, transport string) (float64, bool) {
+	metricName := prometheus.BuildFQName(ovntypes.MetricOvnkubeNamespace, ovntypes.MetricOvnkubeSubsystemClusterManager, "cluster_user_defined_networks")
+	mf := ovntest.FindMetricFamily(metricName)
+	if mf == nil {
+		return 0, false
+	}
+	for _, metric := range mf.GetMetric() {
+		if ovntest.MetricLabelValue(metric.GetLabel(), "role") == role &&
+			ovntest.MetricLabelValue(metric.GetLabel(), "topology") == topology &&
+			ovntest.MetricLabelValue(metric.GetLabel(), "transport") == transport {
+			return metric.GetGauge().GetValue(), true
+		}
+	}
+	return 0, false
+}
+
+func getCUDNConditionMetricValue(nameLabel, conditionLabel, statusLabel string) (float64, bool) {
+	metricName := prometheus.BuildFQName(ovntypes.MetricOvnkubeNamespace, ovntypes.MetricOvnkubeSubsystemClusterManager, "cluster_user_defined_network_condition")
+	return ovntest.GetConditionMetricValue(metricName, nameLabel, conditionLabel, statusLabel)
 }

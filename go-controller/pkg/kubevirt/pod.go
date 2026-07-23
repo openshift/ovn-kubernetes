@@ -12,9 +12,11 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/validate/content"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
-	v1 "k8s.io/client-go/listers/core/v1"
+	listersv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/retry"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -31,6 +33,12 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/ndp"
 )
 
+var (
+	virtLauncherPodLabel = map[string]string{
+		kubevirtv1.AppLabel: "virt-launcher",
+	}
+)
+
 // DefaultGatewayReconciler is responsible for reconciling the default gateway
 // configuration of a virtual machine's network interface after a live migration.
 // It supports both IPv4 and IPv6 configurations.
@@ -42,9 +50,7 @@ type DefaultGatewayReconciler struct {
 	getNetworkNameForNADKey func(nadKey string) string
 }
 
-// NewDefaultGatewayReconciler creates a new instance of DefaultGatewayReconciler.
-// It takes a WatchFactory for managing resource watches, a NetInfo object for network information,
-// and the name of the network interface to send ARPs or RAs as parameters.
+// NewDefaultGatewayReconciler creates a new DefaultGatewayReconciler.
 func NewDefaultGatewayReconciler(watchFactory *factory.WatchFactory, netInfo util.NetInfo, interfaceName string, getNetworkNameForNADKey func(nadKey string) string) *DefaultGatewayReconciler {
 	return &DefaultGatewayReconciler{
 		watchFactory:            watchFactory,
@@ -54,36 +60,22 @@ func NewDefaultGatewayReconciler(watchFactory *factory.WatchFactory, netInfo uti
 	}
 }
 
-// IsPodLiveMigratable will return true if the pod belongs
-// to kubevirt and should use the live migration features
+// IsPodLiveMigratable returns true if the pod should use KubeVirt live migration features.
 func IsPodLiveMigratable(pod *corev1.Pod) bool {
 	_, ok := pod.Annotations[kubevirtv1.AllowPodBridgeNetworkLiveMigrationAnnotation]
 	return ok
 }
 
-// TODO: remove adapter once all findVMRelatedPods usages transition to use PodLister
-type listPodsFn func(namespace string, selector metav1.LabelSelector) ([]*corev1.Pod, error)
-
-// findVMRelatedPods will return pods belong to the same vm annotated at pod and
-// filter out the one at the function argument
+// findVMRelatedPods returns pods that belong to the same VM as pod and filters out pod.
 func findVMRelatedPods(client *factory.WatchFactory, pod *corev1.Pod) ([]*corev1.Pod, error) {
-	return findVMRelatedPodsWithListerFn(client.GetPodsBySelector, pod)
-}
-
-func findVMRelatedPodsWithListerFn(listPodsFn listPodsFn, pod *corev1.Pod) ([]*corev1.Pod, error) {
-	vmName, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
-	if !ok {
-		return nil, nil
-	}
-	vmLabelSelector := metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmName}}
-	vmPods, err := listPodsFn(pod.Namespace, vmLabelSelector)
+	vmDescription, err := NewVMDescriptionFromPod(pod)
 	if err != nil {
 		return nil, err
 	}
-	if len(vmPods) == 0 {
-		return []*corev1.Pod{}, nil
+	vmPods, err := vmDescription.OwnedPods(client.PodCoreInformer().Lister())
+	if err != nil {
+		return nil, err
 	}
-
 	filteredOutVMPods := []*corev1.Pod{}
 	for _, vmPod := range vmPods {
 		// The purpose of this function is to return the "other" pods related
@@ -97,15 +89,14 @@ func findVMRelatedPodsWithListerFn(listPodsFn listPodsFn, pod *corev1.Pod) ([]*c
 	return filteredOutVMPods, nil
 }
 
-// findPodAnnotation will return the the OVN pod
-// annotation from any other pod annotated with the same VM as pod
+// findPodAnnotation returns the OVN pod annotation from any other pod annotated with the same VM as pod.
 func findPodAnnotation(client *factory.WatchFactory, pod *corev1.Pod, nadKey string) (*util.PodAnnotation, error) {
 	vmPods, err := findVMRelatedPods(client, pod)
 	if err != nil {
 		return nil, fmt.Errorf("failed finding related pods for pod %s/%s when looking for network info: %v", pod.Namespace, pod.Name, err)
 	}
-	// virtual machine is not being live migrated so there is no other
-	// vm pods
+	// The virtual machine is not being live migrated, so there are no other
+	// VM pods.
 	if len(vmPods) == 0 {
 		return nil, nil
 	}
@@ -119,11 +110,10 @@ func findPodAnnotation(client *factory.WatchFactory, pod *corev1.Pod, nadKey str
 	return nil, fmt.Errorf("missing virtual machine pod annotation at stale pods for %s/%s", pod.Namespace, pod.Name)
 }
 
-// EnsurePodAnnotationForVM will at live migration extract the ovn pod
-// annotations from the source vm pod and copy it
-// to the target vm pod so ip address follow vm during migration. This has to
-// done before creating the LSP to be sure that Address field get configured
-// correctly at the target VM pod LSP.
+// EnsurePodAnnotationForVM extracts OVN pod annotations from the source VM pod
+// during live migration and copies them to the target VM pod so IP addresses
+// follow the VM. This must happen before creating the LSP to ensure the target
+// VM pod LSP Address field is configured correctly.
 func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.KubeOVN, pod *corev1.Pod, nadKey string) (*util.PodAnnotation, error) {
 	if !IsPodLiveMigratable(pod) {
 		return nil, nil
@@ -164,20 +154,18 @@ func EnsurePodAnnotationForVM(watchFactory *factory.WatchFactory, kube *kube.Kub
 	return podAnnotation, nil
 }
 
-// AllVMPodsAreCompleted return true if all the vm pods are completed
-func AllVMPodsAreCompleted(podLister v1.PodLister, pod *corev1.Pod) (bool, error) {
+// AllVMPodsAreCompleted returns true if all VM pods are completed.
+func AllVMPodsAreCompleted(podLister listersv1.PodLister, pod *corev1.Pod) (bool, error) {
 	if !util.PodCompleted(pod) {
 		return false, nil
 	}
 
-	f := func(namespace string, selector metav1.LabelSelector) ([]*corev1.Pod, error) {
-		s, err := metav1.LabelSelectorAsSelector(&selector)
-		if err != nil {
-			return nil, err
-		}
-		return podLister.Pods(namespace).List(s)
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return false, err
 	}
-	vmPods, err := findVMRelatedPodsWithListerFn(f, pod)
+
+	vmPods, err := vmDescription.OwnedPods(podLister)
 	if err != nil {
 		return false, fmt.Errorf("failed finding related pods for pod %s/%s when checking if they are completed: %v", pod.Namespace, pod.Name, err)
 	}
@@ -190,8 +178,8 @@ func AllVMPodsAreCompleted(podLister v1.PodLister, pod *corev1.Pod) (bool, error
 	return true, nil
 }
 
-// IsMigratedSourcePodStale return false if the pod is live migratable,
-// not completed and is the running VM pod with newest creation timestamp
+// IsMigratedSourcePodStale returns true if the live-migratable pod is completed
+// or has a newer sibling pod for the same VM.
 func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bool, error) {
 	if !IsPodLiveMigratable(pod) {
 		return false, nil
@@ -215,15 +203,13 @@ func IsMigratedSourcePodStale(client *factory.WatchFactory, pod *corev1.Pod) (bo
 	return false, nil
 }
 
-// ZoneContainsPodSubnet will return true if the logical switch tonains
-// the pod subnet and also the switch name owning it, this means that
-// this zone owns the that subnet.
+// ZoneContainsPodSubnet returns the switch name and true if the logical switch
+// contains the pod subnet, meaning this zone owns that subnet.
 func ZoneContainsPodSubnet(lsManager *logicalswitchmanager.LogicalSwitchManager, ips []*net.IPNet) (string, bool) {
 	return lsManager.GetSubnetName(ips)
 }
 
-// nodeContainsPodSubnet will return true if the node subnet annotation
-// contains the subnets from the argument
+// nodeContainsPodSubnet returns true if the node subnet annotation contains the argument subnets.
 func nodeContainsPodSubnet(watchFactory *factory.WatchFactory, nodeName string, podAnnotation *util.PodAnnotation, netName string) (bool, error) {
 	node, err := watchFactory.GetNode(nodeName)
 	if err != nil {
@@ -243,17 +229,101 @@ func nodeContainsPodSubnet(watchFactory *factory.WatchFactory, nodeName string, 
 	return false, nil
 }
 
-// ExtractVMNameFromPod returns namespace and name of vm backed up but the pod
-// for regular pods return nil
-func ExtractVMNameFromPod(pod *corev1.Pod) *ktypes.NamespacedName {
-	vmName, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
-	if !ok {
-		return nil
-	}
-	return &ktypes.NamespacedName{Namespace: pod.Namespace, Name: vmName}
+// VMDescription holds the identity and ownership information for a KubeVirt
+// virtual machine derived from one of its virt-launcher pods. The key field
+// stores the namespaced name of the VM, and ownedPodsFn is a closure that
+// lists all pods belonging to the same VM via label or annotation selectors.
+type VMDescription struct {
+	key         ktypes.NamespacedName
+	ownedPodsFn func(podLister listersv1.PodLister) ([]*corev1.Pod, error)
 }
 
-// CleanUpLiveMigratablePod remove routing and DHCP ovn related resources
+// Key returns the namespaced name of the VM.
+func (vm VMDescription) Key() ktypes.NamespacedName {
+	return vm.key
+}
+
+// OwnedPods returns pods owned by the VM.
+func (vm VMDescription) OwnedPods(podLister listersv1.PodLister) ([]*corev1.Pod, error) {
+	return vm.ownedPodsFn(podLister)
+}
+
+func vmNameFromPod(pod *corev1.Pod) (string, error) {
+	vmName, ok := pod.Annotations[kubevirtv1.DomainAnnotation]
+	if !ok {
+		return "", fmt.Errorf("virtual machine pod %s/%s is missing the mandatory kubevirt annotation %s", pod.Namespace, pod.Name, kubevirtv1.DomainAnnotation)
+	}
+	return vmName, nil
+}
+
+// nameToLabel truncates name to fit within the Kubernetes label value
+// maximum length of 63 characters (content.LabelValueMaxLength). If
+// name already fits, it is returned unchanged.
+func nameToLabel(name string) string {
+	if len(name) <= content.LabelValueMaxLength {
+		return name
+	}
+	return name[:content.LabelValueMaxLength]
+}
+
+// NewVMDescriptionFromPod builds a VMDescription from a virt-launcher pod.
+// Returns (nil, nil) if the pod is not owned by a virtual machine.
+// The VM name is extracted from the KubeVirt domain annotation on the pod,
+// and the returned VMDescription.ownedPodsFn lists all sibling virt-launcher
+// pods belonging to the same VM. When the VM name label matches the
+// (possibly truncated) VM name, the lookup uses that label for efficiency;
+// otherwise it falls back to the generic virt-launcher label and filters
+// by the domain annotation to avoid false matches across VMs with long or
+// colliding names.
+func NewVMDescriptionFromPod(pod *corev1.Pod) (*VMDescription, error) {
+	if !IsPodOwnedByVirtualMachine(pod) {
+		return nil, nil
+	}
+
+	vmName, err := vmNameFromPod(pod)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VM name from pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	vmDescription := VMDescription{
+		key: ktypes.NamespacedName{Namespace: pod.Namespace, Name: vmName},
+	}
+
+	// By default, filter pods first by "virt-launcher" pods.
+	labelSelector := virtLauncherPodLabel
+
+	// If the label is the same, truncating it if it is longer than 63 characters,
+	// search directly by label so we iterate less.
+	vmNameLabel, ok := pod.Labels[kubevirtv1.VirtualMachineNameLabel]
+	if ok && nameToLabel(vmName) == vmNameLabel {
+		labelSelector = map[string]string{kubevirtv1.VirtualMachineNameLabel: vmNameLabel}
+	}
+
+	vmDescription.ownedPodsFn = func(podLister listersv1.PodLister) ([]*corev1.Pod, error) {
+		labelMatchedPods, err := podLister.Pods(vmDescription.key.Namespace).List(labels.SelectorFromSet(labelSelector))
+		if err != nil {
+			return nil, err
+		}
+		// Filter by DomainAnnotation to ensure we only include pods that actually
+		// belong to this VM. Different VMs can have the same label if one VM's
+		// name matches another VM's hostname, or if VM names are very long and
+		// match their truncated form.
+		ownedPods := []*corev1.Pod{}
+		for _, virtLauncherPod := range labelMatchedPods {
+			podVMName, err := vmNameFromPod(virtLauncherPod)
+			if err != nil {
+				return nil, err
+			}
+			if podVMName == vmDescription.key.Name {
+				ownedPods = append(ownedPods, virtLauncherPod)
+			}
+		}
+		return ownedPods, nil
+	}
+
+	return &vmDescription, nil
+}
+
+// CleanUpLiveMigratablePod removes routing and OVN DHCP resources
 // when all the pods for the same VM as `pod` argument are completed.
 func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *factory.WatchFactory, pod *corev1.Pod) error {
 	if !IsPodLiveMigratable(pod) {
@@ -279,6 +349,7 @@ func CleanUpLiveMigratablePod(nbClient libovsdbclient.Client, watchFactory *fact
 	return nil
 }
 
+// SyncVirtualMachines deletes stale OVN resources for missing VMs or VMs in the wrong zone.
 func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.NamespacedName]bool, controllerName string) error {
 	if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, ovntypes.OVNClusterRouter, func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return ownsItAndIsOrphanOrWrongZone(item.ExternalIDs, vms, controllerName)
@@ -298,16 +369,12 @@ func SyncVirtualMachines(nbClient libovsdbclient.Client, vms map[ktypes.Namespac
 	return nil
 }
 
-// FindLiveMigratablePods will return all the pods with a `vm.kubevirt.io`
-// label filtered by `kubevirt.io/allow-pod-bridge-network-live-migration`
-// annotation
+// FindLiveMigratablePods returns virt-launcher pods filtered by the
+// `kubevirt.io/allow-pod-bridge-network-live-migration` annotation.
 func FindLiveMigratablePods(watchFactory *factory.WatchFactory) ([]*corev1.Pod, error) {
 	vmPods, err := watchFactory.GetAllPodsBySelector(
 		metav1.LabelSelector{
-			MatchExpressions: []metav1.LabelSelectorRequirement{{
-				Key:      kubevirtv1.VirtualMachineNameLabel,
-				Operator: metav1.LabelSelectorOpExists,
-			}},
+			MatchLabels: virtLauncherPodLabel,
 		},
 	)
 	if err != nil {
@@ -322,8 +389,8 @@ func FindLiveMigratablePods(watchFactory *factory.WatchFactory) ([]*corev1.Pod, 
 	return liveMigratablePods, nil
 }
 
-// allocateSyncMigratablePodIPs will refill ip pool in
-// case the node has take over the vm subnet for live migrated vms
+// allocateSyncMigratablePodIPs refills the IP pool when the node has taken over
+// the VM subnet for live-migrated VMs.
 func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nodeName, nadKey string, pod *corev1.Pod, allocatePodIPsOnSwitch func(*corev1.Pod, *util.PodAnnotation, string, string) (string, error)) (*ktypes.NamespacedName, string, *util.PodAnnotation, error) {
 	isStale, err := IsMigratedSourcePodStale(watchFactory, pod)
 	if err != nil {
@@ -335,38 +402,45 @@ func allocateSyncMigratablePodIPs(watchFactory *factory.WatchFactory, lsManager 
 		return nil, "", nil, nil
 	}
 
-	vmKey := ExtractVMNameFromPod(pod)
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if vmDescription == nil {
+		return nil, "", nil, nil
+	}
+	vmKey := vmDescription.Key()
 
 	annotation, err := util.UnmarshalPodAnnotation(pod.Annotations, nadKey)
 	if err != nil {
 		return nil, "", nil, nil
 	}
 	switchName, zoneContainsPodSubnet := ZoneContainsPodSubnet(lsManager, annotation.IPs)
-	// If this zone do not own the subnet or the node that is passed
-	// do not match the switch, they should not be deallocated
+	// If this zone does not own the subnet or the passed node does not match the
+	// switch, they should not be deallocated.
 	if !zoneContainsPodSubnet || (nodeName != "" && switchName != nodeName) {
-		return vmKey, "", annotation, nil
+		return &vmKey, "", annotation, nil
 	}
 	expectedLogicalPortName, err := allocatePodIPsOnSwitch(pod, annotation, nadKey, switchName)
 	if err != nil {
-		return vmKey, "", nil, err
+		return &vmKey, "", nil, err
 	}
-	return vmKey, expectedLogicalPortName, annotation, nil
+	return &vmKey, expectedLogicalPortName, annotation, nil
 }
 
-// AllocateSyncMigratablePodIPsOnZone will refill ip pool in
-// with pod's IPs if those IPs belong to the zone
+// AllocateSyncMigratablePodIPsOnZone refills the IP pool with the pod's IPs if
+// those IPs belong to the zone.
 func AllocateSyncMigratablePodIPsOnZone(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, nadKey string, pod *corev1.Pod, allocatePodIPsOnSwitch func(*corev1.Pod, *util.PodAnnotation, string, string) (string, error)) (*ktypes.NamespacedName, string, *util.PodAnnotation, error) {
 	// We care about the whole zone so we pass the nodeName empty
 	return allocateSyncMigratablePodIPs(watchFactory, lsManager, "", nadKey, pod, allocatePodIPsOnSwitch)
 }
 
-// ZoneContainsPodSubnetOrUntracked returns whether a pod with its corresponding
-// allocated IPs as reflected on the annotation come from a subnet that is
-// either assigned to a node of the zone or, not assigned to any node after
+// ZoneContainsPodSubnetOrUntracked returns whether a pod's allocated IPs from
+// the annotation come from a subnet that is either assigned to a node of the
+// zone or not assigned to any node after
 // migrating from a node that has since been deleted and the subnet originally
 // assigned to that node has not yet been re-assigned to a different node. For
-// convenience, the host subnets might not provided in which case they might be
+// convenience, the host subnets might not be provided, in which case they might be
 // parsed and returned if used.
 func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsManager *logicalswitchmanager.LogicalSwitchManager, hostSubnets []*net.IPNet, annotation *util.PodAnnotation) ([]*net.IPNet, bool, error) {
 	_, local := ZoneContainsPodSubnet(lsManager, annotation.IPs)
@@ -388,17 +462,33 @@ func ZoneContainsPodSubnetOrUntracked(watchFactory *factory.WatchFactory, lsMana
 	return hostSubnets, !util.IsContainedInAnyCIDR(annotation.IPs[0], hostSubnets...), nil
 }
 
-// IsPodOwnedByVirtualMachine returns true if the pod is own by a
-// kubevirt virtual machine, false otherwise.
+// IsPodOwnedByVirtualMachine returns true if the pod is owned by a
+// KubeVirt virtual machine, false otherwise.
 func IsPodOwnedByVirtualMachine(pod *corev1.Pod) bool {
-	return ExtractVMNameFromPod(pod) != nil
+	for k, v := range virtLauncherPodLabel {
+		if pod.Labels[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
-// IsPodAllowedForMigration determines whether a given pod is eligible for live migration
+// IsPodAllowedForMigration determines whether a given pod is eligible for live migration.
 func IsPodAllowedForMigration(pod *corev1.Pod, netInfo util.NetInfo) bool {
 	return IsPodOwnedByVirtualMachine(pod) &&
 		(netInfo.TopologyType() == ovntypes.Layer2Topology ||
 			netInfo.TopologyType() == ovntypes.LocalnetTopology)
+}
+
+// LiveMigrationStatusChanged returns true if the live migration status
+// changed between the old and new pod. This is a lightweight check suitable
+// for use in informer event filters to detect when a migration completes.
+func LiveMigrationStatusChanged(oldPod, newPod *corev1.Pod) bool {
+	if oldPod == nil || newPod == nil {
+		return false
+	}
+	return oldPod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp] !=
+		newPod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp]
 }
 
 func isTargetPodReady(targetPod *corev1.Pod) bool {
@@ -467,17 +557,17 @@ func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
 //
 // Note: The function assumes that the pod is part of a VirtualMachine resource managed
 // by KubeVirt.
-func DiscoverLiveMigrationStatus(podLister v1.PodLister, pod *corev1.Pod) (*LiveMigrationStatus, error) {
-	vmKey := ExtractVMNameFromPod(pod)
-	if vmKey == nil {
-		return nil, nil
-	}
-
-	selector, err := metav1.LabelSelectorAsSelector(&metav1.LabelSelector{MatchLabels: map[string]string{kubevirtv1.VirtualMachineNameLabel: vmKey.Name}})
+func DiscoverLiveMigrationStatus(podLister listersv1.PodLister, pod *corev1.Pod) (*LiveMigrationStatus, error) {
+	vmDescription, err := NewVMDescriptionFromPod(pod)
 	if err != nil {
 		return nil, err
 	}
-	vmPods, err := podLister.Pods(pod.Namespace).List(selector)
+
+	if vmDescription == nil {
+		return nil, nil
+	}
+
+	vmPods, err := vmDescription.OwnedPods(podLister)
 	if err != nil {
 		return nil, err
 	}
@@ -546,9 +636,8 @@ func DiscoverLiveMigrationStatus(podLister v1.PodLister, pod *corev1.Pod) (*Live
 	return &status, nil
 }
 
-// ReconcileIPv4AfterLiveMigration will send a GARP after live migration
-// to update the default gw mac address to the node where the VM is running
-// now.
+// ReconcileIPv4AfterLiveMigration sends a GARP after live migration to update
+// the default gateway MAC address to the node where the VM is now running.
 func (r *DefaultGatewayReconciler) ReconcileIPv4AfterLiveMigration(liveMigrationStatus *LiveMigrationStatus) error {
 	if liveMigrationStatus.State != LiveMigrationTargetDomainReady {
 		return nil
@@ -586,12 +675,13 @@ func (r *DefaultGatewayReconciler) ReconcileIPv4AfterLiveMigration(liveMigration
 	return nil
 }
 
-// ReconcileIPv6AfterLiveMigration will do two things at VM's:
-// - Remove ipv6 default gw path from VM's node before live migration
-// - Add ipv6 default gw path from VM's node after live migration
-// This is done by sending a pair of unsolicited RA's one with lifetime=0
-// (to remove the gateway path) another with lifetime=max to add the new
-// default gateway path
+// ReconcileIPv6AfterLiveMigration updates the VM's IPv6 default gateway path:
+//   - Remove the IPv6 default gateway path from the VM's node before live migration.
+//   - Add the IPv6 default gateway path from the VM's node after live migration.
+//
+// This is done by sending a pair of unsolicited RAs: one with lifetime=0 to
+// remove the gateway path and another with lifetime=max to add the new default
+// gateway path.
 func (r *DefaultGatewayReconciler) ReconcileIPv6AfterLiveMigration(liveMigration *LiveMigrationStatus) error {
 	if !liveMigration.IsTargetDomainReady() {
 		return nil

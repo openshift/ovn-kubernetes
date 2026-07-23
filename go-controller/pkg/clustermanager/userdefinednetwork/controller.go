@@ -138,6 +138,11 @@ type Controller struct {
 	// Keys are CR name, value is affected namespace names slice.
 	namespaceTracker     map[string]sets.Set[string]
 	namespaceTrackerLock sync.RWMutex
+	// cudnMetricTracker tracks which CUDNs are counted in the CUDN gauge metric.
+	// Maps (role, topology, transport) labels to the set of CUDN names sharing
+	// that combination.
+	// Only mutated from syncClusterUDN and initializeController (single-threaded).
+	cudnMetricTracker map[cudnMetricKey]sets.Set[string]
 	// renderNadFn render NAD manifest from given object, enable replacing in tests.
 	renderNadFn RenderNetAttachDefManifest
 	// createNetworkLock lock should be held when NAD is created to avoid having two components
@@ -206,6 +211,7 @@ func New(
 		namespaceInformer: namespaceInformer,
 		networkManager:    networkManager,
 		namespaceTracker:  map[string]sets.Set[string]{},
+		cudnMetricTracker: map[cudnMetricKey]sets.Set[string]{},
 		vidAllocator:      vidAllocator,
 		reservedVNIs:      map[vniKey]string{},
 		eventRecorder:     eventRecorder,
@@ -299,6 +305,8 @@ func (c *Controller) initializeController() error {
 	}
 
 	c.initializeNamespaceTracker(cudnNADs)
+	c.seedCUDNCountMetrics(cudnNADs)
+
 	if util.IsEVPNEnabled() {
 		// Recover VID allocations from existing EVPN CUDNs.
 		// Recovery failures are logged and the affected CUDNs are enqueued for reconciliation,
@@ -784,6 +792,12 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 			klog.Infof("Finalizer removed from UserDefinedNetworks [%s/%s]", udn.Namespace, udn.Name)
 			metrics.DecrementUDNCount(role, topology)
 			metrics.DeleteDynamicUDNNodeCount(util.GenerateUDNNetworkName(udn.Namespace, udn.Name))
+
+			if config.Metrics.EnableScaleMetrics {
+				// Clean up UDN metric time series to prevent cardinality explosion
+				networkName := util.GenerateUDNNetworkName(udn.Namespace, udn.Name)
+				metrics.CleanupUDNMetrics(networkName)
+			}
 		}
 
 		return nil, nil
@@ -933,16 +947,6 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 	cudnName := cudn.Name
 	affectedNamespaces := c.namespaceTracker[cudnName]
 
-	var role, topology string
-	if cudn.Spec.Network.Layer2 != nil {
-		role = string(cudn.Spec.Network.Layer2.Role)
-	} else if cudn.Spec.Network.Layer3 != nil {
-		role = string(cudn.Spec.Network.Layer3.Role)
-	} else if cudn.Spec.Network.Localnet != nil {
-		role = string(cudn.Spec.Network.Localnet.Role)
-	}
-	topology = string(cudn.Spec.Network.Topology)
-
 	if !cudn.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(cudn, template.FinalizerUserDefinedNetwork) {
 			var errs []error
@@ -974,7 +978,8 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 			}
 			klog.Infof("Finalizer removed from ClusterUserDefinedNetwork %q", cudn.Name)
 			delete(c.namespaceTracker, cudnName)
-			metrics.DecrementCUDNCount(role, topology)
+			c.cudnMetricUncounted(cudnName, &cudn.Spec.Network)
+			metrics.DeleteCUDNCondition(cudnName)
 			metrics.DeleteDynamicUDNNodeCount(util.GenerateCUDNNetworkName(cudn.Name))
 			c.releaseEVPNIDsForNetwork(cudnName)
 		}
@@ -983,7 +988,6 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 	}
 
 	if _, exist := c.namespaceTracker[cudnName]; !exist {
-		// start tracking CR
 		c.namespaceTracker[cudnName] = sets.Set[string]{}
 	}
 
@@ -994,7 +998,7 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 			return nil, fmt.Errorf("failed to add finalizer to ClusterUserDefinedNetwork %q: %w", cudnName, err)
 		}
 		klog.Infof("Added Finalizer to ClusterUserDefinedNetwork %q", cudnName)
-		metrics.IncrementCUDNCount(role, topology)
+		c.cudnMetricCounted(cudnName, &cudn.Spec.Network)
 	}
 
 	if evpnErr != nil {
@@ -1094,6 +1098,10 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 
 	// Apply status if either NetworkCreated or TransportAccepted condition changed
 	if !networkCreatedOrUpdated && !transportUpdated {
+		// Record the metric from the existing API-confirmed conditions so it is
+		// populated after controller restarts, where the informer fires synthetic
+		// creates for all CUDNs but the conditions haven't changed.
+		recordCUDNConditionMetrics(cudn)
 		return nil
 	}
 	conditionsApply := make([]*metaapplyv1.ConditionApplyConfiguration, len(cudn.Status.Conditions))
@@ -1120,6 +1128,7 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 		return fmt.Errorf("failed to update ClusterUserDefinedNetwork status %q: %w", cudnName, err)
 	}
 	klog.Infof("Updated status ClusterUserDefinedNetwork %q", cudn.Name)
+	recordCUDNConditionMetrics(cudn)
 
 	return nil
 }

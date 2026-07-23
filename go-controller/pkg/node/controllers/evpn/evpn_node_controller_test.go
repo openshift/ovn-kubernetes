@@ -1269,8 +1269,10 @@ var _ = Describe("EVPN node controller", func() {
 			ensuredMu.Lock()
 			ensuredCfgs = nil
 			ensuredMu.Unlock()
+			fakeNM.Lock()
 			fakeNM.NADNetworks = nil
 			fakeNM.PrimaryNetworks = nil
+			fakeNM.Unlock()
 			fakeNM.TriggerHandlers(nadKey, nil, true)
 
 			Eventually(func() bool {

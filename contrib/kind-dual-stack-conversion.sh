@@ -46,6 +46,26 @@ convert_cni() {
   echo "Updated CNI"
 }
 
+curl_service_from_node() {
+  local node=$1
+  local target=$2
+  local attempts=${3:-6}
+  local interval=${4:-2}
+  local timeout=${5:-5}
+
+  for i in $(seq 1 "${attempts}"); do
+    if docker exec "${node}" curl --max-time "${timeout}" --silent --show-error --fail "${target}" >/dev/null; then
+      echo "Validated ${target} from node ${node} after ${i} attempt(s)"
+      return 0
+    fi
+    if [ "${i}" -eq "${attempts}" ]; then
+      return 1
+    fi
+    echo "Waiting for ${target} to be reachable from node ${node} (${i}/${attempts})"
+    sleep "${interval}"
+  done
+}
+
 convert_k8s_control_plane(){
   # Kubeadm installs apiserver and controller-manager as static pods
   # one the configuration has changed kubelet restart them
@@ -288,11 +308,11 @@ IPS=()
 CLUSTER_IPV4=$(kubectl get services my-service-v4 -o jsonpath='{.spec.clusterIPs[0]}')
 IPS+=("${CLUSTER_IPV4}:8081")
 CLUSTER_IPV6=$(kubectl get services my-service-v6 -o jsonpath='{.spec.clusterIPs[0]}')
-IPS+=("\[${CLUSTER_IPV6}\]:8080")
+IPS+=("[${CLUSTER_IPV6}]:8080")
 
 for n in $NODES; do
-  for ip in ${IPS[@]}; do
-    docker exec $n curl --connect-timeout 5 $ip
+  for ip in "${IPS[@]}"; do
+    curl_service_from_node "${n}" "${ip}"
   done
 done
 
