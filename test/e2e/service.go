@@ -127,8 +127,16 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		namespace := f.Namespace.Name
 		jig := e2eservice.NewTestJig(cs, namespace, serviceName)
 
-		ginkgo.By("Creating a ClusterIP service")
+		ginkgo.By("creating a host-network backend pod")
 		targetPort := infraprovider.Get().GetK8HostPort()
+		httpPort := infraprovider.Get().GetK8HostPort()
+		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: (int32(targetPort))}, {ContainerPort: (int32(targetPort)), Protocol: "UDP"}},
+			"netexec", fmt.Sprintf("--http-port=%d", httpPort), fmt.Sprintf("--udp-port=%d", targetPort))
+		serverPod.Labels = jig.Labels
+		serverPod.Spec.HostNetwork = true
+		serverPod = e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)
+
+		ginkgo.By("Creating a ClusterIP service")
 		service, err := jig.CreateUDPService(context.TODO(), func(s *v1.Service) {
 			s.Spec.Ports = []v1.ServicePort{
 				{
@@ -140,15 +148,6 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			}
 		})
 		framework.ExpectNoError(err)
-
-		ginkgo.By("creating a host-network backend pod")
-
-		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: (int32(targetPort))}, {ContainerPort: (int32(targetPort)), Protocol: "UDP"}},
-			"netexec", fmt.Sprintf("--udp-port=%d", targetPort))
-		serverPod.Labels = jig.Labels
-		serverPod.Spec.HostNetwork = true
-
-		serverPod = e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)
 		nodeName := serverPod.Spec.NodeName
 
 		ginkgo.By("Connecting to the service from another host-network pod on node " + nodeName)
@@ -701,8 +700,10 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		ginkgo.By("Starting a UDP server listening on the additional IP")
 		// now that 2.2.2.2 exists on the node's lo interface, let's start a server listening on it
 		// we use UDP here since agnhost lets us pick the listen address only for UDP
+		httpPort := infraprovider.Get().GetK8HostPort()
+		udpHostNsPort = infraprovider.Get().GetK8HostPort()
 		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: int32(udpHostNsPort)}, {ContainerPort: int32(udpHostNsPort), Protocol: "UDP"}},
-			"netexec", "--udp-port="+fmt.Sprintf("%d", udpHostNsPort), "--udp-listen-addresses="+extraIP)
+			"netexec", fmt.Sprintf("--http-port=%d", httpPort), "--udp-port="+fmt.Sprintf("%d", udpHostNsPort), "--udp-listen-addresses="+extraIP)
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.NodeName = nodeName
 		serverPod.Spec.HostNetwork = true
