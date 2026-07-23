@@ -42,7 +42,7 @@ ENV PYTHONDONTWRITEBYTECODE yes
 RUN INSTALL_PKGS=" \
 	openssl firewalld-filesystem \
 	libpcap iproute iproute-tc strace \
-	tcpdump iputils \
+	tcpdump iputils socat \
 	libreswan \
 	ethtool conntrack-tools \
 	openshift-clients \
