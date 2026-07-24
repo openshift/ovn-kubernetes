@@ -798,6 +798,10 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 				nodetypes.DefaultOpenFlowCookie, matchVLAN, bridgeMacAddress, actions))
 	}
 
+	if util.IsNetworkSegmentationSupportEnabled() {
+		dftFlows = append(dftFlows, b.arpFanoutFilterFlows(matchVLAN, stripVLAN)...)
+	}
+
 	// table 0, check packets coming from OVN have the correct mac address. Low priority flows that are a catch all
 	// for non-IP packets that would normally be forwarded with NORMAL action (table 0, priority 0 flow).
 	for _, netConfig := range b.patchedNetConfigs() {
@@ -1260,6 +1264,55 @@ func (b *BridgeConfiguration) allowNodeIPGARPFlows(nodeIPs []net.IP) []string {
 			flows = append(flows, generateGratuitousARPAllowFlow(netConfig.OfPortPatch, nodeIP, priority))
 		}
 
+	}
+	return flows
+}
+
+// arpFanoutFilterFlows prevents ARP requests and IPv6 Neighbor Solicitations
+// for local node IPs from reaching CUDN GR patch ports.
+//
+// For IPv4: the generic priority-10 fan-out rule replicates all unicast
+// traffic destined to the bridge MAC to every patch port. For broadcast ARP
+// and IPv6 multicast NS, the priority-0 NORMAL action floods to all ports.
+// In both cases CUDN GRs receive the request and reply for the node IP.
+//
+// All CUDN GRs share the same node IP on their external interface, so every
+// one of them generates a reply (ARP reply or NA). These duplicate replies
+// flood the physical network and cause remote nodes to passively learn
+// redundant MAC_Bindings, driving ovs-vswitchd CPU up.
+//
+// ARP requests can arrive as broadcast (dl_dst=ff:ff:ff:ff:ff:ff) for initial
+// resolution or as unicast (dl_dst=bridgeMAC) for neighbor probes. IPv6
+// Neighbor Solicitations use multicast (dl_dst=33:33:ff:xx:xx:xx). The flows
+// match only on arp_tpa/nd_target (the node IP) without restricting dl_dst,
+// so they intercept all three cases. The action explicitly outputs to the
+// default network patch port (tagged, as OVN expects) and LOCAL (kernel,
+// after strip_vlan in VLAN mode since LOCAL is an untagged access port)
+// rather than using NORMAL, because NORMAL would flood broadcast/multicast
+// packets to all ports including CUDN patch ports.
+//
+// Must be called with bridge.mutex held.
+func (b *BridgeConfiguration) arpFanoutFilterFlows(matchVLAN, stripVLAN string) []string {
+	defaultNetConfig, found := b.netConfig[types.DefaultNetworkName]
+	if !found || defaultNetConfig.OfPortPatch == "" {
+		return nil
+	}
+
+	var flows []string
+	for _, ip := range b.ips {
+		if ip.IP.To4() != nil {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=11, table=0, %s arp, arp_op=1, arp_tpa=%s, "+
+					"actions=output:%s,%soutput:LOCAL",
+					nodetypes.DefaultOpenFlowCookie, matchVLAN, ip.IP,
+					defaultNetConfig.OfPortPatch, stripVLAN))
+		} else {
+			flows = append(flows,
+				fmt.Sprintf("cookie=%s, priority=11, table=0, %s icmp6, icmpv6_type=%d, nd_target=%s, "+
+					"actions=output:%s,%soutput:LOCAL",
+					nodetypes.DefaultOpenFlowCookie, matchVLAN, types.NeighborSolicitationICMPType, ip.IP,
+					defaultNetConfig.OfPortPatch, stripVLAN))
+		}
 	}
 	return flows
 }

@@ -104,6 +104,7 @@ type NetInfo interface {
 	GetNetworkScopedLoadBalancerName(lbName string) string
 	GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string
 	GetNetworkScopedRouterToSwitchPortName(nodeName string) string
+	GetNetworkScopedSwitchToRouterPortName(nodeName string) string
 
 	// GetNetInfo is an identity method used to get the specific NetInfo
 	// implementation
@@ -568,6 +569,10 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedRouterToSwitchPortName(nodeName str
 	return types.RouterToSwitchPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
 }
 
+func (nInfo *DefaultNetInfo) GetNetworkScopedSwitchToRouterPortName(nodeName string) string {
+	return types.SwitchToRouterPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
+}
+
 func (nInfo *DefaultNetInfo) canReconcile(netInfo NetInfo) bool {
 	_, ok := netInfo.(*DefaultNetInfo)
 	return ok
@@ -849,6 +854,18 @@ func (nInfo *userDefinedNetInfo) GetNetworkScopedRouterToSwitchPortName(nodeName
 		return types.TransitRouterToSwitchPrefix + switchName
 	}
 	return types.RouterToSwitchPrefix + switchName
+}
+
+// GetNetworkScopedSwitchToRouterPortName returns the port name from switch to router.
+// For Layer2 topology, this is the switch port to transit router (stotr-).
+// For Layer3 topology, this is the switch port to cluster router (stor-).
+// Not Applicable for Localnet topology.
+func (nInfo *userDefinedNetInfo) GetNetworkScopedSwitchToRouterPortName(nodeName string) string {
+	switchName := nInfo.GetNetworkScopedSwitchName(nodeName)
+	if nInfo.TopologyType() == types.Layer2Topology {
+		return types.SwitchToTransitRouterPrefix + switchName
+	}
+	return types.SwitchToRouterPrefix + switchName
 }
 
 // getPrefix returns if the logical entities prefix for this network
@@ -2388,4 +2405,13 @@ func CheckSubnetOverlapWithClusterSubnets(subnets []*net.IPNet, subnetsName stri
 			subnetsName, subnets)
 	}
 	return nil
+}
+
+// GetNetworkScopedRouterToSwitchPortNameFromSwitchName returns the
+// router-to-switch port name for the given switch name.
+func GetNetworkScopedRouterToSwitchPortNameFromSwitchName(switchName string) string {
+	if strings.HasSuffix(switchName, types.OVNLayer2Switch) {
+		return types.SwitchToTransitRouterPrefix + switchName
+	}
+	return types.SwitchToRouterPrefix + switchName
 }
