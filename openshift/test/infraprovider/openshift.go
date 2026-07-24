@@ -18,7 +18,6 @@ import (
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	e2einfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
@@ -30,7 +29,7 @@ type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
-	hostPort                *portalloc.PortAllocator
+	hostPort                *randPortAllocator
 	clusterInfra            *baremetalInfra
 }
 
@@ -42,7 +41,12 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
-		hostPort:     portalloc.New(30000, 32767),
+		// Host ports must come from 9000-9999: it is the only range besides
+		// the NodePort range (30000-32767) that the installer's AWS security
+		// groups and GCP firewall rules open for node-to-node TCP and UDP
+		// traffic, and unlike the NodePort range it cannot conflict with
+		// NodePort allocations.
+		hostPort:     newRandPortAllocator(9000, 9999),
 		clusterInfra: clusterInfra,
 	}
 	if err = o.initClusterObjects(config); err != nil {
