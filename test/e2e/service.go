@@ -168,7 +168,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			if err != nil {
 				return false, err
 			}
-			return stdout == nodeName, nil
+			return hostnameMatchesNode(stdout, nodeName), nil
 		})
 		framework.ExpectNoError(err)
 	})
@@ -720,7 +720,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			if err != nil {
 				return false, err
 			}
-			return (stdout == nodeName), nil
+			return hostnameMatchesNode(stdout, nodeName), nil
 		})
 		framework.ExpectNoError(err)
 
@@ -757,7 +757,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			if err != nil {
 				return false, err
 			}
-			return stdout == nodeName, nil
+			return hostnameMatchesNode(stdout, nodeName), nil
 		})
 		framework.ExpectNoError(err)
 
@@ -782,7 +782,8 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			if err != nil {
 				return false, err
 			}
-			return stdout == fmt.Sprintf(`{"responses":["%s"]}`, nodeName), nil
+			return stdout == fmt.Sprintf(`{"responses":["%s"]}`, nodeName) ||
+				stdout == fmt.Sprintf(`{"responses":["%s"]}`, strings.Split(nodeName, ".")[0]), nil
 		})
 		framework.ExpectNoError(err)
 	})
@@ -3735,4 +3736,12 @@ func getServingAndReadyEndpointSliceAddresses(epSlice discoveryv1.EndpointSlice)
 		addresses.Insert(ep.Addresses[0])
 	}
 	return addresses
+}
+
+// hostnameMatchesNode compares a hostname returned by agnhost (os.Hostname())
+// against a Kubernetes node name. On cloud providers the node name is often a
+// FQDN (e.g. "ip-10-0-2-8.ec2.internal") while os.Hostname() returns the
+// short hostname ("ip-10-0-2-8"). This helper accepts either form.
+func hostnameMatchesNode(hostname, nodeName string) bool {
+	return hostname == nodeName || hostname == strings.Split(nodeName, ".")[0]
 }
