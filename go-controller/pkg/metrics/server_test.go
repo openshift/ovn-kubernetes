@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
@@ -373,11 +374,18 @@ func newMetricsTestDriver() *metricsTestDriver {
 }
 
 func (t *metricsTestDriver) testTLSHandshake(clientVersion int, clientCipherSuites []uint16, verify func(Gomega, tls.ConnectionState, error)) {
+	certPEM, err := os.ReadFile(t.opts.CertFile)
+	Expect(err).NotTo(HaveOccurred())
+
+	certPool := x509.NewCertPool()
+	Expect(certPool.AppendCertsFromPEM(certPEM)).To(BeTrue())
+
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true,
-		MinVersion:         uint16(clientVersion),
-		MaxVersion:         uint16(clientVersion),
-		CipherSuites:       clientCipherSuites,
+		RootCAs:      certPool,
+		ServerName:   "localhost",
+		MinVersion:   uint16(clientVersion),
+		MaxVersion:   uint16(clientVersion),
+		CipherSuites: clientCipherSuites,
 	}
 
 	Eventually(func(g Gomega) {
