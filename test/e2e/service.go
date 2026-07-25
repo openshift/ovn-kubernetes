@@ -2587,10 +2587,11 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 		if len(nodes.Items) < 2 {
 			framework.Failf("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
-		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		nodeIPs := e2enode.GetAddresses(&nodes.Items[1], v1.NodeInternalIP)
+		gomega.Expect(nodeIPs).NotTo(gomega.BeEmpty(), "second Ready node must have an InternalIP")
 		namespaceName = f.Namespace.Name
 		backendNodeName = nodes.Items[0].Name
-		nodeIP = ips[1]
+		nodeIP = nodeIPs[0]
 	})
 
 	ginkgo.It("Should ensure service hairpin traffic is SNATed to hairpin masquerade IP; Switch LB", func() {
@@ -2649,7 +2650,16 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 
 		ginkgo.By("by sending a TCP packet to service service-for-pods with type=NodePort(" + nodeIP + ":" + fmt.Sprint(svc.Spec.Ports[0].NodePort) + ") in namespace " + namespaceName + " from node " + backendNodeName)
 
-		clientIP := pokeEndpointViaNode(backendNodeName, "http", nodeIP, hostNetPort, uint16(svc.Spec.Ports[0].NodePort), "clientip")
+		var clientIP string
+		err = wait.PollImmediate(30*time.Second, 3*time.Minute, func() (bool, error) {
+			clientIP = pokeEndpointViaNode(backendNodeName, "http", nodeIP, hostNetPort, uint16(svc.Spec.Ports[0].NodePort), "clientip")
+			if clientIP == "" {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err, "timed out waiting for successful NodePort response")
+
 		clientIP, _, err = net.SplitHostPort(clientIP)
 		framework.ExpectNoError(err, "failed to parse client ip:port")
 
