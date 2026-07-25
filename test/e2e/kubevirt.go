@@ -423,17 +423,21 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 		startNorthSouthIngressIperfTraffic = func(container infraapi.ExternalContainer, addresses []string, port int32, stage string) error {
 			GinkgoHelper()
 			execFn := func(cmd string) (string, error) {
-				return infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", cmd})
+				return infraprovider.Get().ExecExternalContainerCommand(container, []string{"sh", "-c", cmd})
 			}
 			return startNorthSouthIperfTraffic(execFn, addresses, port, "ingress", stage)
 		}
 
+		// iperfServerScript is POSIX sh and busybox compatible (no bash, jq or
+		// "ip -j") so it can run unmodified on different images (netshoot,
+		// quay.io/openshifttest/iperf3, Fedora VMs, ...).
 		iperfServerScript = `
-#!/bin/bash -xe
-iface=$(ip -j link show | jq -r '.[].ifname | select(. != "eth0" and . != "lo")' | head -1)
+#!/bin/sh
+set -xe
+iface=$(ip link show | awk -F': ' '/^[0-9]+:/{print $2}' | cut -d@ -f1 | grep -v -e '^eth0$' -e '^lo$' | head -1)
 iface=${iface:-eth0}
 
-ipv4=$(ip -j -4 addr show dev $iface | jq -r '.[0].addr_info[0].local // empty')
+ipv4=$(ip -4 addr show dev $iface | awk '/inet /{sub(/\/.*/,"",$2); print $2; exit}')
 if [ "$ipv4" != "" ]; then
 	iperf3 -s -D --bind $ipv4 --logfile /tmp/test_${ipv4}_iperf3.log
 	sleep 1
@@ -443,9 +447,10 @@ if [ "$ipv4" != "" ]; then
 	fi
 fi
 
+ipv6=""
 cnt=0
-while [ "$ipv6" == "" -a $cnt -lt 10 ]; do
-	ipv6=$(ip -j -6 addr show dev $iface | jq -r '.[0].addr_info[] | select(.local | startswith("fe80") | not) | .local' | head -1)
+while [ -z "$ipv6" ] && [ $cnt -lt 10 ]; do
+	ipv6=$(ip -6 addr show dev $iface | awk '/inet6/ && $2 !~ /^fe80/{sub(/\/.*/,"",$2); print $2; exit}')
 	sleep 1
 	cnt=$((cnt+1))
 done
@@ -463,7 +468,7 @@ fi
 			GinkgoHelper()
 			Expect(macVRFContainerIPs).NotTo(BeEmpty())
 			// Start iperf3 server on the external container using the same script as pods
-			output, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", iperfServerScript})
+			output, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{"sh", "-c", iperfServerScript})
 			if err != nil {
 				return fmt.Errorf("failed starting iperf3 server on external container: %s: %w", output, err)
 			}
@@ -495,7 +500,7 @@ fi
 			for _, ip := range addresses {
 				iperfLogFile := fmt.Sprintf("/tmp/ingress_test_%s_%d_iperf3.log", ip, port)
 				execFn := func(cmd string) (string, error) {
-					return infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", cmd})
+					return infraprovider.Get().ExecExternalContainerCommand(container, []string{"sh", "-c", cmd})
 				}
 				checkIperfTraffic(iperfLogFile, execFn, stage)
 			}
@@ -737,7 +742,7 @@ fi
 				Version: kubevirtv1.GroupVersion.Version,
 			})
 
-			if err := client.List(context.Background(), unstructuredVMIMigrations); err != nil {
+			if err := client.List(context.Background(), unstructuredVMIMigrations, crclient.InNamespace(namespace)); err != nil {
 				return nil, err
 			}
 			if len(unstructuredVMIMigrations.Items) == 0 {
@@ -785,6 +790,98 @@ fi
 			)
 		}
 
+		// listNBDBPodContainers returns the pod/container pairs to query every OVN
+		// NB database in the cluster. DB pods are labeled ovn-db-pod=true (one pod
+		// per zone with interconnect, dedicated DB pods without it), the same
+		// selection used by getOvnKubePodsForRouteInjection. The NB DB container
+		// is named "nb-ovsdb" upstream and "nbdb" on OpenShift; default to the
+		// first container otherwise.
+		listNBDBPodContainers = func() ([][2]string, error) {
+			ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+			pods, err := fr.ClientSet.CoreV1().Pods(ovnNamespace).List(context.Background(), metav1.ListOptions{LabelSelector: "ovn-db-pod=true"})
+			if err != nil {
+				return nil, err
+			}
+			if len(pods.Items) == 0 {
+				return nil, fmt.Errorf("no OVN NB database pods found in namespace %s", ovnNamespace)
+			}
+			var result [][2]string
+			for _, pod := range pods.Items {
+				containerName := pod.Spec.Containers[0].Name
+				for _, container := range pod.Spec.Containers {
+					if container.Name == "nb-ovsdb" || container.Name == "nbdb" {
+						containerName = container.Name
+						break
+					}
+				}
+				result = append(result, [2]string{pod.Name, containerName})
+			}
+			return result, nil
+		}
+
+		// checkNoStaleLSPAfterFailedLiveMigration verifies OVN cleaned up after a
+		// failed live migration once the failed target pod terminates: the target
+		// pod LSP must be removed from every NB database and the source pod LSP
+		// must not be left disabled. Without the locality guard on
+		// enableSourceLSPFailedLiveMigration (OCPBUGS-88734) controllers of zones
+		// not owning the source LSP fail the target pod deletion and leak its LSP,
+		// while VM traffic keeps working through the source zone; asserting on the
+		// NB databases catches that leak.
+		checkNoStaleLSPAfterFailedLiveMigration = func(vmiName string) {
+			GinkgoHelper()
+			vmi := &kubevirtv1.VirtualMachineInstance{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace,
+					Name:      vmiName,
+				},
+			}
+			Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
+			Expect(vmi.Status.MigrationState).NotTo(BeNil(), "should have a MigrationState after failed live migration")
+			targetPod := vmi.Status.MigrationState.TargetPod
+			sourcePod := vmi.Status.MigrationState.SourcePod
+			Expect(targetPod).NotTo(BeEmpty())
+			Expect(sourcePod).NotTo(BeEmpty())
+
+			By(fmt.Sprintf("checking no stale LSP remains for failed live migration target pod %s", targetPod))
+			ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+			targetLSPSuffix := fmt.Sprintf("%s_%s", namespace, targetPod)
+			sourceLSPSuffix := fmt.Sprintf("%s_%s", namespace, sourcePod)
+			Eventually(func() error {
+				dbs, err := listNBDBPodContainers()
+				if err != nil {
+					return err
+				}
+				sourceLSPFound := false
+				for _, db := range dbs {
+					stdout, stderr, err := ExecCommandInContainerWithFullOutput(fr, ovnNamespace, db[0], db[1],
+						"ovn-nbctl", "--bare", "--columns=name", "find", "logical_switch_port")
+					if err != nil {
+						return fmt.Errorf("failed listing LSPs at %s/%s: %w, stderr: %s", db[0], db[1], err, stderr)
+					}
+					for _, lsp := range strings.Fields(stdout) {
+						if strings.HasSuffix(lsp, targetLSPSuffix) {
+							return fmt.Errorf("stale LSP %q for failed live migration target pod still present at %s/%s", lsp, db[0], db[1])
+						}
+						if strings.HasSuffix(lsp, sourceLSPSuffix) {
+							sourceLSPFound = true
+							enabled, stderr, err := ExecCommandInContainerWithFullOutput(fr, ovnNamespace, db[0], db[1],
+								"ovn-nbctl", "get", "logical_switch_port", lsp, "enabled")
+							if err != nil {
+								return fmt.Errorf("failed retrieving enabled field of LSP %q at %s/%s: %w, stderr: %s", lsp, db[0], db[1], err, stderr)
+							}
+							if strings.TrimSpace(enabled) == "false" {
+								return fmt.Errorf("source pod LSP %q is disabled after failed live migration at %s/%s", lsp, db[0], db[1])
+							}
+						}
+					}
+				}
+				if !sourceLSPFound {
+					return fmt.Errorf("source pod LSP with suffix %q not found in any NB database", sourceLSPSuffix)
+				}
+				return nil
+			}).WithPolling(5 * time.Second).WithTimeout(2 * time.Minute).Should(Succeed())
+		}
+
 		liveMigrateFailed = func(vmi *kubevirtv1.VirtualMachineInstance) {
 			GinkgoHelper()
 			forceLiveMigrationFailureAnnotationName := kubevirtv1.FuncTestForceLauncherMigrationFailureAnnotation
@@ -801,6 +898,7 @@ fi
 
 			liveMigrateVirtualMachine(vmi.Name)
 			checkLiveMigrationFailed(vmi.Name)
+			checkNoStaleLSPAfterFailedLiveMigration(vmi.Name)
 		}
 
 		ipv4 = func(iface kubevirt.Interface) []kubevirt.Address {
@@ -1327,7 +1425,7 @@ passwd:
 						IPRequest: staticIPs,
 					}
 				}
-				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, []string{"bash", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
+				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, []string{"sh", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
 					if nse != nil {
 						pod.Annotations = networkSelectionElements(*nse)
 					}
@@ -2010,7 +2108,7 @@ write_files:
 				frrExternalContainerInterface, err := infraprovider.Get().GetExternalContainerNetworkInterface(frrExternalContainer, frrNetwork)
 				Expect(err).NotTo(HaveOccurred(), "must fetch FRR container network interface attached to secondary network")
 
-				output, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"bash", "-c", fmt.Sprintf(`
+				output, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"sh", "-c", fmt.Sprintf(`
 set -xe
 ip route add %[1]s via %[2]s
 ip route add %[3]s via %[4]s
@@ -2105,13 +2203,13 @@ ip route add %[3]s via %[4]s
 				checkNorthSouthIngressIperfTraffic(externalContainer, serverIPs, serverPort, step)
 				checkNorthSouthEgressICMPTraffic(vmi, externalContainerIPs, step)
 				if td.ingress == "routed" {
-					_, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"bash", "-c", iperfServerScript})
+					_, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"sh", "-c", iperfServerScript})
 					Expect(err).NotTo(HaveOccurred(), step)
 					Expect(startNorthSouthEgressIperfTraffic(vmi, externalContainerIPs, iperf3DefaultPort, step)).To(Succeed())
 					By("Check egress src ip is not node IP on 'routed' ingress mode")
 					for _, vmAddress := range expectedAddreses {
 						output, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{
-							"bash", "-c", fmt.Sprintf("grep 'connected to %s' /tmp/test_*", vmAddress),
+							"sh", "-c", fmt.Sprintf("grep 'connected to %s' /tmp/test_*", vmAddress),
 						})
 						Expect(err).NotTo(HaveOccurred(), step+": "+output)
 					}

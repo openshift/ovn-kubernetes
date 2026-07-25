@@ -9,6 +9,12 @@ var (
 	// LabelToLabelMaps label -> label (ginkgo label)
 	// E2E tests are written with the support of ginkgo. ginkgo tests may contain Labels.
 	LabelToLabelMaps = map[string][]string{
+		// Kubevirt tests run in the virtualization suite (parallelism 3)
+		// instead of openshift/conformance/parallel, matching the
+		// baremetalds-e2e-ovn-bgp-virt-* jobs (TEST_SUITE=openshift/network/virtualization).
+		"[Suite:openshift/network/virtualization]": {
+			`[Feature:VirtualMachineSupport]`,
+		},
 		"[Disabled:Unimplemented]": {
 			`[Feature:Service]`,
 			`[Feature:NetworkPolicy]`,
@@ -20,7 +26,6 @@ var (
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
-			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
 			`[Feature:Multicast]`,
 			`[Feature:MultiHoming]`,
@@ -33,6 +38,8 @@ var (
 	// if a test name partially or fully contains one of the map value strings, then add the label to the test
 	// label -> partial or full test name or regex to match a test name
 	LabelToTestNameMatchMaps = map[string][]string{
+		// Kubevirt tests run in the virtualization suite, see LabelToLabelMaps.
+		"[Suite:openshift/network/virtualization]": {},
 		// alpha features that are not gated
 		"[Disabled:Alpha]": {},
 		// tests for features that are not implemented in openshift
@@ -121,7 +128,14 @@ var (
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			// localnet kubevirt tests mutate shared node state via
+			// SetupUnderlay (OVS bridge + ovn-bridge-mappings), run them
+			// serialized to avoid concurrent bridge-mappings updates.
+			`should maintain tcp connection with minimal downtime`,
+			`should start multiple VMs with same hostname`,
+			`Secondary/Localnet`,
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)
