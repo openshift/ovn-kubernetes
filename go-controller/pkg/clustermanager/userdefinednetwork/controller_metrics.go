@@ -100,21 +100,3 @@ func cudnMetricLabels(spec *userdefinednetworkv1.NetworkSpec) (role, topology, t
 	}
 	return
 }
-
-// cudnMetricConditions is the set of conditions that are recorded as metrics.
-var cudnMetricConditions = sets.New(
-	conditionTypeNetworkCreated,
-	ConditionTypeTransportAccepted,
-)
-
-// recordCUDNConditionMetrics records condition metrics for a CUDN that is not being deleted.
-func recordCUDNConditionMetrics(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) {
-	if cudn == nil || !cudn.DeletionTimestamp.IsZero() {
-		return
-	}
-	for _, condition := range cudn.Status.Conditions {
-		if cudnMetricConditions.Has(condition.Type) {
-			metrics.RecordCUDNCondition(cudn.Name, condition.Type, condition.Status)
-		}
-	}
-}

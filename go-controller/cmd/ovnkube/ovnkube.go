@@ -83,7 +83,6 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["Monitoring Options"] = config.MonitoringFlags
 	m["IPFIX Flow Tracing Options"] = config.IPFIXFlags
 	m["Metrics Options"] = config.MetricsFlags
-	m["TLS Options"] = config.TLSFlags
 	m["Hybrid Overlay Options"] = config.HybridOverlayFlags
 
 	return m
@@ -329,17 +328,8 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	eventRecorder := util.EventRecorder(ovnClientset.KubeClient)
 
 	if config.Metrics.BindAddress != "" && !combineMetricsEndpoints(runMode) {
-		opts := metrics.MetricServerOptions{
-			BindAddress: config.Metrics.BindAddress,
-			CertFile:    config.Metrics.NodeServerCert,
-			KeyFile:     config.Metrics.NodeServerPrivKey,
-			EnablePprof: config.Metrics.EnablePprof,
-			// Use default registry so existing metric registrations keep working.
-			Registerer:      prometheus.DefaultRegisterer,
-			ApplyTLSOptions: config.TLS.ApplyOptions,
-		}
-
-		metrics.StartMetricsServer(opts, ctx.Done(), ovnKubeStartWg)
+		metrics.StartMetricsServer(config.Metrics.BindAddress, config.Metrics.EnablePprof,
+			config.Metrics.NodeServerCert, config.Metrics.NodeServerPrivKey, ctx.Done(), ovnKubeStartWg)
 	}
 
 	// In IC mode, only cluster manager runs leader election. Node and
@@ -625,8 +615,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				EnableOVNControllerMetrics: true,
 				EnableOVNNorthdMetrics:     true,
 				EnableOVNDBMetrics:         true,
-				OVSDBClient:                ovsClient,
-				ApplyTLSOptions:            config.TLS.ApplyOptions,
 			}
 
 			if combineMetricsEndpoints(runMode) {
@@ -635,7 +623,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				opts.EnablePprof = config.Metrics.EnablePprof
 			}
 
-			metrics.StartMetricsServer(opts, ctx.Done(), wg)
+			metrics.StartOVNMetricsServer(opts, ovsClient, ovnClientset.KubeClient, ctx.Done(), wg)
 		}
 	}
 

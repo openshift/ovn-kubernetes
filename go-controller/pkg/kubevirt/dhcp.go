@@ -25,7 +25,6 @@ const (
 	dhcpLeaseTime = 3500
 )
 
-// DHCPConfigsOpt mutates generated DHCP options before they are written to OVN.
 type DHCPConfigsOpt = func(*dhcpConfigs)
 
 type dhcpConfigs struct {
@@ -33,7 +32,6 @@ type dhcpConfigs struct {
 	V6 *nbdb.DHCPOptions
 }
 
-// WithIPv4Router configures the IPv4 router DHCP option.
 func WithIPv4Router(router string) func(*dhcpConfigs) {
 	return func(configs *dhcpConfigs) {
 		if configs.V4 == nil {
@@ -43,7 +41,6 @@ func WithIPv4Router(router string) func(*dhcpConfigs) {
 	}
 }
 
-// WithIPv4MTU configures the IPv4 MTU DHCP option.
 func WithIPv4MTU(mtu int) func(*dhcpConfigs) {
 	return func(configs *dhcpConfigs) {
 		if configs.V4 == nil {
@@ -53,7 +50,6 @@ func WithIPv4MTU(mtu int) func(*dhcpConfigs) {
 	}
 }
 
-// WithIPv4DNSServer configures the IPv4 DNS server DHCP option.
 func WithIPv4DNSServer(dnsServer string) func(*dhcpConfigs) {
 	return func(configs *dhcpConfigs) {
 		if configs.V4 == nil {
@@ -63,12 +59,11 @@ func WithIPv4DNSServer(dnsServer string) func(*dhcpConfigs) {
 	}
 }
 
-// WithIPv6DNSServer configures the IPv6 DNS server DHCP option.
 func WithIPv6DNSServer(dnsServer string) func(*dhcpConfigs) {
 	return func(configs *dhcpConfigs) {
-		// If there is no IPv6 DNS server, don't configure the option. This is
-		// common in dual-stack environments since an IPv4 DNS server can serve
-		// IPv6 AAAA records.
+		// If there is no ipv6 dns server don't configure the option, this is
+		// quite common at dual stack envs since a ipv4 dns server can serve
+		// ipv6 AAAA records.
 		if dnsServer == "" {
 			return
 		}
@@ -79,7 +74,6 @@ func WithIPv6DNSServer(dnsServer string) func(*dhcpConfigs) {
 	}
 }
 
-// EnsureDHCPOptionsForLSP creates or updates DHCP options for a VM logical switch port.
 func EnsureDHCPOptionsForLSP(controllerName string, nbClient libovsdbclient.Client, pod *corev1.Pod, ips []*net.IPNet, lsp *nbdb.LogicalSwitchPort, opts ...DHCPConfigsOpt) error {
 	vmDescription, err := NewVMDescriptionFromPod(pod)
 	if err != nil {
@@ -125,7 +119,6 @@ func composeDHCPConfigs(controllerName string, vmKey ktypes.NamespacedName, podI
 	return dhcpConfigs, nil
 }
 
-// RetrieveDNSServiceClusterIPs returns IPv4 and IPv6 cluster IPs for the configured DNS service.
 func RetrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string, error) {
 	dnsServer, err := k8scli.GetService(config.Kubernetes.DNSServiceNamespace, config.Kubernetes.DNSServiceName)
 	if err != nil {
@@ -143,7 +136,6 @@ func RetrieveDNSServiceClusterIPs(k8scli *factory.WatchFactory) (string, string,
 	return clusterIPv4, clusterIPv6, nil
 }
 
-// ComposeDHCPv4Options builds OVN DHCPv4 options for a VM pod CIDR.
 func ComposeDHCPv4Options(cidr, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
 	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv4)).String()
 	dhcpOptions := &nbdb.DHCPOptions{
@@ -158,7 +150,6 @@ func ComposeDHCPv4Options(cidr, controllerName string, vmKey ktypes.NamespacedNa
 	return composeDHCPOptions(controllerName, vmKey, dhcpOptions)
 }
 
-// ComposeDHCPv6Options builds OVN DHCPv6 options for a VM pod CIDR.
 func ComposeDHCPv6Options(cidr, controllerName string, vmKey ktypes.NamespacedName) *nbdb.DHCPOptions {
 	serverMAC := util.IPAddrToHWAddr(net.ParseIP(ARPProxyIPv6)).String()
 	dhcpOptions := &nbdb.DHCPOptions{
@@ -182,7 +173,6 @@ func composeDHCPOptions(controllerName string, vmKey ktypes.NamespacedName, dhcp
 	return dhcpOptions
 }
 
-// DeleteDHCPOptions deletes OVN DHCP options owned by the VM associated with pod.
 func DeleteDHCPOptions(nbClient libovsdbclient.Client, pod *corev1.Pod) error {
 	vmDescription, err := NewVMDescriptionFromPod(pod)
 	if err != nil {

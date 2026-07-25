@@ -566,17 +566,18 @@ func parseScopedNodeQueueKey(key string) (nodeName, netName string) {
 	return parts[0], parts[1]
 }
 
-// getCachedNode returns a cached node by name for read-only access.
-// WARNING: The returned node MUST NOT be modified. It is a shared reference
-// from the controller cache. All verified usages are read-only.
+// Get returns a deep copy of a cached node by name.
 func (c *NodeController) getCachedNode(netName, nodeName string) *corev1.Node {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
-	return c.nodeCache[netName][nodeName]
+	node := c.nodeCache[netName][nodeName]
+	if node == nil {
+		return nil
+	}
+	return node.DeepCopy()
 }
 
-// setCachedNode stores a reference to the node in cache.
-// The node is from the k8s informer cache (immutable), safe to cache by reference.
+// Set stores a deep copy of a node.
 func (c *NodeController) setCachedNode(netName string, node *corev1.Node) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
@@ -588,19 +589,19 @@ func (c *NodeController) setCachedNode(netName string, node *corev1.Node) {
 		c.nodeCache[netName] = make(map[string]*corev1.Node)
 	}
 
-	c.nodeCache[netName][node.Name] = node
+	c.nodeCache[netName][node.Name] = node.DeepCopy()
 }
 
-// getLatestInformerNode returns the latest informer node for read-only access.
-// WARNING: The returned node MUST NOT be modified. It is a shared reference.
 func (c *NodeController) getLatestInformerNode(netName, nodeName string) *corev1.Node {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
-	return c.latestInformerNodeCache[netName][nodeName]
+	node := c.latestInformerNodeCache[netName][nodeName]
+	if node == nil {
+		return nil
+	}
+	return node.DeepCopy()
 }
 
-// setLatestInformerNode stores a reference to the latest informer node in cache.
-// The node is from the k8s informer cache (immutable), safe to cache by reference.
 func (c *NodeController) setLatestInformerNode(netName string, node *corev1.Node) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
@@ -612,7 +613,7 @@ func (c *NodeController) setLatestInformerNode(netName string, node *corev1.Node
 		c.latestInformerNodeCache[netName] = make(map[string]*corev1.Node)
 	}
 
-	c.latestInformerNodeCache[netName][node.Name] = node
+	c.latestInformerNodeCache[netName][node.Name] = node.DeepCopy()
 }
 
 // Delete removes a node from the cache.

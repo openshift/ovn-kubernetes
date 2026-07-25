@@ -81,13 +81,10 @@ type BridgeConfiguration struct {
 
 	// variables that are only set on creation and never changed
 	// don't require mutex lock to read
-	nodeName   string
-	bridgeName string
-	uplinkName string
-	gwIface    string
-	// gwIfaceRep is the OVS representor port for the gateway MAC when one exists.
-	// In DPU mode this is the host representor. In accelerated full mode this is
-	// the representor of the configured gateway VF/SF.
+	nodeName    string
+	bridgeName  string
+	uplinkName  string
+	gwIface     string
 	gwIfaceRep  string
 	interfaceID string
 
@@ -201,7 +198,6 @@ func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
 					config.Gateway.DPUHostGatewayRepresentorInterface, bridgeName, repErr, stderr)
 			}
 			klog.Infof("Adding host representor interface %s to bridge %s", config.Gateway.DPUHostGatewayRepresentorInterface, bridgeName)
-			res.gwIfaceRep = config.Gateway.DPUHostGatewayRepresentorInterface
 		}
 		res.bridgeName = bridgeName
 		res.gwIface = bridgeName
@@ -253,7 +249,8 @@ func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
 
 	// for DPU we use the host MAC address for the Gateway configuration
 	if config.IsModeDPU() {
-		if err := res.setDPUHostGatewayConfiguration(nodeName); err != nil {
+		res.macAddress, err = util.GetDPUOps().GetHostGatewayMACAddress(res.bridgeName, nodeName)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -266,42 +263,12 @@ func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
 	return &res, nil
 }
 
-func (b *BridgeConfiguration) setDPUHostGatewayConfiguration(nodeName string) error {
-	if b.gwIfaceRep == "" {
-		b.gwIfaceRep = config.Gateway.DPUHostGatewayRepresentorInterface
-	}
-	if b.gwIfaceRep == "" {
-		// When the DPU host representor was not provided explicitly, discover
-		// it by inspecting the ports attached to the gateway bridge.
-		klog.V(5).Infof("No DPU host gateway representor configured, discovering host representor from bridge %s", b.bridgeName)
-		hostRep, err := util.GetDPUOps().GetDPUHostRepInterface(b.bridgeName)
-		if err != nil {
-			return err
-		}
-		b.gwIfaceRep = hostRep
-	}
-	macAddress, err := util.GetDPUOps().GetHostGatewayMACAddress(b.bridgeName, nodeName)
-	if err != nil {
-		return err
-	}
-	b.macAddress = macAddress
-	return nil
-}
-
 func (b *BridgeConfiguration) GetGatewayIface() string {
 	return b.gwIface
 }
 
 func (b *BridgeConfiguration) GetGatewayIfaceRep() string {
 	return b.gwIfaceRep
-}
-
-// GetStaticFDBPort returns the OVS bridge port that owns the gateway MAC.
-func (b *BridgeConfiguration) GetStaticFDBPort() string {
-	if b.gwIfaceRep != "" {
-		return b.gwIfaceRep
-	}
-	return b.bridgeName
 }
 
 // UpdateInterfaceIPAddresses sets and returns the bridge's current ips
@@ -456,17 +423,33 @@ func (b *BridgeConfiguration) ConfigureBridgePorts() error {
 		b.ofPortPhys = ofportPhys
 	}
 
-	// Get ofport representing the host. That is, the representor when present, ovsLocalPort otherwise.
-	b.ofPortHost = nodetypes.OvsLocalPort
-	hostOVSInterfaceName := b.bridgeName
-	if b.gwIfaceRep != "" {
-		ofPortHost, stderr, err := util.RunOVSVsctl("get", "interface", b.gwIfaceRep, "ofport")
+	// Get ofport representing the host. That is, host representor port in case of DPUs, ovsLocalPort otherwise.
+	var hostOVSInterfaceName string
+	if config.IsModeDPU() {
+		var stderr string
+		hostRep, err := util.GetDPUOps().GetDPUHostRepInterface(b.bridgeName)
 		if err != nil {
-			return fmt.Errorf("failed to get ofport of gateway representor %s, stderr: %q, error: %v",
-				b.gwIfaceRep, stderr, err)
+			return err
 		}
-		b.ofPortHost = ofPortHost
-		hostOVSInterfaceName = b.gwIfaceRep
+
+		b.ofPortHost, stderr, err = util.RunOVSVsctl("get", "interface", hostRep, "ofport")
+		if err != nil {
+			return fmt.Errorf("failed to get ofport of host interface %s, stderr: %q, error: %v",
+				hostRep, stderr, err)
+		}
+		hostOVSInterfaceName = hostRep
+	} else {
+		var err error
+		if b.gwIfaceRep != "" {
+			b.ofPortHost, _, err = util.RunOVSVsctl("get", "interface", b.gwIfaceRep, "ofport")
+			if err != nil {
+				return fmt.Errorf("failed to get ofport of bypass rep %s, error: %v", b.gwIfaceRep, err)
+			}
+			hostOVSInterfaceName = b.gwIfaceRep
+		} else {
+			b.ofPortHost = nodetypes.OvsLocalPort
+			hostOVSInterfaceName = b.bridgeName
+		}
 	}
 
 	// Ensure the host port on the bridge carries the configured VLAN tag when requested.
@@ -599,7 +582,7 @@ func getIntfName(gatewayIntf string) (string, error) {
 func bridgedGatewayNodeSetup(ovsClient libovsdbclient.Client, nodeName, bridgeName, physicalNetworkName string) (string, error) {
 	// IPv6 forwarding is enabled globally
 	if config.IPv4Mode {
-		err := util.SetForwardingModeForInterface(bridgeName)
+		err := util.SetforwardingModeForInterface(bridgeName)
 		if err != nil {
 			return "", err
 		}

@@ -122,14 +122,14 @@ func allocatePodAnnotation(
 	// no id allocation
 	var idAllocator id.NamedAllocator
 
-	allocateToPodWithRollback := func(currentPod *corev1.Pod) (*corev1.Pod, func(), error) {
+	allocateToPodWithRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
-		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
 			idAllocator,
 			netInfo,
 			node,
-			currentPod,
+			pod,
 			nadKey,
 			network,
 			claimsReconciler,
@@ -137,7 +137,7 @@ func allocatePodAnnotation(
 			reallocateIP,
 			networkRole,
 		)
-		return updatedPod, rollback, err
+		return pod, rollback, err
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
@@ -151,7 +151,7 @@ func allocatePodAnnotation(
 		return nil, nil, err
 	}
 
-	return updatedPod, podAnnotation, nil
+	return pod, podAnnotation, nil
 }
 
 // AllocatePodAnnotationWithTunnelID allocates the PodAnnotation which includes
@@ -211,14 +211,14 @@ func allocatePodAnnotationWithTunnelID(
 	podAnnotation *util.PodAnnotation,
 	err error) {
 
-	allocateToPodWithRollback := func(currentPod *corev1.Pod) (*corev1.Pod, func(), error) {
+	allocateToPodWithRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
 		var rollback func()
-		updatedPod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
+		pod, podAnnotation, rollback, err = allocatePodAnnotationWithRollback(
 			ipAllocator,
 			idAllocator,
 			netInfo,
 			node,
-			currentPod,
+			pod,
 			nadKey,
 			network,
 			claimsReconciler,
@@ -226,7 +226,7 @@ func allocatePodAnnotationWithTunnelID(
 			reallocateIP,
 			networkRole,
 		)
-		return updatedPod, rollback, err
+		return pod, rollback, err
 	}
 
 	err = util.UpdatePodWithRetryOrRollback(
@@ -240,7 +240,7 @@ func allocatePodAnnotationWithTunnelID(
 		return nil, nil, err
 	}
 
-	return updatedPod, podAnnotation, nil
+	return pod, podAnnotation, nil
 }
 
 // validateStaticIPRequest checks if a static IP request can be honored when IPAM is enabled for the given network.

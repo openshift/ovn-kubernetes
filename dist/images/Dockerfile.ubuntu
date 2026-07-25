@@ -11,7 +11,7 @@
 #
 # So this file will change over time.
 
-FROM ubuntu:26.04
+FROM ubuntu:25.10
 
 USER root
 

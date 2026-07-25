@@ -379,8 +379,8 @@ func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targe
 
 // wrapper logic around pokeEndpoint
 // contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
-func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.Set[string]) bool {
-	responses := sets.New[string]()
+func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
+	responses := sets.NewString()
 
 	for i := 0; i < maxTries; i++ {
 		epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, externalAddress, externalPort, "hostname")
@@ -1963,35 +1963,6 @@ func waitOVNKubernetesHealthy(f *framework.Framework) error {
 			len(nodes.Items), len(ovnNodePods.Items), runningControlPlanePods)
 		return true, nil
 	})
-}
-
-// secondToLastIP returns the second-to-last usable IP in the given subnet.
-// Using the high end of the range avoids collisions with both OVN IPAM
-// (which allocates from lower end onwards) and Docker IPAM (which allocates from lower end onwards).
-// This assumes OVN-K CUDN IPAM won't allocate IPs from the top of the subnet range
-// for pods in these e2e tests.
-// Example: "10.100.0.0/24" -> 10.100.0.253, "fd00:100::/64" -> fd00:100::ffff:ffff:ffff:fffe
-func secondToLastIP(ipNet *net.IPNet) net.IP {
-	// Compute broadcast: network OR inverted mask
-	broadcast := make(net.IP, len(ipNet.IP))
-	for i := range ipNet.IP {
-		broadcast[i] = ipNet.IP[i] | ^ipNet.Mask[i]
-	}
-	// Subtract 2 from broadcast to get second-to-last usable IP
-	result := make(net.IP, len(broadcast))
-	copy(result, broadcast)
-	borrow := byte(2)
-	for i := len(result) - 1; i >= 0 && borrow > 0; i-- {
-		diff := int(result[i]) - int(borrow)
-		if diff < 0 {
-			result[i] = byte(diff + 256)
-			borrow = 1
-		} else {
-			result[i] = byte(diff)
-			borrow = 0
-		}
-	}
-	return result
 }
 
 // waitForNodeReadyState waits for the specified node to reach the desired Ready state within the given timeout

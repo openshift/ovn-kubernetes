@@ -237,7 +237,7 @@ func testManagementPort(ctx *cli.Context, fexec *ovntest.FakeExec, testNS ns.Net
 		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+				Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/forwarding=1",
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
@@ -473,7 +473,7 @@ func testManagementPortDPUHost(ctx *cli.Context, fexec *ovntest.FakeExec, testNS
 		// We do not enable per-interface forwarding for IPv6
 		if cfg.family == netlink.FAMILY_V4 {
 			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "sysctl -w net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
+				Cmd:    "sysctl -w net/ipv4/conf/ovn-k8s-mp0/forwarding=1",
 				Output: "net.ipv4.conf.ovn-k8s-mp0.forwarding = 1",
 			})
 		}
@@ -746,7 +746,6 @@ var _ = Describe("Management Port tests", func() {
 
 				// Return error here, so we know that function didn't returned earlier
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
-				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 				err := syncMgmtPortInterface(ovsClient, mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
 			})
@@ -761,26 +760,9 @@ var _ = Describe("Management Port tests", func() {
 					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
 				})
 				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
-				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(false)
 
 				err := syncMgmtPortInterface(ovsClient, mgmtPortName, false)
 				Expect(err).To(HaveOccurred())
-			})
-
-			It("Succeeds when representor link is already removed", func() {
-				execMock.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd:    "ovs-vsctl --timeout=15 --no-headings --data bare --format csv --columns type,name find Interface name=" + mgmtPortName,
-					Output: "," + mgmtPortName,
-				})
-				execMock.AddFakeCmdsNoOutputNoError([]string{
-					"ovs-vsctl --timeout=15 --if-exists get Interface " + mgmtPortName + " external-ids:ovn-orig-mgmt-port-rep-name",
-					"ovs-vsctl --timeout=15 --if-exists del-port br-int " + mgmtPortName,
-				})
-				netlinkOpsMock.On("LinkByName", mgmtPortName).Return(nil, netlinkMockErr)
-				netlinkOpsMock.On("IsLinkNotFoundError", mock.Anything).Return(true)
-
-				err := syncMgmtPortInterface(ovsClient, mgmtPortName, false)
-				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("Fails to set representor link down", func() {
