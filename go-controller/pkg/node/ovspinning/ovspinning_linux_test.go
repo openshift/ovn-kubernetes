@@ -109,7 +109,7 @@ func TestAlignCPUAffinity(t *testing.T) {
 					&kubeletpodresourcesv1.AllocatableResourcesResponse{CpuIds: tc.allocatableCPUs}, nil)
 				mockClient.On("List", mock.Anything, mock.Anything).Return(
 					buildListPodResourcesResponse(tc.usedCPUs), nil)
-				Run(context.Background(), stopCh, mockClient)
+				Run(context.Background(), stopCh, mockClient, nil)
 			}()
 
 			expectedUnixCPUSet := convertCPUSet(&expectedCPUs)
@@ -519,5 +519,43 @@ func buildListPodResourcesResponse(usedCPUs [][]int64) *kubeletpodresourcesv1.Li
 
 	return &kubeletpodresourcesv1.ListPodResourcesResponse{
 		PodResources: podResources,
+	}
+}
+
+func TestParsePmdCpuMask(t *testing.T) {
+	tests := []struct {
+		name        string
+		mask        string
+		expected    []int
+		expectError bool
+	}{
+		{name: "hex with 0x prefix", mask: "0xc", expected: []int{2, 3}},
+		{name: "hex with 0X prefix", mask: "0XC", expected: []int{2, 3}},
+		{name: "bare hex lowercase", mask: "c", expected: []int{2, 3}},
+		{name: "bare hex uppercase", mask: "C", expected: []int{2, 3}},
+		{name: "single bit", mask: "0x1", expected: []int{0}},
+		{name: "multiple bits", mask: "0x6", expected: []int{1, 2}},
+		{name: "all low byte", mask: "0xff", expected: []int{0, 1, 2, 3, 4, 5, 6, 7}},
+		{name: "zero", mask: "0x0", expected: []int{}},
+		{name: "leading zeros", mask: "0x0000000000000006", expected: []int{1, 2}},
+		{name: "empty string", mask: "", expected: []int{}},
+		{name: "whitespace only", mask: "  ", expected: []int{}},
+		{name: "with whitespace", mask: " 0xc ", expected: []int{2, 3}},
+		{name: "invalid", mask: "xyz", expectError: true},
+		{name: "CPU 64 only", mask: "0x10000000000000000", expected: []int{64}},
+		{name: "CPUs spanning 64-bit boundary", mask: "0x10000000000000003", expected: []int{0, 1, 64}},
+		{name: "CPU 128 only", mask: "0x100000000000000000000000000000000", expected: []int{128}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parsePmdCpuMask(tt.mask)
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, cpuset.New(tt.expected...), result)
+		})
 	}
 }
