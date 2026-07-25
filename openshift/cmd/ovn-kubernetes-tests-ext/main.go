@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/rest"
 
 	// ensure providers are initialised for configuring infra
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/aws"
@@ -54,7 +56,7 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Without cluster access, include all eligible tests
+	// Without cluster access (or) kind cluster, include all eligible tests
 	if ocpInfra == nil {
 		return true
 	}
@@ -72,6 +74,29 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// suites
 
 	return true
+}
+
+// initializeInfraProvider initializes the infrastructure provider based on cluster type.
+// For kind clusters, it uses SSH-based command execution for OTE mode.
+// For OpenShift clusters, it uses the standard OpenShift infrastructure provider.
+func initializeInfraProvider(cfg *rest.Config) error {
+	if infraprovider.IsKind() {
+		infra, err := ocpinfraprovider.InitializeKindInfra()
+		if err != nil {
+			return fmt.Errorf("failed to initialize kind infrastructure: %w", err)
+		}
+		infraprovider.Set(infra)
+	} else {
+		infra, err := ocpinfraprovider.New(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to initialize OpenShift infrastructure: %w", err)
+		}
+		infraprovider.Set(infra)
+		// Set ocpInfra only for OpenShift clusters (not for kind)
+		ocpInfra = infra
+	}
+	deploymentconfig.Set(ocpdeploymentconfig.New())
+	return nil
 }
 
 func main() {
@@ -109,14 +134,7 @@ func main() {
 	cfg, cfgErr := getKubeConfig()
 	var infraErr error
 	if cfgErr == nil {
-		infra, err := ocpinfraprovider.New(cfg)
-		if err != nil {
-			infraErr = err
-		} else {
-			ocpInfra = infra
-			infraprovider.Set(ocpInfra)
-			deploymentconfig.Set(ocpdeploymentconfig.New())
-		}
+		infraErr = initializeInfraProvider(cfg)
 	}
 
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
