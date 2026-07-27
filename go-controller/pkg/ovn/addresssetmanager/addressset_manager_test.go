@@ -18,6 +18,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/cache"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
@@ -164,8 +165,9 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		// this is only used for "saves db transactions when IPs don't change" test
 		countingNBClient = &countingClient{Client: libovsdbNBClient}
-		addressSetManager = NewAddressSetManager(wf.PodCoreInformer(), wf.NamespaceInformer(), wf.NodeCoreInformer(), countingNBClient,
+		addressSetManager, err = NewAddressSetManager(wf.PodCoreInformer(), wf.NamespaceInformer(), wf.NodeCoreInformer(), countingNBClient,
 			fakeNetworkManager.Interface().GetNetworkNameForNADKey)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = addressSetManager.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
@@ -1280,6 +1282,42 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
 		})
 
+		ginkgo.It("enters and leaves node selector for all-namespaces sets via pod nodeName index", func() {
+			// Empty namespace selector → matchedNamespaces.all; computeNodeAddressSetCachePlan
+			// updates only pods on the pending node via listPodsOnNode / podsByNode.
+			namespace2 := *testing.NewNamespace(namespaceName2)
+			podOnNodeInNs2 := testing.NewPod(namespace2.Name, "ns2pod", node1.Name, ip3)
+			_, err := clientSet.KubeClient.CoreV1().Namespaces().Create(context.TODO(), &namespace2, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			_, err = clientSet.KubeClient.CoreV1().Pods(namespace2.Name).Create(context.TODO(), podOnNodeInNs2, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			allPodsSelector := &metav1.LabelSelector{}
+			allNamespacesSelector := &metav1.LabelSelector{}
+			specialNodeSelector := &metav1.LabelSelector{
+				MatchLabels: map[string]string{nodeLabelKey: "special-node"},
+			}
+			asID := GetPodSelectorAddrSetDbIDs(allPodsSelector, allNamespacesSelector, specialNodeSelector, "", controllerName, false)
+			_, _, _, err = addressSetManager.EnsureAddressSet(allPodsSelector, allNamespacesSelector, specialNodeSelector,
+				"", "backRef-all-ns", controllerName, &util.DefaultNetInfo{}, false)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			emptyAS, _ := addressset.GetTestDbAddrSets(asID, []string{})
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
+
+			node1Copy := node1.DeepCopy()
+			node1Copy.Labels = map[string]string{nodeLabelKey: "special-node"}
+			_, err = clientSet.KubeClient.CoreV1().Nodes().Update(context.TODO(), node1Copy, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			// BeforeEach pod on node1 (ip1) plus the ns2 pod found via the nodeName index (ip3).
+			expectedAS, _ := addressset.GetTestDbAddrSets(asID, []string{ip1, ip3})
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{expectedAS}))
+
+			node1Copy.Labels = map[string]string{nodeLabelKey: nodeTypeWorker}
+			_, err = clientSet.KubeClient.CoreV1().Nodes().Update(context.TODO(), node1Copy, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
+		})
 	})
 
 	ginkgo.It("reconciles HostNetworkNamespace IPs", func() {
@@ -1345,8 +1383,9 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = clientSet.KubeClient.CoreV1().Nodes().Delete(context.TODO(), testNode.Name, metav1.DeleteOptions{})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		addressSetManager = NewAddressSetManager(wf.PodCoreInformer(), wf.NamespaceInformer(), wf.NodeCoreInformer(), libovsdbNBClient,
+		addressSetManager, err = NewAddressSetManager(wf.PodCoreInformer(), wf.NamespaceInformer(), wf.NodeCoreInformer(), libovsdbNBClient,
 			func(_ string) string { return "" })
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = addressSetManager.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		// run EnsureAddressSet again, otherwise address set won't be reconciled with no users
@@ -1711,6 +1750,14 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{emptyAS}))
 	})
 
+	ginkgo.It("allows a second NewAddressSetManager when the pod nodeName indexer already exists", func() {
+		startAddrSetManager(initialDB, nil, nil)
+		second, err := NewAddressSetManager(wf.PodCoreInformer(), wf.NamespaceInformer(), wf.NodeCoreInformer(), libovsdbNBClient,
+			fakeNetworkManager.Interface().GetNetworkNameForNADKey)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(second).NotTo(gomega.BeNil())
+		second.Stop()
+	})
 })
 
 var _ = ginkgo.Describe("shortLabelSelectorString function", func() {
@@ -1780,5 +1827,62 @@ var _ = ginkgo.Describe("shortLabelSelectorString function", func() {
 			MatchLabels: map[string]string{"k2": "v2", "k1": "v1", "k3": "v3"},
 		}
 		gomega.Expect(shortLabelSelectorString(ls1)).To(gomega.Equal(shortLabelSelectorString(ls2)))
+	})
+})
+
+type stubPodNodeNameIndexer struct {
+	indexer        cache.Indexer
+	addIndexersErr error
+	// installOnError installs the indexers before returning addIndexersErr, simulating a
+	// concurrent constructor that won the race.
+	installOnError bool
+	addCalls       int
+}
+
+func (s *stubPodNodeNameIndexer) GetIndexer() cache.Indexer { return s.indexer }
+
+func (s *stubPodNodeNameIndexer) AddIndexers(indexers cache.Indexers) error {
+	s.addCalls++
+	if s.addIndexersErr != nil {
+		if s.installOnError {
+			_ = s.indexer.AddIndexers(indexers)
+		}
+		return s.addIndexersErr
+	}
+	return s.indexer.AddIndexers(indexers)
+}
+
+var _ = ginkgo.Describe("ensurePodNodeNameIndexer", func() {
+	ginkgo.It("is a no-op when the indexer already exists", func() {
+		indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{
+			podNodeNameIndex: podByNodeNameIndexFunc,
+		})
+		stub := &stubPodNodeNameIndexer{indexer: indexer}
+		gomega.Expect(ensurePodNodeNameIndexer(stub)).To(gomega.Succeed())
+		gomega.Expect(stub.addCalls).To(gomega.Equal(0))
+	})
+
+	ginkgo.It("returns an error when AddIndexers fails and the index is still missing", func() {
+		indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+		stub := &stubPodNodeNameIndexer{
+			indexer:        indexer,
+			addIndexersErr: fmt.Errorf("boom"),
+		}
+		err := ensurePodNodeNameIndexer(stub)
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring(podNodeNameIndex))
+		gomega.Expect(stub.addCalls).To(gomega.Equal(1))
+	})
+
+	ginkgo.It("tolerates AddIndexers error when a concurrent constructor installed the index", func() {
+		indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+		stub := &stubPodNodeNameIndexer{
+			indexer:        indexer,
+			addIndexersErr: fmt.Errorf("indexer conflict"),
+			installOnError: true,
+		}
+		gomega.Expect(ensurePodNodeNameIndexer(stub)).To(gomega.Succeed())
+		_, exists := stub.indexer.GetIndexers()[podNodeNameIndex]
+		gomega.Expect(exists).To(gomega.BeTrue())
 	})
 })
