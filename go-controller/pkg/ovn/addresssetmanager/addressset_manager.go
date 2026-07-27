@@ -68,6 +68,98 @@ type podSelectorAddressSet struct {
 	// and config.Kubernetes.HostNetworkNamespace address set IPs will be included when that namespace is matched and
 	// podSelector is empty.
 	legacyNetpolMode bool
+
+	// addresses is an authoritative in-memory mirror of the OVN address-set contents.
+	// Incremental reconciles compute add/remove against this cache and skip OVN writes
+	// when the delta is empty, avoiding a full pod list and OVN getAddresses on every event.
+	addresses sets.Set[string]
+	// podAddresses maps "namespace/name" to the IPs that pod currently contributes.
+	// Used to handle IP reuse across pods: an IP is only removed when no remaining selected
+	// pod still contributes it.
+	podAddresses map[string][]string
+	// selectedPods maps namespace name to the set of pod names currently selected into this
+	// address set. Used to diff membership on namespace/node-scoped reconciles.
+	selectedPods map[string]sets.Set[string]
+	// pendingUpdates batches the triggering event context between enqueue (reconcilePod /
+	// reconcileNamespace / reconcileNode) and reconcileAddressSet. Cleared at the start of
+	// each reconcile under the per-key lock.
+	pendingUpdates addrSetPendingUpdates
+}
+
+// addrSetPendingUpdates records which objects triggered a reconcile so reconcileAddressSet
+// can take an incremental path instead of always rebuilding the full desired address set.
+// Multiple pod-scoped classes (namespace, node-selector, pod) may be coalesced in one
+// snapshot; reconcileAddressSetLocked falls back to full sync when more than one is present.
+type addrSetPendingUpdates struct {
+	// podKeys are "namespace/name" keys for pods that need incremental membership/IP checks.
+	podKeys sets.Set[string]
+	// namespaceKeys are namespaces whose membership may have changed due to label updates.
+	namespaceKeys sets.Set[string]
+	// nodeKeys are nodes that may affect nodeSelector membership or host-network IPs.
+	nodeKeys sets.Set[string]
+	// fullSync forces a full desired-state rebuild (first ensure, host-network namespace create, etc.).
+	fullSync bool
+}
+
+func (u *addrSetPendingUpdates) addPodKey(podKey string) {
+	if u.podKeys == nil {
+		u.podKeys = sets.New[string]()
+	}
+	u.podKeys.Insert(podKey)
+}
+
+func (u *addrSetPendingUpdates) addNamespaceKey(nsKey string) {
+	if u.namespaceKeys == nil {
+		u.namespaceKeys = sets.New[string]()
+	}
+	u.namespaceKeys.Insert(nsKey)
+}
+
+func (u *addrSetPendingUpdates) addNodeKey(nodeKey string) {
+	if u.nodeKeys == nil {
+		u.nodeKeys = sets.New[string]()
+	}
+	u.nodeKeys.Insert(nodeKey)
+}
+
+// snapshot clones pending state for this reconcile. pendingUpdates itself is left
+// intact until a successful reconcile clears it, so a failed attempt keeps the
+// triggering keys for retry (and for coalescing with later events).
+func (u *addrSetPendingUpdates) snapshot() addrSetPendingUpdates {
+	return addrSetPendingUpdates{
+		podKeys:       u.podKeys.Clone(),
+		namespaceKeys: u.namespaceKeys.Clone(),
+		nodeKeys:      u.nodeKeys.Clone(),
+		fullSync:      u.fullSync,
+	}
+}
+
+func (u *addrSetPendingUpdates) clear() {
+	u.podKeys = nil
+	u.namespaceKeys = nil
+	u.nodeKeys = nil
+	u.fullSync = false
+}
+
+// addressSetPodCacheSnapshot is a point-in-time copy of pod membership mirrors used to
+// replace caches after OVN apply without re-listing Kubernetes objects.
+type addressSetPodCacheSnapshot struct {
+	selectedPods map[string]sets.Set[string]
+	podAddresses map[string][]string
+}
+
+// hostNetworkSnapshot is a compute-time snapshot of host-network IPs for this address set
+// (from hostNetworkNamespaceIPsPerNode) plus whether the set currently selects the host-
+// network namespace. Used for OVN desired-state union; not committed as per-AS cache state.
+type hostNetworkSnapshot struct {
+	selecting bool
+	addresses sets.Set[string]
+}
+
+// addressSetCachePlan is the exact pod-cache mutation corresponding to a computed OVN delta.
+// It is built during the compute phase and applied after OVN succeeds without re-listing.
+type addressSetCachePlan struct {
+	podCacheReplace *addressSetPodCacheSnapshot
 }
 
 const (
@@ -110,7 +202,9 @@ type AddressSetManager struct {
 	hostNetworkNamespaceExists bool
 	// local cache of HostNetworkNamespace address set IPs
 	hostNetworkNamespaceIPsPerNode map[string][]string
-	// local cache of address sets that select HostNetworkNamespace
+	// local cache of address sets that select HostNetworkNamespace. Membership is
+	// registered when the host-network cache plan is built so node IP updates during
+	// an in-flight OVN apply still enqueue the address set for reconcile.
 	hostNetworkSelectingAddrSets sets.Set[string]
 
 	clusterNodeIPsLock     sync.RWMutex
@@ -381,9 +475,17 @@ func (m *AddressSetManager) EnsureAddressSet(podSelector, namespaceSelector, nod
 	if !found {
 		// Populate a newly created address set before returning hashes to the caller.
 		// Until reconcile runs, the NB object is empty while ACLs may already reference it
-		// (e.g. on DB ID change or first ensure). This is a one-time sync on creation;
-		// existing sets are kept up to date by the async reconciler on pod/namespace/node events.
-		if reconcileErr := m.reconcileAddressSet(addrSetKey); reconcileErr != nil {
+		// (e.g. on DB ID change or first ensure). Force fullSync so replaceAddressSetContents
+		// builds the desired state and initializes the in-memory mirrors. Existing sets are
+		// kept up to date by the async reconciler on pod/namespace/node events.
+		if reconcileErr := m.addressSets.DoWithLock(addrSetKey, func(key string) error {
+			psAddrSet, ok := m.addressSets.Load(key)
+			if !ok {
+				return nil
+			}
+			psAddrSet.pendingUpdates.fullSync = true
+			return m.reconcileAddressSetLocked(key, psAddrSet)
+		}); reconcileErr != nil {
 			klog.Errorf("Failed to reconcile address set %s on ensure: %v", addrSetKey, reconcileErr)
 			// this only puts key to the queue, no lock
 			m.addressSetReconciler.Reconcile(addrSetKey)
@@ -405,6 +507,7 @@ func (m *AddressSetManager) CleanupForController(controllerName string) error {
 				return fmt.Errorf("failed to destroy address set %s: %w", key, err)
 			}
 			m.addressSets.Delete(key)
+			m.unregisterHostNetworkSelectingAddrSet(key)
 			return nil
 		}); err != nil {
 			errs = append(errs, err)
@@ -423,15 +526,21 @@ func (m *AddressSetManager) DeleteAddressSet(addrSetKey, backRef string) error {
 		if len(psAddrSet.backRefs) == 0 {
 			err := psAddrSet.addressSet.Destroy()
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to destroy address set %s: %w", key, err)
 			}
 			m.addressSets.Delete(key)
-			m.hostNetworkNamespaceLock.Lock()
-			m.hostNetworkSelectingAddrSets.Delete(key)
-			m.hostNetworkNamespaceLock.Unlock()
+			m.unregisterHostNetworkSelectingAddrSet(key)
 		}
 		return nil
 	})
+}
+
+// unregisterHostNetworkSelectingAddrSet drops a destroyed address set from host-network
+// tracking so host IP updates do not keep enqueueing stale keys.
+func (m *AddressSetManager) unregisterHostNetworkSelectingAddrSet(key string) {
+	m.hostNetworkNamespaceLock.Lock()
+	defer m.hostNetworkNamespaceLock.Unlock()
+	m.hostNetworkSelectingAddrSets.Delete(key)
 }
 
 func (m *AddressSetManager) podNeedUpdate(old, new *corev1.Pod) bool {
@@ -498,6 +607,9 @@ func (m *AddressSetManager) reconcilePod(podKey string) error {
 				}
 				// check if pod's node matches address set's node selector
 				if pod == nil || addrSet.selectedNodes == nil || addrSet.selectedNodes.Has(pod.Spec.NodeName) {
+					// Record the pod key so reconcileAddressSet can update membership incrementally
+					// without listing all matching pods.
+					addrSet.pendingUpdates.addPodKey(podKey)
 					m.addressSetReconciler.Reconcile(addrSetKey)
 					return nil
 				}
@@ -506,6 +618,9 @@ func (m *AddressSetManager) reconcilePod(podKey string) error {
 			// only check address sets that have previously matched pod's namespace to avoid extra reconciliations
 			previouslyMatchedNamespaces := addrSet.selectedNamespaces
 			if previouslyMatchedNamespaces == nil || previouslyMatchedNamespaces.Has(namespace) {
+				// Record the pod key so reconcileAddressSet can update membership incrementally
+				// without listing all matching pods.
+				addrSet.pendingUpdates.addPodKey(podKey)
 				m.addressSetReconciler.Reconcile(addrSetKey)
 				return nil
 			}
@@ -536,26 +651,39 @@ func (m *AddressSetManager) updateHostNetworkNamespaceExists() error {
 		}
 	}
 	m.hostNetworkNamespaceLock.Lock()
-	defer m.hostNetworkNamespaceLock.Unlock()
 	if err != nil {
-		// namespace was deleted/never existed
+		// Namespace deleted or never existed. Snapshot selecting sets under the lock so we can
+		// enqueue them after clearing global host state, rather than relying only on
+		// reconcileNamespace's later membership loop.
+		wasPresent := m.hostNetworkNamespaceExists
+		addrSetKeys := m.hostNetworkSelectingAddrSets.UnsortedList()
 		clear(m.hostNetworkNamespaceIPsPerNode)
 		m.hostNetworkNamespaceExists = false
+		m.hostNetworkNamespaceLock.Unlock()
+		if wasPresent {
+			return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, "", true)
+		}
 		return nil
 	}
-	if !m.hostNetworkNamespaceExists {
+	needsFullSync := !m.hostNetworkNamespaceExists
+	var addrSetKeys []string
+	if needsFullSync {
 		// namespace was just created, get all existing host network IPs
-		ips, err := m.getAllHostNamespaceAddresses()
-		if err != nil {
-			return fmt.Errorf("error getting host network namespace %s IPs: %v", config.Kubernetes.HostNetworkNamespace, err)
+		ips, ipErr := m.getAllHostNamespaceAddresses()
+		if ipErr != nil {
+			m.hostNetworkNamespaceLock.Unlock()
+			return fmt.Errorf("error getting host network namespace %s IPs: %v", config.Kubernetes.HostNetworkNamespace, ipErr)
 		}
-
 		m.hostNetworkNamespaceIPsPerNode = ips
-		for addrSetKey := range m.hostNetworkSelectingAddrSets {
-			m.addressSetReconciler.Reconcile(addrSetKey)
-		}
+		// Snapshot selecting address sets before releasing the lock; per-key locks are taken below.
+		addrSetKeys = m.hostNetworkSelectingAddrSets.UnsortedList()
 	}
 	m.hostNetworkNamespaceExists = true
+	m.hostNetworkNamespaceLock.Unlock()
+
+	if needsFullSync {
+		return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, "", true)
+	}
 	return nil
 }
 
@@ -583,13 +711,16 @@ func (m *AddressSetManager) reconcileNamespace(nsKey string) error {
 				return err
 			}
 			if currentlyMatchedNamespaces.Has(nsKey) {
-				// this namespace is relevant for this address set, reconcile
+				// Namespace entered or still matches selection; record for namespace-scoped reconcile.
+				addrSet.pendingUpdates.addNamespaceKey(nsKey)
 				m.addressSetReconciler.Reconcile(addrSetKey)
 				return nil
 			}
 			// now check if this address set was matching this namespace before, if yes, reconcile since it might not match anymore
 			previouslyMatchedNamespaces := addrSet.selectedNamespaces
 			if previouslyMatchedNamespaces.Has(nsKey) {
+				// Namespace left selection; record for namespace-scoped reconcile to remove its pods.
+				addrSet.pendingUpdates.addNamespaceKey(nsKey)
 				m.addressSetReconciler.Reconcile(addrSetKey)
 				return nil
 			}
@@ -650,7 +781,8 @@ func (m *AddressSetManager) reconcileNode(nodeKey string) error {
 				return err
 			}
 			if currentlyMatchedNodes.Has(nodeKey) {
-				// this node is relevant for this address set, reconcile
+				// Node entered or still matches the node selector; record for node-scoped reconcile.
+				addrSet.pendingUpdates.addNodeKey(nodeKey)
 				m.addressSetReconciler.Reconcile(addrSetKey)
 				return nil
 			}
@@ -658,6 +790,8 @@ func (m *AddressSetManager) reconcileNode(nodeKey string) error {
 			previouslyMatchedNodes := addrSet.selectedNodes
 			// previouslyMatchedNodes == nil means the address set hasn't been reconciled yet, so need to reconcile
 			if previouslyMatchedNodes == nil || previouslyMatchedNodes.Has(nodeKey) {
+				// Node left selection (or first reconcile); record for node-scoped reconcile.
+				addrSet.pendingUpdates.addNodeKey(nodeKey)
 				m.addressSetReconciler.Reconcile(addrSetKey)
 				return nil
 			}
@@ -673,40 +807,75 @@ func (m *AddressSetManager) reconcileNode(nodeKey string) error {
 
 func (m *AddressSetManager) updateHostNetworkIPs(nodeName string) error {
 	m.hostNetworkNamespaceLock.Lock()
-	defer m.hostNetworkNamespaceLock.Unlock()
 	if !m.hostNetworkNamespaceExists {
+		m.hostNetworkNamespaceLock.Unlock()
 		return nil
 	}
+	m.hostNetworkNamespaceLock.Unlock()
+
 	node, err := m.nodeLister.Get(nodeName)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to get node %s: %v", nodeName, err)
+	}
+
+	var addrSetKeys []string
+	m.hostNetworkNamespaceLock.Lock()
+	if !m.hostNetworkNamespaceExists {
+		m.hostNetworkNamespaceLock.Unlock()
+		return nil
 	}
 	if err != nil || config.HybridOverlay.Enabled && util.NoHostSubnet(node) {
 		// delete event OR node started matching hybrid overlay and should be ignored for host network namespace
 		// delete host network IPs for this node from host network namespace's address set
 		updated := len(m.hostNetworkNamespaceIPsPerNode[nodeName]) != 0
 		delete(m.hostNetworkNamespaceIPsPerNode, nodeName)
-
+		if updated {
+			addrSetKeys = m.hostNetworkSelectingAddrSets.UnsortedList()
+		}
+		m.hostNetworkNamespaceLock.Unlock()
 		if !updated {
 			return nil
 		}
-		for addrSetKey := range m.hostNetworkSelectingAddrSets {
-			m.addressSetReconciler.Reconcile(addrSetKey)
-		}
-		return nil
+		return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, nodeName, true)
 	}
 	// add/update node event
 	hostNetworkPolicyIPs, err := m.getHostNamespaceAddressesForNode(node)
 	if err != nil {
+		m.hostNetworkNamespaceLock.Unlock()
 		return fmt.Errorf("error parsing annotation for node %s: %w", node.Name, err)
 	}
 	// add the host network IPs for this node to host network namespace's address set
 	// hostNetworkPolicyIPs is built from the annotations and always preserves ips order
 	if slices.Equal(m.hostNetworkNamespaceIPsPerNode[node.Name], hostNetworkPolicyIPs) {
+		m.hostNetworkNamespaceLock.Unlock()
 		return nil
 	}
 	m.hostNetworkNamespaceIPsPerNode[node.Name] = hostNetworkPolicyIPs
-	for addrSetKey := range m.hostNetworkSelectingAddrSets {
+	addrSetKeys = m.hostNetworkSelectingAddrSets.UnsortedList()
+	m.hostNetworkNamespaceLock.Unlock()
+
+	return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, nodeName, true)
+}
+
+// enqueueHostNetworkSelectingAddrSetUpdates records pending updates on host-network selecting
+// address sets and enqueues reconciliation. Must not be called while holding hostNetworkNamespaceLock.
+// fullSync is always true in this version since reconcile has no incremental host-network path yet.
+func (m *AddressSetManager) enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys []string, nodeName string, fullSync bool) error {
+	for _, addrSetKey := range addrSetKeys {
+		if err := m.addressSets.DoWithLock(addrSetKey, func(key string) error {
+			psAddrSet, ok := m.addressSets.Load(key)
+			if !ok {
+				return nil
+			}
+			if fullSync {
+				psAddrSet.pendingUpdates.fullSync = true
+			} else {
+				psAddrSet.pendingUpdates.addNodeKey(nodeName)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 		m.addressSetReconciler.Reconcile(addrSetKey)
 	}
 	return nil
@@ -793,99 +962,361 @@ func (m *AddressSetManager) getHostNamespaceAddressesForNode(node *corev1.Node) 
 	return ips, nil
 }
 
+// reconcileAddressSet is the workqueue handler for pod-selector address sets.
+// It acquires the per-key lock and delegates to reconcileAddressSetLocked.
 func (m *AddressSetManager) reconcileAddressSet(key string) error {
 	return m.addressSets.DoWithLock(key, func(key string) error {
 		psAddrSet, found := m.addressSets.Load(key)
 		if !found {
 			return nil
 		}
-		matchedNamespaces, err := m.getSelectedNamespaces(psAddrSet)
-		if err != nil {
-			return fmt.Errorf("failed to get selected namespaces for address set %s: %v", key, err)
-		}
-		var pods []*corev1.Pod
-		if matchedNamespaces.all {
-			// no namespace selector, use pod selector only
-			if psAddrSet.podSelector.Empty() {
-				// all cluster pods
-				pods, err = m.podLister.List(labels.Everything())
-				if err != nil {
-					return fmt.Errorf("failed to list pods: %v", err)
-				}
-			} else {
-				// global pod selector
-				pods, err = m.podLister.List(psAddrSet.podSelector)
-				if err != nil {
-					return fmt.Errorf("failed to list pods: %v", err)
-				}
-			}
-		} else {
-			// namespace selector is set, apply pod selector in every namespace
-			for ns := range matchedNamespaces.set {
-				if psAddrSet.podSelector.Empty() {
-					// empty selector means no filtering, select all pods in a given namespace
-					nsPods, err := m.podLister.Pods(ns).List(labels.Everything())
-					if err != nil {
-						return fmt.Errorf("failed to list pods in namespace %s: %v", ns, err)
-					}
-					pods = append(pods, nsPods...)
-				} else {
-					// namespaced pod selector, select matching pods in a given namespace
-					nsPods, err := m.podLister.Pods(ns).List(psAddrSet.podSelector)
-					if err != nil {
-						return fmt.Errorf("failed to list pods in namespace %s: %v", ns, err)
-					}
-					pods = append(pods, nsPods...)
-				}
-			}
-		}
-		// apply node selector filter if it's not empty
-		if psAddrSet.nodeSelector != nil && !psAddrSet.nodeSelector.Empty() {
-			selectedNodes, err := m.getSelectedNodes(psAddrSet.nodeSelector)
-			if err != nil {
-				return fmt.Errorf("failed to get selected nodes for address set %s: %v", key, err)
-			}
-			filtered := make([]*corev1.Pod, 0, len(pods))
-			for _, pod := range pods {
-				if pod.Spec.NodeName != "" && selectedNodes.Has(pod.Spec.NodeName) {
-					filtered = append(filtered, pod)
-				}
-			}
-			pods = filtered
-			psAddrSet.selectedNodes = selectedNodes
-		}
-		ips, err := m.getPodIPs(pods, psAddrSet.netInfo, psAddrSet.legacyNetpolMode)
-		if err != nil {
-			return fmt.Errorf("failed to get pod IPs: %v", err)
-		}
-		// now check if this address set should add hostNetworkNamespace IPs
-		// it only makes sense for the default network
-		if psAddrSet.legacyNetpolMode && psAddrSet.netInfo.IsDefault() && config.Kubernetes.HostNetworkNamespace != "" &&
-			psAddrSet.podSelector.Empty() {
-			// update m.hostNetworkSelectingAddrSets
-			m.hostNetworkNamespaceLock.Lock()
-			if m.hostNetworkNamespaceExists {
-				if matchedNamespaces.Has(config.Kubernetes.HostNetworkNamespace) {
-					for _, hostnetIPs := range m.hostNetworkNamespaceIPsPerNode {
-						ips = append(ips, hostnetIPs...)
-					}
-					m.hostNetworkSelectingAddrSets.Insert(key)
-				} else {
-					m.hostNetworkSelectingAddrSets.Delete(key)
-				}
-			}
-			m.hostNetworkNamespaceLock.Unlock()
-		}
+		return m.reconcileAddressSetLocked(key, psAddrSet)
+	})
+}
 
-		// this operation doesn't check the contents on the address set and will run a db transaction
-		// every time, may be improved.
-		err = psAddrSet.addressSet.SetAddresses(ips)
+// reconcileAddressSetLocked reconciles a pod-selector address set under the per-key lock.
+// This version always rebuilds the full desired state from all matching pods (and
+// host-network IPs when applicable); incremental paths driven by pendingUpdates are added
+// in later versions. pendingUpdates is cleared only after a successful reconcile so a failed
+// attempt keeps its triggering keys for retry and for coalescing with later events.
+func (m *AddressSetManager) reconcileAddressSetLocked(key string, psAddrSet *podSelectorAddressSet) error {
+	matchedNamespaces, err := m.getSelectedNamespaces(psAddrSet)
+	if err != nil {
+		return fmt.Errorf("failed to get selected namespaces for address set %s: %w", key, err)
+	}
+
+	var selectedNodes sets.Set[string]
+	if psAddrSet.nodeSelector != nil && !psAddrSet.nodeSelector.Empty() {
+		selectedNodes, err = m.getSelectedNodes(psAddrSet.nodeSelector)
 		if err != nil {
-			return fmt.Errorf("failed to set addresses for address set %s: %v", key, err)
+			return fmt.Errorf("failed to get selected nodes for address set %s: %w", key, err)
+		}
+	}
+
+	// First reconcile for a newly created address set: replace OVN contents wholesale
+	// and seed the in-memory mirrors. Avoids diffing against an empty/uninitialized cache.
+	if psAddrSet.addresses == nil {
+		if err := m.replaceAddressSetContents(psAddrSet, matchedNamespaces, selectedNodes, key); err != nil {
+			return fmt.Errorf("failed to replace address set contents for %s: %w", key, err)
 		}
 		psAddrSet.selectedNamespaces = matchedNamespaces
+		if psAddrSet.nodeSelector != nil && !psAddrSet.nodeSelector.Empty() {
+			psAddrSet.selectedNodes = selectedNodes
+		}
+		psAddrSet.pendingUpdates.clear()
 		return nil
+	}
+
+	toAdd, toRemove, cachePlan, err := m.computeFullAddressSetDelta(psAddrSet, matchedNamespaces, selectedNodes, key)
+	if err != nil {
+		return fmt.Errorf("failed to compute full address set delta for %s: %w", key, err)
+	}
+
+	// Skip OVN transaction entirely when nothing changed.
+	if err := m.applyAddressSetChanges(psAddrSet, toAdd, toRemove); err != nil {
+		return fmt.Errorf("failed to apply address changes for address set %s: %w", key, err)
+	}
+
+	// Commit the pod-cache snapshot used to compute the OVN delta.
+	m.applyAddressSetCachePlan(psAddrSet, cachePlan)
+
+	psAddrSet.selectedNamespaces = matchedNamespaces
+	if psAddrSet.nodeSelector != nil && !psAddrSet.nodeSelector.Empty() {
+		psAddrSet.selectedNodes = selectedNodes
+	}
+	psAddrSet.pendingUpdates.clear()
+	return nil
+}
+
+// computeAddressDelta returns addresses present in desired but not current (toAdd) and
+// present in current but not desired (toRemove). Nil sets are treated as empty.
+func (m *AddressSetManager) computeAddressDelta(current, desired sets.Set[string]) (toAdd, toRemove []string) {
+	if current == nil {
+		current = sets.New[string]()
+	}
+	if desired == nil {
+		desired = sets.New[string]()
+	}
+	return desired.Difference(current).UnsortedList(), current.Difference(desired).UnsortedList()
+}
+
+// applyAddressSetChanges writes toAdd/toRemove to OVN via ApplyAddressChanges and updates
+// the addresses mirror only on success. Returns immediately when both lists are empty.
+func (m *AddressSetManager) applyAddressSetChanges(psAddrSet *podSelectorAddressSet, toAdd, toRemove []string) error {
+	toAdd, toRemove = addressset.NormalizeAddressChanges(toAdd, toRemove)
+	if len(toAdd) == 0 && len(toRemove) == 0 {
+		return nil
+	}
+	if err := psAddrSet.addressSet.ApplyAddressChanges(toAdd, toRemove); err != nil {
+		return err
+	}
+	if psAddrSet.addresses == nil {
+		psAddrSet.addresses = sets.New[string]()
+	}
+	for _, addr := range toRemove {
+		psAddrSet.addresses.Delete(addr)
+	}
+	for _, addr := range toAdd {
+		psAddrSet.addresses.Insert(addr)
+	}
+	return nil
+}
+
+// podMatchesAddressSet returns whether pod should currently contribute IPs to the address set,
+// applying namespace/node/pod selectors and legacyNetpolMode host-network / completed-pod rules.
+func (m *AddressSetManager) podMatchesAddressSet(pod *corev1.Pod, psAddrSet *podSelectorAddressSet,
+	matchedNamespaces *selectedNamespaces, selectedNodes sets.Set[string]) bool {
+	if pod == nil {
+		return false
+	}
+	if !matchedNamespaces.Has(pod.Namespace) {
+		return false
+	}
+	if psAddrSet.legacyNetpolMode && pod.Spec.HostNetwork {
+		return false
+	}
+	if util.PodCompleted(pod) {
+		return false
+	}
+	if pod.Annotations[ovntypes.OvnPodAnnotationName] == "" && len(pod.Status.PodIPs) == 0 {
+		return false
+	}
+	if !psAddrSet.podSelector.Matches(labels.Set(pod.Labels)) {
+		return false
+	}
+	if psAddrSet.nodeSelector != nil && !psAddrSet.nodeSelector.Empty() {
+		if pod.Spec.NodeName == "" || !selectedNodes.Has(pod.Spec.NodeName) {
+			return false
+		}
+	}
+	return true
+}
+
+// getPodIPsForPod returns the network IPs for a single pod using the same filtering as getPodIPs.
+func (m *AddressSetManager) getPodIPsForPod(pod *corev1.Pod, netInfo util.NetInfo, noHostNetwork bool) ([]string, error) {
+	ips, err := m.getPodIPs([]*corev1.Pod{pod}, netInfo, noHostNetwork)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get IPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	return ips, nil
+}
+
+// listMatchingPodsInNamespace lists pods in namespace that match the address set's pod
+// selector (and node selector when set). Returns nil when the namespace is not selected.
+func (m *AddressSetManager) listMatchingPodsInNamespace(psAddrSet *podSelectorAddressSet, namespace string,
+	matchedNamespaces *selectedNamespaces, selectedNodes sets.Set[string]) ([]*corev1.Pod, error) {
+	if !matchedNamespaces.Has(namespace) {
+		return nil, nil
+	}
+	var pods []*corev1.Pod
+	var err error
+	if psAddrSet.podSelector.Empty() {
+		pods, err = m.podLister.Pods(namespace).List(labels.Everything())
+	} else {
+		pods, err = m.podLister.Pods(namespace).List(psAddrSet.podSelector)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods in namespace %s: %w", namespace, err)
+	}
+	if psAddrSet.nodeSelector == nil || psAddrSet.nodeSelector.Empty() {
+		return pods, nil
+	}
+	filtered := make([]*corev1.Pod, 0, len(pods))
+	for _, pod := range pods {
+		if pod.Spec.NodeName != "" && selectedNodes.Has(pod.Spec.NodeName) {
+			filtered = append(filtered, pod)
+		}
+	}
+	return filtered, nil
+}
+
+// listAllMatchingPods returns every pod that matches the address set's namespace, pod, and
+// (when set) node selectors. Used for full-sync builds.
+func (m *AddressSetManager) listAllMatchingPods(psAddrSet *podSelectorAddressSet, matchedNamespaces *selectedNamespaces,
+	selectedNodes sets.Set[string]) ([]*corev1.Pod, error) {
+	var pods []*corev1.Pod
+	if matchedNamespaces.all {
+		var err error
+		if psAddrSet.podSelector.Empty() {
+			pods, err = m.podLister.List(labels.Everything())
+		} else {
+			pods, err = m.podLister.List(psAddrSet.podSelector)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to list pods: %w", err)
+		}
+	} else {
+		for ns := range matchedNamespaces.set {
+			nsPods, err := m.listMatchingPodsInNamespace(psAddrSet, ns, matchedNamespaces, selectedNodes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to list matching pods in namespace %s: %w", ns, err)
+			}
+			pods = append(pods, nsPods...)
+		}
+	}
+	if psAddrSet.nodeSelector == nil || psAddrSet.nodeSelector.Empty() {
+		return pods, nil
+	}
+	filtered := make([]*corev1.Pod, 0, len(pods))
+	for _, pod := range pods {
+		if pod.Spec.NodeName != "" && selectedNodes.Has(pod.Spec.NodeName) {
+			filtered = append(filtered, pod)
+		}
+	}
+	return filtered, nil
+}
+
+// computeFullAddressSetDelta builds the complete desired address set (all matching pod IPs
+// plus host-network IPs when applicable) and diffs it against the in-memory addresses mirror.
+func (m *AddressSetManager) computeFullAddressSetDelta(psAddrSet *podSelectorAddressSet, matchedNamespaces *selectedNamespaces,
+	selectedNodes sets.Set[string], key string) (toAdd, toRemove []string, plan *addressSetCachePlan, err error) {
+	pods, err := m.listAllMatchingPods(psAddrSet, matchedNamespaces, selectedNodes)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to list matching pods for address set %s: %w", key, err)
+	}
+
+	podSnapshot, err := m.buildPodCacheSnapshot(psAddrSet, pods, matchedNamespaces, selectedNodes)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to build pod cache snapshot for address set %s: %w", key, err)
+	}
+
+	desiredAddresses := sets.New[string]()
+	for _, ips := range podSnapshot.podAddresses {
+		desiredAddresses.Insert(ips...)
+	}
+
+	hostSnapshot := m.buildHostNetworkSnapshot(psAddrSet, matchedNamespaces, key)
+	if hostSnapshot != nil && hostSnapshot.selecting {
+		desiredAddresses.Insert(hostSnapshot.addresses.UnsortedList()...)
+	}
+
+	currentAddresses := psAddrSet.addresses
+	toAdd, toRemove = m.computeAddressDelta(currentAddresses, desiredAddresses)
+	plan = &addressSetCachePlan{
+		podCacheReplace: podSnapshot,
+	}
+	return toAdd, toRemove, plan, nil
+}
+
+// buildPodCacheSnapshot builds a point-in-time pod membership snapshot from the given pods.
+func (m *AddressSetManager) buildPodCacheSnapshot(psAddrSet *podSelectorAddressSet, pods []*corev1.Pod,
+	matchedNamespaces *selectedNamespaces, selectedNodes sets.Set[string]) (*addressSetPodCacheSnapshot, error) {
+	snapshot := &addressSetPodCacheSnapshot{
+		selectedPods: make(map[string]sets.Set[string]),
+		podAddresses: make(map[string][]string),
+	}
+	for _, pod := range pods {
+		if !m.podMatchesAddressSet(pod, psAddrSet, matchedNamespaces, selectedNodes) {
+			continue
+		}
+		podIPs, podErr := m.getPodIPsForPod(pod, psAddrSet.netInfo, psAddrSet.legacyNetpolMode)
+		if podErr != nil {
+			return nil, fmt.Errorf("failed to get IPs for pod %s/%s while building cache snapshot: %w", pod.Namespace, pod.Name, podErr)
+		}
+		podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+		snapshot.podAddresses[podKey] = slices.Clone(podIPs)
+		if snapshot.selectedPods[pod.Namespace] == nil {
+			snapshot.selectedPods[pod.Namespace] = sets.New[string]()
+		}
+		snapshot.selectedPods[pod.Namespace].Insert(pod.Name)
+	}
+	return snapshot, nil
+}
+
+// buildHostNetworkSnapshot snapshots host-network IPs from hostNetworkNamespaceIPsPerNode
+// and registers selector membership so node IP updates during an in-flight OVN apply
+// still enqueue this address set for reconcile.
+func (m *AddressSetManager) buildHostNetworkSnapshot(psAddrSet *podSelectorAddressSet,
+	matchedNamespaces *selectedNamespaces, key string) *hostNetworkSnapshot {
+	if !(psAddrSet.legacyNetpolMode && psAddrSet.netInfo.IsDefault() && config.Kubernetes.HostNetworkNamespace != "" &&
+		psAddrSet.podSelector.Empty()) {
+		return nil
+	}
+	m.hostNetworkNamespaceLock.Lock()
+	defer m.hostNetworkNamespaceLock.Unlock()
+	selecting := m.hostNetworkNamespaceExists && matchedNamespaces.Has(config.Kubernetes.HostNetworkNamespace)
+	if selecting {
+		m.hostNetworkSelectingAddrSets.Insert(key)
+	} else {
+		m.hostNetworkSelectingAddrSets.Delete(key)
+	}
+	addresses := sets.New[string]()
+	if selecting {
+		for _, hostnetIPs := range m.hostNetworkNamespaceIPsPerNode {
+			addresses.Insert(hostnetIPs...)
+		}
+	}
+	return &hostNetworkSnapshot{
+		selecting: selecting,
+		addresses: addresses,
+	}
+}
+
+// applyAddressSetCachePlan applies a precomputed pod-cache mutation after a successful OVN apply.
+func (m *AddressSetManager) applyAddressSetCachePlan(psAddrSet *podSelectorAddressSet, plan *addressSetCachePlan) {
+	if plan == nil {
+		return
+	}
+	psAddrSet.podAddresses = clonePodAddressesMap(plan.podCacheReplace.podAddresses)
+	psAddrSet.selectedPods = cloneSelectedPodsMap(plan.podCacheReplace.selectedPods)
+}
+
+func clonePodAddressesMap(src map[string][]string) map[string][]string {
+	if src == nil {
+		return make(map[string][]string)
+	}
+	dst := make(map[string][]string, len(src))
+	for podKey, ips := range src {
+		dst[podKey] = slices.Clone(ips)
+	}
+	return dst
+}
+
+func cloneSelectedPodsMap(src map[string]sets.Set[string]) map[string]sets.Set[string] {
+	if src == nil {
+		return make(map[string]sets.Set[string])
+	}
+	dst := make(map[string]sets.Set[string], len(src))
+	for ns, pods := range src {
+		dst[ns] = pods.Clone()
+	}
+	return dst
+}
+
+// replaceAddressSetContents performs a one-shot full replace of OVN address-set contents and
+// initializes the in-memory mirrors. Used on first ensure when addresses is nil so ACLs that
+// already reference the set are populated immediately.
+func (m *AddressSetManager) replaceAddressSetContents(psAddrSet *podSelectorAddressSet, matchedNamespaces *selectedNamespaces,
+	selectedNodes sets.Set[string], key string) error {
+	pods, err := m.listAllMatchingPods(psAddrSet, matchedNamespaces, selectedNodes)
+	if err != nil {
+		return fmt.Errorf("failed to list matching pods while replacing address set %s: %w", key, err)
+	}
+
+	podSnapshot, err := m.buildPodCacheSnapshot(psAddrSet, pods, matchedNamespaces, selectedNodes)
+	if err != nil {
+		return fmt.Errorf("failed to build pod cache snapshot while replacing address set %s: %w", key, err)
+	}
+
+	desiredAddresses := []string{}
+	for _, ips := range podSnapshot.podAddresses {
+		desiredAddresses = append(desiredAddresses, ips...)
+	}
+
+	hostSnapshot := m.buildHostNetworkSnapshot(psAddrSet, matchedNamespaces, key)
+	if hostSnapshot != nil && hostSnapshot.selecting {
+		desiredAddresses = append(desiredAddresses, hostSnapshot.addresses.UnsortedList()...)
+	}
+	desiredAddresses = addressset.GetUniqueAddresses(desiredAddresses)
+
+	if err := psAddrSet.addressSet.SetAddresses(desiredAddresses); err != nil {
+		return fmt.Errorf("failed to set addresses while replacing address set %s: %w", key, err)
+	}
+	psAddrSet.addresses = sets.New(desiredAddresses...)
+	m.applyAddressSetCachePlan(psAddrSet, &addressSetCachePlan{
+		podCacheReplace: podSnapshot,
 	})
+	return nil
 }
 
 type selectedNamespaces struct {
