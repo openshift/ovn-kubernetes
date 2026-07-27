@@ -148,6 +148,11 @@ type addressSetPodCacheSnapshot struct {
 	podAddresses map[string][]string
 }
 
+// podCacheEntry records the IPs a pod should contribute after a successful OVN apply.
+type podCacheEntry struct {
+	ips []string
+}
+
 // hostNetworkSnapshot is a compute-time snapshot of host-network IPs for this address set
 // (from hostNetworkNamespaceIPsPerNode) plus whether the set currently selects the host-
 // network namespace. Used for OVN desired-state union; not committed as per-AS cache state.
@@ -160,6 +165,36 @@ type hostNetworkSnapshot struct {
 // It is built during the compute phase and applied after OVN succeeds without re-listing.
 type addressSetCachePlan struct {
 	podCacheReplace *addressSetPodCacheSnapshot
+	podRemoves      sets.Set[string]
+	podSets         map[string]podCacheEntry
+}
+
+func newAddressSetCachePlan() *addressSetCachePlan {
+	return &addressSetCachePlan{}
+}
+
+func (p *addressSetCachePlan) recordPodRemove(podKey string) {
+	// Full-replace plans already encode membership; incremental records must not mix in.
+	if p.podCacheReplace != nil {
+		return
+	}
+	if p.podRemoves == nil {
+		p.podRemoves = sets.New[string]()
+	}
+	p.podRemoves.Insert(podKey)
+	delete(p.podSets, podKey)
+}
+
+func (p *addressSetCachePlan) recordPodSet(podKey string, ips []string) {
+	// Full-replace plans already encode membership; incremental records must not mix in.
+	if p.podCacheReplace != nil {
+		return
+	}
+	if p.podSets == nil {
+		p.podSets = make(map[string]podCacheEntry)
+	}
+	p.podRemoves.Delete(podKey)
+	p.podSets[podKey] = podCacheEntry{ips: slices.Clone(ips)}
 }
 
 const (
@@ -975,11 +1010,13 @@ func (m *AddressSetManager) reconcileAddressSet(key string) error {
 }
 
 // reconcileAddressSetLocked reconciles a pod-selector address set under the per-key lock.
-// This version always rebuilds the full desired state from all matching pods (and
-// host-network IPs when applicable); incremental paths driven by pendingUpdates are added
-// in later versions. pendingUpdates is cleared only after a successful reconcile so a failed
-// attempt keeps its triggering keys for retry and for coalescing with later events.
+// It prefers an incremental path driven by pendingUpdates (only the triggering
+// pods/namespaces/nodes) and falls back to a full desired-state rebuild when needed.
+// pendingUpdates is cleared only after a successful reconcile so a failed attempt
+// keeps its triggering keys for retry and for coalescing with later events.
 func (m *AddressSetManager) reconcileAddressSetLocked(key string, psAddrSet *podSelectorAddressSet) error {
+	pending := psAddrSet.pendingUpdates.snapshot()
+
 	matchedNamespaces, err := m.getSelectedNamespaces(psAddrSet)
 	if err != nil {
 		return fmt.Errorf("failed to get selected namespaces for address set %s: %w", key, err)
@@ -993,9 +1030,18 @@ func (m *AddressSetManager) reconcileAddressSetLocked(key string, psAddrSet *pod
 		}
 	}
 
+	var toAdd, toRemove []string
+	var cachePlan *addressSetCachePlan
+	fullSync := m.needsFullAddressSetSync(psAddrSet, pending)
+	if !fullSync && m.pendingPodUpdateClassCount(pending, psAddrSet) > 1 {
+		// Coalesced namespace/node/pod updates cannot be handled by a single incremental path.
+		klog.V(4).Infof("Address set %s: forcing full sync due to coalesced pending update classes "+
+			"(namespaces=%d pods=%d nodes=%d)", key, pending.namespaceKeys.Len(), pending.podKeys.Len(), pending.nodeKeys.Len())
+		fullSync = true
+	}
 	// First reconcile for a newly created address set: replace OVN contents wholesale
 	// and seed the in-memory mirrors. Avoids diffing against an empty/uninitialized cache.
-	if psAddrSet.addresses == nil {
+	if fullSync && psAddrSet.addresses == nil {
 		if err := m.replaceAddressSetContents(psAddrSet, matchedNamespaces, selectedNodes, key); err != nil {
 			return fmt.Errorf("failed to replace address set contents for %s: %w", key, err)
 		}
@@ -1006,10 +1052,45 @@ func (m *AddressSetManager) reconcileAddressSetLocked(key string, psAddrSet *pod
 		psAddrSet.pendingUpdates.clear()
 		return nil
 	}
-
-	toAdd, toRemove, cachePlan, err := m.computeFullAddressSetDelta(psAddrSet, matchedNamespaces, selectedNodes, key)
-	if err != nil {
-		return fmt.Errorf("failed to compute full address set delta for %s: %w", key, err)
+	if fullSync {
+		toAdd, toRemove, cachePlan, err = m.computeFullAddressSetDelta(psAddrSet, matchedNamespaces, selectedNodes, key)
+		if err != nil {
+			return fmt.Errorf("failed to compute full address set delta for %s: %w", key, err)
+		}
+	} else if pending.podKeys.Len() > 0 {
+		// Pod add/update/delete: process only the pending pod keys. Namespace and node-selector
+		// membership changes still fall back to full sync (handled by the branches below).
+		cachePlan, err = m.computePodAddressSetCachePlan(psAddrSet, pending.podKeys, matchedNamespaces, selectedNodes)
+		if err != nil {
+			return fmt.Errorf("failed to compute pod address set cache plan for %s: %w", key, err)
+		}
+	} else if pending.nodeKeys.Len() > 0 && psAddrSet.nodeSelector != nil && !psAddrSet.nodeSelector.Empty() {
+		// Node-selector membership change: not yet handled incrementally in this version, so
+		// rebuild fully rather than silently missing pods that entered/left the selection.
+		klog.V(4).Infof("Address set %s: forcing full sync for node-selector membership change", key)
+		fullSync = true
+		toAdd, toRemove, cachePlan, err = m.computeFullAddressSetDelta(psAddrSet, matchedNamespaces, selectedNodes, key)
+		if err != nil {
+			return fmt.Errorf("failed to compute full address set delta for %s: %w", key, err)
+		}
+	} else if pending.nodeKeys.Len() == 0 {
+		// No pending context (unexpected empty snapshot), or a namespace-only pending update
+		// (not yet handled incrementally) — rebuild fully.
+		klog.V(4).Infof("Address set %s: forcing full sync due to unhandled pending update classes", key)
+		fullSync = true
+		toAdd, toRemove, cachePlan, err = m.computeFullAddressSetDelta(psAddrSet, matchedNamespaces, selectedNodes, key)
+		if err != nil {
+			return fmt.Errorf("failed to compute full address set delta for %s: %w", key, err)
+		}
+	}
+	// Host-network updates always force fullSync above (not yet incremental in this version), so
+	// nodeKeys is never the only pending class here. Still union the current host-network
+	// snapshot against the incremental pod-cache plan: full sync already unions pod + host IPs
+	// against addresses in computeFullAddressSetDelta, and incremental paths must do the same so
+	// an IP still contributed by host-network is never removed.
+	if !fullSync {
+		hostSnapshot := m.buildHostNetworkSnapshot(psAddrSet, matchedNamespaces, key)
+		toAdd, toRemove = m.deriveUnionAddressDelta(psAddrSet, cachePlan, hostSnapshot)
 	}
 
 	// Skip OVN transaction entirely when nothing changed.
@@ -1026,6 +1107,29 @@ func (m *AddressSetManager) reconcileAddressSetLocked(key string, psAddrSet *pod
 	}
 	psAddrSet.pendingUpdates.clear()
 	return nil
+}
+
+// needsFullAddressSetSync returns true when reconcile must rebuild desired state from all
+// matching pods rather than applying an incremental delta.
+func (m *AddressSetManager) needsFullAddressSetSync(psAddrSet *podSelectorAddressSet, pending addrSetPendingUpdates) bool {
+	return pending.fullSync || psAddrSet.addresses == nil || psAddrSet.selectedPods == nil || psAddrSet.podAddresses == nil
+}
+
+// pendingPodUpdateClassCount returns how many distinct pod-scoped incremental update classes
+// are present in pending. Host-network-only nodeKeys (no nodeSelector) are excluded because
+// they are handled separately via deriveUnionAddressDelta / buildHostNetworkSnapshot.
+func (m *AddressSetManager) pendingPodUpdateClassCount(pending addrSetPendingUpdates, psAddrSet *podSelectorAddressSet) int {
+	count := 0
+	if pending.namespaceKeys.Len() > 0 {
+		count++
+	}
+	if pending.podKeys.Len() > 0 {
+		count++
+	}
+	if pending.nodeKeys.Len() > 0 && psAddrSet.nodeSelector != nil && !psAddrSet.nodeSelector.Empty() {
+		count++
+	}
+	return count
 }
 
 // computeAddressDelta returns addresses present in desired but not current (toAdd) and
@@ -1099,6 +1203,141 @@ func (m *AddressSetManager) getPodIPsForPod(pod *corev1.Pod, netInfo util.NetInf
 		return nil, fmt.Errorf("failed to get IPs for pod %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
 	return ips, nil
+}
+
+// ensurePodCacheInitialized lazily allocates the in-memory membership / address mirrors.
+func (psAddrSet *podSelectorAddressSet) ensurePodCacheInitialized() {
+	if psAddrSet.addresses == nil {
+		psAddrSet.addresses = sets.New[string]()
+	}
+	if psAddrSet.podAddresses == nil {
+		psAddrSet.podAddresses = make(map[string][]string)
+	}
+	if psAddrSet.selectedPods == nil {
+		psAddrSet.selectedPods = make(map[string]sets.Set[string])
+	}
+}
+
+// removePodFromCache drops podKey from the membership mirrors.
+func (psAddrSet *podSelectorAddressSet) removePodFromCache(podKey string) {
+	psAddrSet.ensurePodCacheInitialized()
+	if _, hadPod := psAddrSet.podAddresses[podKey]; !hadPod {
+		return
+	}
+	delete(psAddrSet.podAddresses, podKey)
+	namespace, name, _ := cache.SplitMetaNamespaceKey(podKey)
+	if podSet, ok := psAddrSet.selectedPods[namespace]; ok {
+		podSet.Delete(name)
+		if podSet.Len() == 0 {
+			delete(psAddrSet.selectedPods, namespace)
+		}
+	}
+}
+
+// addPodToCache records that podKey currently contributes ips to the address set.
+func (psAddrSet *podSelectorAddressSet) addPodToCache(podKey string, ips []string) {
+	psAddrSet.ensurePodCacheInitialized()
+	namespace, name, _ := cache.SplitMetaNamespaceKey(podKey)
+	if psAddrSet.selectedPods[namespace] == nil {
+		psAddrSet.selectedPods[namespace] = sets.New[string]()
+	}
+	psAddrSet.selectedPods[namespace].Insert(name)
+	psAddrSet.podAddresses[podKey] = slices.Clone(ips)
+}
+
+// evaluatePodCacheUpdate determines whether podKey should remain in the membership mirrors
+// after reconcile and which IPs it should contribute. Does not compute OVN address deltas.
+func (m *AddressSetManager) evaluatePodCacheUpdate(psAddrSet *podSelectorAddressSet, pod *corev1.Pod,
+	matchedNamespaces *selectedNamespaces, selectedNodes sets.Set[string]) (keepInCache bool, ips []string, err error) {
+	if pod == nil || !m.podMatchesAddressSet(pod, psAddrSet, matchedNamespaces, selectedNodes) {
+		return false, nil, nil
+	}
+	newIPs, err := m.getPodIPsForPod(pod, psAddrSet.netInfo, psAddrSet.legacyNetpolMode)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to evaluate pod cache update for %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	return true, newIPs, nil
+}
+
+// postBatchPodIPSet returns the pod IP set after overlaying plan mutations onto podAddresses.
+// A nil plan (or a plan with no pod changes) yields the current pod IP set. Shared-IP ownership
+// is evaluated across the whole batch so concurrent removals/transfers in one reconcile produce
+// a single correct membership set. Nil podAddresses is treated as empty; this path does not
+// allocate or mutate the OVN addresses mirror.
+func (m *AddressSetManager) postBatchPodIPSet(psAddrSet *podSelectorAddressSet, plan *addressSetCachePlan) sets.Set[string] {
+	podIPs := sets.New[string]()
+
+	if plan != nil && plan.podCacheReplace != nil {
+		for _, ips := range plan.podCacheReplace.podAddresses {
+			podIPs.Insert(ips...)
+		}
+		return podIPs
+	}
+
+	for podKey, ips := range psAddrSet.podAddresses {
+		if plan != nil {
+			if plan.podRemoves.Has(podKey) {
+				continue
+			}
+			if entry, ok := plan.podSets[podKey]; ok {
+				podIPs.Insert(entry.ips...)
+				continue
+			}
+		}
+		podIPs.Insert(ips...)
+	}
+	if plan != nil {
+		for podKey, entry := range plan.podSets {
+			if _, existed := psAddrSet.podAddresses[podKey]; existed {
+				continue
+			}
+			podIPs.Insert(entry.ips...)
+		}
+	}
+	return podIPs
+}
+
+// deriveUnionAddressDelta diffs psAddrSet.addresses against the union of post-batch pod IPs
+// and the desired host-network IP set. Pod and host contributions must not be applied as
+// independent OVN deltas: an IP contributed by both must remain in OVN until neither does.
+func (m *AddressSetManager) deriveUnionAddressDelta(psAddrSet *podSelectorAddressSet, podPlan *addressSetCachePlan,
+	hostSnapshot *hostNetworkSnapshot) (toAdd, toRemove []string) {
+	desired := m.postBatchPodIPSet(psAddrSet, podPlan)
+	if hostSnapshot != nil && hostSnapshot.selecting {
+		desired = desired.Union(hostSnapshot.addresses)
+	}
+	return m.computeAddressDelta(psAddrSet.addresses, desired)
+}
+
+// computePodAddressSetCachePlan builds the pod-cache plan for the given pending pod keys.
+// OVN add/remove is computed later via deriveUnionAddressDelta.
+func (m *AddressSetManager) computePodAddressSetCachePlan(psAddrSet *podSelectorAddressSet, podKeys sets.Set[string],
+	matchedNamespaces *selectedNamespaces, selectedNodes sets.Set[string]) (*addressSetCachePlan, error) {
+	plan := newAddressSetCachePlan()
+	for podKey := range podKeys {
+		namespace, name, splitErr := cache.SplitMetaNamespaceKey(podKey)
+		if splitErr != nil {
+			return nil, fmt.Errorf("failed to split pod key %q: %w", podKey, splitErr)
+		}
+		pod, getErr := m.podLister.Pods(namespace).Get(name)
+		if getErr != nil {
+			if !apierrors.IsNotFound(getErr) {
+				return nil, fmt.Errorf("failed to get pod %s: %w", podKey, getErr)
+			}
+			plan.recordPodRemove(podKey)
+			continue
+		}
+		keepInCache, podIPs, evalErr := m.evaluatePodCacheUpdate(psAddrSet, pod, matchedNamespaces, selectedNodes)
+		if evalErr != nil {
+			return nil, fmt.Errorf("failed to evaluate pod %s for address set cache plan: %w", podKey, evalErr)
+		}
+		if keepInCache {
+			plan.recordPodSet(podKey, podIPs)
+		} else {
+			plan.recordPodRemove(podKey)
+		}
+	}
+	return plan, nil
 }
 
 // listMatchingPodsInNamespace lists pods in namespace that match the address set's pod
@@ -1257,8 +1496,17 @@ func (m *AddressSetManager) applyAddressSetCachePlan(psAddrSet *podSelectorAddre
 	if plan == nil {
 		return
 	}
-	psAddrSet.podAddresses = clonePodAddressesMap(plan.podCacheReplace.podAddresses)
-	psAddrSet.selectedPods = cloneSelectedPodsMap(plan.podCacheReplace.selectedPods)
+	if plan.podCacheReplace != nil {
+		psAddrSet.podAddresses = clonePodAddressesMap(plan.podCacheReplace.podAddresses)
+		psAddrSet.selectedPods = cloneSelectedPodsMap(plan.podCacheReplace.selectedPods)
+	} else {
+		for podKey := range plan.podRemoves {
+			psAddrSet.removePodFromCache(podKey)
+		}
+		for podKey, entry := range plan.podSets {
+			psAddrSet.addPodToCache(podKey, entry.ips)
+		}
+	}
 }
 
 func clonePodAddressesMap(src map[string][]string) map[string][]string {
