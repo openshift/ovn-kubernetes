@@ -1357,6 +1357,155 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		gomega.Expect(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{restartedAS}))
 	})
 
+	ginkgo.DescribeTable("keeps shared IPs when only one of pod/host ownership is removed",
+		func(dualStack bool) {
+			// Legacy netpol address sets union pod IPs with HostNetworkNamespace IPs. An IP present
+			// in both mirrors must remain in OVN until neither owns it.
+			config.IPv4Mode = true
+			config.IPv6Mode = dualStack
+			config.Kubernetes.HostNetworkNamespace = "ovn-host-network"
+			hostNetNamespace := *testing.NewNamespace(config.Kubernetes.HostNetworkNamespace)
+			namespace1 := *testing.NewNamespace(namespaceName1)
+
+			hostAndGW := []string{node1MgmtIP, gwIP1}
+			sharedMgmt := []string{node1MgmtIP}
+			if dualStack {
+				hostAndGW = append(hostAndGW, node1MgmtIPV6, gwIP1v6)
+				sharedMgmt = append(sharedMgmt, node1MgmtIPV6)
+			}
+
+			testNode := corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": hostNetworkNodeSubnetsAnnotation(dualStack),
+						"k8s.ovn.org/node-id":      "1",
+					},
+				},
+			}
+			// Pod IPs intentionally overlap with the host-network management IPs.
+			overlappingPod := testing.NewPodWithLabelsAllIPFamilies(namespace1.Name, "overlap-pod", nodeName, sharedMgmt, nil)
+			startAddrSetManagerWithNodes(initialDB,
+				[]corev1.Namespace{hostNetNamespace, namespace1},
+				[]corev1.Pod{*overlappingPod},
+				[]corev1.Node{testNode})
+
+			_, _, _, err := addressSetManager.EnsureAddressSet(&metav1.LabelSelector{}, &metav1.LabelSelector{}, nil,
+				"", "backRef", controllerName, &util.DefaultNetInfo{}, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			hostNSASIDs := GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, &metav1.LabelSelector{}, nil,
+				"", controllerName, true)
+			expectedData := expectAddrSetData(hostNSASIDs, hostAndGW, dualStack)
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData(expectedData))
+
+			// Pod leaves while host still owns the shared management IP(s) — OVN must keep them.
+			addressSetManager.Stop()
+			err = clientSet.KubeClient.CoreV1().Pods(namespace1.Name).Delete(context.TODO(), overlappingPod.Name, metav1.DeleteOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(func() bool {
+				_, getErr := addressSetManager.podLister.Pods(namespace1.Name).Get(overlappingPod.Name)
+				return apierrors.IsNotFound(getErr)
+			}).Should(gomega.BeTrue())
+
+			addrSetKey := getInternalKey(&metav1.LabelSelector{}, &metav1.LabelSelector{}, nil, "", controllerName, true)
+			err = forceReconcileAddressSet(addrSetKey, func(psAddrSet *podSelectorAddressSet) {
+				psAddrSet.pendingUpdates.addPodKey(fmt.Sprintf("%s/%s", namespace1.Name, overlappingPod.Name))
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(addressSetManager.nbClient).Should(libovsdbtest.HaveData(expectedData))
+			err = addressSetManager.addressSets.DoWithLock(addrSetKey, func(key string) error {
+				psAddrSet, found := addressSetManager.addressSets.Load(key)
+				gomega.Expect(found).To(gomega.BeTrue())
+				for _, ip := range sharedMgmt {
+					gomega.Expect(psAddrSet.addresses.Has(ip)).To(gomega.BeTrue())
+				}
+				return nil
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			// Re-add a pod with the shared IP(s), then drop host ownership (delete node).
+			remainingPod := testing.NewPodWithLabelsAllIPFamilies(namespace1.Name, "remaining-pod", nodeName, sharedMgmt, nil)
+			_, err = clientSet.KubeClient.CoreV1().Pods(namespace1.Name).Create(context.TODO(), remainingPod, metav1.CreateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(func() error {
+				_, getErr := addressSetManager.podLister.Pods(namespace1.Name).Get(remainingPod.Name)
+				return getErr
+			}).Should(gomega.Succeed())
+			err = forceReconcileAddressSet(addrSetKey, func(psAddrSet *podSelectorAddressSet) {
+				psAddrSet.pendingUpdates.addPodKey(fmt.Sprintf("%s/%s", namespace1.Name, remainingPod.Name))
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(addressSetManager.nbClient).Should(libovsdbtest.HaveData(expectedData))
+
+			err = clientSet.KubeClient.CoreV1().Nodes().Delete(context.TODO(), testNode.Name, metav1.DeleteOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(func() bool {
+				_, getErr := addressSetManager.nodeLister.Get(testNode.Name)
+				return apierrors.IsNotFound(getErr)
+			}).Should(gomega.BeTrue())
+			// Controllers are stopped; apply the host-network IP cache update that reconcileNode
+			// would have performed, then force the selecting address-set reconcile.
+			gomega.Expect(addressSetManager.updateHostNetworkIPs(testNode.Name)).To(gomega.Succeed())
+			err = forceReconcileAddressSet(addrSetKey, func(psAddrSet *podSelectorAddressSet) {
+				psAddrSet.pendingUpdates.addNodeKey(testNode.Name)
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(addressSetManager.nbClient).Should(libovsdbtest.HaveData(expectAddrSetData(hostNSASIDs, sharedMgmt, dualStack)))
+		},
+		ginkgo.Entry("IPv4", false),
+		ginkgo.Entry("dual-stack", true),
+	)
+
+	ginkgo.DescribeTable("updates host-network annotation IPs without disturbing unrelated pod IPs",
+		func(dualStack bool) {
+			// Host-only incremental path: node annotation change must rewrite host IPs while a
+			// non-overlapping selected pod IP stays put (deriveUnionAddressDelta).
+			config.IPv4Mode = true
+			config.IPv6Mode = dualStack
+			config.Kubernetes.HostNetworkNamespace = "ovn-host-network"
+			hostNetNamespace := *testing.NewNamespace(config.Kubernetes.HostNetworkNamespace)
+			namespace1 := *testing.NewNamespace(namespaceName1)
+
+			podIPs := []string{ip1}
+			initialIPs := []string{ip1, node1MgmtIP, gwIP1}
+			updatedIPs := []string{ip1, node1MgmtIP, gwIP2}
+			if dualStack {
+				podIPs = append(podIPs, ip1v6)
+				initialIPs = append(initialIPs, ip1v6, node1MgmtIPV6, gwIP1v6)
+				updatedIPs = append(updatedIPs, ip1v6, node1MgmtIPV6, gwIP2v6)
+			}
+
+			testNode := corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+					Annotations: map[string]string{
+						"k8s.ovn.org/node-subnets": hostNetworkNodeSubnetsAnnotation(dualStack),
+						"k8s.ovn.org/node-id":      "1",
+					},
+				},
+			}
+			regularPod := testing.NewPodWithLabelsAllIPFamilies(namespace1.Name, "regular-pod", nodeName, podIPs, nil)
+			startAddrSetManagerWithNodes(initialDB,
+				[]corev1.Namespace{hostNetNamespace, namespace1},
+				[]corev1.Pod{*regularPod},
+				[]corev1.Node{testNode})
+
+			_, _, _, err := addressSetManager.EnsureAddressSet(&metav1.LabelSelector{}, &metav1.LabelSelector{}, nil,
+				"", "backRef", controllerName, &util.DefaultNetInfo{}, true)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			hostNSASIDs := GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, &metav1.LabelSelector{}, nil,
+				"", controllerName, true)
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData(expectAddrSetData(hostNSASIDs, initialIPs, dualStack)))
+
+			testNode.Annotations["k8s.ovn.org/node-id"] = "2"
+			_, err = clientSet.KubeClient.CoreV1().Nodes().Update(context.TODO(), &testNode, metav1.UpdateOptions{})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData(expectAddrSetData(hostNSASIDs, updatedIPs, dualStack)))
+		},
+		ginkgo.Entry("IPv4", false),
+		ginkgo.Entry("dual-stack", true),
+	)
+
 	ginkgo.DescribeTable("drains host-network IPs when the host network namespace is deleted",
 		func(dualStack bool) {
 			config.IPv4Mode = true
@@ -1394,6 +1543,60 @@ var _ = ginkgo.Describe("OVN podSelectorAddressSet", func() {
 		ginkgo.Entry("IPv4", false),
 		ginkgo.Entry("dual-stack", true),
 	)
+
+	ginkgo.It("enqueues selecting address sets for host-only reconcile when the host network namespace is deleted", func() {
+		// Enqueue from updateHostNetworkNamespaceExists itself (not only reconcileNamespace),
+		// using host-only pending so host IPs drain without a full pod rebuild.
+		config.Kubernetes.HostNetworkNamespace = "ovn-host-network"
+		hostNetNamespace := *testing.NewNamespace(config.Kubernetes.HostNetworkNamespace)
+		namespace1 := *testing.NewNamespace(namespaceName1)
+		gwIP1 := "100.64.0.1"
+		testNode := corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-subnets": fmt.Sprintf("{\"default\":\"%s\"}", node1Subnet),
+					"k8s.ovn.org/node-id":      "1",
+				},
+			},
+		}
+		regularPod := testing.NewPod(namespace1.Name, "regular-pod", nodeName, ip1)
+		startAddrSetManagerWithNodes(initialDB,
+			[]corev1.Namespace{hostNetNamespace, namespace1},
+			[]corev1.Pod{*regularPod},
+			[]corev1.Node{testNode})
+
+		_, _, _, err := addressSetManager.EnsureAddressSet(&metav1.LabelSelector{}, &metav1.LabelSelector{}, nil,
+			"", "backRef", controllerName, &util.DefaultNetInfo{}, true)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		hostNSASIDs := GetPodSelectorAddrSetDbIDs(&metav1.LabelSelector{}, &metav1.LabelSelector{}, nil,
+			"", controllerName, true)
+		expectedAS, _ := addressset.GetTestDbAddrSets(hostNSASIDs, []string{ip1, node1MgmtIP, gwIP1})
+		gomega.Eventually(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{expectedAS}))
+
+		addressSetManager.Stop()
+		err = clientSet.KubeClient.CoreV1().Namespaces().Delete(context.TODO(), hostNetNamespace.Name, metav1.DeleteOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Eventually(func() bool {
+			_, getErr := addressSetManager.namespaceLister.Get(hostNetNamespace.Name)
+			return apierrors.IsNotFound(getErr)
+		}).Should(gomega.BeTrue())
+
+		gomega.Expect(addressSetManager.updateHostNetworkNamespaceExists()).To(gomega.Succeed())
+		addrSetKey := getInternalKey(&metav1.LabelSelector{}, &metav1.LabelSelector{}, nil, "", controllerName, true)
+		err = addressSetManager.addressSets.DoWithLock(addrSetKey, func(key string) error {
+			psAddrSet, found := addressSetManager.addressSets.Load(key)
+			if !found {
+				return fmt.Errorf("address set %s not found", key)
+			}
+			gomega.Expect(psAddrSet.pendingUpdates.fullSync).To(gomega.BeFalse())
+			gomega.Expect(psAddrSet.pendingUpdates.nodeKeys.Has("")).To(gomega.BeTrue())
+			return addressSetManager.reconcileAddressSetLocked(key, psAddrSet)
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		expectedAS, _ = addressset.GetTestDbAddrSets(hostNSASIDs, []string{ip1})
+		gomega.Expect(addressSetManager.nbClient).Should(libovsdbtest.HaveData([]libovsdbtest.TestData{expectedAS}))
+	})
 
 	ginkgo.It("updates IPs for existing nodes when the host network traffic namespace is created", func() {
 		config.Kubernetes.HostNetworkNamespace = "ovn-host-network"

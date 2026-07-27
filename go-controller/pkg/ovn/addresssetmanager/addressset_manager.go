@@ -688,15 +688,18 @@ func (m *AddressSetManager) updateHostNetworkNamespaceExists() error {
 	m.hostNetworkNamespaceLock.Lock()
 	if err != nil {
 		// Namespace deleted or never existed. Snapshot selecting sets under the lock so we can
-		// enqueue them after clearing global host state, rather than relying only on
-		// reconcileNamespace's later membership loop.
+		// enqueue them after clearing global host state (symmetric with the create path), rather
+		// than relying only on reconcileNamespace's later membership loop.
 		wasPresent := m.hostNetworkNamespaceExists
 		addrSetKeys := m.hostNetworkSelectingAddrSets.UnsortedList()
 		clear(m.hostNetworkNamespaceIPsPerNode)
 		m.hostNetworkNamespaceExists = false
 		m.hostNetworkNamespaceLock.Unlock()
 		if wasPresent {
-			return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, "", true)
+			// Host IPs are already cleared and exists=false, so the next reconcile sees
+			// selecting=false. Enqueue a host-only pending update (not fullSync) so
+			// deriveUnionAddressDelta drains host IPs without rebuilding all pod membership.
+			return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, "", false)
 		}
 		return nil
 	}
@@ -717,6 +720,8 @@ func (m *AddressSetManager) updateHostNetworkNamespaceExists() error {
 	m.hostNetworkNamespaceLock.Unlock()
 
 	if needsFullSync {
+		// Host-network namespace just appeared with a full IP set; force fullSync on sets
+		// that already select it so host-network addresses are rebuilt from scratch.
 		return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, "", true)
 	}
 	return nil
@@ -871,7 +876,7 @@ func (m *AddressSetManager) updateHostNetworkIPs(nodeName string) error {
 		if !updated {
 			return nil
 		}
-		return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, nodeName, true)
+		return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, nodeName, false)
 	}
 	// add/update node event
 	hostNetworkPolicyIPs, err := m.getHostNamespaceAddressesForNode(node)
@@ -889,12 +894,14 @@ func (m *AddressSetManager) updateHostNetworkIPs(nodeName string) error {
 	addrSetKeys = m.hostNetworkSelectingAddrSets.UnsortedList()
 	m.hostNetworkNamespaceLock.Unlock()
 
-	return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, nodeName, true)
+	// Host-network IPs for this node changed; enqueue selecting address sets with
+	// a node-key pending update so only host-network delta is recomputed.
+	return m.enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys, nodeName, false)
 }
 
 // enqueueHostNetworkSelectingAddrSetUpdates records pending updates on host-network selecting
 // address sets and enqueues reconciliation. Must not be called while holding hostNetworkNamespaceLock.
-// fullSync is always true in this version since reconcile has no incremental host-network path yet.
+// When fullSync is false, nodeName may be empty to mark a host-global change (e.g. host NS delete).
 func (m *AddressSetManager) enqueueHostNetworkSelectingAddrSetUpdates(addrSetKeys []string, nodeName string, fullSync bool) error {
 	for _, addrSetKey := range addrSetKeys {
 		if err := m.addressSets.DoWithLock(addrSetKey, func(key string) error {
@@ -1087,12 +1094,12 @@ func (m *AddressSetManager) reconcileAddressSetLocked(key string, psAddrSet *pod
 			return fmt.Errorf("failed to compute full address set delta for %s: %w", key, err)
 		}
 	}
-	// Host-network updates always force fullSync above (not yet incremental in this version), so
-	// nodeKeys is never the only pending class here. Still union the current host-network
-	// snapshot against the incremental pod-cache plan: full sync already unions pod + host IPs
-	// against addresses in computeFullAddressSetDelta, and incremental paths must do the same so
-	// an IP still contributed by host-network is never removed.
+	// Only nodeKeys are pending, if any, means a host-network IP change without a nodeSelector.
+	// deriveUnionAddressDelta below will pick up the host-network update.
 	if !fullSync {
+		// Full sync already unions pod + host IPs against addresses in computeFullAddressSetDelta.
+		// Incremental paths must do the same: never remove an IP from OVN while pods or the
+		// current host-network snapshot still contribute it.
 		hostSnapshot := m.buildHostNetworkSnapshot(psAddrSet, matchedNamespaces, key)
 		toAdd, toRemove = m.deriveUnionAddressDelta(psAddrSet, cachePlan, hostSnapshot)
 	}
