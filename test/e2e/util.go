@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -963,185 +964,6 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	return nil
 }
 
-func getNodeIPTRules(nodeName string) string {
-	ipt4Rules, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"iptables-save", "-c"})
-	framework.ExpectNoError(err, "failed to get iptables rules from node %s", nodeName)
-	ipt6Rules, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip6tables-save", "-c"})
-	framework.ExpectNoError(err, "failed to get ip6tables rules from node %s", nodeName)
-	iptRules := ipt4Rules + ipt6Rules
-	framework.Logf("DEBUG: Dumping IPTRules %v", iptRules)
-	return iptRules
-}
-
-// pokeNodeIPTableRules returns the number of iptables (both ipv6 and ipv4) rules that match the provided pattern
-func pokeNodeIPTableRules(nodeName, pattern string) int {
-	iptRules := getNodeIPTRules(nodeName)
-	numOfMatchRules := 0
-	for _, iptRule := range strings.Split(iptRules, "\n") {
-		match := strings.Contains(iptRule, pattern)
-		if match {
-			framework.Logf("DEBUG: Matched rule %s for pattern %s", iptRule, pattern)
-			numOfMatchRules++
-		}
-	}
-	return numOfMatchRules
-}
-
-func countIPTablesRulesMatches(nodeName string, patterns []string) int {
-	numMatches := 0
-	iptRules := getNodeIPTRules(nodeName)
-	for _, pattern := range patterns {
-		for _, iptRule := range strings.Split(iptRules, "\n") {
-			matched, err := regexp.MatchString(pattern, iptRule)
-			if err == nil && matched {
-				numMatches++
-			}
-		}
-	}
-	return numMatches
-}
-
-type Elem []string
-
-func (e *Elem) UnmarshalJSON(data []byte) error {
-	var str string
-	var i int
-	var concatenation map[string][]json.RawMessage
-	if err := json.Unmarshal(data, &str); err == nil {
-		*e = []string{str}
-		return nil
-	}
-	if err := json.Unmarshal(data, &i); err == nil {
-		*e = []string{fmt.Sprintf("%d", i)}
-		return nil
-	}
-	if err := json.Unmarshal(data, &concatenation); err == nil {
-		concat := concatenation["concat"]
-		for _, rawMsg := range concat {
-			var str string
-			var i int
-			if err := json.Unmarshal(rawMsg, &str); err == nil {
-				*e = append(*e, str)
-			}
-			if err := json.Unmarshal(rawMsg, &i); err == nil {
-				*e = append(*e, fmt.Sprintf("%d", i))
-			}
-		}
-		return nil
-	}
-	return fmt.Errorf("could not unmarshal %s", string(data))
-}
-
-func getNFTablesElements(nodeName, name string) ([]Elem, error) {
-	array := []Elem{}
-
-	nftCmd := []string{"nft", "-j", "list", "set", "inet", "ovn-kubernetes", name}
-	nftElements, err := infraprovider.Get().ExecK8NodeCommand(nodeName, nftCmd)
-	if err != nil {
-		return array, err
-	}
-	framework.Logf("DEBUG: Dumping NFTElements %v", nftElements)
-	// The output will look like
-	//
-	// {
-	//   "nftables": [
-	//     {
-	//       "metainfo": {
-	//         ...
-	//       }
-	//     },
-	//     {
-	//       "set": {
-	//         ...
-	//         "elem": [
-	//           ...
-	//         ]
-	//       }
-	//     }
-	//   ]
-	// }
-	//
-	// (Where the "elem" element will be omitted if the set is empty.)
-
-	jsonResult := map[string][]map[string]map[string]json.RawMessage{}
-	if err := json.Unmarshal([]byte(nftElements), &jsonResult); err != nil {
-		return array, err
-	}
-	elem := jsonResult["nftables"][1]["set"]["elem"]
-	if elem == nil {
-		return array, err
-	}
-	err = json.Unmarshal(elem, &array)
-	return array, err
-}
-
-// countNFTablesElements returns the number of nftables elements in the indicated set
-// of the "ovn-kubernetes" table.
-func countNFTablesElements(nodeName, name string) int {
-	defer ginkgo.GinkgoRecover()
-	array, err := getNFTablesElements(nodeName, name)
-	framework.ExpectNoError(err, "failed to get nftables elements from node %s", nodeName)
-	return len(array)
-}
-
-func countNFTablesRulesMatches(nodeName, name string, sets [][]string) int {
-	numMatches := 0
-	array, err := getNFTablesElements(nodeName, name)
-	framework.ExpectNoError(err, "failed to get nftables elements from node %s", nodeName)
-	for _, set := range sets {
-		for _, elem := range array {
-			if slices.Equal(set, elem) {
-				numMatches++
-			}
-		}
-	}
-	return numMatches
-}
-
-func checkNumberOfETPRules(backendNodeName string, value int, pattern string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numberOfETPRules := pokeNodeIPTableRules(backendNodeName, pattern)
-		isExpected := numberOfETPRules == value
-		if !isExpected {
-			framework.Logf("numberOfETPRules got: %d, expected: %d", numberOfETPRules, value)
-		}
-		return isExpected, nil
-	}
-}
-func checkNumberOfNFTElements(backendNodeName string, value int, name string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numberOfNFTElements := countNFTablesElements(backendNodeName, name)
-		isExpected := numberOfNFTElements == value
-		if !isExpected {
-			framework.Logf("numberOfNFTElements got: %d, expected: %d", numberOfNFTElements, value)
-		}
-		return isExpected, nil
-	}
-}
-
-func checkIPTablesRulesPresent(backendNodeName string, patterns []string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numMatches := countIPTablesRulesMatches(backendNodeName, patterns)
-		isExpected := numMatches == len(patterns)
-		if !isExpected {
-			framework.Logf("checkIPTablesRulesPresent got: numMatches: %d, expected: %d",
-				numMatches, len(patterns))
-		}
-		return isExpected, nil
-	}
-}
-func checkNFTElementsPresent(backendNodeName, name string, sets [][]string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numMatches := countNFTablesRulesMatches(backendNodeName, name, sets)
-		isExpected := numMatches == len(sets)
-		if !isExpected {
-			framework.Logf("checkNFTElementsPresent got: numMatches: %d, expected: %d",
-				numMatches, len(sets))
-		}
-		return isExpected, nil
-	}
-}
-
 // isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
 func isDualStackCluster(nodes *v1.NodeList) bool {
 	for _, node := range nodes.Items {
@@ -2037,4 +1859,51 @@ func firstSubnetOf(subnet string, subnetSize int) string {
 		panic(fmt.Sprintf("firstSubnetOf: requested size /%d is not between min /%d and max /%d for %s", subnetSize, ones, bits, subnet))
 	}
 	return fmt.Sprintf("%s/%d", ipNet.IP, subnetSize)
+}
+
+// monitorTcpdumpOnNode creates a privileged host-network pod on the given node that runs
+// tcpdump on the specified interface with the provided filter. It blocks until ctx is
+// cancelled, then fetches the pod logs and deletes the monitor pod. Returns all captured
+// tcpdump output.
+func monitorTcpdumpOnNode(ctx context.Context, f *framework.Framework,
+	name, nodeName, nodeIface, options, filter string) (string, error) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: f.Namespace.Name,
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
+			HostNetwork: true,
+			Containers: []corev1.Container{
+				{
+					Name:  "traffic-monitor",
+					Image: images.Netshoot(),
+					Command: []string{
+						"/bin/bash",
+						"-c",
+						fmt.Sprintf("exec tcpdump -i %s %s %s", nodeIface, options, filter),
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: func(b bool) *bool { return &b }(true),
+					},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}
+
+	createdPod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "Failed to create traffic monitor pod")
+	err = e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, createdPod)
+	framework.ExpectNoError(err, "Monitor pod failed to start")
+
+	<-ctx.Done()
+	logs, err := e2ekubectl.RunKubectl(f.Namespace.Name, "logs", name)
+	if err != nil {
+		return "", err
+	}
+	return logs, nil
 }
