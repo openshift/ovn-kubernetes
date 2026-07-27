@@ -1057,9 +1057,14 @@ func (m *AddressSetManager) reconcileAddressSetLocked(key string, psAddrSet *pod
 		if err != nil {
 			return fmt.Errorf("failed to compute full address set delta for %s: %w", key, err)
 		}
+	} else if pending.namespaceKeys.Len() > 0 {
+		// Namespace label change: list pods only in the affected namespaces.
+		cachePlan, err = m.computeNamespaceAddressSetCachePlan(psAddrSet, pending.namespaceKeys, matchedNamespaces, selectedNodes)
+		if err != nil {
+			return fmt.Errorf("failed to compute namespace address set cache plan for %s: %w", key, err)
+		}
 	} else if pending.podKeys.Len() > 0 {
-		// Pod add/update/delete: process only the pending pod keys. Namespace and node-selector
-		// membership changes still fall back to full sync (handled by the branches below).
+		// Pod add/update/delete: process only the pending pod keys.
 		cachePlan, err = m.computePodAddressSetCachePlan(psAddrSet, pending.podKeys, matchedNamespaces, selectedNodes)
 		if err != nil {
 			return fmt.Errorf("failed to compute pod address set cache plan for %s: %w", key, err)
@@ -1074,9 +1079,8 @@ func (m *AddressSetManager) reconcileAddressSetLocked(key string, psAddrSet *pod
 			return fmt.Errorf("failed to compute full address set delta for %s: %w", key, err)
 		}
 	} else if pending.nodeKeys.Len() == 0 {
-		// No pending context (unexpected empty snapshot), or a namespace-only pending update
-		// (not yet handled incrementally) — rebuild fully.
-		klog.V(4).Infof("Address set %s: forcing full sync due to unhandled pending update classes", key)
+		// No pending context (unexpected empty snapshot) — rebuild fully.
+		klog.V(4).Infof("Address set %s: forcing full sync due to empty pending updates", key)
 		fullSync = true
 		toAdd, toRemove, cachePlan, err = m.computeFullAddressSetDelta(psAddrSet, matchedNamespaces, selectedNodes, key)
 		if err != nil {
@@ -1367,6 +1371,44 @@ func (m *AddressSetManager) listMatchingPodsInNamespace(psAddrSet *podSelectorAd
 		}
 	}
 	return filtered, nil
+}
+
+// computeNamespaceAddressSetCachePlan builds the pod-cache plan for the affected namespaces:
+// add/update pods that now match, and remove cached pods that no longer match.
+// OVN add/remove is computed later via deriveUnionAddressDelta.
+func (m *AddressSetManager) computeNamespaceAddressSetCachePlan(psAddrSet *podSelectorAddressSet, namespaceKeys sets.Set[string],
+	matchedNamespaces *selectedNamespaces, selectedNodes sets.Set[string]) (*addressSetCachePlan, error) {
+	plan := newAddressSetCachePlan()
+	for ns := range namespaceKeys {
+		pods, listErr := m.listMatchingPodsInNamespace(psAddrSet, ns, matchedNamespaces, selectedNodes)
+		if listErr != nil {
+			return nil, fmt.Errorf("failed to list matching pods in namespace %s: %w", ns, listErr)
+		}
+		desiredPods := sets.New[string]()
+		for _, pod := range pods {
+			podKey := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+			keepInCache, podIPs, evalErr := m.evaluatePodCacheUpdate(psAddrSet, pod, matchedNamespaces, selectedNodes)
+			if evalErr != nil {
+				return nil, fmt.Errorf("failed to evaluate pod %s for namespace address set cache plan: %w", podKey, evalErr)
+			}
+			if !keepInCache {
+				continue
+			}
+			desiredPods.Insert(podKey)
+			plan.recordPodSet(podKey, podIPs)
+		}
+		// Drop pods that were selected last reconcile but are no longer desired in this namespace.
+		if cachedPods, ok := psAddrSet.selectedPods[ns]; ok {
+			for podName := range cachedPods {
+				fullPodKey := fmt.Sprintf("%s/%s", ns, podName)
+				if desiredPods.Has(fullPodKey) {
+					continue
+				}
+				plan.recordPodRemove(fullPodKey)
+			}
+		}
+	}
+	return plan, nil
 }
 
 // listAllMatchingPods returns every pod that matches the address set's namespace, pod, and
