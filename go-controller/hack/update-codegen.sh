@@ -101,6 +101,14 @@ for crd in ${crds}; do
     github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
     "$@"
 
+  # Show the API-linter report, but fail if it contains any violation other than
+  # the expected apimachinery (and sometimes our own) names_match ones.
+  if grep -vE '^API rule violation: names_match,' "${api_violations_report}" | grep -q '[^[:space:]]'; then
+    echo "ERROR: openapi-gen reported unexpected API rule violations for ${crd} (only names_match is allowed):" >&2
+    grep -vE '^API rule violation: names_match,' "${api_violations_report}" >&2
+    exit 1
+  fi
+
   echo "Generating apply configuration for $crd ($api_version)"
   applyconfiguration-gen \
     --openapi-schema <(go run github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/openapi/cmd/models-schema) \

@@ -61,8 +61,10 @@ type ExternalNetworkSource struct {
 // ExternalNextHops contains slices of StaticHops and DynamicHops structures. Minimum is one StaticHop or one DynamicHop.
 type ExternalNextHops struct {
 	// StaticHops defines a slice of StaticHop. This field is optional.
+	// +listType=atomic
 	StaticHops []*StaticHop `json:"static,omitempty"`
 	//DynamicHops defines a slices of DynamicHop. This field is optional.
+	// +listType=atomic
 	DynamicHops []*DynamicHop `json:"dynamic,omitempty"`
 }
 

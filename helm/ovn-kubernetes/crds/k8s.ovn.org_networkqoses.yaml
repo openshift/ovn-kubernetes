@@ -106,6 +106,7 @@ spec:
                                 type: string
                             type: object
                           type: array
+                          x-kubernetes-list-type: atomic
                         to:
                           items:
                             description: |-
@@ -247,6 +248,7 @@ spec:
                               rule: '!(has(self.ipBlock) && (has(self.podSelector)
                                 || has(self.namespaceSelector)))'
                           type: array
+                          x-kubernetes-list-type: atomic
                       type: object
                     dscp:
                       description: dscp marking value for matching pods' traffic.
@@ -258,6 +260,7 @@ spec:
                   type: object
                 maxItems: 20
                 type: array
+                x-kubernetes-list-type: atomic
               networkSelectors:
                 description: |-
                   networkSelector selects the networks on which the pod IPs need to be added to the source address set.
