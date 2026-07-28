@@ -1107,19 +1107,32 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 					// sourceIP will be joinSubnetIP for nodeports, so only using hostname endpoint
 					return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", "", false
 				}),
-			ginkgo.Entry("UDN pod to the same node nodeport service in different UDN network should not work",
-				// FIXME: This test should work: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5419
-				// This traffic flow is expected to work eventually but doesn't work today on Layer3 (v4 and v6) and Layer2 (v4 only) networks.
-				// Reason it doesn't work today is because UDN networks don't have MAC bindings for masqueradeIPs of other networks.
-				// Traffic flow: UDN pod in network A -> samenode nodeIP:nodePort service of networkB
-				// UDN pod in networkA -> ovn-switch -> ovn-cluster-router (SNAT to masqueradeIP of networkA) -> mpX interface ->
-				// enters the host and hits IPTables rules to DNAT to clusterIP:Port of service of networkB.
-				// Then it hits the pkt_mark flows on breth0 and get's sent into networkB's patchport where it hits the GR.
-				// On the GR we DNAT to backend pod and SNAT to joinIP.
-				// Reply: Pod replies and now OVN in networkB tries to ARP for the masqueradeIP of networkA which is the source and simply
-				// fails as it doesn't know how to reach this masqueradeIP.
-				// There is also inconsistency in behaviour within Layer2 networks for how IPv4 works and how IPv6 works where the traffic
-				// works on ipv6 because of the flows described below.
+			ginkgo.Entry("UDN pod to the same node nodeport service in different UDN network should only work for IPv6",
+				// FIXME: IPv4 should also work: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5419
+				//
+				// Cross-UDN same-node nodeport traffic goes through the management port in both
+				// local and shared gateway modes (the priority 1004 LRP on the cluster router
+				// reroutes traffic destined for the local node's IP to the management port):
+				// UDN pod in networkA -> ovn-switch -> ovn-cluster-router (SNAT to masqueradeIP)
+				// -> mpX interface -> host nftables (DNAT nodePort->clusterIP) -> breth0 table 0 -> table 2
+				//
+				// IPv6 works: nftables "fib daddr type local" succeeds for IPv6 regardless of
+				// incoming interface, so the pkt_mark is set and breth0 table 2 dispatches the
+				// packet to networkB's patch port. The mask narrowing (/112 -> /128) on the GR
+				// external port makes the static route (fd69::/112 -> fd69::4) take effect for
+				// the reply, routing it back through the management port to networkA.
+				//
+				// IPv4 fails: the kernel's IPv4 FIB lookup in "fib daddr type local" is
+				// interface-aware. Since the node IP (e.g. 172.18.0.2) is local on breth0, not
+				// on ovn-k8s-mpX, the lookup fails and the pkt_mark is never set:
+				//   $ ip route get 172.18.0.2 iif ovn-k8s-mp7
+				//   RTNETLINK answers: Invalid argument
+				//   $ ip -6 route get fc00:f853:ccd:e793::2 iif ovn-k8s-mp7
+				//   local fc00:f853:ccd:e793::2 ... iif ovn-k8s-mp7 pref medium
+				// Without the mark, the packet hits the priority=200 drop flow in breth0 table 2
+				// (nw_src=masqueradeIP -> drop).
+				// The original pkt_mark design (PR#4792) was intended for external clients hitting
+				// the node IP, not for cross-UDN traffic arriving on a UDN management port.
 				func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
 					clientPod := podsNetA[0]
 					node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodes.Items[0].Name, metav1.GetOptions{})
@@ -1130,23 +1143,11 @@ var _ = ginkgo.DescribeTableSubtree("BGP: isolation between advertised networks"
 						nodeIP = nodeIPv6
 					}
 					nodePort := svcNetB.Spec.Ports[0].NodePort
-					out := curlConnectionTimeoutCode
-					errBool := true
-					if ipFamily == utilnet.IPv6 && cudnATemplate.Spec.Network.Topology == udnv1.NetworkTopologyLayer2 {
-						// For Layer2 networks, we have these flows we add on breth0:
-						// cookie=0xdeff105, duration=173.245s, table=1, n_packets=0, n_bytes=0, idle_age=173, priority=14,icmp6,icmp_type=134 actions=FLOOD
-						// cookie=0xdeff105, duration=173.245s, table=1, n_packets=8, n_bytes=640, idle_age=4, priority=14,icmp6,icmp_type=136 actions=FLOOD
-						// which floods the Router Advertisement (RA, type 134) and Neighbor Advertisement (NA, type 136)
-						// Given on Layer2 the GR has the SNATs for both masqueradeIPs this works perfectly well and
-						// the networks are able to NDP for the masqueradeIPs for the other networks.
-						// This doesn't work on Layer3 networks since masqueradeIP SNATs are present on the ovn-cluster-router in that case.
-						// See the tcpdump on the issue: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5410 for more details.
-						out = ""
-						errBool = false
+					expectErr = ipFamily == utilnet.IPv4
+					if expectErr {
+						expectedOutput = curlConnectionTimeoutCode
 					}
-
-					// sourceIP will be joinSubnetIP for nodeports, so only using hostname endpoint
-					return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", out, errBool
+					return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", expectedOutput, expectErr
 				}),
 			ginkgo.Entry("UDN pod to a different node nodeport service in different UDN network should work",
 				func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
