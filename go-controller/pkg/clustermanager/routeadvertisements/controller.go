@@ -987,6 +987,18 @@ func (c *Controller) generateFRRConfiguration(
 
 		targetRouter.Neighbors = make([]frrtypes.Neighbor, 0, len(source.Spec.BGP.Routers[i].Neighbors))
 		for _, neighbor := range source.Spec.BGP.Routers[i].Neighbors {
+			// Validate the neighbor identifier upfront, before any filtering
+			// might skip the neighbor, so that an invalid neighbor is
+			// consistently reported as a configuration error
+			key := neighborKey(neighbor)
+			if key == "" {
+				return nil, fmt.Errorf("%w: neighbor with neither address nor interface on FRRConfiguration %s/%s",
+					errConfig,
+					source.Namespace,
+					source.Name,
+				)
+			}
+
 			// Skip neighbors that are the node itself
 			if (nodeV4 != "" && neighbor.Address == nodeV4) || (nodeV6 != "" && neighbor.Address == nodeV6) {
 				continue
@@ -1050,7 +1062,7 @@ func (c *Controller) generateFRRConfiguration(
 				}
 			}
 
-			vrfNeighbors[matchedVRF] = append(vrfNeighbors[matchedVRF], neighbor.Address)
+			vrfNeighbors[matchedVRF] = append(vrfNeighbors[matchedVRF], key)
 			targetRouter.Neighbors = append(targetRouter.Neighbors, neighbor)
 		}
 		if len(targetRouter.Neighbors) == 0 {
@@ -1111,7 +1123,15 @@ func (c *Controller) generateFRRConfiguration(
 				vrfASNs[""] = router.ASN
 				vrfNeighbors[""] = make([]string, 0, len(router.Neighbors))
 				for _, neighbor := range router.Neighbors {
-					vrfNeighbors[""] = append(vrfNeighbors[""], neighbor.Address)
+					key := neighborKey(neighbor)
+					if key == "" {
+						return nil, fmt.Errorf("%w: neighbor with neither address nor interface on FRRConfiguration %s/%s",
+							errConfig,
+							source.Namespace,
+							source.Name,
+						)
+					}
+					vrfNeighbors[""] = append(vrfNeighbors[""], key)
 				}
 				break
 			}
@@ -1878,6 +1898,15 @@ func (c *Controller) reconcileNAD(key string) error {
 	}
 
 	return nil
+}
+
+// neighborKey returns the identifier of a neighbor as used in raw FRR config:
+// the session address or, for unnumbered neighbors, the interface name.
+func neighborKey(neighbor frrtypes.Neighbor) string {
+	if neighbor.Address != "" {
+		return neighbor.Address
+	}
+	return neighbor.Interface
 }
 
 func (c *Controller) reconcileEgressIPs(string) error {

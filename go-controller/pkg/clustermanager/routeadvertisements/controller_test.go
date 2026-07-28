@@ -216,6 +216,7 @@ type testPrefixSelector struct {
 type testNeighbor struct {
 	ASN                    uint32
 	Address                string
+	Interface              string
 	DualStackAddressFamily *bool
 	Advertise              []string
 	NextHopV4              string
@@ -225,8 +226,9 @@ type testNeighbor struct {
 
 func (tn testNeighbor) Neighbor() frrapi.Neighbor {
 	n := frrapi.Neighbor{
-		ASN:     tn.ASN,
-		Address: tn.Address,
+		ASN:       tn.ASN,
+		Address:   tn.Address,
+		Interface: tn.Interface,
 		ToAdvertise: frrapi.Advertise{
 			Allowed: frrapi.AllowedOutPrefixes{
 				Mode:     frrapi.AllowRestricted,
@@ -348,9 +350,14 @@ func (tf testFRRConfig) generateUnicastRawConfig() string {
 			fmt.Fprintf(&buf, "router bgp %d vrf %s\n", r.ASN, r.VRF)
 		}
 		for _, n := range r.Neighbors {
-			if utilnet.IsIPv6String(n.Address) {
+			switch {
+			case n.Address == "" && n.Interface != "":
+				// unnumbered neighbors are included in both address families
+				fmt.Fprintf(&buf, " address-family ipv4 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Interface)
+				fmt.Fprintf(&buf, " address-family ipv6 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Interface)
+			case utilnet.IsIPv6String(n.Address):
 				fmt.Fprintf(&buf, " address-family ipv6 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Address)
-			} else {
+			default:
 				fmt.Fprintf(&buf, " address-family ipv4 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Address)
 			}
 		}
@@ -587,6 +594,73 @@ func TestController_reconcile(t *testing.T) {
 					}},
 			},
 			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "reconciles pod RouteAdvertisement with an unnumbered interface neighbor",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0"},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0", Advertise: []string{"1.1.0.0/24"}},
+						}},
+					},
+				},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "fails to reconcile a neighbor with neither address nor interface",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
+		},
+		{
+			name: "fails to reconcile a neighbor with neither address nor interface in an IPv6-only cluster",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"fd01::/64\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
 			name: "reconciles dual-stack pod+eip RouteAdvertisement for a single FRR config, node and default network and target VRF",
