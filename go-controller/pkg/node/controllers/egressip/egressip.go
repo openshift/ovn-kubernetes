@@ -45,6 +45,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iptables"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/linkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -54,12 +55,11 @@ import (
 )
 
 const (
-	rulePriority        = 6000 // the priority of the ip routing rules created by the controller. Egress Service priority is 5000.
-	ruleFwMarkPriority  = 5999 // the priority of the ip routing rules for LGW mode when we want to skip processing eip ip rules because dst is a node ip. Pkt will be fw marked with 1008.
-	routingTableIDStart = 1000
-	chainName           = "OVN-KUBE-EGRESS-IP-MULTI-NIC"
-	iptChainName        = utiliptables.Chain(chainName)
-	maxRetries          = 15
+	rulePriority       = 6000 // the priority of the ip routing rules created by the controller. Egress Service priority is 5000.
+	ruleFwMarkPriority = 5999 // the priority of the ip routing rules for LGW mode when we want to skip processing eip ip rules because dst is a node ip. Pkt will be fw marked with 1008.
+	chainName          = "OVN-KUBE-EGRESS-IP-MULTI-NIC"
+	iptChainName       = utiliptables.Chain(chainName)
+	maxRetries         = 15
 )
 
 var (
@@ -325,6 +325,10 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 		})
 	if err != nil {
 		return fmt.Errorf("failed to run EgressIP controller because migration from using address labels to a node annotation failed: %v", err)
+	}
+
+	if err := nftables.InitEgressIPNFTChain(c.v4, c.v6); err != nil {
+		return fmt.Errorf("failed to initialize nftables default drop rule for secondary egressip: %w", err)
 	}
 
 	err = wait.PollUntilContextTimeout(wait.ContextForChannel(stopCh), 1*time.Second, 10*time.Second, true,
