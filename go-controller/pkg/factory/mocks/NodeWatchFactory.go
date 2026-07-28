@@ -6,7 +6,6 @@
 package mocks
 
 import (
-	clusternetworkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions/clusternetworkconnect/v1"
 	corev1 "k8s.io/api/core/v1"
 	cache "k8s.io/client-go/tools/cache"
 
@@ -14,6 +13,7 @@ import (
 
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/informers/externalversions/egressip/v1"
 
+	clusternetworkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/informers/externalversions/clusternetworkconnect/v1"
 	factory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 
 	informerscorev1 "k8s.io/client-go/informers/core/v1"
@@ -29,8 +29,6 @@ import (
 	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/informers/externalversions/userdefinednetwork/v1"
 
 	v1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
-
-	v1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/informers/externalversions/uplink/v1alpha1"
 
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/informers/externalversions/vtep/v1"
 )
@@ -229,7 +227,6 @@ func (_m *NodeWatchFactory) ClusterUserDefinedNetworkInformer() userdefinednetwo
 
 	return r0
 }
-
 
 // ClusterNetworkConnectInformer provides a mock function with no fields
 func (_m *NodeWatchFactory) ClusterNetworkConnectInformer() clusternetworkconnectv1.ClusterNetworkConnectInformer {
@@ -809,46 +806,6 @@ func (_m *NodeWatchFactory) Start() error {
 		r0 = rf()
 	} else {
 		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// UplinkInformer provides a mock function with no fields
-func (_m *NodeWatchFactory) UplinkInformer() v1alpha1.UplinkInformer {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for UplinkInformer")
-	}
-
-	var r0 v1alpha1.UplinkInformer
-	if rf, ok := ret.Get(0).(func() v1alpha1.UplinkInformer); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(v1alpha1.UplinkInformer)
-		}
-	}
-
-	return r0
-}
-
-// UplinkStateInformer provides a mock function with no fields
-func (_m *NodeWatchFactory) UplinkStateInformer() v1alpha1.UplinkStateInformer {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for UplinkStateInformer")
-	}
-
-	var r0 v1alpha1.UplinkStateInformer
-	if rf, ok := ret.Get(0).(func() v1alpha1.UplinkStateInformer); ok {
-		r0 = rf()
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(v1alpha1.UplinkStateInformer)
-		}
 	}
 
 	return r0
