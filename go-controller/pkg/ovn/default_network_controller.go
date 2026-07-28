@@ -104,6 +104,9 @@ type DefaultNetworkController struct {
 
 	// Controller used for programming OVN for Network Connect
 	networkConnectController *networkconnectcontroller.Controller
+	// Controller used to re-drive Uplink-backed network gateways when
+	// UplinkState changes.
+	uplinkStateController *uplinkStateController
 
 	// Controller used to handle the admin policy based external route resources
 	apbExternalRouteController *apbroutecontroller.ExternalGatewayMasterController
@@ -246,6 +249,15 @@ func newDefaultNetworkControllerCommon(
 		svcController:              svcController,
 		gatewayTopologyFactory:     topology.NewGatewayTopologyFactory(cnci.nbClient),
 	}
+	if util.IsNetworkSegmentationSupportEnabled() {
+		oc.uplinkStateController = newUplinkStateController(
+			cnci.watchFactory.UplinkStateInformer(),
+			networkManager,
+			nodeReconciler,
+			routeImportManager,
+			cnci.zone,
+		)
+	}
 	// Allocate IPs for logical router port "GwRouterToJoinSwitchPrefix + OVNClusterRouter". This should always
 	// allocate the first IPs in the join switch subnets.
 	gwLRPIfAddrs, err := oc.getOVNClusterRouterPortToJoinSwitchIfAddrs()
@@ -358,6 +370,9 @@ func (oc *DefaultNetworkController) Stop() {
 	}
 	if oc.networkConnectController != nil {
 		oc.networkConnectController.Stop()
+	}
+	if oc.uplinkStateController != nil {
+		oc.uplinkStateController.Stop()
 	}
 
 	close(oc.stopChan)
@@ -669,6 +684,11 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 	// https://github.com/ovn-kubernetes/ovn-kubernetes/pull/859
 	if err := WithSyncDurationMetric("node", oc.startNodeReconciliation); err != nil {
 		return err
+	}
+	if oc.uplinkStateController != nil {
+		if err := WithSyncDurationMetric("uplink state", oc.uplinkStateController.Start); err != nil {
+			return err
+		}
 	}
 
 	startSvc := time.Now()
@@ -1037,6 +1057,9 @@ func (h *defaultNetworkControllerEventHandler) AddResource(obj interface{}, from
 		if fromRetryLoop {
 			_, shouldSyncReroute = h.oc.syncEIPNodeRerouteFailed.Load(node.Name)
 			_, shouldSyncEIPNode = h.oc.syncEIPNodeFailed.Load(node.Name)
+			// addEgressNode runs after the reroute setup, so a reroute failure
+			// means that the egress node setup was never attempted.
+			shouldSyncEIPNode = shouldSyncEIPNode || shouldSyncReroute
 		}
 
 		if shouldSyncReroute {
@@ -1116,16 +1139,19 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		h.oc.eIPC.nodeZoneState.Store(newNode.Name, h.oc.isLocalZoneNode(newNode))
 		h.oc.eIPC.nodeZoneState.UnlockKey(newNode.Name)
 
-		_, syncEIPNodeRerouteFailed := h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
+		_, rerouteRetryPending := h.oc.syncEIPNodeRerouteFailed.Load(newNode.Name)
+		newNodeIsLocal := h.oc.isLocalZoneNode(newNode)
+		nodeBecameLocal := !h.oc.isLocalZoneNode(oldNode) && newNodeIsLocal
 
 		// node moved from remote -> local or previously failed reroute config
-		if (!h.oc.isLocalZoneNode(oldNode) || syncEIPNodeRerouteFailed) && h.oc.isLocalZoneNode(newNode) {
+		if nodeBecameLocal || (rerouteRetryPending && newNodeIsLocal) {
 			if err := h.oc.eIPC.ensureDefaultNoRerouteQoSRules(newNode.Name); err != nil {
+				h.oc.syncEIPNodeRerouteFailed.Store(newNode.Name, true)
 				return err
 			}
 		}
 		// update the nodeIP in the default-reRoute (102 priority) destination address-set
-		if syncEIPNodeRerouteFailed || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
+		if rerouteRetryPending || util.NodeHostCIDRsAnnotationChanged(oldNode, newNode) {
 			klog.Infof("Egress IP detected IP address change for node %s. Updating no re-route policies", newNode.Name)
 			err := h.oc.eIPC.ensureDefaultNoRerouteNodePolicies()
 			if err != nil {
@@ -1136,7 +1162,7 @@ func (h *defaultNetworkControllerEventHandler) UpdateResource(oldObj, newObj int
 		}
 
 		_, syncEIPNodeFailed := h.oc.syncEIPNodeFailed.Load(newNode.Name)
-		if syncEIPNodeFailed {
+		if syncEIPNodeFailed || rerouteRetryPending || nodeBecameLocal {
 			err := h.oc.eIPC.addEgressNode(newNode)
 			if err != nil {
 				h.oc.syncEIPNodeFailed.Store(newNode.Name, true)

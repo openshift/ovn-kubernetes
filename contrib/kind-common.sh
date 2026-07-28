@@ -70,7 +70,7 @@ set_common_default_params() {
   KIND_CREATE=${KIND_CREATE:-true}
   KIND_IMAGE=${KIND_IMAGE:-kindest/node}
   KIND_CLUSTER_NAME=${KIND_CLUSTER_NAME:-ovn}
-  K8S_VERSION=${K8S_VERSION:-v1.35.0}
+  K8S_VERSION=${K8S_VERSION:-v1.36.2}
   KIND_SETTLE_DURATION=${KIND_SETTLE_DURATION:-30}
   KIND_CONFIG=${KIND_CONFIG:-${DIR}/kind.yaml.j2}
   KIND_LOCAL_REGISTRY=${KIND_LOCAL_REGISTRY:-false}
@@ -91,11 +91,20 @@ set_common_default_params() {
 
   # Image/source code params
   OVN_IMAGE=${OVN_IMAGE:-local}
+  OVN_IMAGE_FAMILY=${OVN_IMAGE_FAMILY:-fedora}
   OVN_REPO=${OVN_REPO:-""}
   OVN_GITREF=${OVN_GITREF:-""}
   # Pods to force-delete on --deploy so they respawn with the kind-loaded image.
   # ovs-node excluded: restarting it under live ovnkube-node pods breaks the cluster.
   OVN_DEPLOY_PODS=${OVN_DEPLOY_PODS:-"ovnkube-identity ovnkube-control-plane ovnkube-node"}
+  case "${OVN_IMAGE_FAMILY}" in
+    fedora|ubuntu)
+      ;;
+    *)
+      echo "Unsupported OVN image family: ${OVN_IMAGE_FAMILY}"
+      exit 1
+      ;;
+  esac
 
   # Subnet params
   # Input not currently validated. Modify outside script at your own risk.
@@ -130,6 +139,11 @@ set_common_default_params() {
   OVN_HA=${OVN_HA:-false}
   OVN_GATEWAY_MODE=${OVN_GATEWAY_MODE:-shared}
   OVN_SECOND_BRIDGE=${OVN_SECOND_BRIDGE:-false}
+  OVN_UPLINK_BRIDGE=${OVN_UPLINK_BRIDGE:-false}
+  OVN_UPLINK_BRIDGE_NAME=${OVN_UPLINK_BRIDGE_NAME:-ovsbr1}
+  OVN_UPLINK_NETWORK_NAME=${OVN_UPLINK_NETWORK_NAME:-uplink}
+  OVN_UPLINK_NETWORK_IPV4=${OVN_UPLINK_NETWORK_IPV4:-172.28.0.0/16}
+  OVN_UPLINK_NETWORK_IPV6=${OVN_UPLINK_NETWORK_IPV6:-fc00:f853:ccd:e800::/64}
   OVN_DISABLE_SNAT_MULTIPLE_GWS=${OVN_DISABLE_SNAT_MULTIPLE_GWS:-false}
   OVN_DISABLE_FORWARDING=${OVN_DISABLE_FORWARDING:-false}
   OVN_UNPRIVILEGED_MODE=${OVN_UNPRIVILEGED_MODE:-false}
@@ -231,6 +245,10 @@ set_common_default_params() {
     echo "EVPN requires local gateway mode (-gm local)"
     exit 1
   fi
+  if [ "$OVN_UPLINK_BRIDGE" == true ] && [ "${DPU_MODE:-none}" != "none" ]; then
+    echo "Uplink bridge provisioning is supported only for regular KIND deployments"
+    exit 1
+  fi
   
 
   ENABLE_NO_OVERLAY=${ENABLE_NO_OVERLAY:-false}
@@ -262,10 +280,11 @@ set_common_default_params() {
 }
 
 set_ovn_image() {
+  local ovn_image_repo="ovn-daemonset-${OVN_IMAGE_FAMILY}"
   if [ "${KIND_LOCAL_REGISTRY:-false}" == true ]; then
-    OVN_IMAGE="localhost:5000/ovn-daemonset-fedora:latest"
+    OVN_IMAGE="localhost:5000/${ovn_image_repo}:latest"
   else
-    OVN_IMAGE="localhost/ovn-daemonset-fedora:dev"
+    OVN_IMAGE="localhost/${ovn_image_repo}:dev"
   fi
 }
 
@@ -309,6 +328,7 @@ EOF
 }
 
 build_ovn_image() {
+  local build_target="${OVN_IMAGE_FAMILY}-image"
   local push_args=""
   if [ "$OCI_BIN" == "podman" ]; then
     # docker doesn't perform tls check by default only podman does, hence we need to disable it for podman.
@@ -319,7 +339,7 @@ build_ovn_image() {
     set_ovn_image
 
     # Build image
-    make -C ${DIR}/../dist/images IMAGE="${OVN_IMAGE}" OVN_REPO="${OVN_REPO}" OVN_GITREF="${OVN_GITREF}" OCI_BIN="${OCI_BIN}" fedora-image
+    make -C ${DIR}/../dist/images IMAGE="${OVN_IMAGE}" OVN_REPO="${OVN_REPO}" OVN_GITREF="${OVN_GITREF}" OCI_BIN="${OCI_BIN}" "${build_target}"
 
     # store in local registry
     if [ "$KIND_LOCAL_REGISTRY" == true ];then
@@ -440,6 +460,289 @@ docker_create_second_interface() {
   for n in $KIND_NODES; do
     "$OCI_BIN" network connect xgw "$n"
   done
+}
+
+kind_uplink_network_value() {
+  local container=$1
+  local field=$2
+
+  "$OCI_BIN" inspect "$container" | jq -r \
+    --arg network "${OVN_UPLINK_NETWORK_NAME}" \
+    --arg field "$field" \
+    '.[0].NetworkSettings.Networks[$network][$field] // empty'
+}
+
+oci_network_subnets() {
+  local network=$1
+
+  "$OCI_BIN" network inspect "$network" | jq -r '
+    .[0] as $network |
+    [
+      $network.IPAM.Config[]?.Subnet,
+      $network.subnets[]?.subnet
+    ] | map(select(. != null and . != "")) | .[]
+  '
+}
+
+validate_uplink_network_subnets() {
+  local network=$1
+  local existing_subnets subnet missing_subnets unexpected_subnets
+
+  if ! existing_subnets=$(oci_network_subnets "$network" | sort -u); then
+    echo "failed to inspect OCI network ${network}" >&2
+    exit 1
+  fi
+
+  for subnet in "${OVN_UPLINK_NETWORK_IPV4}" "${OVN_UPLINK_NETWORK_IPV6}"; do
+    if ! printf '%s\n' "$existing_subnets" | grep -Fxq "$subnet"; then
+      missing_subnets="${missing_subnets} ${subnet}"
+    fi
+  done
+
+  while IFS= read -r subnet; do
+    case "$subnet" in
+    ""|"${OVN_UPLINK_NETWORK_IPV4}"|"${OVN_UPLINK_NETWORK_IPV6}")
+      ;;
+    *)
+      unexpected_subnets="${unexpected_subnets} ${subnet}"
+      ;;
+    esac
+  done <<< "$existing_subnets"
+
+  if [ -n "${missing_subnets}" ] || [ -n "${unexpected_subnets}" ]; then
+    echo "OCI network ${network} subnets do not match expected Uplink subnets" >&2
+    echo "Expected subnets: ${OVN_UPLINK_NETWORK_IPV4} ${OVN_UPLINK_NETWORK_IPV6}" >&2
+    echo "Existing subnets: ${existing_subnets}" >&2
+    exit 1
+  fi
+}
+
+ensure_uplink_network() {
+  if "$OCI_BIN" network inspect "${OVN_UPLINK_NETWORK_NAME}" >/dev/null 2>&1; then
+    validate_uplink_network_subnets "${OVN_UPLINK_NETWORK_NAME}"
+    return
+  fi
+
+  "$OCI_BIN" network create --ipv6 --driver=bridge "${OVN_UPLINK_NETWORK_NAME}" \
+    --subnet="${OVN_UPLINK_NETWORK_IPV4}" \
+    --subnet="${OVN_UPLINK_NETWORK_IPV6}"
+}
+
+docker_create_uplink_interface() {
+  echo "adding Uplink interfaces to nodes"
+
+  ensure_uplink_network
+
+  KIND_NODES=$(kind_get_nodes)
+  for n in $KIND_NODES; do
+    if [ -z "$(kind_uplink_network_value "$n" IPAddress)" ]; then
+      "$OCI_BIN" network connect "${OVN_UPLINK_NETWORK_NAME}" "$n"
+    fi
+  done
+}
+
+disable_bridge_netfilter() {
+  echo "disabling bridge netfilter for KIND container bridge networks"
+
+  sudo modprobe br_netfilter || true
+  for sysctl_name in \
+    net.bridge.bridge-nf-call-iptables \
+    net.bridge.bridge-nf-call-ip6tables; do
+    if sysctl -n "${sysctl_name}" >/dev/null 2>&1; then
+      sudo sysctl -w "${sysctl_name}=0"
+    fi
+  done
+}
+
+find_kind_uplink_interface() {
+  local node=$1
+  local ip iface
+
+  ip=$(kind_uplink_network_value "$node" IPAddress)
+  if [ -n "$ip" ]; then
+    iface=$("$OCI_BIN" exec "$node" sh -c \
+      "ip -o -4 addr show | awk -v ip='${ip}' '\$4 ~ \"^\" ip \"/\" {print \$2; exit}'")
+    if [ -n "$iface" ]; then
+      echo "$iface"
+      return 0
+    fi
+  fi
+
+  ip=$(kind_uplink_network_value "$node" GlobalIPv6Address)
+  if [ -n "$ip" ]; then
+    iface=$("$OCI_BIN" exec "$node" sh -c \
+      "ip -o -6 addr show | awk -v ip='${ip}' '\$4 ~ \"^\" ip \"/\" {print \$2; exit}'")
+    if [ -n "$iface" ]; then
+      echo "$iface"
+      return 0
+    fi
+  fi
+
+  echo "failed to find node interface for network ${OVN_UPLINK_NETWORK_NAME} on ${node}" >&2
+  return 1
+}
+
+configure_kind_uplink_bridge() {
+  echo "configuring unmanaged Uplink bridge ${OVN_UPLINK_BRIDGE_NAME}"
+
+  KIND_NODES=$(kind_get_nodes)
+  for n in $KIND_NODES; do
+    local iface pod
+    iface=$(find_kind_uplink_interface "$n")
+    pod=$(kubectl -n ovn-kubernetes get pod \
+      -l app=ovnkube-node \
+      --field-selector "spec.nodeName=${n}" \
+      -o jsonpath='{.items[0].metadata.name}')
+    if [ -z "$pod" ]; then
+      echo "failed to find ovnkube-node pod on ${n}" >&2
+      return 1
+    fi
+    local existing_iface
+    existing_iface=$(kubectl -n ovn-kubernetes exec "$pod" -c ovn-controller -- \
+      ovs-vsctl br-get-external-id "${OVN_UPLINK_BRIDGE_NAME}" bridge-uplink 2>/dev/null || true)
+    if [ -n "$existing_iface" ]; then
+      iface=$existing_iface
+    fi
+    kubectl -n ovn-kubernetes exec "$pod" -c ovn-controller -- \
+      ovs-vsctl --may-exist add-br "${OVN_UPLINK_BRIDGE_NAME}"
+    kubectl -n ovn-kubernetes exec "$pod" -c ovn-controller -- \
+      ovs-vsctl --may-exist add-port "${OVN_UPLINK_BRIDGE_NAME}" "$iface"
+    kubectl -n ovn-kubernetes exec "$pod" -c ovn-controller -- \
+      ovs-vsctl br-set-external-id "${OVN_UPLINK_BRIDGE_NAME}" bridge-uplink "$iface"
+    "$OCI_BIN" exec "$n" sh -c 'bridge=$1; iface=$2; ip link set dev "$bridge" up;
+      for addr in $(ip -o -4 addr show dev "$iface" scope global | awk "{print \$4}"); do
+        ip addr add "$addr" dev "$bridge" 2>/dev/null || true;
+        ip addr del "$addr" dev "$iface" 2>/dev/null || true;
+      done;
+      for addr in $(ip -o -6 addr show dev "$iface" scope global | awk "{print \$4}"); do
+        ip addr add "$addr" dev "$bridge" 2>/dev/null || true;
+        ip addr del "$addr" dev "$iface" 2>/dev/null || true;
+      done' sh "${OVN_UPLINK_BRIDGE_NAME}" "$iface"
+    echo "Uplink nodeConfig: node=${n} hostInterfaceName=${OVN_UPLINK_BRIDGE_NAME} bridge=${OVN_UPLINK_BRIDGE_NAME} bridgeUplink=${iface}"
+  done
+}
+
+configure_frr_uplink_receive_config() {
+  local frr_uplink_ipv4=$1
+  local frr_uplink_ipv6=$2
+  local receive_file
+  local kubectl_cmd=(kubectl)
+
+  if [ -z "${frr_uplink_ipv4}" ] && [ -z "${frr_uplink_ipv6}" ]; then
+    echo "external FRR has no IP address on ${OVN_UPLINK_NETWORK_NAME}" >&2
+    return 1
+  fi
+  if frr_k8s_remote_enabled; then
+    kubectl_cmd=(kubectl --kubeconfig "$(frr_k8s_host_kubeconfig)")
+  fi
+
+  receive_file=$(mktemp)
+  {
+    echo "apiVersion: frrk8s.metallb.io/v1beta1"
+    echo "kind: FRRConfiguration"
+    echo "metadata:"
+    echo "  name: uplink-receive-all"
+    echo "  labels:"
+    echo "    name: uplink-receive-all"
+    echo "spec:"
+    echo "  bgp:"
+    echo "    routers:"
+    echo "    - asn: 64512"
+    echo "      neighbors:"
+    if [ -n "${frr_uplink_ipv4}" ]; then
+      echo "      - address: ${frr_uplink_ipv4}"
+      echo "        asn: 64512"
+      echo "        disableMP: true"
+      echo "        toReceive:"
+      echo "          allowed:"
+      echo "            mode: filtered"
+      echo "            prefixes:"
+      echo "            - prefix: ${BGP_SERVER_NET_SUBNET_IPV4}"
+    fi
+    if [ "$PLATFORM_IPV6_SUPPORT" == true ] && [ -n "${frr_uplink_ipv6}" ]; then
+      echo "      - address: ${frr_uplink_ipv6}"
+      echo "        asn: 64512"
+      echo "        disableMP: true"
+      echo "        toReceive:"
+      echo "          allowed:"
+      echo "            mode: filtered"
+      echo "            prefixes:"
+      echo "            - prefix: ${BGP_SERVER_NET_SUBNET_IPV6}"
+    fi
+  } > "${receive_file}"
+
+  "${kubectl_cmd[@]}" apply -n frr-k8s-system -f "${receive_file}"
+  rm -f "${receive_file}"
+  echo "Uplink FRRConfiguration selector: name=uplink-receive-all"
+}
+
+configure_frr_uplink_peers() {
+  if [ "$OVN_UPLINK_BRIDGE" != true ] ||
+     [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ] ||
+     [ "$ENABLE_NO_OVERLAY_MANAGED_ROUTING" == true ] ||
+     [ "${DPU_MODE:-none}" == "host" ]; then
+    return
+  fi
+
+  echo "configuring external FRR for Uplink network ${OVN_UPLINK_NETWORK_NAME}"
+  "$OCI_BIN" network connect "${OVN_UPLINK_NETWORK_NAME}" frr || true
+
+  local attempts=0
+  while ! "$OCI_BIN" exec frr vtysh -c "show daemons" >/dev/null 2>&1; do
+    if (( ++attempts > 30 )); then
+      echo "error: FRR daemons did not become ready for Uplink peering" >&2
+      return 1
+    fi
+    sleep 1
+  done
+
+  local frr_uplink_ipv4 frr_uplink_ipv6
+  frr_uplink_ipv4=$(kind_uplink_network_value frr IPAddress)
+  frr_uplink_ipv6=$(kind_uplink_network_value frr GlobalIPv6Address)
+
+  local ipv4_neighbors=()
+  local ipv6_neighbors=()
+  local node_ip
+  KIND_NODES=$(kind_get_nodes)
+  for n in $KIND_NODES; do
+    node_ip=$(kind_uplink_network_value "$n" IPAddress)
+    if [ -n "${node_ip}" ]; then
+      ipv4_neighbors+=("${node_ip}")
+    fi
+    if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
+      node_ip=$(kind_uplink_network_value "$n" GlobalIPv6Address)
+      if [ -n "${node_ip}" ]; then
+        ipv6_neighbors+=("${node_ip}")
+      fi
+    fi
+  done
+
+  local vtysh_cmds=(-c "configure terminal" -c "router bgp 64512")
+  for node_ip in "${ipv4_neighbors[@]}" "${ipv6_neighbors[@]}"; do
+    vtysh_cmds+=(-c "neighbor ${node_ip} remote-as 64512")
+  done
+  if ((${#ipv4_neighbors[@]} > 0)); then
+    vtysh_cmds+=(-c "address-family ipv4 unicast")
+    for node_ip in "${ipv4_neighbors[@]}"; do
+      vtysh_cmds+=(-c "neighbor ${node_ip} activate")
+      vtysh_cmds+=(-c "neighbor ${node_ip} route-reflector-client")
+    done
+    vtysh_cmds+=(-c "exit-address-family")
+  fi
+  if ((${#ipv6_neighbors[@]} > 0)); then
+    vtysh_cmds+=(-c "address-family ipv6 unicast")
+    for node_ip in "${ipv6_neighbors[@]}"; do
+      vtysh_cmds+=(-c "neighbor ${node_ip} activate")
+      vtysh_cmds+=(-c "neighbor ${node_ip} route-reflector-client")
+    done
+    vtysh_cmds+=(-c "exit-address-family")
+  fi
+  vtysh_cmds+=(-c "end" -c "write memory")
+  "$OCI_BIN" exec frr vtysh "${vtysh_cmds[@]}"
+
+  "$OCI_BIN" exec frr ip route delete default || true
+  "$OCI_BIN" exec frr ip -6 route delete default || true
+  configure_frr_uplink_receive_config "${frr_uplink_ipv4}" "${frr_uplink_ipv6}"
 }
 
 check_ipv6() {
@@ -583,7 +886,8 @@ align_metallb_pool_with_ip_family() {
 }
 
 install_metallb() {
-  local metallb_version=v0.15.3
+  local metallb_version=v0.16.1
+  local metallb_upstream_frr_image=quay.io/frrouting/frr:10.5.3
   mkdir -p /tmp/metallb
   local builddir
   builddir=$(mktemp -d "${METALLB_DIR}/XXXXXX")
@@ -602,21 +906,22 @@ install_metallb() {
     'kind_path = os.path.join(build_path, "kind")' \
     'kind_path = "kind"'
 
-  # MetalLB v0.15.3 still pins its in-cluster FRR speaker containers to 10.4.1.
-  # Keep the pinned upstream string for patching, but replace the actual
-  # deployed image so CI exercises the same FRR build as the rest of our BGP
-  # setup and coredump debugging.
+  # MetalLB v0.16.1 manifests reference FRR 10.5.3. CI uses
+  # FRR_DEPLOYED_IMAGE for BGP tests, so replace that exact upstream value in
+  # the MetalLB manifests. Matching the exact upstream value is intentional
+  # because if a future MetalLB release changes its FRR image, this script
+  # should fail instead of silently leaving MetalLB on an unexpected FRR version.
   replace_in_file_or_exit \
     config/frr/speaker-patch.yaml \
-    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${metallb_upstream_frr_image}" \
     "${FRR_DEPLOYED_IMAGE}"
   replace_in_file_or_exit \
     config/manifests/metallb-frr.yaml \
-    "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+    "${metallb_upstream_frr_image}" \
     "${FRR_DEPLOYED_IMAGE}"
   replace_in_file_or_exit \
     charts/metallb/values.yaml \
-    "tag: ${FRR_K8S_UPSTREAM_FRR_IMAGE##*:}" \
+    "tag: ${metallb_upstream_frr_image##*:}" \
     "tag: ${FRR_DEPLOYED_IMAGE##*:}"
 
   pip install -r dev-env/requirements.txt
@@ -632,6 +937,17 @@ install_metallb() {
     ip_family="ipv4"
     ipv6_network=""
   fi
+  # The dev-env BGP backend is selected with -b. MetalLB v0.16.1 can default
+  # that path to frr-k8s, which runs FRR through in-cluster frr-k8s resources
+  # instead of the standalone dev-env container named frr. The service and
+  # network-segmentation e2e setup below still connects clientnet to that frr
+  # container and relies on its external routes. Keep -b frr explicit so this
+  # Kubernetes 1.36 compatibility update only changes the MetalLB release and
+  # does not also change the BGP datapath used by those tests.
+  #
+  # TODO: Move this path to frr-k8s in a separate change after validating the
+  # service and network-segmentation e2e setup against the in-cluster frr-k8s
+  # backend.
   # Override GOBIN until https://github.com/metallb/metallb/issues/2218 is fixed.
   GOBIN="" inv dev-env -n ovn -b frr -p bgp -i "${ip_family}"
 
@@ -1213,8 +1529,8 @@ get_kubevirt_release_url() {
 
 readonly FRR_K8S_VERSION=v0.0.0-20260603082256-b43efcb206be
 readonly FRR_K8S_GIT_REF=b43efcb206be
-readonly FRR_K8S_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.1
-readonly FRR_K8S_ALL_IN_ONE_UPSTREAM_FRR_IMAGE=quay.io/frrouting/frr:10.4.3
+readonly FRR_K8S_PATCHED_DEMO_FRR_IMAGE=quay.io/frrouting/frr:10.4.1
+readonly FRR_K8S_ALL_IN_ONE_FRR_IMAGE=quay.io/frrouting/frr:10.4.3
 readonly FRR_DEPLOYED_IMAGE=quay.io/frrouting/frr:10.6.0
 # Override to test newer FRR builds in the in-cluster frr-k8s daemonset
 # without changing the pinned frr-k8s release.
@@ -1242,24 +1558,11 @@ clone_frr() {
     sed -i 's|quay.io/frrouting/frr:10.4.3|quay.io/frrouting/frr:9.1.0|g' hack/demo/demo.sh
     git apply ../patches/*
 
-    # The upstream frr-k8s demo.sh hardcodes quay.io/frrouting/frr:9.1.0,
-    # which crashes on musl libc (Alpine) due to a race condition in
-    # pthread_setname_np during BGP keepalive thread startup
-    # (https://github.com/FRRouting/frr/issues/15699, fixed in FRR 10.1 by
-    # https://github.com/FRRouting/frr/pull/15714).
-    #
-    # Bump to 10.4.1 for upstream demo was posted here: https://github.com/metallb/frr-k8s/pull/404
-    # We bump further to 10.6.0 to include additional fixes for EVPN and coredumps:
-    # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3907335193
-    # https://github.com/ovn-kubernetes/ovn-kubernetes/pull/5874#issuecomment-3898408592
-    # https://github.com/FRRouting/frr/pull/20496
-    #
-    # Note: 10.6.0 carries the bfdd coredump fix:
-    # https://github.com/FRRouting/frr/pull/19822
-    # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6299
+    # The OVN-K demo patch changes the external demo router image to 10.4.1.
+    # Replace that patched image with the FRR version configured by this script.
     replace_in_file_or_exit \
       hack/demo/demo.sh \
-      "${FRR_K8S_UPSTREAM_FRR_IMAGE}" \
+      "${FRR_K8S_PATCHED_DEMO_FRR_IMAGE}" \
       "${FRR_EXTERNAL_DEMO_IMAGE}"
 
     popd
@@ -1481,9 +1784,24 @@ install_frr_k8s() {
   sed -i 's|gcr.io/kubebuilder/kube-rbac-proxy|registry.k8s.io/kubebuilder/kube-rbac-proxy|g' \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml
 
+  # This BGP e2e setup uses two FRR containers:
+  # 1. The external FRR test router from hack/demo/demo.sh. clone_frr()
+  #    patches that image to FRR_EXTERNAL_DEMO_IMAGE.
+  # 2. The in-cluster frr-k8s daemonset from config/all-in-one/frr-k8s.yaml.
+  #    Patch that manifest here because clone_frr() does not update it.
+  #
+  # In regular PR e2e jobs where nobody sets a custom FRR_K8S_FRR_IMAGE
+  # environment variable, FRR_EXTERNAL_DEMO_IMAGE and FRR_K8S_FRR_IMAGE both
+  # resolve to FRR_DEPLOYED_IMAGE, so both containers use the same FRR build.
+  # FRR_K8S_FRR_IMAGE remains overrideable for tests that intentionally need a
+  # different in-cluster daemonset image.
+  #
+  # Match the manifest's current upstream image exactly. If the pinned frr-k8s
+  # manifest changes its FRR image, replace_in_file_or_exit fails and this
+  # override must be reviewed before it changes what CI deploys.
   replace_in_file_or_exit \
     "${FRR_TMP_DIR}"/frr-k8s/config/all-in-one/frr-k8s.yaml \
-    "${FRR_K8S_ALL_IN_ONE_UPSTREAM_FRR_IMAGE}" \
+    "${FRR_K8S_ALL_IN_ONE_FRR_IMAGE}" \
     "${FRR_K8S_FRR_IMAGE}"
 
   if [ "${bgp_port}" -ne 0 ]; then
@@ -1505,6 +1823,9 @@ install_frr_k8s() {
 }
 
 wait_for_frr_k8s() {
+  # The pinned frr-k8s all-in-one manifest runs the webhook-serving helper as
+  # deployment/frr-k8s-statuscleaner. Wait for it before tests create
+  # FRRConfiguration resources so admission does not race the install.
   if kubectl -n frr-k8s-system get deployment frr-k8s-statuscleaner >/dev/null 2>&1; then
     kubectl wait -n frr-k8s-system deployment frr-k8s-statuscleaner --for condition=Available --timeout 2m
   fi
