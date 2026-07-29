@@ -536,17 +536,19 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			return nil, err
 		}
 
-		wf.uplinkFactory = uplinkinformerfactory.NewSharedInformerFactory(ovnClientset.UplinkClient, resyncInterval)
-		wf.uplinkStateFactory = newUplinkStateSharedInformerFactory(ovnClientset.UplinkClient, nodeName)
-		wf.informers[UplinkType], err = newQueuedInformer(eventQueueSize, UplinkType,
-			wf.uplinkFactory.K8s().V1alpha1().Uplinks().Informer(), wf.stopChan, minNumEventQueues)
-		if err != nil {
-			return nil, err
-		}
-		wf.informers[UplinkStateType], err = newQueuedInformer(eventQueueSize, UplinkStateType,
-			wf.uplinkStateFactory.K8s().V1alpha1().UplinkStates().Informer(), wf.stopChan, minNumEventQueues)
-		if err != nil {
-			return nil, err
+		if util.IsUplinkEnabled() {
+			wf.uplinkFactory = uplinkinformerfactory.NewSharedInformerFactory(ovnClientset.UplinkClient, resyncInterval)
+			wf.uplinkStateFactory = newUplinkStateSharedInformerFactory(ovnClientset.UplinkClient, nodeName)
+			wf.informers[UplinkType], err = newQueuedInformer(eventQueueSize, UplinkType,
+				wf.uplinkFactory.K8s().V1alpha1().Uplinks().Informer(), wf.stopChan, minNumEventQueues)
+			if err != nil {
+				return nil, err
+			}
+			wf.informers[UplinkStateType], err = newQueuedInformer(eventQueueSize, UplinkStateType,
+				wf.uplinkStateFactory.K8s().V1alpha1().UplinkStates().Informer(), wf.stopChan, minNumEventQueues)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -690,13 +692,13 @@ func (wf *WatchFactory) Start() error {
 		}
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() && wf.uplinkFactory != nil {
+	if wf.uplinkFactory != nil {
 		wf.uplinkFactory.Start(wf.stopChan)
 		if err := waitForCacheSyncWithTimeout(wf.uplinkFactory, wf.stopChan); err != nil {
 			return err
 		}
 	}
-	if util.IsNetworkSegmentationSupportEnabled() && wf.uplinkStateFactory != nil {
+	if wf.uplinkStateFactory != nil {
 		wf.uplinkStateFactory.Start(wf.stopChan)
 		if err := waitForCacheSyncWithTimeout(wf.uplinkStateFactory, wf.stopChan); err != nil {
 			return err
@@ -976,19 +978,21 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 			return nil, err
 		}
 
-		wf.uplinkFactory = uplinkinformerfactory.NewSharedInformerFactory(ovnClientset.UplinkClient, resyncInterval)
-		wf.uplinkStateFactory = newUplinkStateSharedInformerFactory(ovnClientset.UplinkClient, nodeName)
-		wf.informers[UplinkType], err = newQueuedInformer(eventQueueSize,
-			UplinkType, wf.uplinkFactory.K8s().V1alpha1().Uplinks().Informer(),
-			wf.stopChan, minNumEventQueues)
-		if err != nil {
-			return nil, err
-		}
-		wf.informers[UplinkStateType], err = newQueuedInformer(eventQueueSize,
-			UplinkStateType, wf.uplinkStateFactory.K8s().V1alpha1().UplinkStates().Informer(),
-			wf.stopChan, minNumEventQueues)
-		if err != nil {
-			return nil, err
+		if util.IsUplinkEnabled() {
+			wf.uplinkFactory = uplinkinformerfactory.NewSharedInformerFactory(ovnClientset.UplinkClient, resyncInterval)
+			wf.uplinkStateFactory = newUplinkStateSharedInformerFactory(ovnClientset.UplinkClient, nodeName)
+			wf.informers[UplinkType], err = newQueuedInformer(eventQueueSize,
+				UplinkType, wf.uplinkFactory.K8s().V1alpha1().Uplinks().Informer(),
+				wf.stopChan, minNumEventQueues)
+			if err != nil {
+				return nil, err
+			}
+			wf.informers[UplinkStateType], err = newQueuedInformer(eventQueueSize,
+				UplinkStateType, wf.uplinkStateFactory.K8s().V1alpha1().UplinkStates().Informer(),
+				wf.stopChan, minNumEventQueues)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1181,19 +1185,21 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 
-		wf.uplinkFactory = uplinkinformerfactory.NewSharedInformerFactory(ovnClientset.UplinkClient, resyncInterval)
-		wf.uplinkStateFactory = newUplinkStateSharedInformerFactory(ovnClientset.UplinkClient, "")
-		wf.informers[UplinkType], err = newQueuedInformer(eventQueueSize,
-			UplinkType, wf.uplinkFactory.K8s().V1alpha1().Uplinks().Informer(),
-			wf.stopChan, minNumEventQueues)
-		if err != nil {
-			return nil, err
-		}
-		wf.informers[UplinkStateType], err = newQueuedInformer(eventQueueSize,
-			UplinkStateType, wf.uplinkStateFactory.K8s().V1alpha1().UplinkStates().Informer(),
-			wf.stopChan, minNumEventQueues)
-		if err != nil {
-			return nil, err
+		if util.IsUplinkEnabled() {
+			wf.uplinkFactory = uplinkinformerfactory.NewSharedInformerFactory(ovnClientset.UplinkClient, resyncInterval)
+			wf.uplinkStateFactory = newUplinkStateSharedInformerFactory(ovnClientset.UplinkClient, "")
+			wf.informers[UplinkType], err = newQueuedInformer(eventQueueSize,
+				UplinkType, wf.uplinkFactory.K8s().V1alpha1().Uplinks().Informer(),
+				wf.stopChan, minNumEventQueues)
+			if err != nil {
+				return nil, err
+			}
+			wf.informers[UplinkStateType], err = newQueuedInformer(eventQueueSize,
+				UplinkStateType, wf.uplinkStateFactory.K8s().V1alpha1().UplinkStates().Informer(),
+				wf.stopChan, minNumEventQueues)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		// make sure namespace informer cache is initialized and synced on Start().

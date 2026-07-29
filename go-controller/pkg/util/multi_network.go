@@ -975,8 +975,12 @@ func (nInfo *userDefinedNetInfo) EVPNIPVRFVID() int {
 	return nInfo.evpn.IPVRF.VID
 }
 
-// Uplink returns the Uplink resource selected by this network.
+// Uplink returns the Uplink resource selected by this network, or "" when the
+// Uplink feature is disabled so that uplink-specific handling is skipped.
 func (nInfo *userDefinedNetInfo) Uplink() string {
+	if !IsUplinkEnabled() {
+		return ""
+	}
 	return nInfo.uplink
 }
 
@@ -1958,6 +1962,10 @@ func IsNetworkSegmentationSupportEnabled() bool {
 
 func IsNetworkConnectEnabled() bool {
 	return IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableNetworkConnect
+}
+
+func IsUplinkEnabled() bool {
+	return IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableUplink
 }
 
 func IsRouteAdvertisementsEnabled() bool {
