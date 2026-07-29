@@ -185,11 +185,12 @@ func TestNewUnmanagedBridgeConfigurationResolvesDPUHostVFRepresentor(t *testing.
 	ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
 		OVSData: []libovsdbtest.TestData{
 			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{bridgeUUID}},
+			// No bridge-uplink external-id: the physical uplink must be derived
+			// by skipping the VF representors.
 			&vswitchd.Bridge{
-				UUID:        bridgeUUID,
-				Name:        "br-hostvf0",
-				Ports:       []string{uplinkPortUUID, vf0PortUUID, vf7PortUUID},
-				ExternalIDs: map[string]string{"bridge-uplink": "eth1"},
+				UUID:  bridgeUUID,
+				Name:  "br-hostvf0",
+				Ports: []string{uplinkPortUUID, vf0PortUUID, vf7PortUUID},
 			},
 			&vswitchd.Port{UUID: uplinkPortUUID, Name: "eth1", Interfaces: []string{uplinkInterfaceUUID}},
 			&vswitchd.Interface{UUID: uplinkInterfaceUUID, Name: "eth1", Type: "system"},

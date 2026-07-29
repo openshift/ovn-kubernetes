@@ -64,6 +64,12 @@ type DPUOps interface {
 	FindHostRepresentorByPeerMAC(ovsClient libovsdbclient.Client, bridge *vswitchd.Bridge, hostMAC net.HardwareAddr,
 		nodeName string) (string, error)
 
+	// IsHostFacingRepresentor reports whether netdev is a DPU-side representor
+	// of a host function (PF, VF or SF). Such representors can never be a
+	// bridge's physical uplink even though OVS reports them as system-type
+	// ports.
+	IsHostFacingRepresentor(netdev string) bool
+
 	// ResolveDeviceDetails returns PF and VF indices for a device identified
 	// by either a PCI address (e.g. "0000:03:00.2") or a netdev name
 	// (e.g. "eth0-1"). It is up to the implementation to interpret the deviceID
@@ -236,6 +242,15 @@ func hostPeerMACAddress(rep string, flavour sriovnet.PortFlavour) (net.HardwareA
 	return mac, nil
 }
 
+func (n *SwitchdevDPUOps) IsHostFacingRepresentor(netdev string) bool {
+	flavour, err := GetSriovnetOps().GetRepresentorPortFlavour(normalizeOVSName(netdev))
+	if err != nil {
+		return false
+	}
+	_, ok := hostFacingRepresentorFlavours[flavour]
+	return ok
+}
+
 func (n *SwitchdevDPUOps) ResolveDeviceDetails(deviceID string) (*NetworkDeviceDetails, error) {
 	if IsPCIDeviceName(deviceID) {
 		return GetNetworkDeviceDetails(deviceID)
@@ -403,6 +418,10 @@ func (s *SimulatedDPUOps) FindHostRepresentorByPeerMAC(
 	}
 	return "", fmt.Errorf("%w: no simulated representor on bridge %q peers with host MAC %s",
 		ErrHostRepresentorNotFound, bridgeName, hostMAC)
+}
+
+func (s *SimulatedDPUOps) IsHostFacingRepresentor(netdev string) bool {
+	return simulatedDPURepresentorIndex(normalizeOVSName(netdev)) >= 0
 }
 
 func normalizeOVSName(name string) string {

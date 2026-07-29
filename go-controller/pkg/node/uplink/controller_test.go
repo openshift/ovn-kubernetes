@@ -371,6 +371,87 @@ func TestResolveByHostMACReportsBridgeNotFound(t *testing.T) {
 		"the total miss must surface as BridgeNotFound")
 }
 
+func TestBridgeUplinkIgnoresHostRepresentorsOnDPU(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	resolver := newDPUBridgeResolverHarness(t)
+
+	// br-vm holds the physical port p1 plus two VF representors, all
+	// system-type in OVS. Without filtering out the representors the uplink
+	// would be ambiguous and fall back to the useless "br"-prefix heuristic.
+	uplinkName, err := resolver.BridgeUplink("br-vm")
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "deriving br-vm's uplink must succeed once VF representors are ignored")
+	g.Expect(uplinkName).To(gomega.Equal("p1"), "br-vm's only non-representor system port is p1")
+
+	uplinkName, err = resolver.BridgeUplink("br-host")
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "deriving br-host's uplink must succeed once the PF representor is ignored")
+	g.Expect(uplinkName).To(gomega.Equal("p0"), "br-host's only non-representor system port is p0")
+}
+
+func TestBridgeUplinkRejectsRepresentorOnlyBridgeOnDPU(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-hostvf0-uuid"}},
+			&vswitchd.Bridge{UUID: "br-hostvf0-uuid", Name: "br-hostvf0", Ports: []string{"pf0vf7-port-uuid"}},
+			&vswitchd.Port{UUID: "pf0vf7-port-uuid", Name: "pf0vf7", Interfaces: []string{"pf0vf7-iface-uuid"}},
+			&vswitchd.Interface{UUID: "pf0vf7-iface-uuid", Name: "pf0vf7", Type: "system"},
+		},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(testCtx.Cleanup)
+
+	sriovOps := utilmocks.NewSriovnetOps(t)
+	origSriovOps := util.GetSriovnetOps()
+	util.SetSriovnetOpsInst(sriovOps)
+	t.Cleanup(func() {
+		util.SetSriovnetOpsInst(origSriovOps)
+	})
+	sriovOps.On("GetRepresentorPortFlavour", "pf0vf7").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_VF), nil)
+
+	// A bridge whose only system-type port is a VF representor has no physical
+	// uplink; it must not silently pass validation with the representor itself
+	// selected as the uplink.
+	_, err = (defaultOVSBridgeResolver{ovsClient: ovsClient}).BridgeUplink("br-hostvf0")
+	g.Expect(err).To(gomega.HaveOccurred(), "a representor-only bridge must not resolve an uplink")
+	g.Expect(discoveryReason(err)).To(gomega.Equal(uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound),
+		"the failure must surface as BridgeUplinkNotFound")
+}
+
+func TestBridgeUplinkFallsBackToExternalIDForBondPort(t *testing.T) {
+	g := gomega.NewWithT(t)
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-bond-uuid"}},
+			&vswitchd.Bridge{
+				UUID: "br-bond-uuid", Name: "br-bond", Ports: []string{"bond0-port-uuid"},
+				ExternalIDs: map[string]string{"bridge-uplink": "eth0"},
+			},
+			&vswitchd.Port{UUID: "bond0-port-uuid", Name: "bond0", Interfaces: []string{"eth0-iface-uuid", "eth1-iface-uuid"}},
+			&vswitchd.Interface{UUID: "eth0-iface-uuid", Name: "eth0", Type: "system"},
+			&vswitchd.Interface{UUID: "eth1-iface-uuid", Name: "eth1", Type: "system"},
+		},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "failed to build the OVS test harness for the bond bridge")
+	t.Cleanup(testCtx.Cleanup)
+
+	// bond0 is the bridge's only system-type port, but it has no same-named
+	// Interface row, so it cannot be the uplink itself; the resolver must
+	// fall back to the bridge-uplink external-id.
+	uplinkName, err := (defaultOVSBridgeResolver{ovsClient: ovsClient}).BridgeUplink("br-bond")
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "a bond bridge with bridge-uplink set must resolve")
+	g.Expect(uplinkName).To(gomega.Equal("eth0"), "the bridge-uplink external-id must be used for a bond port")
+}
+
 func TestNodeUplinkControllerPublishesResolvedState(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())

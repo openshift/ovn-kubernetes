@@ -654,6 +654,10 @@ func gatewayReady(patchPort string) bool {
 	return true
 }
 
+// getIntfName returns the physical uplink interface of the gateway OVS bridge
+// gatewayIntf, as derived by util.GetNicName (external-ids:bridge-uplink,
+// single system-type port, or the "br<nic>" name convention), and verifies
+// that the result is plugged into OVS (has an ofport).
 func getIntfName(ovsClient libovsdbclient.Client, gatewayIntf string) (string, error) {
 	// The given (or autodetected) interface is an OVS bridge and this could be
 	// created by us using util.NicToBridge() or it was pre-created by the user.
