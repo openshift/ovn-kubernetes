@@ -218,6 +218,12 @@ set_common_default_params() {
     exit 1
   fi
 
+  ENABLE_UPLINK=${ENABLE_UPLINK:-false}
+  if [[ $ENABLE_UPLINK == true && $ENABLE_NETWORK_SEGMENTATION != true ]]; then
+    echo "Uplink requires network-segmentation to be enabled (-nse)"
+    exit 1
+  fi
+
   DYNAMIC_UDN_ALLOCATION=${DYNAMIC_UDN_ALLOCATION:-false}
   if [[ $DYNAMIC_UDN_ALLOCATION == true && $ENABLE_NETWORK_SEGMENTATION != true ]]; then
       echo "Dynamic UDN allocation requires network-segmentation to be enabled (-nse)"
