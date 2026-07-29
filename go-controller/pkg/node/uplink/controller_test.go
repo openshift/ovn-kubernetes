@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
 
@@ -198,6 +199,176 @@ func TestDefaultOVSBridgeResolverResolvesSmartNICRepresentor(t *testing.T) {
 	bridgeName, err := (defaultOVSBridgeResolver{ovsClient: ovsClient}).Resolve("pf0vf1")
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(bridgeName).To(gomega.Equal("ovsbr1"))
+}
+
+// newDPUBridgeResolverHarness models a BlueField style DPU: br-host carries the
+// host PF representor that backs the default gateway bridge, br-vm carries host
+// VF representors, and br-int is the OVN integration bridge.
+func newDPUBridgeResolverHarness(t *testing.T) defaultOVSBridgeResolver {
+	t.Helper()
+	g := gomega.NewWithT(t)
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+
+	ovsData := []libovsdbtest.TestData{
+		&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-int-uuid", "br-host-uuid", "br-vm-uuid"}},
+		&vswitchd.Bridge{UUID: "br-int-uuid", Name: "br-int", Ports: []string{"mp0-port-uuid"}},
+		&vswitchd.Port{UUID: "mp0-port-uuid", Name: "ovn-k8s-mp0", Interfaces: []string{"mp0-iface-uuid"}},
+		&vswitchd.Interface{UUID: "mp0-iface-uuid", Name: "ovn-k8s-mp0"},
+
+		&vswitchd.Bridge{UUID: "br-host-uuid", Name: "br-host", Ports: []string{"p0-port-uuid", "pf0hpf-port-uuid"}},
+		&vswitchd.Port{UUID: "p0-port-uuid", Name: "p0", Interfaces: []string{"p0-iface-uuid"}},
+		&vswitchd.Interface{UUID: "p0-iface-uuid", Name: "p0", Type: "system"},
+		&vswitchd.Port{UUID: "pf0hpf-port-uuid", Name: "pf0hpf", Interfaces: []string{"pf0hpf-iface-uuid"}},
+		&vswitchd.Interface{UUID: "pf0hpf-iface-uuid", Name: "pf0hpf", Type: "system"},
+
+		&vswitchd.Bridge{UUID: "br-vm-uuid", Name: "br-vm", Ports: []string{"p1-port-uuid", "pf0vf0-port-uuid", "pf0vf7-port-uuid"}},
+		&vswitchd.Port{UUID: "p1-port-uuid", Name: "p1", Interfaces: []string{"p1-iface-uuid"}},
+		&vswitchd.Interface{UUID: "p1-iface-uuid", Name: "p1", Type: "system"},
+		&vswitchd.Port{UUID: "pf0vf0-port-uuid", Name: "pf0vf0", Interfaces: []string{"pf0vf0-iface-uuid"}},
+		&vswitchd.Interface{UUID: "pf0vf0-iface-uuid", Name: "pf0vf0", Type: "system"},
+		&vswitchd.Port{UUID: "pf0vf7-port-uuid", Name: "pf0vf7", Interfaces: []string{"pf0vf7-iface-uuid"}},
+		&vswitchd.Interface{UUID: "pf0vf7-iface-uuid", Name: "pf0vf7", Type: "system"},
+	}
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: ovsData})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(testCtx.Cleanup)
+
+	sriovOps := utilmocks.NewSriovnetOps(t)
+	origSriovOps := util.GetSriovnetOps()
+	util.SetSriovnetOpsInst(sriovOps)
+	t.Cleanup(func() {
+		util.SetSriovnetOpsInst(origSriovOps)
+	})
+
+	// The physical uplinks are not representors at all.
+	for _, uplink := range []string{"p0", "p1", "ovn-k8s-mp0"} {
+		sriovOps.On("GetRepresentorPortFlavour", uplink).
+			Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_UNKNOWN),
+				fmt.Errorf("not a representor")).Maybe()
+	}
+	sriovOps.On("GetRepresentorPortFlavour", "pf0hpf").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_PF), nil).Maybe()
+	sriovOps.On("GetDevlinkPortFunctionMacAddress", "pf0hpf").
+		Return(ovntest.MustParseMAC(dpuHostPFMAC), nil).Maybe()
+	for rep, mac := range map[string]string{"pf0vf0": dpuHostVF0MAC, "pf0vf7": dpuHostVF7MAC} {
+		sriovOps.On("GetRepresentorPortFlavour", rep).
+			Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_VF), nil).Maybe()
+		sriovOps.On("GetDevlinkPortFunctionMacAddress", rep).
+			Return(ovntest.MustParseMAC(mac), nil).Maybe()
+	}
+
+	return defaultOVSBridgeResolver{ovsClient: ovsClient}
+}
+
+const (
+	dpuHostPFMAC  = "00:73:58:6d:a1:b3"
+	dpuHostVF0MAC = "00:07:3d:f2:76:4a"
+	dpuHostVF7MAC = "00:07:3d:f2:76:51"
+)
+
+func TestResolveByHostMACSucceeds(t *testing.T) {
+	tests := []struct {
+		name           string
+		hostMAC        string
+		expectedBridge string
+		description    string
+	}{
+		{
+			// The Uplink selects host VF enp4s0f0v0, whose DPU representor
+			// pf0vf0 sits on br-vm. Matching only PF representors used to
+			// miss this entirely.
+			name:           "VF representor",
+			hostMAC:        dpuHostVF0MAC,
+			expectedBridge: "br-vm",
+			description:    "the VF0 representor pf0vf0 is attached to br-vm",
+		},
+		{
+			name:           "correct VF on a shared bridge",
+			hostMAC:        dpuHostVF7MAC,
+			expectedBridge: "br-vm",
+			description:    "pf0vf7 shares br-vm with pf0vf0 and the physical port p1",
+		},
+		{
+			name:           "PF representor",
+			hostMAC:        dpuHostPFMAC,
+			expectedBridge: "br-host",
+			description:    "the PF representor pf0hpf is attached to br-host",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+			resolver := newDPUBridgeResolverHarness(t)
+
+			bridgeName, err := resolver.ResolveByHostMAC(ovntest.MustParseMAC(tt.hostMAC), "node-a")
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "resolving the host MAC of the %s must succeed", tt.name)
+			g.Expect(bridgeName).To(gomega.Equal(tt.expectedBridge), tt.description)
+		})
+	}
+}
+
+func TestResolveByHostMACFallsBackToSriovnetForPF(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	const (
+		bridgeUUID    = "br-host-uuid"
+		portUUID      = "pf0hpf-port-uuid"
+		interfaceUUID = "pf0hpf-iface-uuid"
+	)
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{bridgeUUID}},
+			&vswitchd.Bridge{UUID: bridgeUUID, Name: "br-host", Ports: []string{portUUID}},
+			&vswitchd.Port{UUID: portUUID, Name: "pf0hpf", Interfaces: []string{interfaceUUID}},
+			&vswitchd.Interface{UUID: interfaceUUID, Name: "pf0hpf", Type: "system"},
+		},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(testCtx.Cleanup)
+
+	sriovOps := utilmocks.NewSriovnetOps(t)
+	origSriovOps := util.GetSriovnetOps()
+	util.SetSriovnetOpsInst(sriovOps)
+	t.Cleanup(func() {
+		util.SetSriovnetOpsInst(origSriovOps)
+	})
+	sriovOps.On("GetRepresentorPortFlavour", "pf0hpf").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_PF), nil)
+	// Older kernels do not report devlink port function attributes; the PF path
+	// must still resolve through the sysfs aware sriovnet helper.
+	sriovOps.On("GetDevlinkPortFunctionMacAddress", "pf0hpf").
+		Return(nil, fmt.Errorf("devlink port has no function attributes"))
+	sriovOps.On("GetRepresentorPeerMacAddress", "pf0hpf").
+		Return(ovntest.MustParseMAC(dpuHostPFMAC), nil)
+
+	bridgeName, err := (defaultOVSBridgeResolver{ovsClient: ovsClient}).
+		ResolveByHostMAC(ovntest.MustParseMAC(dpuHostPFMAC), "node-a")
+	g.Expect(err).NotTo(gomega.HaveOccurred(),
+		"PF resolution must fall back to sriovnet when devlink reports no function attributes")
+	g.Expect(bridgeName).To(gomega.Equal("br-host"), "the PF representor resolved via the fallback is attached to br-host")
+}
+
+func TestResolveByHostMACReportsBridgeNotFound(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	resolver := newDPUBridgeResolverHarness(t)
+
+	_, err := resolver.ResolveByHostMAC(ovntest.MustParseMAC("02:00:00:00:00:99"), "node-a")
+	g.Expect(err).To(gomega.HaveOccurred(), "a host MAC no representor peers with must not resolve to a bridge")
+	g.Expect(discoveryReason(err)).To(gomega.Equal(uplinkv1alpha1.UplinkStateReasonBridgeNotFound),
+		"the total miss must surface as BridgeNotFound")
 }
 
 func TestNodeUplinkControllerPublishesResolvedState(t *testing.T) {

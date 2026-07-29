@@ -4,7 +4,6 @@
 package uplink
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -1075,23 +1075,31 @@ func (r defaultOVSBridgeResolver) ResolveByHostMAC(hostMAC net.HardwareAddr, nod
 	sort.Slice(bridges, func(i, j int) bool {
 		return bridges[i].Name < bridges[j].Name
 	})
+	var lookupErrors []error
 	for _, bridge := range bridges {
 		if bridge.Name == ovsIntegrationBridge {
 			continue
 		}
-		bridgeMAC, err := util.GetDPUOps().GetHostGatewayMACAddress(r.ovsClient, bridge.Name, nodeName)
+		rep, err := util.GetDPUOps().FindHostRepresentorByPeerMAC(r.ovsClient, bridge, hostMAC, nodeName)
 		if err != nil {
-			klog.V(5).Infof("Failed to read DPU host MAC for bridge %s: %v", bridge.Name, err)
+			if !errors.Is(err, util.ErrHostRepresentorNotFound) {
+				// Keep searching the remaining bridges, but remember why this
+				// one could not be inspected so a total miss can report it.
+				lookupErrors = append(lookupErrors, err)
+			}
+			klog.V(5).Infof("Bridge %s does not back host MAC %s: %v", bridge.Name, hostMAC, err)
 			continue
 		}
-		if bytes.Equal(bridgeMAC, hostMAC) {
-			return bridge.Name, nil
-		}
+		klog.Infof("Resolved Uplink host MAC %s to OVS bridge %s via DPU representor %s",
+			hostMAC, bridge.Name, rep)
+		return bridge.Name, nil
 	}
-	return "", newDiscoveryError(
-		uplinkv1alpha1.UplinkStateReasonBridgeNotFound,
-		fmt.Errorf("failed to find DPU bridge for host MAC %s", hostMAC),
-	)
+
+	err = fmt.Errorf("failed to find DPU bridge for host MAC %s", hostMAC)
+	if len(lookupErrors) > 0 {
+		err = fmt.Errorf("%w: %v", err, kerrors.NewAggregate(lookupErrors))
+	}
+	return "", newDiscoveryError(uplinkv1alpha1.UplinkStateReasonBridgeNotFound, err)
 }
 
 func (r defaultOVSBridgeResolver) bridgeForPortOrInterface(name string) (string, error) {
