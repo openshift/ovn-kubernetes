@@ -513,4 +513,3 @@ func (cm *ControllerManager) Stop() {
 func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil
 }
-

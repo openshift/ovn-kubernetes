@@ -463,7 +463,48 @@ func (b *BridgeConfiguration) SetNetworkOfPatchPort(netName string) error {
 	if !found {
 		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, b.bridgeName)
 	}
-	return netConfig.setOfPatchPort()
+	if err := netConfig.setOfPatchPort(); err != nil {
+		return err
+	}
+
+	// Only set no-flood on bridges that also carry the default network.
+	// The ARP storm occurs because CUDNs share the node IP with the
+	// default GR on the same bridge.
+	if netName != types.DefaultNetworkName && util.IsNetworkSegmentationSupportEnabled() {
+		if _, isSharedBridge := b.netConfig[types.DefaultNetworkName]; isSharedBridge {
+			if err := util.SetPortNoFlood(b.bridgeName, netConfig.PatchPort); err != nil {
+				return fmt.Errorf("failed to set no-flood on port %s of bridge %s: %w",
+					netConfig.PatchPort, b.bridgeName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// SyncNoFlood re-applies OFPPC_NO_FLOOD on every non-default patch port
+// that shares the bridge with the default network. The flag is OpenFlow
+// port config (not OVSDB-persisted), so it must be reapplied after
+// ovs-vswitchd restarts or ports are re-created.
+func (b *BridgeConfiguration) SyncNoFlood() error {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return nil
+	}
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	if _, hasDefault := b.netConfig[types.DefaultNetworkName]; !hasDefault {
+		return nil
+	}
+	for netName, netConfig := range b.netConfig {
+		if netName == types.DefaultNetworkName || netConfig.PatchPort == "" || netConfig.OfPortPatch == "" {
+			continue
+		}
+		if err := util.SetPortNoFlood(b.bridgeName, netConfig.PatchPort); err != nil {
+			return fmt.Errorf("failed to set no-flood on port %s of bridge %s: %w",
+				netConfig.PatchPort, b.bridgeName, err)
+		}
+	}
+	return nil
 }
 
 func (b *BridgeConfiguration) GetInterfaceID() string {

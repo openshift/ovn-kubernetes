@@ -312,6 +312,27 @@ func RunOVSOfctl(args ...string) (string, string, error) {
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
 }
 
+// SetPortNoFlood sets the OFPPC_NO_FLOOD bit on the named OVS port via
+// "ovs-ofctl mod-port", preventing NORMAL/FLOOD actions from sending
+// packets to that port. The no-flood property is an OpenFlow port
+// config flag and cannot be set through the OVSDB Port table.
+// Resolves the ofport number first via ovs-vsctl because ovs-ofctl
+// uses OpenFlow to map names to numbers and OpenFlow limits port names
+// to 15 bytes (see ovs-ofctl(8) --names documentation).
+func SetPortNoFlood(bridgeName, portName string) error {
+	ofport, _, err := GetOVSOfPort("get", "Interface", portName, "ofport")
+	if err != nil {
+		return fmt.Errorf("failed to get ofport for %s on bridge %s: %w",
+			portName, bridgeName, err)
+	}
+	_, stderr, err := RunOVSOfctl("mod-port", bridgeName, ofport, "no-flood")
+	if err != nil {
+		return fmt.Errorf("failed to set no-flood on port %s (ofport %s) of bridge %s: stderr: %s, error: %w",
+			portName, ofport, bridgeName, stderr, err)
+	}
+	return nil
+}
+
 // RunOVSVsctl runs a command via ovs-vsctl.
 func RunOVSVsctl(args ...string) (string, string, error) {
 	cmdArgs := []string{fmt.Sprintf("--timeout=%d", ovsCommandTimeout)}

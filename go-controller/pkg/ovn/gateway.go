@@ -16,6 +16,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"

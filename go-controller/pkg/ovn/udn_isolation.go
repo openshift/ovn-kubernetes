@@ -21,7 +21,6 @@ import (
 	addressset "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/address_set"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/batching"
 	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
@@ -264,7 +263,7 @@ func GetAdvertisedNetworkSubnetsAddressSetDBIDs() *libovsdbops.DbObjectIDs {
 
 // GetAdvertisedNetworkSubnetsDropPGdbIDs returns the DB IDs for the advertised network subnets drop port group
 func GetAdvertisedNetworkSubnetsDropPGdbIDs() *libovsdbops.DbObjectIDs {
-	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupAdvertisedNetwork, types.DefaultNetworkControllerName,
+	return libovsdbops.NewDbObjectIDs(libovsdbops.PortGroupAdvertisedNetwork, DefaultNetworkControllerName,
 		map[libovsdbops.ExternalIDKey]string{
 			libovsdbops.ObjectNameKey: advertisedNetworkSubnetsKey,
 		})
