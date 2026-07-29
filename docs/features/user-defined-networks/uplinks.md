@@ -13,6 +13,38 @@ its physical uplink must already exist on the selected nodes. OVN-Kubernetes
 discovers the bridge, records node-local state in `UplinkState`, configures OVN
 bridge mappings, and programs the gateway and service flows needed by the CUDN.
 
+## Enabling the Feature
+
+The Uplink feature is opt-in and disabled by default. It is a sub-feature of
+network segmentation and is only active when both network segmentation and the
+Uplink feature flag are enabled.
+
+Enable it by passing `--enable-uplink` to the ovnkube components (this requires
+`--enable-network-segmentation`, which in turn requires
+`--enable-multi-network`). Depending on how the cluster is deployed:
+
+* Helm: set all three global values:
+
+```yaml
+  global:
+    enableMultiNetwork: true
+    enableNetworkSegmentation: true
+    enableUplink: true
+```
+
+* kind: pass `--multi-network-enable` (`-mne`), `--network-segmentation-enable`
+  (`-nse`), and `--uplink-enable` (`-ue`) to `contrib/kind.sh`
+
+A `ClusterUserDefinedNetwork` keeps its `spec.uplinks` field regardless of the
+feature flag, but the reference is only acted upon when the feature is enabled.
+When the feature is disabled, a `ClusterUserDefinedNetwork` that sets
+`spec.uplinks` is **rejected** rather than silently ignored: the CUDN's
+`NetworkCreated` condition is set to `False` with reason
+`NetworkAttachmentDefinitionSyncError` and the message
+`spec.uplinks is set but the Uplink feature is disabled, ignoring this CUDN`, and no
+`NetworkAttachmentDefinition` is created for it. Enabling network segmentation
+alone is not sufficient — `--enable-uplink` must also be set.
+
 ## Supported Scope
 
 This feature currently supports:
