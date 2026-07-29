@@ -100,6 +100,26 @@ func TestSwitchdevFindHostRepresentorByPeerMACMatchesSF(t *testing.T) {
 	g.Expect(rep).To(gomega.Equal("pf0vf0"), "pf0vf0 is the SF representor peering with the host MAC")
 }
 
+func TestSwitchdevFindHostRepresentorByPeerMACRejectsZeroFallbackMAC(t *testing.T) {
+	g := gomega.NewWithT(t)
+	ovsClient := newVFBridgeHarness(t)
+
+	sriovOps := replaceSriovnetOps(t)
+	sriovOps.On("GetRepresentorPortFlavour", "pf0vf0").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_PF), nil)
+	sriovOps.On("GetDevlinkPortFunctionMacAddress", "pf0vf0").
+		Return(nil, fmt.Errorf("devlink unavailable"))
+	// The sriovnet fallback can report an unset PF peer MAC as all zeroes with
+	// a nil error; it must not be matched, even against a zero host MAC.
+	sriovOps.On("GetRepresentorPeerMacAddress", "pf0vf0").
+		Return(ovntest.MustParseMAC("00:00:00:00:00:00"), nil)
+
+	_, err := (&SwitchdevDPUOps{}).FindHostRepresentorByPeerMAC(
+		ovsClient, mustGetBridge(t, ovsClient, "br-vm"), ovntest.MustParseMAC("00:00:00:00:00:00"), "node-a")
+	g.Expect(errors.Is(err, ErrHostRepresentorNotFound)).To(gomega.BeTrue(),
+		"an all-zero fallback MAC must be treated as unset, not matched")
+}
+
 func TestSwitchdevFindHostRepresentorByPeerMACMissWrapsSentinel(t *testing.T) {
 	g := gomega.NewWithT(t)
 	ovsClient := newVFBridgeHarness(t)

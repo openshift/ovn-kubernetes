@@ -8,7 +8,11 @@ package util
 
 import (
 	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/netlinkops"
+	"github.com/vishvananda/netlink"
 
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/mocks"
@@ -225,6 +229,72 @@ func TestGetFunctionRepresentorName(t *testing.T) {
 			}
 
 			mockSriovnetOps.AssertExpectations(t)
+		})
+	}
+}
+
+type fakeDevlinkNetlinkOps struct {
+	netlinkops.NetlinkOps
+	port *netlink.DevlinkPort
+	err  error
+}
+
+func (f *fakeDevlinkNetlinkOps) DevLinkGetPortByNetdevName(_ string) (*netlink.DevlinkPort, error) {
+	return f.port, f.err
+}
+
+func TestGetDevlinkPortFunctionMacAddress(t *testing.T) {
+	tests := []struct {
+		desc   string
+		port   *netlink.DevlinkPort
+		err    error
+		expMAC string
+		expErr string
+	}{
+		{
+			desc:   "returns the reported function hardware address",
+			port:   &netlink.DevlinkPort{Fn: &netlink.DevlinkPortFn{HwAddr: ovntest.MustParseMAC("00:07:3d:f2:76:4a")}},
+			expMAC: "00:07:3d:f2:76:4a",
+		},
+		{
+			desc:   "fails when devlink lookup fails",
+			err:    fmt.Errorf("no devlink port"),
+			expErr: "failed to get devlink port",
+		},
+		{
+			desc:   "fails when function attributes are missing",
+			port:   &netlink.DevlinkPort{},
+			expErr: "does not report function attributes",
+		},
+		{
+			desc:   "fails when the hardware address is absent",
+			port:   &netlink.DevlinkPort{Fn: &netlink.DevlinkPortFn{}},
+			expErr: "does not report a hardware address",
+		},
+		{
+			desc: "fails when the hardware address is all zeros",
+			// Drivers may report an unset function MAC as 00:00:00:00:00:00.
+			port:   &netlink.DevlinkPort{Fn: &netlink.DevlinkPortFn{HwAddr: ovntest.MustParseMAC("00:00:00:00:00:00")}},
+			expErr: "does not report a hardware address",
+		},
+	}
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			netlinkops.SetNetlinkOps(&fakeDevlinkNetlinkOps{port: tc.port, err: tc.err})
+			t.Cleanup(netlinkops.ResetNetlinkOps)
+
+			mac, err := defaultSriovnetOps{}.GetDevlinkPortFunctionMacAddress("pf0vf7")
+			if tc.expErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.expErr) {
+					t.Errorf("Expected error containing %q, got: %v", tc.expErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("Expected no error, got: %v", err)
+			} else if mac.String() != tc.expMAC {
+				t.Errorf("Expected MAC %q, got %q", tc.expMAC, mac)
+			}
 		})
 	}
 }

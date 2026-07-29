@@ -228,6 +228,11 @@ func hostPeerMACAddress(rep string, flavour sriovnet.PortFlavour) (net.HardwareA
 	if err != nil {
 		return nil, fmt.Errorf("%v; devlink lookup also failed: %v", err, devlinkErr)
 	}
+	// GetRepresentorPeerMacAddress can succeed with an empty or all-zero MAC
+	// when the peer function MAC is unset; treat that as absent too.
+	if len(mac) == 0 || isZeroMAC(mac) {
+		return nil, fmt.Errorf("representor %s peer MAC is unset; devlink lookup also failed: %v", rep, devlinkErr)
+	}
 	return mac, nil
 }
 
