@@ -7,7 +7,7 @@ toolchain go1.25.1
 require (
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
-	github.com/openshift-eng/openshift-tests-extension v0.0.0-20260127124016-0fed2b824818
+	github.com/openshift-eng/openshift-tests-extension v0.0.0-20260612102633-2fd5b2fa4221
 	github.com/openshift/api v0.0.0-20260311143357-f6ee4c095675
 	github.com/openshift/client-go v0.0.0-20260306160707-3935d929fc7d
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
