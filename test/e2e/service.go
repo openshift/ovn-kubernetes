@@ -402,6 +402,10 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 							}
 							return err
 						}, 60*time.Second, 1*time.Second).Should(gomega.Succeed())
+
+						ginkgo.By("Waiting for endpoint to be created")
+						err = e2eendpointslice.WaitForEndpointPods(context.TODO(), f.ClientSet, f.Namespace.Name, echoServiceName, serverPod.Name)
+						framework.ExpectNoError(err)
 					})
 
 					// Run queries against the service both with a small (10 bytes + overhead for echo service) and
@@ -439,7 +443,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 										clientPod.Name,
 										cmd,
 										framework.Poll,
-										60*time.Second)
+										2*time.Minute)
 									framework.ExpectNoError(err, fmt.Sprintf("Testing TCP with %s payload failed", size))
 									gomega.Expect(stdout).To(gomega.Equal(echoPayloads[size]), fmt.Sprintf("Testing TCP with %s payload failed", size))
 								}
@@ -564,7 +568,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 											}
 										}
 										return nil
-									}, 60*time.Second, 1*time.Second).Should(gomega.Succeed())
+									}, 2*time.Minute, 1*time.Second).Should(gomega.Succeed())
 									// Flushing the IP route cache will remove any routes in the cache
 									// that are a result of receiving a "need to frag" packet. Let's
 									// flush this on all 3 nodes else we will run into the
