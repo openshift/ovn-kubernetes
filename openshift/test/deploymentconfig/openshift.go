@@ -9,6 +9,7 @@ import (
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
 var deploymentConfig api.DeploymentConfig
@@ -61,9 +62,13 @@ func (m openshift) PrimaryInterfaceName() string {
 }
 
 func (m openshift) GetAgnHostContainerImage() string {
-	// use downloadable image for external container.
-	// ref: https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L197
-	return "registry.k8s.io/e2e-test-images/agnhost:2.40"
+	// Resolve agnhost the same way the k8s e2e framework does
+	// (e2epod.NewAgnhostPod et al). imageutils honors the repository
+	// mapping (KUBE_TEST_REPO_LIST) that openshift-tests sets up, so pods
+	// use the mirrored image and pass origin's known-image-checker
+	// monitor. A hardcoded registry.k8s.io reference gets flagged as an
+	// unknown image and fails the job.
+	return imageutils.GetE2EImage(imageutils.Agnhost)
 }
 
 func (m openshift) IsConfigurationEnabled(config api.Config) bool {
