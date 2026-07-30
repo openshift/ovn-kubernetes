@@ -38,6 +38,7 @@ import (
 	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	eiptypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	rafake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
@@ -3539,4 +3540,101 @@ func TestUpdates(t *testing.T) {
 func getRAConditionMetricValue(nameLabel, conditionLabel, statusLabel string) (float64, bool) {
 	metricName := prometheus.BuildFQName(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemClusterManager, "route_advertisement_condition")
 	return ovntest.GetConditionMetricValue(metricName, nameLabel, conditionLabel, statusLabel)
+}
+
+// TestController_updateRAStatus verifies that the 'Accepted' condition is
+// refreshed when consecutive reconciles fail for different reasons, so that
+// the status message never gets stale.
+func TestController_updateRAStatus(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	fakeClientset := util.GetOVNClientset().GetClusterManagerClientset()
+	c := &Controller{raClient: fakeClientset.RouteAdvertisementsClient}
+
+	raName := "ra"
+	tra := &testRA{Name: raName}
+	_, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), tra.RouteAdvertisements(), metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	t.Cleanup(func() { metrics.DeleteRouteAdvertisementCondition(raName) })
+
+	getRA := func() *ratypes.RouteAdvertisements {
+		ra, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(context.Background(), raName, metav1.GetOptions{})
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+		return ra
+	}
+
+	// first reconcile fails with error A
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error A", errConfig))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "first reconcile with error A should update the status")
+	accepted := meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should be set after the first reconcile")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should be false after error A")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationError"), "errConfig should be reported as ConfigurationError")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error A"), "the message should report error A")
+
+	// rewind the condition transition time one hour into the past, so we can
+	// tell whether subsequent refreshes preserve or bump it: condition
+	// timestamps have one-second resolution and the whole test runs within a
+	// single second, so against a "now" timestamp an unchanged and a wrongly
+	// re-stamped transition time would look identical
+	rewound := metav1.NewTime(time.Now().Add(-time.Hour).Truncate(time.Second))
+	ra := getRA()
+	meta.FindStatusCondition(ra.Status.Conditions, "Accepted").LastTransitionTime = rewound
+	_, err = fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().UpdateStatus(context.Background(), ra, metav1.UpdateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "rewinding the condition transition time should succeed")
+
+	// second reconcile fails with error B for the same reason: the message
+	// must be refreshed
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error B", errConfig))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "second reconcile with error B should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after error B")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should stay false after error B")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationError"), "errConfig should still be reported as ConfigurationError")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error B"), "the message should be refreshed to error B")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a message-only refresh should preserve the transition time")
+
+	// third reconcile fails with a different reason: reason and message must
+	// be refreshed
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "third reconcile with error C should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after error C")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should stay false after error C")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationPending"), "errPending should be reported as ConfigurationPending")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error C"), "the message should be refreshed to error C")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a reason/message refresh should preserve the transition time")
+
+	// fourth reconcile fails with the same error: the status must not be
+	// applied again
+	countStatusPatches := func() int {
+		patches := 0
+		for _, action := range fakeClientset.RouteAdvertisementsClient.(*rafake.Clientset).Actions() {
+			if action.GetVerb() == "patch" {
+				patches++
+			}
+		}
+		return patches
+	}
+	patches := countStatusPatches()
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a reconcile with an unchanged error should succeed")
+	g.Expect(countStatusPatches()).To(gomega.Equal(patches), "an unchanged status must not be re-applied")
+
+	// fifth reconcile fails with the same error but had FRRConfig/NAD updates:
+	// the status must be applied even though the condition is unchanged
+	err = c.updateRAStatus(getRA(), true, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a reconcile with updates should update the status")
+	g.Expect(countStatusPatches()).To(gomega.Equal(patches+1), "hadUpdates should apply the status even when the condition is unchanged")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a hadUpdates apply should preserve the transition time of an unchanged condition")
+
+	// sixth reconcile succeeds: the condition status flips and the transition
+	// time must be bumped
+	err = c.updateRAStatus(getRA(), false, nil)
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a successful reconcile should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after a successful reconcile")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionTrue), "the Accepted condition should be true after a successful reconcile")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally(">", rewound.Time), "a status flip should bump the transition time")
 }

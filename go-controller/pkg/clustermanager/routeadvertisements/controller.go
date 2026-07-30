@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
-	metaapply "k8s.io/client-go/applyconfigurations/meta/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -1618,26 +1617,6 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		cstatus = metav1.ConditionFalse
 	}
 
-	var updateStatus bool
-	condition := meta.FindStatusCondition(ra.Status.Conditions, conditionTypeAccepted)
-	switch {
-	case condition == nil:
-		fallthrough
-	case condition.ObservedGeneration != ra.Generation:
-		fallthrough
-	case (err == nil) != (condition.Status == metav1.ConditionTrue):
-		fallthrough
-	case hadUpdates:
-		updateStatus = true
-	}
-	if !updateStatus {
-		// Record the metric from the existing API-confirmed condition so it is
-		// populated after controller restarts, where the informer fires synthetic
-		// creates for all RAs but the condition hasn't changed.
-		metrics.RecordRouteAdvertisementCondition(ra.Name, conditionTypeAccepted, cstatus)
-		return nil
-	}
-
 	status := "Accepted"
 	reason := "Accepted"
 	msg := "ovn-kubernetes cluster-manager validated the resource and requested the necessary configuration changes"
@@ -1654,17 +1633,41 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		}
 	}
 
+	// MergeStatusCondition reports whether the condition differs from the
+	// existing one (in status, reason, message or observed generation),
+	// preserves the last transition time when the condition status is
+	// unchanged and trims the message to the maximum length allowed for
+	// conditions
+	condition, changed := util.MergeStatusCondition(ra.Status.Conditions, metav1.Condition{
+		Type:               conditionTypeAccepted,
+		Status:             cstatus,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: ra.Generation,
+	})
+	updateStatus := changed || hadUpdates
+	if !updateStatus {
+		// Record the metric from the existing API-confirmed condition so it is
+		// populated after controller restarts, where the informer fires synthetic
+		// creates for all RAs but the condition hasn't changed.
+		metrics.RecordRouteAdvertisementCondition(ra.Name, conditionTypeAccepted, cstatus)
+		return nil
+	}
+
+	if changed && err != nil {
+		// errConfig/errPending are not retried, so make them visible in the
+		// logs and not just in the status; log only when the condition changes
+		// to avoid repeating the same warning on every reconcile of a steady
+		// error state, which can otherwise still update the status through
+		// hadUpdates
+		klog.Warningf("Reconciling RouteAdvertisements %q failed: %v", ra.Name, err)
+	}
+
 	_, err = c.raClient.K8sV1().RouteAdvertisements().ApplyStatus(
 		context.Background(),
 		raapply.RouteAdvertisements(ra.Name).WithStatus(
 			raapply.RouteAdvertisementsStatus().WithStatus(status).WithConditions(
-				metaapply.Condition().
-					WithType(conditionTypeAccepted).
-					WithStatus(cstatus).
-					WithLastTransitionTime(metav1.NewTime(time.Now())).
-					WithReason(reason).
-					WithMessage(msg).
-					WithObservedGeneration(ra.Generation),
+				util.ConditionToApply(condition),
 			),
 		),
 		metav1.ApplyOptions{
