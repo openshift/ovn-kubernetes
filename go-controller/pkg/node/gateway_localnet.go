@@ -18,7 +18,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -28,16 +28,12 @@ func initLocalGateway(hostSubnets []*net.IPNet, mgmtPort managementport.Interfac
 		return nil
 	}
 
-	klog.Info("Adding iptables/nftables masquerading rules for new local gateway")
+	klog.Info("Adding iptables masquerading rules for new local gateway")
 
-	// Set up iptables filter rules to allow traffic to/from the management port.
-	ifName := mgmtPort.GetInterfaceName()
-	if err := initLocalGatewayIPTFilterRules(ifName); err != nil {
-		return fmt.Errorf("failed to configure local forwarding rules for: %s, err: %v", ifName, err)
-	}
-
-	// Set up nftables masquerade rules for this node's subnets.
 	var allCIDRs []*net.IPNet
+	ifName := mgmtPort.GetInterfaceName()
+
+	// First pass: collect all CIDRs and setup iptables filter rules per interface
 	for _, hostSubnet := range hostSubnets {
 		// local gateway mode uses mp0 as default path for all ingress traffic into OVN
 		nextHop, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(hostSubnet), mgmtPort.GetAddresses())
@@ -45,11 +41,18 @@ func initLocalGateway(hostSubnets []*net.IPNet, mgmtPort managementport.Interfac
 			return fmt.Errorf("failed to find management port address: %w", err)
 		}
 
+		// add iptables masquerading for mp0 to exit the host for egress
 		cidr := nextHop.IP.Mask(nextHop.Mask)
 		cidrNet := &net.IPNet{IP: cidr, Mask: nextHop.Mask}
 		allCIDRs = append(allCIDRs, cidrNet)
+
+		// Setup iptables filter rules for this interface/CIDR
+		if err := initLocalGatewayIPTFilterRules(ifName, cidrNet); err != nil {
+			return fmt.Errorf("failed to add local NAT rules for: %s, err: %v", ifName, err)
+		}
 	}
 
+	// setup nftables masquerade rules for all CIDRs (v4, v6 or dualstack)
 	if len(allCIDRs) > 0 {
 		if err := initLocalGatewayNFTNATRules(allCIDRs...); err != nil {
 			return fmt.Errorf("failed to setup nftables masquerade rules: %w", err)
@@ -112,8 +115,8 @@ func cleanupLocalnetGateway(ovsClient libovsdbclient.Client, physnet string) err
 		}
 		if physnet == m[0] {
 			bridgeName := m[1]
-			if err := ovsops.DeleteBridge(ovsClient, bridgeName); err != nil {
-				return fmt.Errorf("failed to delete bridge %s: %w", bridgeName, err)
+			if _, stderr, err := util.RunOVSVsctl("--", "--if-exists", "del-br", bridgeName); err != nil {
+				return fmt.Errorf("failed to ovs-vsctl del-br %s stderr:%s (%v)", bridgeName, stderr, err)
 			}
 			break
 		}

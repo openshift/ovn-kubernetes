@@ -18,8 +18,10 @@ import (
 	"github.com/vishvananda/netlink"
 
 	utilnet "k8s.io/utils/net"
+)
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+const (
+	RoutingTableIDStart = 1000
 )
 
 var ErrorNoIP = errors.New("no IP available")
@@ -477,7 +479,7 @@ func IPNetsToIPs(ipNets []*net.IPNet) []net.IP {
 // CalculateRouteTableID will calculate route table ID based on the network
 // interface index
 func CalculateRouteTableID(ifIndex int) int {
-	return ifIndex + config.OvnKubeNode.RoutingTableIDStart
+	return ifIndex + RoutingTableIDStart
 }
 
 // RouteEqual compare two routes

@@ -15,7 +15,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -192,7 +191,7 @@ func (vrfm *Controller) sync(vrf vrf) error {
 		if !ok {
 			return fmt.Errorf("node has another non VRF device with same name %s", vrf.name)
 		}
-		if vrfDev.Table < uint32(config.OvnKubeNode.RoutingTableIDStart) {
+		if vrfDev.Table < util.RoutingTableIDStart {
 			return fmt.Errorf("node has another VRF device with same name %s that is not managed by ovn-kubernetes", vrf.name)
 		}
 		if vrfDev.Table != vrf.table {
@@ -258,8 +257,8 @@ func (vrfm *Controller) AddVRF(name string, slaveInterface string, table uint32,
 	if len(name) > 15 {
 		return fmt.Errorf("VRF Manager: VRF name %s must be within 15 characters", name)
 	}
-	if table < uint32(config.OvnKubeNode.RoutingTableIDStart) {
-		return fmt.Errorf("VRF Manager: cannot manage a VRF %s with table %d lower than %d", name, table, config.OvnKubeNode.RoutingTableIDStart)
+	if table < util.RoutingTableIDStart {
+		return fmt.Errorf("VRF Manager: cannot manage a VRF %s with table %d lower than %d", name, table, util.RoutingTableIDStart)
 	}
 	var (
 		vrfDev vrf
@@ -379,7 +378,7 @@ func (vrfm *Controller) repair(validVRFs sets.Set[string]) error {
 			// not a vrf device
 			continue
 		}
-		if vrf.Table < uint32(config.OvnKubeNode.RoutingTableIDStart) {
+		if vrf.Table < util.RoutingTableIDStart {
 			// vrf device not managed by us
 			continue
 		}

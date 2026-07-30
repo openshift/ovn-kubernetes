@@ -27,7 +27,8 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/evpn"
@@ -91,7 +92,7 @@ func (ncm *NodeControllerManager) NewNetworkController(nInfo util.NetInfo) (netw
 		// Pass a shallow clone of the watch factory, this allows multiplexing
 		// informers for UDNs.
 		udnc, err := node.NewUserDefinedNodeNetworkController(ncm.newCommonNetworkControllerInfo(ncm.watchFactory.(*factory.WatchFactory).ShallowClone()),
-			nInfo, ncm.networkManager.Interface(), ncm.vrfManager, ncm.ruleManager, ncm.mpdm, ncm.defaultNodeNetworkController.Gateway, ncm.ovsClient)
+			nInfo, ncm.networkManager.Interface(), ncm.vrfManager, ncm.ruleManager, ncm.mpdm, ncm.defaultNodeNetworkController.Gateway)
 		if err != nil && ncm.mpdm != nil && util.IsNetworkSegmentationSupportEnabled() && nInfo.IsPrimaryNetwork() {
 			_ = ncm.mpdm.ReleaseDeviceIDForNetwork(nInfo.GetNetworkName())
 		}
@@ -553,7 +554,7 @@ func (ncm *NodeControllerManager) checkForStaleOVSPodInterfaces() {
 		podUID := ovsIface.ExternalIDs["iface-id-ver"]
 		if _, ok := expectedPodUIDs[podUID]; !ok {
 			klog.Warningf("Found stale OVS Interface %s with iface-id-ver %s, deleting it", ovsIface.Name, podUID)
-			if err := ovsops.DeletePortWithInterfaces(ncm.ovsClient, "br-int", ovsIface.Name); err != nil {
+			if err := libovsdbops.DeletePortWithInterfaces(ncm.ovsClient, "br-int", ovsIface.Name); err != nil {
 				klog.Errorf("Failed to delete stale interface %s: %v", ovsIface.Name, err)
 			}
 		}

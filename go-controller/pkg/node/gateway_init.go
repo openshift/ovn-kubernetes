@@ -22,7 +22,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb"
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -31,7 +31,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func getGatewayNextHops(ovsClient libovsdbclient.Client) ([]net.IP, string, error) {
+func getGatewayNextHops() ([]net.IP, string, error) {
 	var gatewayNextHops []net.IP
 	var needIPv4NextHop bool
 	var needIPv6NextHop bool
@@ -83,9 +83,9 @@ func getGatewayNextHops(ovsClient libovsdbclient.Client) ([]net.IP, string, erro
 	}
 	gatewayIntf := config.Gateway.Interface
 	if gatewayIntf != "" && (config.IsModeDPU() || config.IsModeFull()) {
-		if bridge, err := ovsops.GetPortBridge(ovsClient, gatewayIntf); err == nil {
+		if bridgeName, _, err := util.RunOVSVsctl("port-to-br", gatewayIntf); err == nil {
 			// This is an OVS bridge's internal port
-			gatewayIntf = bridge.Name
+			gatewayIntf = bridgeName
 		}
 	}
 
@@ -194,6 +194,40 @@ func configureSvcRouteViaInterface(routeManager *routemanager.Controller, iface 
 	return nil
 }
 
+func shouldConfigureDPUHostNoOverlayPodCIDRRoute() bool {
+	return config.IsModeDPUHost() &&
+		config.Gateway.Mode == config.GatewayModeShared &&
+		config.Default.Transport == types.NetworkTransportNoOverlay
+}
+
+func configureDPUHostNoOverlayPodCIDRRoute(routeManager *routemanager.Controller, iface string, gwIPs []net.IP) error {
+	link, err := util.LinkSetUp(iface)
+	if err != nil {
+		return fmt.Errorf("unable to get link for %s, error: %v", iface, err)
+	}
+
+	mtu := config.Default.MTU
+	if config.Default.RoutableMTU != 0 {
+		mtu = config.Default.RoutableMTU
+	}
+
+	for _, clusterSubnet := range config.Default.ClusterSubnets {
+		subnet := clusterSubnet.CIDR
+		isV6 := utilnet.IsIPv6CIDR(subnet)
+		gwIP, err := util.MatchIPFamily(isV6, gwIPs)
+		if err != nil {
+			return fmt.Errorf("unable to find gateway IP for subnet: %v, found IPs: %v", subnet, gwIPs)
+		}
+		subnetCopy := *subnet
+		gwIPCopy := gwIP[0]
+		err = routeManager.Add(netlink.Route{LinkIndex: link.Attrs().Index, Gw: gwIPCopy, Dst: &subnetCopy, MTU: mtu})
+		if err != nil {
+			return fmt.Errorf("unable to add gateway IP route for subnet: %v, %v", subnet, err)
+		}
+	}
+	return nil
+}
+
 // getNodePrimaryIfAddrs returns the appropriate interface addresses based on the node mode
 func getNodePrimaryIfAddrs(watchFactory factory.NodeWatchFactory, nodeName string, gatewayIntf string) ([]*net.IPNet, error) {
 	switch config.OvnKubeNode.Mode {
@@ -244,17 +278,14 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 
 	waiter := newStartupWaiter()
 
-	gatewayNextHops, gatewayIntf, err := getGatewayNextHops(nc.ovsClient)
+	gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
 	if err != nil {
 		return nil, err
 	}
 
 	egressGWInterface := ""
 	if config.Gateway.EgressGWInterface != "" {
-		egressGWInterface, err = interfaceForEXGW(nc.ovsClient, config.Gateway.EgressGWInterface)
-		if err != nil {
-			return nil, err
-		}
+		egressGWInterface = interfaceForEXGW(config.Gateway.EgressGWInterface)
 	}
 
 	// Get interface addresses based on node mode
@@ -314,7 +345,7 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 	}
 
 	readyGwFunc := func() (bool, error) {
-		controllerReady, err := isOVNControllerReady(nc.ovsClient)
+		controllerReady, err := isOVNControllerReady()
 		if err != nil || !controllerReady {
 			return false, err
 		}
@@ -381,22 +412,18 @@ func (nc *DefaultNodeNetworkController) initGatewayMainStart(gw *gateway, waiter
 // and returns the name of the bridge if exists, or the interface itself
 // if the bridge needs to be created. In this last scenario, BridgeForInterface
 // will create the bridge.
-func interfaceForEXGW(ovsClient libovsdbclient.Client, intfName string) (string, error) {
-	if _, err := ovsops.GetBridge(ovsClient, intfName); err == nil {
+func interfaceForEXGW(intfName string) string {
+	if _, _, err := util.RunOVSVsctl("br-exists", intfName); err == nil {
 		// It's a bridge
-		return intfName, nil
-	} else if !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return "", fmt.Errorf("failed to check whether %s is an OVS bridge: %w", intfName, err)
+		return intfName
 	}
 
 	bridge := util.GetBridgeName(intfName)
-	if _, err := ovsops.GetBridge(ovsClient, bridge); err == nil {
+	if _, _, err := util.RunOVSVsctl("br-exists", bridge); err == nil {
 		// not a bridge, but the corresponding bridge was already created
-		return bridge, nil
-	} else if !errors.Is(err, libovsdbclient.ErrNotFound) {
-		return "", fmt.Errorf("failed to check whether OVS bridge %s exists for interface %s: %w", bridge, intfName, err)
+		return bridge
 	}
-	return intfName, nil
+	return intfName
 }
 
 // TODO(adrianc): revisit if support for nodeIPManager is needed.
@@ -472,7 +499,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHostPreStart(kubeNodeIP ne
 		return fmt.Errorf("failed to update masquerade subnet annotation on node: %s, error: %v", nc.name, err)
 	}
 
-	gatewayNextHops, _, err := getGatewayNextHops(nc.ovsClient)
+	gatewayNextHops, _, err := getGatewayNextHops()
 	if err != nil {
 		return err
 	}

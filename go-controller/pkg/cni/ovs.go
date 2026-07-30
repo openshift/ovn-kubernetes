@@ -6,7 +6,6 @@ package cni
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,9 +14,6 @@ import (
 	"k8s.io/klog/v2"
 	kexec "k8s.io/utils/exec"
 
-	"github.com/ovn-kubernetes/libovsdb/client"
-
-	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -202,7 +198,7 @@ func checkCancelSandbox(mac string, getter PodInfoGetter, namespace, name, nadKe
 	return nil
 }
 
-func waitForPodInterface(ctx context.Context, ovsClient client.Client, ifInfo *PodInterfaceInfo,
+func waitForPodInterface(ctx context.Context, ifInfo *PodInterfaceInfo,
 	ifaceName, ifaceID string, getter PodInfoGetter,
 	namespace, name, initialPodUID string) error {
 	// Note that this function is called either the Full mode or the DPU mode
@@ -220,33 +216,13 @@ func waitForPodInterface(ctx context.Context, ovsClient client.Client, ifInfo *P
 			return fmt.Errorf("%s waiting for OVS port binding (ovn-installed) for %s %v", errDetail, mac, ifAddrs)
 		default:
 			// check to see if the interface has its expected external id set, which indicates if it is active
-			existingIfaceID := ""
-			ovnInstalled := ""
-			if ovsClient != nil {
-				iface, err := ovsops.GetOVSInterface(ovsClient, ifaceName)
-				if err != nil {
-					if !errors.Is(err, client.ErrNotFound) {
-						return fmt.Errorf("failed to get OVS interface %s while waiting for binding: %w", ifaceName, err)
-					}
-				} else {
-					existingIfaceID = iface.ExternalIDs["iface-id"]
-					ovnInstalled = iface.ExternalIDs["ovn-installed"]
-				}
-			} else {
-				output, err := ovsGetMultiOutput("Interface", ifaceName, columns)
-				if err == nil && len(output) > 0 {
-					existingIfaceID = output[0]
-				}
-				if err == nil && len(output) == 2 {
-					ovnInstalled = output[1]
-				}
-			}
+			output, err := ovsGetMultiOutput("Interface", ifaceName, columns)
 			// It may have been cleared by a subsequent CNI ADD and if so, there's no need to keep checking for flows
-			if existingIfaceID != "" && existingIfaceID != ifaceID {
+			if err == nil && len(output) > 0 && output[0] != ifaceID {
 				return fmt.Errorf("OVS sandbox port %s is no longer active (probably due to a subsequent "+
 					"CNI ADD)", ifaceName)
 			}
-			if ovnInstalled == "true" {
+			if err == nil && len(output) == 2 && output[1] == "true" {
 				klog.V(5).Infof("Interface %s has ovn-installed=true", ifaceName)
 				return nil
 			}

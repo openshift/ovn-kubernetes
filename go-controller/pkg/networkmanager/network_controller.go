@@ -15,7 +15,6 @@ import (
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -427,7 +426,7 @@ func (c *networkController) syncNetwork(network string) error {
 	}
 
 	// fetch other relevant network information
-	err := c.gatherNetwork(want, have)
+	err := c.gatherNetwork(want)
 	if err != nil {
 		return fmt.Errorf("failed to fetch other network information for network %s: %w", network, err)
 	}
@@ -520,14 +519,14 @@ func (c *networkController) deleteNetwork(network string) error {
 	return nil
 }
 
-func (c *networkController) gatherNetwork(network util.MutableNetInfo, current util.NetInfo) error {
+func (c *networkController) gatherNetwork(network util.MutableNetInfo) error {
 	if network == nil {
 		return nil
 	}
-	return c.setAdvertisements(network, current)
+	return c.setAdvertisements(network)
 }
 
-func (c *networkController) setAdvertisements(network util.MutableNetInfo, current util.NetInfo) error {
+func (c *networkController) setAdvertisements(network util.MutableNetInfo) error {
 	if !network.IsDefault() && !network.IsPrimaryNetwork() {
 		return nil
 	}
@@ -565,13 +564,6 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo, curre
 	eipAdvertisements := map[string][]string{}
 	for raName := range raNames {
 		ra, err := c.raLister.Get(raName)
-		if apierrors.IsNotFound(err) {
-			// A stale NAD annotation should not prevent a network controller
-			// from starting. Preserve the current advertised state until the
-			// RouteAdvertisements controller removes the stale annotation.
-			preserveAdvertisements(network, current)
-			return nil
-		}
 		if err != nil {
 			return err
 		}
@@ -587,15 +579,9 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo, curre
 			continue
 		}
 		if accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != ra.Generation {
-			// The RA is not accepted yet (e.g. a brand-new network whose
-			// subnets haven't been allocated). Don't abort here: starting the
-			// controller is what lets the node allocator assign subnets, which
-			// is in turn what lets the RA become accepted - aborting would
-			// deadlock the two. Keep the previously-advertised VRFs (empty for
-			// a new network) for now; the RA's later transition to Accepted
-			// re-triggers this sync and fills in the real VRFs.
-			preserveAdvertisements(network, current)
-			return nil
+			// if the RA is not accepted, we commit to no change, best to
+			// preserve the old config while we can't validate new config
+			return fmt.Errorf("failed to reconcile network %q: RouteAdvertisements %q not in accepted status", network.GetNetworkName(), ra.Name)
 		}
 
 		nodeSelector, err := metav1.LabelSelectorAsSelector(&ra.Spec.NodeSelector)
@@ -628,19 +614,6 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo, curre
 	network.SetPodNetworkAdvertisedVRFs(podAdvertisements)
 	network.SetEgressIPAdvertisedVRFs(eipAdvertisements)
 	return nil
-}
-
-// preserveAdvertisements carries the currently-advertised VRFs over to the
-// network being synced, so a missing or not-yet-accepted RouteAdvertisements
-// neither blocks the controller from starting nor clears existing advertisement
-// state. For a brand-new network, current is nil and the advertised VRFs are
-// left empty.
-func preserveAdvertisements(network util.MutableNetInfo, current util.NetInfo) {
-	if current == nil {
-		return
-	}
-	network.SetPodNetworkAdvertisedVRFs(current.GetPodNetworkAdvertisedVRFs())
-	network.SetEgressIPAdvertisedVRFs(current.GetEgressIPAdvertisedVRFs())
 }
 
 func (c *networkController) hasRouteAdvertisements() bool {

@@ -611,8 +611,8 @@ type ClusterUserDefinedNetwork struct {
     Status ClusterUserDefinedNetworkStatus `json:"status,omitempty"`
 }
 
-// ClusterUserDefinedNetworkSpec defines the desired state of ClusterUserDefinedNetwork.
-type ClusterUserDefinedNetworkSpec struct {
+// ClusterUserDefinedNetwork defines the desired state of ClusterUserDefinedNetwork.
+type ClusterUserDefinedNetwork struct {
     // NamespaceSelector Label selector for which namespace network should be available for.
     // +kubebuilder:validation:Required
     // +required

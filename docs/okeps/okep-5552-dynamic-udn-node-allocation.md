@@ -96,8 +96,7 @@ controller manager containers. The breakdown of how these will be modified is ou
 
 * Cluster Manager
   * UDN Controller — No change
-  * Route Advertisements Controller — Modified to advertise networks only on nodes where they are active,
-reconciling on network activity changes, instead of requiring subnets on every selected node.
+  * Route Advertisements Controller — No change
   * Egress Service Cluster — Doesn't support UDN
   * Endpoint Mirror Controller — No change
   * EgressIP Controller — No change

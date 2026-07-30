@@ -299,9 +299,12 @@ func (mp *udnManagementPortOVS) create() error {
 	klog.V(3).Infof("Setup management port link %s for network %s succeeded", mp.ifName, mp.GetNetworkName())
 
 	// STEP3
-	err = util.SetForwardingModeForInterface(mp.ifName)
-	if err != nil {
-		return err
+	// IPv6 forwarding is enabled globally
+	if ipv4, _ := mp.IPMode(); ipv4 {
+		err = util.SetForwardingModeForInterface(mp.ifName)
+		if err != nil {
+			return err
+		}
 	}
 
 	// add loose mode for rp filter on management port
@@ -361,9 +364,11 @@ func (mp *udnManagementPortNetdev) create() error {
 		return fmt.Errorf("bring up management port %s for network %s failed: %v", mp.ifName, mp.GetNetworkName(), err)
 	}
 
-	err = util.SetForwardingModeForInterface(mp.ifName)
-	if err != nil {
-		return err
+	if ipv4, _ := mp.IPMode(); ipv4 {
+		err = util.SetForwardingModeForInterface(mp.ifName)
+		if err != nil {
+			return err
+		}
 	}
 
 	// add loose mode for rp filter on management port
