@@ -460,6 +460,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	if len(nads) == 0 {
 		return nil, nil, fmt.Errorf("%w: no networks selected", errPending)
 	}
+	// ordered, so that processing and error messages are deterministic across
+	// reconciles regardless of lister iteration order
+	slices.SortFunc(nads, func(a, b *nadtypes.NetworkAttachmentDefinition) int {
+		return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name)
+	})
 
 	// validate and gather information about the networks
 	networkSet := sets.New[string]()
@@ -576,6 +581,9 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	if len(nodes) == 0 {
 		return nil, nil, fmt.Errorf("%w: no nodes selected", errPending)
 	}
+	// ordered, so that processing and error messages are deterministic across
+	// reconciles regardless of lister iteration order
+	slices.SortFunc(nodes, func(a, b *corev1.Node) int { return strings.Compare(a.Name, b.Name) })
 	// prepare a map of selected nodes to the FRRConfigurations that apply to
 	// them
 	nodeToFRRConfig := map[string][]*frrtypes.FRRConfiguration{}
@@ -595,6 +603,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	if len(frrConfigs) == 0 {
 		return nil, nil, fmt.Errorf("%w: no FRRConfigurations selected", errPending)
 	}
+	// ordered, so that processing and error messages are deterministic across
+	// reconciles regardless of lister iteration order
+	slices.SortFunc(frrConfigs, func(a, b *frrtypes.FRRConfiguration) int {
+		return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name)
+	})
 
 	frrRouterVRFs := sets.New[string]()
 	for _, frrConfig := range frrConfigs {
@@ -769,7 +782,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	}
 
 	generated := []*frrtypes.FRRConfiguration{}
-	for nodeName, frrConfigs := range nodeToFRRConfig {
+	// iterate nodes in their sorted order rather than ranging over the map, so
+	// that processing and error messages are deterministic across reconciles
+	for _, node := range nodes {
+		nodeName := node.Name
+		frrConfigs := nodeToFRRConfig[nodeName]
 		// reset node specific information
 		selectedNetworks.hostNetworkSubnets = map[string][]string{}
 		selectedNetworks.hostSubnets = []string{}
