@@ -173,6 +173,9 @@ func (c *openflowManager) syncFlows() {
 				c.defaultBridge.GetBridgeName(), err, stderr, len(flows))
 		} else {
 			c.deleteStaleGroups()
+			if err := c.defaultBridge.SyncNoFlood(); err != nil {
+				klog.Errorf("Failed to sync no-flood port config for bridge %s: %v", c.defaultBridge.GetBridgeName(), err)
+			}
 		}
 	}
 
