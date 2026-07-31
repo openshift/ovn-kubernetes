@@ -987,6 +987,12 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 		return nil, nil
 	}
 
+	// The Uplink is always a part of the CUDN CRD, but it is optional.
+	// Reject a CUDN that references an Uplink while the feature is disabled instead of silently ignoring spec.uplinks.
+	if len(cudn.Spec.Uplinks) > 0 && !util.IsUplinkEnabled() {
+		return nil, fmt.Errorf("spec.uplinks is set but the Uplink feature is disabled, ignoring this CUDN")
+	}
+
 	if _, exist := c.namespaceTracker[cudnName]; !exist {
 		c.namespaceTracker[cudnName] = sets.Set[string]{}
 	}

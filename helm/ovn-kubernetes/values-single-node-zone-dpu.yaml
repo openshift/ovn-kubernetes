@@ -67,6 +67,8 @@ global:
   enableNetworkSegmentation: false
   # -- Configure to use route advertisements feature with ovn-kubernetes
   enableRouteAdvertisements: false
+  # -- Configure to enable the uplink feature with ovn-kubernetes
+  enableUplink: false
   # -- Optional Linux routing table ID start used by ovnkube-node for generated VRF/route tables.
   # -- Minimum: 1000. If unset, ovnkube-node uses its built-in default.
   # routingTableIDStart: 1002

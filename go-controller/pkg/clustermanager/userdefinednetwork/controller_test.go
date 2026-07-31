@@ -529,6 +529,31 @@ var _ = Describe("User Defined Network Controller", func() {
 				}
 			})
 
+			It("should report an error when spec.uplinks is set but the Uplink feature is disabled", func() {
+				config.OVNKubernetesFeature.EnableUplink = false
+				nsName := "red"
+				cudn := testLayer2SecondaryClusterUDN("test-uplink-disabled", nsName)
+				cudn.Spec.Uplinks = []string{"tenant-blue"}
+
+				c = newTestController(template.RenderNetAttachDefManifest, testNamespace(nsName), cudn)
+				Expect(c.Run()).To(Succeed())
+
+				Eventually(func() []metav1.Condition {
+					var err error
+					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return normalizeConditions(filterTransportConditions(cudn.Status.Conditions))
+				}).Should(Equal([]metav1.Condition{{
+					Type:    "NetworkCreated",
+					Status:  "False",
+					Reason:  "NetworkAttachmentDefinitionSyncError",
+					Message: "spec.uplinks is set but the Uplink feature is disabled, ignoring this CUDN",
+				}}), "status should report the Uplink feature is disabled")
+
+				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).Get(context.Background(), cudn.Name, metav1.GetOptions{})
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "NAD must not be created when the Uplink feature is disabled")
+			})
+
 			It("should allocate VID for EVPN network NAD", func() {
 				testNs := testNamespace("evpn-test")
 				vtep := testVTEP("vtep-test")

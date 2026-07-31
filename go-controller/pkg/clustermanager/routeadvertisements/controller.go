@@ -126,7 +126,7 @@ func NewController(
 		raClient:        ovnClient.RouteAdvertisementsClient,
 		nm:              nm,
 	}
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if util.IsUplinkEnabled() {
 		c.uplinkStateLister = wf.UplinkStateInformer().Lister()
 	}
 
@@ -187,7 +187,7 @@ func NewController(
 	}
 	c.nodeController = controllerutil.NewController("clustermanager routeadvertisements node controller", nodeConfig)
 
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if util.IsUplinkEnabled() {
 		uplinkStateConfig := &controllerutil.ControllerConfig[uplinkv1alpha1.UplinkState]{
 			RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
 			Reconcile:      func(_ string) error { c.raController.ReconcileAll(); return nil },
@@ -247,7 +247,7 @@ func (c *Controller) Start() error {
 		c.nodeController,
 		c.raController,
 	}
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if util.IsUplinkEnabled() {
 		controllers = append(controllers, c.uplinkStateController)
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
@@ -264,7 +264,7 @@ func (c *Controller) Stop() {
 		c.nodeController,
 		c.raController,
 	}
-	if util.IsNetworkSegmentationSupportEnabled() {
+	if util.IsUplinkEnabled() {
 		controllers = append(controllers, c.uplinkStateController)
 	}
 	if config.OVNKubernetesFeature.EnableEgressIP {
@@ -1389,7 +1389,7 @@ func (c *Controller) getDPUHostGatewayNextHops(
 	}
 
 	uplinkName := selectedNetworks.networkUplinks[networkName]
-	if uplinkName == "" {
+	if uplinkName == "" || c.uplinkStateLister == nil {
 		return getDPUHostGatewayNextHops(node)
 	}
 	stateName := uplinkutil.StateName(uplinkName, node.Name)

@@ -175,6 +175,7 @@ EOF
     --network-segmentation-enable \
     --dynamic-udn-allocation \
     --multi-network-enable \
+    --uplink-enable \
     --route-advertisements-enable \
     --no-overlay-enable \
     --advertise-default-network \
@@ -198,6 +199,7 @@ install_ovnk_dpu() {
     --multi-network-enable \
     --network-segmentation-enable \
     --dynamic-udn-allocation \
+    --uplink-enable \
     --route-advertisements-enable \
     --no-overlay-enable \
     --advertise-default-network \
