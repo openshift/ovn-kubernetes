@@ -771,10 +771,14 @@ func (nInfo *userDefinedNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupNa
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
+// GetNetworkScopedRouterToSwitchPortName returns the router to switch port name (rtos-).
+// Not applicable for Localnet topology.
 func (nInfo *userDefinedNetInfo) GetNetworkScopedRouterToSwitchPortName(nodeName string) string {
 	return types.RouterToSwitchPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
 }
 
+// GetNetworkScopedSwitchToRouterPortName returns the switch to router port name (stor-).
+// Not applicable for Localnet topology.
 func (nInfo *userDefinedNetInfo) GetNetworkScopedSwitchToRouterPortName(nodeName string) string {
 	return types.SwitchToRouterPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
 }

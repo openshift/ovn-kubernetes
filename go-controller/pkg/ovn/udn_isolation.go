@@ -421,7 +421,7 @@ func CleanupStaleAdvertisedNetworkSubnets(nbClient libovsdbclient.Client, validS
 	}
 	if len(stale) > 0 {
 		if err := addrSet.DeleteAddresses(stale); err != nil {
-			klog.Errorf("Failed to delete stale addresses %q from advertised network subnets address set: %v", stale, err)
+			return fmt.Errorf("failed to delete stale addresses %q from advertised network subnets address set: %w", stale, err)
 		}
 		klog.Infof("Cleaned up stale advertised addresses %q from advertised network subnets address set", stale)
 	}

@@ -199,7 +199,7 @@ func (cm *ControllerManager) CleanupStaleNetworks(validNetworks ...util.NetInfo)
 	// Network reconciliation will take care of removing the subnets for existing networks that are no longer
 	// advertised.
 	if err := ovn.CleanupStaleAdvertisedNetworkSubnets(cm.nbClient, validNetworksSubnets); err != nil {
-		return fmt.Errorf("failed to cleanup stale advertised subnets: %w", err)
+		klog.Errorf("Failed to cleanup stale advertised subnets: %v", err)
 	}
 	return nil
 }

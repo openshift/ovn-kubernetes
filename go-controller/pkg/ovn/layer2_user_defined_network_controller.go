@@ -632,7 +632,7 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 			for _, subnet := range oc.Subnets() {
 				hostSubnets = append(hostSubnets, subnet.CIDR)
 			}
-			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(""),
 				oc.GetNetworkScopedGWRouterName(node.Name), hostSubnets); err != nil {
 				errs = append(errs, err)
 				oc.mgmtPortFailed.Store(node.Name, true)
