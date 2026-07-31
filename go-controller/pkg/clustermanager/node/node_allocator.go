@@ -6,6 +6,7 @@ package node
 import (
 	"fmt"
 	"net"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -124,6 +125,25 @@ func (na *NodeAllocator) CleanupStaleAnnotation() {
 				node.Name, util.OVNNodeGRLRPAddrs, err)
 		}
 	}
+}
+
+// AddSubnets adds new subnet ranges to the node allocator
+// It is used when a new subnet is added to a secondary layer3 network by updating UDN or NAD
+func (na *NodeAllocator) AddSubnets(subnets []config.CIDRNetworkEntry) error {
+	if !na.hasNodeSubnetAllocation() {
+		return nil
+	}
+
+	for _, subnet := range subnets {
+		if err := na.clusterSubnetAllocator.AddNetworkRange(subnet.CIDR, subnet.HostSubnetLength); err != nil {
+			return fmt.Errorf("failed to add network range %s/%d: %w", subnet.CIDR.String(), subnet.HostSubnetLength, err)
+		}
+		klog.V(5).Infof("Added new network range %s/%d to cluster subnet allocator for network %s",
+			subnet.CIDR.String(), subnet.HostSubnetLength, na.netInfo.GetNetworkName())
+	}
+	na.recordSubnetCount()
+
+	return nil
 }
 
 func (na *NodeAllocator) hasHybridOverlayAllocation() bool {
@@ -247,6 +267,39 @@ func (na *NodeAllocator) hasExpectedHostSubnets(hostSubnets []*net.IPNet) bool {
 	return foundIPv4 == ipv4Mode && foundIPv6 == ipv6Mode
 }
 
+// NeedsNodeCleanup determines if node annotations or allocator state exist for this network.
+func (na *NodeAllocator) NeedsNodeCleanup(node *corev1.Node) (bool, error) {
+	if util.NoHostSubnet(node) {
+		return false, nil
+	}
+
+	networkName := na.netInfo.GetNetworkName()
+	if util.HasNodeHostSubnetAnnotation(node, networkName) {
+		return true, nil
+	}
+
+	if _, err := util.ParseNetworkIDAnnotation(node, networkName); err == nil {
+		return true, nil
+	} else if !util.IsAnnotationNotSetError(err) {
+		return false, fmt.Errorf("failed to parse node %q network id annotation for network %s: %w",
+			node.Name, networkName, err)
+	}
+
+	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+		if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName); err == nil {
+			return true, nil
+		} else if !util.IsAnnotationNotSetError(err) {
+			return false, fmt.Errorf("failed to parse node %q tunnel id annotation for network %s: %w",
+				node.Name, networkName, err)
+		}
+		if na.idAllocator != nil && na.idAllocator.GetID(networkName+"_"+node.Name) != types.InvalidID {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // HandleAddUpdateNodeEvent handles the add or update node event
 func (na *NodeAllocator) HandleAddUpdateNodeEvent(node *corev1.Node) error {
 	defer na.recordSubnetUsage()
@@ -358,7 +411,9 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 
 	// Also update the node annotation if the networkID doesn't match
 	if len(updatedSubnetsMap) > 0 || networkID != types.NoNetworkID || newTunnelID != types.NoTunnelID {
+		updateStart := time.Now()
 		err = na.updateNodeNetworkAnnotationsWithRetry(node.Name, updatedSubnetsMap, networkID, newTunnelID)
+
 		if err != nil {
 			if errR := na.clusterSubnetAllocator.ReleaseNetworks(node.Name, allocatedSubnets...); errR != nil {
 				klog.Warningf("Error releasing node %s subnets: %v", node.Name, errR)
@@ -369,20 +424,57 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 			}
 			return err
 		}
+
+		if na.netInfo.IsUserDefinedNetwork() && config.Metrics.EnableScaleMetrics {
+			updateDuration := time.Since(updateStart)
+			metrics.RecordUDNUpdateNodeAnnotationDuration(networkName, updateDuration.Seconds())
+		}
 	}
 
 	return nil
 }
 
-// HandleDeleteNode handles the delete node event
-func (na *NodeAllocator) HandleDeleteNode(node *corev1.Node) error {
-	if na.hasHybridOverlayAllocation() {
-		na.releaseHybridOverlayNodeSubnet(node.Name)
+// CleanupNode removes this network's per-node annotations when a node object is available
+// and always releases allocator state for the provided node name.
+func (na *NodeAllocator) CleanupNode(nodeName string, node *corev1.Node) error {
+	networkName := na.netInfo.GetNetworkName()
+	if node != nil {
+		needsUpdate := util.HasNodeHostSubnetAnnotation(node, networkName)
+		if !needsUpdate {
+			if _, err := util.ParseNetworkIDAnnotation(node, networkName); err == nil {
+				needsUpdate = true
+			} else if !util.IsAnnotationNotSetError(err) {
+				return fmt.Errorf("failed to parse node %q network id annotation for network %s: %w",
+					node.Name, networkName, err)
+			}
+		}
+		if !needsUpdate && util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+			if _, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName); err == nil {
+				needsUpdate = true
+			} else if !util.IsAnnotationNotSetError(err) {
+				return fmt.Errorf("failed to parse node %q tunnel id annotation for network %s: %w",
+					node.Name, networkName, err)
+			}
+		}
+		if needsUpdate {
+			hostSubnetsMap := map[string][]*net.IPNet{networkName: nil}
+			// passing util.InvalidID deletes the network/tunnel id annotation for the network.
+			if err := na.updateNodeNetworkAnnotationsWithRetry(nodeName, hostSubnetsMap, types.InvalidID, types.InvalidID); err != nil {
+				return fmt.Errorf("failed to clear node %q subnet annotation for network %s: %w",
+					nodeName, networkName, err)
+			}
+		}
 	}
 
+	if na.hasHybridOverlayAllocation() {
+		na.releaseHybridOverlayNodeSubnet(nodeName)
+	}
 	if na.hasNodeSubnetAllocation() || na.hasHybridOverlayAllocationUnmanaged() {
-		na.clusterSubnetAllocator.ReleaseAllNetworks(node.Name)
+		na.clusterSubnetAllocator.ReleaseAllNetworks(nodeName)
 		na.recordSubnetUsage()
+	}
+	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+		na.idAllocator.ReleaseID(networkName + "_" + nodeName)
 	}
 
 	return nil
@@ -628,7 +720,7 @@ func (na *NodeAllocator) allocateNodeSubnets(allocator SubnetAllocator, nodeName
 }
 
 func (na *NodeAllocator) hasNodeSubnetAllocation() bool {
-	// we only allocate subnets for L3 secondary network or default network
+	// we only allocate subnets for L3 user-defined network or default network
 	return na.netInfo.TopologyType() == types.Layer3Topology || !na.netInfo.IsUserDefinedNetwork()
 }
 

@@ -9,7 +9,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/containernetworking/cni/pkg/types"
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	ipamclaimsapi "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	fakeipamclaimclient "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1/apis/clientset/versioned/fake"
 	fakenadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/fake"
@@ -25,6 +25,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/ip"
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	nodecontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controllers/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -37,7 +38,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 		f              *factory.WatchFactory
 		recorder       record.EventRecorder
 		stopChan       chan struct{}
-		nodeController *clusterManagerNodeController
+		nodeController *nodecontroller.NodeController
 		wg             *sync.WaitGroup
 	)
 
@@ -81,12 +82,12 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				err = f.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-				nodeController = newClusterManagerNodeController(f)
+				nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 				gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 				sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology, Subnets: "192.168.0.0/16/24"})
+				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology, Subnets: "192.168.0.0/16/24"})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nc, err := sncm.NewNetworkController(netInfo)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -133,7 +134,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				var err error
 				netInfo, err = util.NewNetInfo(
 					&ovncnitypes.NetConf{
-						NetConf:  types.NetConf{Name: "blue"},
+						NetConf:  cnitypes.NetConf{Name: "blue"},
 						Topology: ovntypes.Layer2Topology,
 						Subnets:  subnets,
 					})
@@ -144,8 +145,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				app.Action = func(ctx *cli.Context) error {
 					gomega.Expect(
 						initConfig(ctx, config.OVNKubernetesFeatureConfig{
-							EnableMultiNetwork: true,
-							EnableInterconnect: true},
+							EnableMultiNetwork: true},
 						)).To(gomega.Succeed())
 					var err error
 					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
@@ -153,19 +153,13 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					err = f.Start()
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					nodeController = newClusterManagerNodeController(f)
+					nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 					gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 					sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-					config.OVNKubernetesFeature.EnableInterconnect = false
 					nc, err := sncm.NewNetworkController(netInfo)
-					gomega.Expect(err).To(gomega.Equal(networkmanager.ErrNetworkControllerTopologyNotManaged))
-					gomega.Expect(nc).To(gomega.BeNil())
-
-					config.OVNKubernetesFeature.EnableInterconnect = true
-					nc, err = sncm.NewNetworkController(netInfo)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Expect(nc).NotTo(gomega.BeNil())
 
@@ -185,8 +179,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				app.Action = func(ctx *cli.Context) error {
 					gomega.Expect(
 						initConfig(ctx, config.OVNKubernetesFeatureConfig{
-							EnableMultiNetwork: true,
-							EnableInterconnect: true},
+							EnableMultiNetwork: true},
 						)).To(gomega.Succeed())
 
 					var err error
@@ -194,7 +187,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Expect(f.Start()).NotTo(gomega.HaveOccurred())
 
-					nodeController = newClusterManagerNodeController(f)
+					nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 					gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 					sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
@@ -257,7 +250,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						err = f.Start()
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-						nodeController = newClusterManagerNodeController(f)
+						nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 
 						sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -275,36 +268,20 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 				},
 				ginkgo.Entry(
-					"does not manage localnet topologies on IC deployments for networks without subnets",
-					&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.LocalnetTopology},
-					config.OVNKubernetesFeatureConfig{EnableInterconnect: true, EnableMultiNetwork: true},
+					"does not manage localnet topologies for networks without subnets",
+					&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: ovntypes.LocalnetTopology},
+					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
 					networkmanager.ErrNetworkControllerTopologyNotManaged,
 				),
 				ginkgo.Entry(
-					"manages localnet topologies on IC deployments for networks with subnets",
+					"manages localnet topologies for networks with subnets",
 					&ovncnitypes.NetConf{
-						NetConf:  types.NetConf{Name: "blue"},
+						NetConf:  cnitypes.NetConf{Name: "blue"},
 						Topology: ovntypes.LocalnetTopology,
 						Subnets:  subnets,
 					},
-					config.OVNKubernetesFeatureConfig{EnableInterconnect: true, EnableMultiNetwork: true},
+					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
 					nil,
-				),
-				ginkgo.Entry(
-					"does not manage localnet topologies on non-IC deployments without subnets",
-					&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.LocalnetTopology},
-					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
-					networkmanager.ErrNetworkControllerTopologyNotManaged,
-				),
-				ginkgo.Entry(
-					"does not manage localnet topologies on non-IC deployments with subnets",
-					&ovncnitypes.NetConf{
-						NetConf:  types.NetConf{Name: "blue"},
-						Topology: ovntypes.LocalnetTopology,
-						Subnets:  subnets,
-					},
-					config.OVNKubernetesFeatureConfig{EnableMultiNetwork: true},
-					networkmanager.ErrNetworkControllerTopologyNotManaged,
 				),
 			)
 		})
@@ -397,7 +374,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 				gomega.Eventually(checkNodeAnnotations).ShouldNot(gomega.HaveOccurred())
 
-				nodeController = newClusterManagerNodeController(f)
+				nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 
 				sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -408,7 +385,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				// there could be a race in updating the node annotations with the fakeclient.
 				// fakeclient will not return an error in such cases to trigger retry by RetryOnConflict.
 				// So testing the cleanup one at a time.
-				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: types.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
+				netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{NetConf: cnitypes.NetConf{Name: "blue"}, Topology: ovntypes.Layer3Topology})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				oc := newNetworkClusterController(
@@ -449,6 +426,87 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("Cleanup L2 primary UDN with IC discovers stale networks via tunnel ID annotation", func() {
+			app.Action = func(ctx *cli.Context) error {
+				nodes := []corev1.Node{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node1",
+							Annotations: map[string]string{
+								"k8s.ovn.org/node-subnets":                                  "{\"default\":[\"10.244.0.0/24\"]}",
+								"k8s.ovn.org/network-ids":                                   "{\"default\":\"0\"}",
+								"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{\"l2-primary\":\"5\"}",
+							},
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "node2",
+							Annotations: map[string]string{
+								"k8s.ovn.org/node-subnets":                                  "{\"default\":[\"10.244.1.0/24\"]}",
+								"k8s.ovn.org/network-ids":                                   "{\"default\":\"0\"}",
+								"k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids": "{\"l2-primary\":\"6\"}",
+							},
+						},
+					},
+				}
+				kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{
+					Items: nodes,
+				})
+				fakeClient := &util.OVNClusterManagerClientset{
+					KubeClient:            kubeFakeClient,
+					NetworkAttchDefClient: fakenadclient.NewSimpleClientset(),
+				}
+
+				gomega.Expect(initConfig(ctx, config.OVNKubernetesFeatureConfig{
+					EnableMultiNetwork: true,
+				})).To(gomega.Succeed())
+				var err error
+				f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = f.Start()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				checkTunnelIDsCleaned := func() error {
+					for _, n := range nodes {
+						updatedNode, err := f.GetNode(n.Name)
+						if err != nil {
+							return err
+						}
+						// default annotations should remain
+						_, err = util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
+						if err != nil {
+							return fmt.Errorf("default subnet annotation missing on node %s: %v", updatedNode.Name, err)
+						}
+						// l2-primary tunnel ID should be cleaned
+						if util.HasUDNLayer2NodeGRLRPTunnelID(updatedNode, "l2-primary") {
+							return fmt.Errorf("tunnel ID annotation for l2-primary still present on node %s", updatedNode.Name)
+						}
+					}
+					return nil
+				}
+
+				nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
+
+				sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// No valid networks passed — l2-primary should be detected as stale
+				// via tunnel ID annotation and cleaned up.
+				err = sncm.CleanupStaleNetworks()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(checkTunnelIDsCleaned).ShouldNot(gomega.HaveOccurred())
+
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.Context("persistent IP allocations", func() {
 			const (
 				claimName   = "claim1"
@@ -467,7 +525,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 
 				netInfo, err = util.NewNetInfo(
 					&ovncnitypes.NetConf{
-						NetConf:            types.NetConf{Name: networkName},
+						NetConf:            cnitypes.NetConf{Name: networkName},
 						Topology:           ovntypes.Layer2Topology,
 						Subnets:            subnetCIDR,
 						AllowPersistentIPs: true,
@@ -490,7 +548,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
@@ -498,7 +555,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						gomega.Expect(f.Start()).To(gomega.Succeed())
 
-						nodeController = newClusterManagerNodeController(f)
+						nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 						gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 						sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
@@ -547,7 +604,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
@@ -555,7 +611,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						gomega.Expect(f.Start()).To(gomega.Succeed())
 
-						nodeController = newClusterManagerNodeController(f)
+						nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 						gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 						sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
@@ -600,7 +656,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
@@ -608,7 +663,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						gomega.Expect(f.Start()).To(gomega.Succeed())
 
-						nodeController = newClusterManagerNodeController(f)
+						nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 						gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 						sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
@@ -673,7 +728,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 						var err error
@@ -681,7 +735,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						gomega.Expect(f.Start()).To(gomega.Succeed())
 
-						nodeController = newClusterManagerNodeController(f)
+						nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 						gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 						sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
@@ -732,7 +786,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						var err error
 						netInfo, err = util.NewNetInfo(
 							&ovncnitypes.NetConf{
-								NetConf:  types.NetConf{Name: networkName},
+								NetConf:  cnitypes.NetConf{Name: networkName},
 								Topology: ovntypes.Layer2Topology,
 								Subnets:  subnetCIDR,
 							})
@@ -749,7 +803,6 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(
 							initConfig(ctx, config.OVNKubernetesFeatureConfig{
 								EnableMultiNetwork:  true,
-								EnableInterconnect:  true,
 								EnablePersistentIPs: true},
 							)).To(gomega.Succeed())
 
@@ -757,7 +810,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
 						gomega.Expect(f.Start()).To(gomega.Succeed())
 
-						nodeController = newClusterManagerNodeController(f)
+						nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 						gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 						sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
@@ -804,14 +857,13 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 				app.Action = func(ctx *cli.Context) error {
 					gomega.Expect(
 						initConfig(ctx, config.OVNKubernetesFeatureConfig{
-							EnableMultiNetwork: true,
-							EnableInterconnect: true},
+							EnableMultiNetwork: true},
 						)).To(gomega.Succeed())
 
 					var err error
 					netInfo, err = util.NewNetInfo(
 						&ovncnitypes.NetConf{
-							NetConf:  types.NetConf{Name: "blue"},
+							NetConf:  cnitypes.NetConf{Name: "blue"},
 							Role:     ovntypes.NetworkRolePrimary,
 							Subnets:  subnets,
 							Topology: ovntypes.Layer2Topology,
@@ -827,7 +879,7 @@ var _ = ginkgo.Describe("Cluster Controller Manager", func() {
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Expect(f.Start()).NotTo(gomega.HaveOccurred())
 
-					nodeController = newClusterManagerNodeController(f)
+					nodeController = nodecontroller.NewController(f, "clustermanager-node", networkmanager.Default().Interface())
 					gomega.Expect(nodeController.Start()).To(gomega.Succeed())
 
 					sncm, err := newUserDefinedNetworkClusterManager(fakeClient, f, networkmanager.Default().Interface(), recorder, nodeController)
@@ -904,7 +956,6 @@ func initConfig(ctx *cli.Context, ovkConfig config.OVNKubernetesFeatureConfig) e
 	if err != nil {
 		return err
 	}
-	config.Kubernetes.HostNetworkNamespace = ""
 	config.OVNKubernetesFeature = ovkConfig
 	return nil
 }

@@ -12,8 +12,11 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os/exec"
 	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -57,7 +60,9 @@ type NetLinkOps interface {
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error)
 	RuleAdd(rule *netlink.Rule) error
+	RuleDel(rule *netlink.Rule) error
 	NeighAdd(neigh *netlink.Neigh) error
+	NeighSet(neigh *netlink.Neigh) error
 	NeighDel(neigh *netlink.Neigh) error
 	NeighList(linkIndex, family int) ([]netlink.Neigh, error)
 	ConntrackDeleteFilters(table netlink.ConntrackTableType, family netlink.InetFamily, filters ...netlink.CustomConntrackFilter) (uint, error)
@@ -238,8 +243,16 @@ func (defaultNetLinkOps) RuleAdd(rule *netlink.Rule) error {
 	return netlink.RuleAdd(rule)
 }
 
+func (defaultNetLinkOps) RuleDel(rule *netlink.Rule) error {
+	return netlink.RuleDel(rule)
+}
+
 func (defaultNetLinkOps) NeighAdd(neigh *netlink.Neigh) error {
 	return netlink.NeighAdd(neigh)
+}
+
+func (defaultNetLinkOps) NeighSet(neigh *netlink.Neigh) error {
+	return netlink.NeighSet(neigh)
 }
 
 func (defaultNetLinkOps) NeighDel(neigh *netlink.Neigh) error {
@@ -613,8 +626,10 @@ func LinkRouteGetByDstAndGw(link netlink.Link, gwIP net.IP, subnet *net.IPNet) (
 	return route, err
 }
 
-// LinkFDBAdd adds a static FDB entry on the bridge that owns the given port.
-func LinkFDBAdd(port netlink.Link, mac net.HardwareAddr, vlan int) error {
+// LinkFDBSet adds or replaces a static FDB entry on the bridge that owns the given port.
+// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so it succeeds whether
+// the entry is new or already exists.
+func LinkFDBSet(port netlink.Link, mac net.HardwareAddr, vlan int) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    port.Attrs().Index,
 		Family:       syscall.AF_BRIDGE,
@@ -623,8 +638,8 @@ func LinkFDBAdd(port netlink.Link, mac net.HardwareAddr, vlan int) error {
 		Vlan:         vlan,
 		HardwareAddr: mac,
 	}
-	if err := netLinkOps.NeighAdd(neigh); err != nil {
-		return fmt.Errorf("failed to add FDB entry %s vlan %d on %s: %w", mac, vlan, port.Attrs().Name, err)
+	if err := netLinkOps.NeighSet(neigh); err != nil {
+		return fmt.Errorf("failed to set FDB entry %s vlan %d on %s: %w", mac, vlan, port.Attrs().Name, err)
 	}
 	return nil
 }
@@ -658,8 +673,10 @@ func LinkNeighDel(link netlink.Link, neighIP net.IP) error {
 	return nil
 }
 
-// LinkNeighAdd adds MAC/IP bindings for the given link
-func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
+// LinkNeighSet adds or replaces MAC/IP bindings for the given link.
+// It uses NeighSet (NLM_F_CREATE|NLM_F_REPLACE) so it succeeds whether
+// the entry is new or already exists (e.g. zebra's extern_learn).
+func LinkNeighSet(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) error {
 	neigh := &netlink.Neigh{
 		LinkIndex:    link.Attrs().Index,
 		Family:       getFamily(neighIP),
@@ -667,9 +684,9 @@ func LinkNeighAdd(link netlink.Link, neighIP net.IP, neighMAC net.HardwareAddr) 
 		IP:           neighIP,
 		HardwareAddr: neighMAC,
 	}
-	err := netLinkOps.NeighAdd(neigh)
+	err := netLinkOps.NeighSet(neigh)
 	if err != nil {
-		return fmt.Errorf("failed to add neighbour entry %+v: %w", neigh, err)
+		return fmt.Errorf("failed to set neighbour entry %+v: %w", neigh, err)
 	}
 	return nil
 }
@@ -1003,29 +1020,69 @@ func ipAddrExistsAtInterface(ipAddr net.IP, iface net.Interface) (bool, error) {
 	return false, nil
 }
 
-// SetforwardingModeForInterface update the forwarding options for the specified interface
-func SetforwardingModeForInterface(ifName string) error {
-	// we use forward slash as path separator to allow dotted interfaceName e.g. foo.200
-	stdout, stderr, err := RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/forwarding=1", ifName))
-	// systctl output enforces dot as path separator
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", strings.ReplaceAll(ifName, ".", "/")) {
-		return fmt.Errorf("could not set the correct forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
-			ifName, stdout, stderr, err)
+var supportsIPv6InterfaceForwarding atomic.Bool
+var checkSupportsIPv6InterfaceForwarding sync.Once
+
+// SupportsIPv6InterfaceForwarding checks whether the kernel supports per-interface IPv6
+// forwarding, as opposed to only global IPv6 forwarding.
+func SupportsIPv6InterfaceForwarding() bool {
+	checkSupportsIPv6InterfaceForwarding.Do(func() {
+		// We avoid using RunSysctl here because we don't want unit tests to have
+		// to deal with figuring out exactly when this function is going to be
+		// called so they can fake it out with fExec.
+		_, err := exec.Command("sysctl", "net.ipv6.conf.lo.force_forwarding").CombinedOutput()
+		supportsIPv6InterfaceForwarding.Store(err == nil)
+	})
+	return supportsIPv6InterfaceForwarding.Load()
+}
+
+// SetSupportsIPv6InterfaceForwarding overrides the value returned by
+// SupportsIPv6InterfaceForwarding(), for testing purposes.
+func SetSupportsIPv6InterfaceForwarding(val bool) {
+	// Make sure the Once has run, so it doesn't override us later.
+	_ = SupportsIPv6InterfaceForwarding()
+
+	supportsIPv6InterfaceForwarding.Store(val)
+}
+
+// The sysctl fs interface uses slash as the path separator and allows interface names to
+// contain dots. But the CLI uses dots as the separator and expects interface names to
+// have been rewritten to use slashes instead.
+func sysctlIfName(ifName string) string {
+	return strings.ReplaceAll(ifName, ".", "/")
+}
+
+// SetForwardingModeForInterface updates the forwarding options for the specified interface
+func SetForwardingModeForInterface(ifName string) error {
+	if config.IPv4Mode {
+		setVal := fmt.Sprintf("net.ipv4.conf.%s.forwarding = 1", sysctlIfName(ifName))
+		stdout, stderr, err := RunSysctl("-w", setVal)
+		if err != nil || stdout != setVal {
+			return fmt.Errorf("could not set the correct IPv4 forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				ifName, stdout, stderr, err)
+		}
+	}
+	if config.IPv6Mode && SupportsIPv6InterfaceForwarding() {
+		setVal := fmt.Sprintf("net.ipv6.conf.%s.force_forwarding = 1", sysctlIfName(ifName))
+		stdout, stderr, err := RunSysctl("-w", setVal)
+		if err != nil || stdout != setVal {
+			return fmt.Errorf("could not set the correct IPv6 forwarding value for interface %s: stdout: %v, stderr: %v, err: %v",
+				ifName, stdout, stderr, err)
+		}
 	}
 	return nil
 }
 
-// SetRPFilterLooseModeForInterface update the reverse path filtering options for the specified interface
+const rpFilterLooseMode = "2"
+
+// SetRPFilterLooseModeForInterface updates the reverse path filtering options for the
+// specified interface to avoid dropping packets with masqueradeIP coming out of
+// managementport interface.
+// NOTE: v6 doesn't have rp_filter strict mode block
 func SetRPFilterLooseModeForInterface(ifName string) error {
-	// update the reverse path filtering options for the specified interface to avoid dropping packets with masqueradeIP
-	// coming out of managementport interface
-	// NOTE: v6 doesn't have rp_filter strict mode block
-	rpFilterLooseMode := "2"
-	// TODO: Convert testing framework to mock golang module utilities. Example:
-	// we use forward slash as path separator to allow dotted mgmtPortName e.g. foo.200
-	stdout, stderr, err := RunSysctl("-w", fmt.Sprintf("net/ipv4/conf/%s/rp_filter=%s", ifName, rpFilterLooseMode))
-	// systctl output enforces dot as path separator
-	if err != nil || stdout != fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", strings.ReplaceAll(ifName, ".", "/"), rpFilterLooseMode) {
+	setVal := fmt.Sprintf("net.ipv4.conf.%s.rp_filter = %s", sysctlIfName(ifName), rpFilterLooseMode)
+	stdout, stderr, err := RunSysctl("-w", setVal)
+	if err != nil || stdout != setVal {
 		return fmt.Errorf("could not set the correct rp_filter value for interface %s: stdout: %v, stderr: %v, err: %v",
 			ifName, stdout, stderr, err)
 	}

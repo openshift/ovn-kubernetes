@@ -8,10 +8,7 @@ package mocks
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	mock "github.com/stretchr/testify/mock"
-
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 )
 
@@ -100,29 +97,29 @@ func (_m *Interface) GetNodesForWindows() ([]*corev1.Node, error) {
 	return r0, r1
 }
 
-// GetPodsForDBChecker provides a mock function with given fields: namespace, opts
-func (_m *Interface) GetPodsForDBChecker(namespace string, opts metav1.ListOptions) ([]*corev1.Pod, error) {
-	ret := _m.Called(namespace, opts)
+// GetPod provides a mock function with given fields: namespace, name
+func (_m *Interface) GetPod(namespace string, name string) (*corev1.Pod, error) {
+	ret := _m.Called(namespace, name)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetPodsForDBChecker")
+		panic("no return value specified for GetPod")
 	}
 
-	var r0 []*corev1.Pod
+	var r0 *corev1.Pod
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, metav1.ListOptions) ([]*corev1.Pod, error)); ok {
-		return rf(namespace, opts)
+	if rf, ok := ret.Get(0).(func(string, string) (*corev1.Pod, error)); ok {
+		return rf(namespace, name)
 	}
-	if rf, ok := ret.Get(0).(func(string, metav1.ListOptions) []*corev1.Pod); ok {
-		r0 = rf(namespace, opts)
+	if rf, ok := ret.Get(0).(func(string, string) *corev1.Pod); ok {
+		r0 = rf(namespace, name)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*corev1.Pod)
+			r0 = ret.Get(0).(*corev1.Pod)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string, metav1.ListOptions) error); ok {
-		r1 = rf(namespace, opts)
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(namespace, name)
 	} else {
 		r1 = ret.Error(1)
 	}

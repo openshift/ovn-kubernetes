@@ -61,7 +61,6 @@ const (
 	// Condition reasons
 	reasonNADCreated   = "NetworkAttachmentDefinitionCreated"
 	reasonSyncError    = "SyncError"
-	reasonVTEPNotFound = "VTEPNotFound"
 	reasonNADDeleted   = "NetworkAttachmentDefinitionDeleted"
 	reasonNADSyncError = "NetworkAttachmentDefinitionSyncError"
 
@@ -83,6 +82,12 @@ func ipVRFKey(networkName string) string {
 	return networkName + "/ipvrf"
 }
 
+// vniKey identifies a VNI within a VTEP scope. VNIs must be unique per VTEP.
+type vniKey struct {
+	vtep string
+	vni  int32
+}
+
 type RenderNetAttachDefManifest func(obj client.Object, targetNamespace string, opts ...template.RenderOption) (*netv1.NetworkAttachmentDefinition, error)
 
 type networkInUseError struct {
@@ -102,6 +107,24 @@ func (e *vtepNotFoundError) Error() string {
 	return fmt.Sprintf("VTEP %q does not exist", e.vtepName)
 }
 
+// vtepNotAcceptedError indicates that a required VTEP CR exists but is not yet accepted.
+type vtepNotAcceptedError struct {
+	vtepName string
+}
+
+func (e *vtepNotAcceptedError) Error() string {
+	return fmt.Sprintf("VTEP %q is not accepted", e.vtepName)
+}
+
+// evpnConfigError indicates an EVPN configuration issue (e.g. feature not enabled, wrong gateway mode).
+type evpnConfigError struct {
+	msg string
+}
+
+func (e *evpnConfigError) Error() string {
+	return e.msg
+}
+
 type Controller struct {
 	// cudnController manage ClusterUserDefinedNetwork CRs.
 	cudnController controller.Controller
@@ -115,6 +138,11 @@ type Controller struct {
 	// Keys are CR name, value is affected namespace names slice.
 	namespaceTracker     map[string]sets.Set[string]
 	namespaceTrackerLock sync.RWMutex
+	// cudnMetricTracker tracks which CUDNs are counted in the CUDN gauge metric.
+	// Maps (role, topology, transport) labels to the set of CUDN names sharing
+	// that combination.
+	// Only mutated from syncClusterUDN and initializeController (single-threaded).
+	cudnMetricTracker map[cudnMetricKey]sets.Set[string]
 	// renderNadFn render NAD manifest from given object, enable replacing in tests.
 	renderNadFn RenderNetAttachDefManifest
 	// createNetworkLock lock should be held when NAD is created to avoid having two components
@@ -126,6 +154,11 @@ type Controller struct {
 	// vidAllocator allocates cluster-wide VLAN IDs for EVPN networks.
 	// VIDs are allocated per network name and stored in the NAD config JSON.
 	vidAllocator id.Allocator
+
+	// reservedVNIs tracks (VTEP, VNI) → network name to ensure no two networks
+	// sharing the same VTEP use the same VNI.
+	reservedVNIs     map[vniKey]string
+	reservedVNIsLock sync.RWMutex
 
 	udnClient         userdefinednetworkclientset.Interface
 	udnLister         userdefinednetworklister.UserDefinedNetworkLister
@@ -178,7 +211,9 @@ func New(
 		namespaceInformer: namespaceInformer,
 		networkManager:    networkManager,
 		namespaceTracker:  map[string]sets.Set[string]{},
+		cudnMetricTracker: map[cudnMetricKey]sets.Set[string]{},
 		vidAllocator:      vidAllocator,
+		reservedVNIs:      map[vniKey]string{},
 		eventRecorder:     eventRecorder,
 	}
 	udnCfg := &controller.ControllerConfig[userdefinednetworkv1.UserDefinedNetwork]{
@@ -270,12 +305,14 @@ func (c *Controller) initializeController() error {
 	}
 
 	c.initializeNamespaceTracker(cudnNADs)
+	c.seedCUDNCountMetrics(cudnNADs)
+
 	if util.IsEVPNEnabled() {
 		// Recover VID allocations from existing EVPN CUDNs.
 		// Recovery failures are logged and the affected CUDNs are enqueued for reconciliation,
 		// but don't block startup - this prevents a DoS where a malicious NAD could
 		// crash the entire cluster-manager.
-		c.recoverEVPNVIDs(cudnNADs)
+		c.recoverEVPNIDs(cudnNADs)
 	}
 
 	return nil
@@ -339,7 +376,7 @@ func (c *Controller) initializeNamespaceTracker(cudnNADs cudnToNADs) {
 	}
 }
 
-// recoverEVPNVIDs recovers VID allocations from existing EVPN CUDNs using
+// recoverEVPNIDs recovers VID allocations and VNI reservations from existing EVPN CUDNs using
 // NetworkManager's cached NetInfo. NetworkManager has already processed all NADs
 // by the time this function is called (it starts before UDN controller).
 //
@@ -350,7 +387,7 @@ func (c *Controller) initializeNamespaceTracker(cudnNADs cudnToNADs) {
 //
 // If VID recovery fails for a CUDN (e.g., NetworkManager couldn't parse the NAD),
 // this logs an error and enqueues the CUDN for reconciliation.
-func (c *Controller) recoverEVPNVIDs(cudnNADs cudnToNADs) {
+func (c *Controller) recoverEVPNIDs(cudnNADs cudnToNADs) {
 	// Extract EVPN CUDNs with NADs into a slice for deterministic ordering.
 	evpnCUDNs := make([]*cudnWithNADs, 0, len(cudnNADs))
 	for _, entry := range cudnNADs {
@@ -378,7 +415,7 @@ func (c *Controller) recoverEVPNVIDs(cudnNADs cudnToNADs) {
 	})
 
 	for _, entry := range evpnCUDNs {
-		if err := c.recoverEVPNVIDsForCUDN(entry.cudn.Name); err != nil {
+		if err := c.recoverEVPNIDsForCUDN(entry.cudn.Name); err != nil {
 			klog.Errorf("VID recovery failed for EVPN CUDN %s: %v. "+
 				"The CUDN will be reconciled and existing NAD VIDs will be preserved if possible.",
 				entry.cudn.Name, err)
@@ -387,10 +424,10 @@ func (c *Controller) recoverEVPNVIDs(cudnNADs cudnToNADs) {
 	}
 }
 
-// recoverEVPNVIDsForCUDN attempts to recover VIDs for a single CUDN using NetworkManager's cache.
+// recoverEVPNIDsForCUDN attempts to recover VIDs and VNI reservations for a single CUDN using NetworkManager's cache.
 // Returns nil if VIDs were successfully recovered or if no VIDs are allocated yet.
 // Returns error if VID reservation fails (e.g., conflict with another network).
-func (c *Controller) recoverEVPNVIDsForCUDN(cudnName string) error {
+func (c *Controller) recoverEVPNIDsForCUDN(cudnName string) error {
 	networkName := util.GenerateCUDNNetworkName(cudnName)
 
 	// Use NetworkManager's cached NetInfo - it has already parsed the NAD
@@ -402,9 +439,12 @@ func (c *Controller) recoverEVPNVIDsForCUDN(cudnName string) error {
 		return fmt.Errorf("network %s not found in NetworkManager cache", networkName)
 	}
 
+	if err := c.reserveVNIs(cudnName, netInfo.EVPNVTEPName(), netInfo.EVPNMACVRFVNI(), netInfo.EVPNIPVRFVNI()); err != nil {
+		return fmt.Errorf("failed to reserve VNIs for cudn %s: %w", cudnName, err)
+	}
+
 	macVRFVID := netInfo.EVPNMACVRFVID()
 	ipVRFVID := netInfo.EVPNIPVRFVID()
-
 	// Check if this network has EVPN VIDs allocated
 	if macVRFVID == 0 && ipVRFVID == 0 {
 		klog.V(4).Infof("EVPN CUDN %s has no VIDs allocated yet, skipping recovery", cudnName)
@@ -447,7 +487,7 @@ func (c *Controller) reserveRecoveredVIDs(networkName string, macVRFVID, ipVRFVI
 	return errors.Join(errs...)
 }
 
-// releaseVIDForNetwork releases the VIDs allocated for a network's VRFs.
+// releaseEVPNIDsForNetwork releases the VIDs and VNI reservations for a network's VRFs.
 //
 // NOTE: VID release is not synchronized with node-side dataplane cleanup.
 // In theory, a rapidly created new network could get the same VID while nodes
@@ -457,11 +497,45 @@ func (c *Controller) reserveRecoveredVIDs(networkName string, macVRFVID, ipVRFVI
 // The actual mitigation is on the node-side: nodes should check for VID conflicts
 // and refuse to configure a VID already in use by a different network, waiting
 // until the old network is cleaned up.
-func (c *Controller) releaseVIDForNetwork(networkName string) {
+func (c *Controller) releaseEVPNIDsForNetwork(networkName string) {
 	macVID := c.vidAllocator.ReleaseID(macVRFKey(networkName))
 	ipVID := c.vidAllocator.ReleaseID(ipVRFKey(networkName))
 	if macVID >= 0 || ipVID >= 0 {
 		klog.V(4).Infof("Released VIDs for network %s: MAC-VRF=%d, IP-VRF=%d", networkName, macVID, ipVID)
+	}
+	c.releaseVNIs(networkName)
+}
+
+// reserveVNIs reserves VNIs for a network within a VTEP scope, ensuring no two
+// networks sharing the same VTEP use the same VNI.
+func (c *Controller) reserveVNIs(networkName, vtepName string, macVRFVNI, ipVRFVNI int32) error {
+	c.reservedVNIsLock.Lock()
+	defer c.reservedVNIsLock.Unlock()
+
+	var errs []error
+	for _, vni := range []int32{macVRFVNI, ipVRFVNI} {
+		if vni == 0 {
+			continue
+		}
+		key := vniKey{vtep: vtepName, vni: vni}
+		if owner, exists := c.reservedVNIs[key]; exists && owner != networkName {
+			errs = append(errs, fmt.Errorf("VNI %d on VTEP %q is already reserved by network %q", vni, vtepName, owner))
+			continue
+		}
+		c.reservedVNIs[key] = networkName
+	}
+	return errors.Join(errs...)
+}
+
+// releaseVNIs releases all VNIs owned by the given network.
+func (c *Controller) releaseVNIs(networkName string) {
+	c.reservedVNIsLock.Lock()
+	defer c.reservedVNIsLock.Unlock()
+
+	for vni, owner := range c.reservedVNIs {
+		if owner == networkName {
+			delete(c.reservedVNIs, vni)
+		}
 	}
 }
 
@@ -718,6 +792,12 @@ func (c *Controller) syncUserDefinedNetwork(udn *userdefinednetworkv1.UserDefine
 			klog.Infof("Finalizer removed from UserDefinedNetworks [%s/%s]", udn.Namespace, udn.Name)
 			metrics.DecrementUDNCount(role, topology)
 			metrics.DeleteDynamicUDNNodeCount(util.GenerateUDNNetworkName(udn.Namespace, udn.Name))
+
+			if config.Metrics.EnableScaleMetrics {
+				// Clean up UDN metric time series to prevent cardinality explosion
+				networkName := util.GenerateUDNNetworkName(udn.Namespace, udn.Name)
+				metrics.CleanupUDNMetrics(networkName)
+			}
 		}
 
 		return nil, nil
@@ -818,11 +898,18 @@ func (c *Controller) reconcileCUDN(key string) error {
 
 	cudnCopy := cudn.DeepCopy()
 
-	nads, syncErr := c.syncClusterUDN(cudnCopy)
+	// Validate EVPN configuration once and pass the result to both sync and
+	// transport status so they see the same VTEP snapshot.
+	var evpnErr error
+	if cudnCopy != nil {
+		evpnErr = c.validateEVPN(cudnCopy)
+	}
+
+	nads, syncErr := c.syncClusterUDN(cudnCopy, evpnErr)
 
 	// Set transport status condition (TransportAccepted) on cudnCopy
 	// The actual status update will be performed by updateClusterUDNStatus() below
-	transportUpdated, transportErr := c.setTransportStatusCondition(cudnCopy)
+	transportUpdated, transportErr := c.setTransportStatusCondition(cudnCopy, evpnErr)
 	if transportErr != nil {
 		return fmt.Errorf("failed to validate transport for ClusterUserDefinedNetwork %q: %v", cudnCopy.Name, transportErr)
 	}
@@ -837,18 +924,19 @@ func (c *Controller) reconcileCUDN(key string) error {
 		return updateStatusErr
 	}
 
-	// vtepNotFoundError is non-fatal: the status has been updated to reflect
-	// the missing VTEP, and the VTEPNotifier will re-queue this CUDN when
-	// the VTEP is created. No need to return an error that would cause retries.
+	// vtepNotFoundError / vtepNotAcceptedError are non-fatal: the status has
+	// been updated to reflect the VTEP issue, and the VTEPNotifier will
+	// re-queue this CUDN when the VTEP is created or becomes accepted.
 	var vtepNotFound *vtepNotFoundError
-	if errors.As(syncErr, &vtepNotFound) {
+	var vtepNotAccepted *vtepNotAcceptedError
+	if errors.As(syncErr, &vtepNotFound) || errors.As(syncErr, &vtepNotAccepted) {
 		return updateStatusErr
 	}
 
 	return errors.Join(syncErr, updateStatusErr)
 }
 
-func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) ([]netv1.NetworkAttachmentDefinition, error) {
+func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, evpnErr error) ([]netv1.NetworkAttachmentDefinition, error) {
 	c.namespaceTrackerLock.Lock()
 	defer c.namespaceTrackerLock.Unlock()
 
@@ -858,16 +946,6 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 
 	cudnName := cudn.Name
 	affectedNamespaces := c.namespaceTracker[cudnName]
-
-	var role, topology string
-	if cudn.Spec.Network.Layer2 != nil {
-		role = string(cudn.Spec.Network.Layer2.Role)
-	} else if cudn.Spec.Network.Layer3 != nil {
-		role = string(cudn.Spec.Network.Layer3.Role)
-	} else if cudn.Spec.Network.Localnet != nil {
-		role = string(cudn.Spec.Network.Localnet.Role)
-	}
-	topology = string(cudn.Spec.Network.Topology)
 
 	if !cudn.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(cudn, template.FinalizerUserDefinedNetwork) {
@@ -900,16 +978,16 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 			}
 			klog.Infof("Finalizer removed from ClusterUserDefinedNetwork %q", cudn.Name)
 			delete(c.namespaceTracker, cudnName)
-			metrics.DecrementCUDNCount(role, topology)
+			c.cudnMetricUncounted(cudnName, &cudn.Spec.Network)
+			metrics.DeleteCUDNCondition(cudnName)
 			metrics.DeleteDynamicUDNNodeCount(util.GenerateCUDNNetworkName(cudn.Name))
-			c.releaseVIDForNetwork(cudnName)
+			c.releaseEVPNIDsForNetwork(cudnName)
 		}
 
 		return nil, nil
 	}
 
 	if _, exist := c.namespaceTracker[cudnName]; !exist {
-		// start tracking CR
 		c.namespaceTracker[cudnName] = sets.Set[string]{}
 	}
 
@@ -920,11 +998,20 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 			return nil, fmt.Errorf("failed to add finalizer to ClusterUserDefinedNetwork %q: %w", cudnName, err)
 		}
 		klog.Infof("Added Finalizer to ClusterUserDefinedNetwork %q", cudnName)
-		metrics.IncrementCUDNCount(role, topology)
+		c.cudnMetricCounted(cudnName, &cudn.Spec.Network)
 	}
 
-	if err := c.validateEVPN(cudn); err != nil {
-		return nil, err
+	if evpnErr != nil {
+		var vtepNA *vtepNotAcceptedError
+		if errors.As(evpnErr, &vtepNA) && len(c.namespaceTracker[cudnName]) > 0 {
+			// NADs already exist — don't tear down the working network,
+			// but also don't propagate any further changes (spec updates,
+			// new namespaces, etc.) while the VTEP is unhealthy.
+			// Return the existing NADs so NetworkCreated stays True.
+			klog.Warningf("VTEP %q is not accepted; freezing NADs for ClusterUserDefinedNetwork %q until VTEP is accepted again", vtepNA.vtepName, cudnName)
+			return c.getExistingNADs(cudn, c.namespaceTracker[cudnName])
+		}
+		return nil, evpnErr
 	}
 
 	selectedNamespaces, err := c.getSelectedNamespaces(cudn.Spec.NamespaceSelector)
@@ -953,6 +1040,23 @@ func (c *Controller) syncClusterUDN(cudn *userdefinednetworkv1.ClusterUserDefine
 		}
 	}
 
+	return nads, errors.Join(errs...)
+}
+
+// getExistingNADs retrieves the current NADs for a CUDN from the cache for the
+// tracked namespaces. Used to return existing NADs without modifying them when
+// further reconciliation should be blocked (e.g. VTEP not accepted).
+func (c *Controller) getExistingNADs(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, trackedNamespaces sets.Set[string]) ([]netv1.NetworkAttachmentDefinition, error) {
+	var nads []netv1.NetworkAttachmentDefinition
+	var errs []error
+	for ns := range trackedNamespaces {
+		nad, err := c.nadLister.NetworkAttachmentDefinitions(ns).Get(cudn.Name)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("namespace %s: %w", ns, err))
+			continue
+		}
+		nads = append(nads, *nad)
+	}
 	return nads, errors.Join(errs...)
 }
 
@@ -994,6 +1098,10 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 
 	// Apply status if either NetworkCreated or TransportAccepted condition changed
 	if !networkCreatedOrUpdated && !transportUpdated {
+		// Record the metric from the existing API-confirmed conditions so it is
+		// populated after controller restarts, where the informer fires synthetic
+		// creates for all CUDNs but the conditions haven't changed.
+		recordCUDNConditionMetrics(cudn)
 		return nil
 	}
 	conditionsApply := make([]*metaapplyv1.ConditionApplyConfiguration, len(cudn.Status.Conditions))
@@ -1020,6 +1128,7 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 		return fmt.Errorf("failed to update ClusterUserDefinedNetwork status %q: %w", cudnName, err)
 	}
 	klog.Infof("Updated status ClusterUserDefinedNetwork %q", cudn.Name)
+	recordCUDNConditionMetrics(cudn)
 
 	return nil
 }
@@ -1057,11 +1166,21 @@ func newClusterNetworkCreatedCondition(nads []netv1.NetworkAttachmentDefinition,
 
 		// Check for specific error types to provide better status reasons
 		var vtepNotFound *vtepNotFoundError
+		var vtepNotAccepted *vtepNotAcceptedError
+		var evpnCfgErr *evpnConfigError
 		if errors.As(syncError, &vtepNotFound) {
-			condition.Reason = reasonVTEPNotFound
+			condition.Reason = ReasonVTEPNotFound
 			condition.Message = fmt.Sprintf("Cannot create network: VTEP '%s' does not exist. "+
 				"Create the VTEP CR first or update the CUDN to reference an existing VTEP.",
 				vtepNotFound.vtepName)
+		} else if errors.As(syncError, &vtepNotAccepted) {
+			condition.Reason = ReasonVTEPNotAccepted
+			condition.Message = fmt.Sprintf("Cannot create network: VTEP '%s' exists but is not accepted. "+
+				"The VTEP must be in Accepted status before the network can be created.",
+				vtepNotAccepted.vtepName)
+		} else if errors.As(syncError, &evpnCfgErr) {
+			condition.Reason = ReasonEVPNConfigError
+			condition.Message = evpnCfgErr.Error()
 		} else {
 			condition.Reason = reasonNADSyncError
 			condition.Message = syncError.Error()
@@ -1072,30 +1191,21 @@ func newClusterNetworkCreatedCondition(nads []netv1.NetworkAttachmentDefinition,
 }
 
 // validateEVPN validates EVPN configuration for a CUDN.
-// Returns an error if EVPN is requested but disabled, or if the referenced VTEP doesn't exist.
+// Returns an error if EVPN is requested but disabled, if the referenced VTEP
+// doesn't exist, or if the VTEP is not yet accepted.
 func (c *Controller) validateEVPN(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork) error {
 	if cudn.Spec.Network.Transport != userdefinednetworkv1.TransportOptionEVPN {
 		return nil // Not an EVPN network
 	}
 
 	if !config.OVNKubernetesFeature.EnableEVPN {
-		return fmt.Errorf("EVPN transport requested but EVPN feature is not enabled")
+		return &evpnConfigError{msg: "EVPN transport requested but EVPN feature is not enabled"}
 	}
 	if config.Gateway.Mode != config.GatewayModeLocal {
-		return fmt.Errorf("EVPN transport requested but EVPN feature is only supported in local gateway mode")
+		return &evpnConfigError{msg: "EVPN transport requested but EVPN feature is only supported in local gateway mode"}
 	}
 
-	// CEL validation ensures EVPN is set when transport is EVPN.
-	vtepName := cudn.Spec.Network.EVPN.VTEP
-	_, err := c.vtepLister.Get(vtepName)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return &vtepNotFoundError{vtepName: vtepName}
-		}
-		return fmt.Errorf("failed to get VTEP %q: %w", vtepName, err)
-	}
-
-	return nil
+	return c.validateVTEP(cudn)
 }
 
 // ReconcileVTEP handles VTEP events by re-queuing all CUDNs that reference the VTEP.

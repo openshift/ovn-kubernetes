@@ -129,7 +129,6 @@ type DefaultNetworkController struct {
 	nodeClusterRouterPortFailed sync.Map
 	hybridOverlayFailed         sync.Map
 	syncZoneICFailed            sync.Map
-	syncHostNetAddrSetFailed    sync.Map
 	syncEIPNodeRerouteFailed    sync.Map
 	syncEIPNodeFailed           sync.Map
 
@@ -197,12 +196,8 @@ func newDefaultNetworkControllerCommon(
 		return nil, fmt.Errorf("unable to create new service controller while creating new default network controller: %w", err)
 	}
 
-	var zoneICHandler *zoneic.ZoneInterconnectHandler
-	var zoneChassisHandler *zoneic.ZoneChassisHandler
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		zoneICHandler = zoneic.NewZoneInterconnectHandler(defaultNetInfo, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
-		zoneChassisHandler = zoneic.NewZoneChassisHandler(cnci.sbClient)
-	}
+	zoneICHandler := zoneic.NewZoneInterconnectHandler(defaultNetInfo, cnci.nbClient, cnci.sbClient, cnci.watchFactory)
+	zoneChassisHandler := zoneic.NewZoneChassisHandler(cnci.sbClient)
 	apbExternalRouteController, err := apbroutecontroller.NewExternalMasterController(
 		cnci.kube.APBRouteClient,
 		defaultStopChan,
@@ -280,7 +275,7 @@ func (oc *DefaultNetworkController) initRetryFramework() {
 }
 
 // newRetryFramework builds and returns a retry framework for the input resource
-// type and assigns all ovnk-master-specific function attributes in the returned struct;
+// type and assigns all ovnkube-controller-specific function attributes in the returned struct;
 // these functions will then be called by the retry logic in the retry package when
 // WatchResource() is called.
 func (oc *DefaultNetworkController) newRetryFramework(
@@ -368,6 +363,10 @@ func (oc *DefaultNetworkController) Stop() {
 	close(oc.stopChan)
 	oc.cancelableCtx.Cancel()
 	oc.wg.Wait()
+}
+
+func (oc *DefaultNetworkController) ServiceController() *svccontroller.Controller {
+	return oc.svcController
 }
 
 func (oc *DefaultNetworkController) RegisterNodeHandler() error {
@@ -486,12 +485,11 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 			_, gwSync := oc.gatewaysFailed.Load(newNode.Name)
 			_, hoSync := oc.hybridOverlayFailed.Load(newNode.Name)
 			_, zoneICSync := oc.syncZoneICFailed.Load(newNode.Name)
-			_, hostNetAddrSetSync := oc.syncHostNetAddrSetFailed.Load(newNode.Name)
 			// When a bootstrap retry first failed while the node was remote, only syncZoneICFailed may be set.
 			// If the node later becomes local before any local switch state was populated in lsManager, we must
 			// do the full local node add instead of replaying only the previous remote-zone retry state.
 			localSwitchReady := oc.hasLocalNodeSwitchState(newNode)
-			if localSwitchReady && (nodeSync || clusterRtrSync || mgmtSync || gwSync || hoSync || zoneICSync || hostNetAddrSetSync) {
+			if localSwitchReady && (nodeSync || clusterRtrSync || mgmtSync || gwSync || hoSync || zoneICSync) {
 				nodeSyncsParam = &nodeSyncs{
 					syncNode:              nodeSync,
 					syncClusterRouterPort: clusterRtrSync,
@@ -507,7 +505,7 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 					syncMgmtPort:          true,
 					syncGw:                true,
 					syncHo:                config.HybridOverlay.Enabled || hoNeedsCleanup,
-					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+					syncZoneIC:            true,
 				}
 			}
 		} else if oc.isLocalZoneNode(oldNode) {
@@ -542,7 +540,7 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 				syncMgmtPort:          true,
 				syncGw:                true,
 				syncHo:                true,
-				syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+				syncZoneIC:            true,
 			}
 		}
 		if err := oc.addUpdateLocalNodeEvent(newNode, nodeSyncsParam); err != nil {
@@ -551,7 +549,7 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 	} else {
 		_, syncZoneIC := oc.syncZoneICFailed.Load(newNode.Name)
 		if oldNode == nil {
-			syncZoneIC = config.OVNKubernetesFeature.EnableInterconnect
+			syncZoneIC = true
 		} else {
 			// Sync interconnect state when the node moved from local to remote, changed zone clusters,
 			// switched from hybrid-overlay to OVN management, or its remote reachability inputs changed.
@@ -567,8 +565,10 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 				newNode.Name, util.GetNodeZone(newNode), oc.GetNetworkName())
 		}
 		// Reprovisioning the DPU, including OVS, changes the chassis system ID without changing the node.
+		// Same can happen with the non-DPU nodes in the testing environment where the node is re-provisioned
+		// without being deleted from the cluster.
 		// Delete the stale remote chassis mapping so the new chassis can be associated cleanly.
-		if oldNode != nil && config.OvnKubeNode.Mode == types.NodeModeDPU && nodeChassisChanged(oldNode, newNode) {
+		if oldNode != nil && nodeChassisChanged(oldNode, newNode) {
 			if err := oc.zoneChassisHandler.DeleteRemoteZoneNode(oldNode); err != nil {
 				aggregatedErrors = append(aggregatedErrors, err)
 			}
@@ -576,29 +576,6 @@ func (oc *DefaultNetworkController) ReconcileNode(oldNode, newNode *corev1.Node,
 		}
 		if err := oc.addUpdateRemoteNodeEvent(newNode, syncZoneIC); err != nil {
 			aggregatedErrors = append(aggregatedErrors, err)
-		}
-	}
-
-	_, syncHostNetAddrSet := oc.syncHostNetAddrSetFailed.Load(newNode.Name)
-	hostNamespaceAddressesChanged := oldNode != nil &&
-		(defaultNodeSubnetChangedWithState(oldNode, newNode, oldState, newState) ||
-			gatewayChanged(oldNode, newNode, oldState, newState, oc.GetNetworkName()))
-	if oldNode == nil || syncHostNetAddrSet || hostNamespaceAddressesChanged {
-		hostNamespaceAddrSetErr := false
-		if hostNamespaceAddressesChanged {
-			if err := oc.delIPFromHostNetworkNamespaceAddrSet(oldNode); err != nil {
-				klog.Errorf("Failed to delete old node IPs from %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
-				hostNamespaceAddrSetErr = true
-				oc.syncHostNetAddrSetFailed.Store(newNode.Name, true)
-				aggregatedErrors = append(aggregatedErrors, err)
-			}
-		}
-		if err := oc.addIPToHostNetworkNamespaceAddrSet(newNode); err != nil {
-			klog.Errorf("Failed to add node IPs to %s address_set: %v", config.Kubernetes.HostNetworkNamespace, err)
-			oc.syncHostNetAddrSetFailed.Store(newNode.Name, true)
-			aggregatedErrors = append(aggregatedErrors, err)
-		} else if !hostNamespaceAddrSetErr {
-			oc.syncHostNetAddrSetFailed.Delete(newNode.Name)
 		}
 	}
 
@@ -811,16 +788,19 @@ func (oc *DefaultNetworkController) run(_ context.Context) error {
 			return err
 		}
 	}
+	if err := cleanupDeprecatedClusterNodeIPsAddressSet(oc.nbClient); err != nil {
+		return err
+	}
 
 	if config.OVNKubernetesFeature.EnableMultiExternalGateway {
 		if err = oc.apbExternalRouteController.Run(oc.wg, 1); err != nil {
 			return err
 		}
-		// If interconnect is enabled and it is a multi-zone setup, then we flush conntrack
-		// on ovnkube-controller side and not on ovnkube-node side, since they are run in the
+		// In a multi-zone setup, flush conntrack on the ovnkube-controller side and not
+		// on the ovnkube-node side, since they are run in the
 		// same process. TODO(tssurya): In upstream ovnk, its possible to run these as different processes
 		// in which case this flushing feature is not supported.
-		if config.OVNKubernetesFeature.EnableInterconnect && oc.zone != types.OvnDefaultZone {
+		if oc.zone != types.OvnDefaultZone {
 			// every minute cleanup stale conntrack entries if any
 			go wait.Until(func() {
 				oc.checkAndDeleteStaleConntrackEntries()

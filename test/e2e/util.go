@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,8 +57,6 @@ const (
 	// ovnGatewayMTUSupport annotation determines if options:gateway_mtu shall be set for a node's gateway router
 	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
-
-var singleNodePerZoneResult *bool
 
 type IpNeighbor struct {
 	Dst    string `json:"dst"`
@@ -381,8 +380,8 @@ func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targe
 
 // wrapper logic around pokeEndpoint
 // contact the ExternalIP service until each endpoint returns its hostname and return true, or false otherwise
-func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.String) bool {
-	responses := sets.NewString()
+func pokeExternalIpService(externalContainer infraapi.ExternalContainer, protocol, externalAddress string, externalPort int32, maxTries int, nodesHostnames sets.Set[string]) bool {
+	responses := sets.New[string]()
 
 	for i := 0; i < maxTries; i++ {
 		epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, externalAddress, externalPort, "hostname")
@@ -594,7 +593,7 @@ func getNodeStatus(node string) string {
 	return status
 }
 
-// waitClusterHealthy ensures we have a given number of ovn-k worker and master nodes,
+// waitClusterHealthy ensures we have a given number of ovn-k worker and control-plane nodes,
 // as well as all nodes are healthy
 func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, controlPlanePodName string) error {
 	return wait.PollImmediate(2*time.Second, 120*time.Second, func() (bool, error) {
@@ -642,7 +641,7 @@ func waitClusterHealthy(f *framework.Framework, numControlPlanePods int, control
 			LabelSelector: "name=" + controlPlanePodName,
 		})
 		if err != nil {
-			return false, fmt.Errorf("failed to list ovn-kube master pods: %w", err)
+			return false, fmt.Errorf("failed to list ovn-kube control-plane pods: %w", err)
 		}
 		if len(podList.Items) != numControlPlanePods {
 			framework.Logf("Not enough running %s pods, want %d, have %d", controlPlanePodName, numControlPlanePods, len(podList.Items))
@@ -965,185 +964,6 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	return nil
 }
 
-func getNodeIPTRules(nodeName string) string {
-	ipt4Rules, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"iptables-save", "-c"})
-	framework.ExpectNoError(err, "failed to get iptables rules from node %s", nodeName)
-	ipt6Rules, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip6tables-save", "-c"})
-	framework.ExpectNoError(err, "failed to get ip6tables rules from node %s", nodeName)
-	iptRules := ipt4Rules + ipt6Rules
-	framework.Logf("DEBUG: Dumping IPTRules %v", iptRules)
-	return iptRules
-}
-
-// pokeNodeIPTableRules returns the number of iptables (both ipv6 and ipv4) rules that match the provided pattern
-func pokeNodeIPTableRules(nodeName, pattern string) int {
-	iptRules := getNodeIPTRules(nodeName)
-	numOfMatchRules := 0
-	for _, iptRule := range strings.Split(iptRules, "\n") {
-		match := strings.Contains(iptRule, pattern)
-		if match {
-			framework.Logf("DEBUG: Matched rule %s for pattern %s", iptRule, pattern)
-			numOfMatchRules++
-		}
-	}
-	return numOfMatchRules
-}
-
-func countIPTablesRulesMatches(nodeName string, patterns []string) int {
-	numMatches := 0
-	iptRules := getNodeIPTRules(nodeName)
-	for _, pattern := range patterns {
-		for _, iptRule := range strings.Split(iptRules, "\n") {
-			matched, err := regexp.MatchString(pattern, iptRule)
-			if err == nil && matched {
-				numMatches++
-			}
-		}
-	}
-	return numMatches
-}
-
-type Elem []string
-
-func (e *Elem) UnmarshalJSON(data []byte) error {
-	var str string
-	var i int
-	var concatenation map[string][]json.RawMessage
-	if err := json.Unmarshal(data, &str); err == nil {
-		*e = []string{str}
-		return nil
-	}
-	if err := json.Unmarshal(data, &i); err == nil {
-		*e = []string{fmt.Sprintf("%d", i)}
-		return nil
-	}
-	if err := json.Unmarshal(data, &concatenation); err == nil {
-		concat := concatenation["concat"]
-		for _, rawMsg := range concat {
-			var str string
-			var i int
-			if err := json.Unmarshal(rawMsg, &str); err == nil {
-				*e = append(*e, str)
-			}
-			if err := json.Unmarshal(rawMsg, &i); err == nil {
-				*e = append(*e, fmt.Sprintf("%d", i))
-			}
-		}
-		return nil
-	}
-	return fmt.Errorf("could not unmarshal %s", string(data))
-}
-
-func getNFTablesElements(nodeName, name string) ([]Elem, error) {
-	array := []Elem{}
-
-	nftCmd := []string{"nft", "-j", "list", "set", "inet", "ovn-kubernetes", name}
-	nftElements, err := infraprovider.Get().ExecK8NodeCommand(nodeName, nftCmd)
-	if err != nil {
-		return array, err
-	}
-	framework.Logf("DEBUG: Dumping NFTElements %v", nftElements)
-	// The output will look like
-	//
-	// {
-	//   "nftables": [
-	//     {
-	//       "metainfo": {
-	//         ...
-	//       }
-	//     },
-	//     {
-	//       "set": {
-	//         ...
-	//         "elem": [
-	//           ...
-	//         ]
-	//       }
-	//     }
-	//   ]
-	// }
-	//
-	// (Where the "elem" element will be omitted if the set is empty.)
-
-	jsonResult := map[string][]map[string]map[string]json.RawMessage{}
-	if err := json.Unmarshal([]byte(nftElements), &jsonResult); err != nil {
-		return array, err
-	}
-	elem := jsonResult["nftables"][1]["set"]["elem"]
-	if elem == nil {
-		return array, err
-	}
-	err = json.Unmarshal(elem, &array)
-	return array, err
-}
-
-// countNFTablesElements returns the number of nftables elements in the indicated set
-// of the "ovn-kubernetes" table.
-func countNFTablesElements(nodeName, name string) int {
-	defer ginkgo.GinkgoRecover()
-	array, err := getNFTablesElements(nodeName, name)
-	framework.ExpectNoError(err, "failed to get nftables elements from node %s", nodeName)
-	return len(array)
-}
-
-func countNFTablesRulesMatches(nodeName, name string, sets [][]string) int {
-	numMatches := 0
-	array, err := getNFTablesElements(nodeName, name)
-	framework.ExpectNoError(err, "failed to get nftables elements from node %s", nodeName)
-	for _, set := range sets {
-		for _, elem := range array {
-			if slices.Equal(set, elem) {
-				numMatches++
-			}
-		}
-	}
-	return numMatches
-}
-
-func checkNumberOfETPRules(backendNodeName string, value int, pattern string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numberOfETPRules := pokeNodeIPTableRules(backendNodeName, pattern)
-		isExpected := numberOfETPRules == value
-		if !isExpected {
-			framework.Logf("numberOfETPRules got: %d, expected: %d", numberOfETPRules, value)
-		}
-		return isExpected, nil
-	}
-}
-func checkNumberOfNFTElements(backendNodeName string, value int, name string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numberOfNFTElements := countNFTablesElements(backendNodeName, name)
-		isExpected := numberOfNFTElements == value
-		if !isExpected {
-			framework.Logf("numberOfNFTElements got: %d, expected: %d", numberOfNFTElements, value)
-		}
-		return isExpected, nil
-	}
-}
-
-func checkIPTablesRulesPresent(backendNodeName string, patterns []string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numMatches := countIPTablesRulesMatches(backendNodeName, patterns)
-		isExpected := numMatches == len(patterns)
-		if !isExpected {
-			framework.Logf("checkIPTablesRulesPresent got: numMatches: %d, expected: %d",
-				numMatches, len(patterns))
-		}
-		return isExpected, nil
-	}
-}
-func checkNFTElementsPresent(backendNodeName, name string, sets [][]string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numMatches := countNFTablesRulesMatches(backendNodeName, name, sets)
-		isExpected := numMatches == len(sets)
-		if !isExpected {
-			framework.Logf("checkNFTElementsPresent got: numMatches: %d, expected: %d",
-				numMatches, len(sets))
-		}
-		return isExpected, nil
-	}
-}
-
 // isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
 func isDualStackCluster(nodes *v1.NodeList) bool {
 	for _, node := range nodes.Items {
@@ -1169,6 +989,9 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		logLocation := "/var/log"
 		coredumpDir := "/tmp/kind/logs/coredumps"
 		dbLocation := "/var/lib/openvswitch"
+		// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5782
+		skippedCoredumps := []string{"zebra", "bgpd", "mgmtd", "bfdd"}
+
 		// Check for coredumps on host
 		var coredumpFiles []string
 		files, err := os.ReadDir(coredumpDir)
@@ -1177,7 +1000,14 @@ func wrappedTestFramework(basename string) *framework.Framework {
 				if file.IsDir() {
 					continue
 				}
-				coredumpFiles = append(coredumpFiles, file.Name())
+				fileName := file.Name()
+				if slices.ContainsFunc(skippedCoredumps, func(s string) bool {
+					return strings.Contains(fileName, s)
+				}) {
+					framework.Logf("Ignoring coredump for skipped process: %s", fileName)
+					continue
+				}
+				coredumpFiles = append(coredumpFiles, fileName)
 			}
 		}
 
@@ -1191,7 +1021,10 @@ func wrappedTestFramework(basename string) *framework.Framework {
 		dbs := []string{"ovnnb_db.db", "ovnsb_db.db"}
 		ovsdb := "conf.db"
 
-		testName := strings.Replace(ginkgo.CurrentSpecReport().LeafNodeText, " ", "_", -1)
+		testName := strings.Trim(
+			regexp.MustCompile(`[^A-Za-z0-9._-]+`).ReplaceAllString(ginkgo.CurrentSpecReport().LeafNodeText, "_"),
+			"_",
+		)
 		logDir := fmt.Sprintf("%s/e2e-dbs/%s-%s", logLocation, testName, f.UniqueName)
 		// grab all OVS and OVN dbs
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
@@ -1417,11 +1250,6 @@ func getSupportedIPFamiliesSlice(cs kubernetes.Interface) []utilnet.IPFamily {
 	return nil
 }
 
-func isInterconnectEnabled() bool {
-	val, present := os.LookupEnv("OVN_ENABLE_INTERCONNECT")
-	return present && val == "true"
-}
-
 func isDynamicUDNEnabled() bool {
 	val, present := os.LookupEnv("DYNAMIC_UDN_ALLOCATION")
 	return present && val == "true"
@@ -1449,27 +1277,8 @@ func isPreConfiguredUdnAddressesEnabled() bool {
 	return val == "true"
 }
 
-func singleNodePerZone() bool {
-	if singleNodePerZoneResult == nil {
-		args := []string{"get", "pods", "--selector=app=ovnkube-node", "-o", "jsonpath={.items[0].spec.containers[*].name}"}
-		containerNames := e2ekubectl.RunKubectlOrDie(deploymentconfig.Get().OVNKubernetesNamespace(), args...)
-		result := true
-		for _, containerName := range strings.Split(containerNames, " ") {
-			if containerName == "ovnkube-node" {
-				result = false
-				break
-			}
-		}
-		singleNodePerZoneResult = &result
-	}
-	return *singleNodePerZoneResult
-}
-
 func getNodeContainerName() string {
-	if singleNodePerZone() {
-		return "ovnkube-controller"
-	}
-	return "ovnkube-node"
+	return "ovnkube-controller"
 }
 
 // getNodeZone returns the node's zone
@@ -1897,57 +1706,9 @@ func getNetworkInterfaceName(pod *v1.Pod, podConfig podConfiguration, netConfigN
 	return iface, nil
 }
 
-// findOVNDBLeaderPod finds the ovnkube-db pod that is currently the northbound database leader
-func findOVNDBLeaderPod(f *framework.Framework, cs clientset.Interface, namespace string) (*v1.Pod, error) {
-	dbPods, err := cs.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: "ovn-db-pod=true"})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list ovnkube-db pods: %v", err)
-	}
-
-	if len(dbPods.Items) == 0 {
-		return nil, fmt.Errorf("no ovnkube-db pods found")
-	}
-
-	if len(dbPods.Items) == 1 {
-		return &dbPods.Items[0], nil
-	}
-
-	for i := range dbPods.Items {
-		pod := &dbPods.Items[i]
-		if pod.Status.Phase != v1.PodRunning {
-			continue
-		}
-
-		stdout, stderr, err := ExecCommandInContainerWithFullOutput(f, namespace, pod.Name, "nb-ovsdb",
-			"ovsdb-client", "query", "unix:/var/run/openvswitch/ovnnb_db.sock",
-			`["_Server", {"op":"select", "table":"Database", "where":[["name", "==", "OVN_Northbound"]], "columns": ["leader"]}]`)
-
-		if err != nil {
-			framework.Logf("Warning: Failed to query leader status on pod %s: %v, stderr: %s", pod.Name, err, stderr)
-			continue
-		}
-
-		// Parse the JSON response to check if this pod is the leader
-		// Expected: [{"rows":[{"leader":true}]}]
-		type dbResp struct {
-			Rows []struct {
-				Leader bool `json:"leader"`
-			} `json:"rows"`
-		}
-		var resp []dbResp
-		if err := json.Unmarshal([]byte(stdout), &resp); err == nil &&
-			len(resp) > 0 && len(resp[0].Rows) > 0 && resp[0].Rows[0].Leader {
-			framework.Logf("Found nbdb leader pod: %s", pod.Name)
-			return pod, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no nbdb leader pod found among %d ovnkube-db pods", len(dbPods.Items))
-}
-
 // waitOVNKubernetesHealthy waits for the ovn-kubernetes cluster to be healthy
 // This includes checking that all nodes are ready, all ovnkube-node pods are running,
-// and all ovnkube-master/control-plane pods are running
+// and ovnkube-control-plane pods are running
 func waitOVNKubernetesHealthy(f *framework.Framework) error {
 	return wait.PollImmediate(5*time.Second, 300*time.Second, func() (bool, error) {
 		// Check that all nodes are ready and schedulable
@@ -1988,53 +1749,71 @@ func waitOVNKubernetesHealthy(f *framework.Framework) error {
 			}
 		}
 
-		// Check ovnkube-master/control-plane pods
-		ovnMasterPods, err := podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-master",
+		// Check ovnkube-control-plane pods
+		ovnControlPlanePods, err := podClient.List(context.Background(), metav1.ListOptions{
+			LabelSelector: "name=ovnkube-control-plane",
 		})
 		if err != nil {
-			framework.Logf("Error listing ovnkube-master pods: %v", err)
+			framework.Logf("Error listing ovnkube-control-plane pods: %v", err)
 			return false, nil
 		}
 
-		// If no ovnkube-master pods, check for ovnkube-control-plane
-		if len(ovnMasterPods.Items) == 0 {
-			ovnMasterPods, err = podClient.List(context.Background(), metav1.ListOptions{
-				LabelSelector: "name=ovnkube-control-plane",
-			})
-			if err != nil {
-				framework.Logf("Error listing ovnkube-control-plane pods: %v", err)
-				return false, nil
-			}
-		}
-
-		if len(ovnMasterPods.Items) == 0 {
-			framework.Logf("No ovnkube-master or ovnkube-control-plane pods found")
+		if len(ovnControlPlanePods.Items) == 0 {
+			framework.Logf("No ovnkube-control-plane pods found")
 			return false, nil
 		}
 
-		// Check that at least one master/control-plane pod is running and ready
-		runningMasterPods := 0
-		for _, pod := range ovnMasterPods.Items {
+		// Check that at least one control-plane pod is running and ready
+		runningControlPlanePods := 0
+		for _, pod := range ovnControlPlanePods.Items {
 			isReady, err := testutils.PodRunningReady(&pod)
 			if err != nil {
-				framework.Logf("Error checking if ovnkube-master pod %s is ready: %v", pod.Name, err)
+				framework.Logf("Error checking if ovnkube-control-plane pod %s is ready: %v", pod.Name, err)
 				continue
 			}
 			if isReady {
-				runningMasterPods++
+				runningControlPlanePods++
 			}
 		}
 
-		if runningMasterPods == 0 {
-			framework.Logf("No ovnkube-master/control-plane pods are running")
+		if runningControlPlanePods == 0 {
+			framework.Logf("No ovnkube-control-plane pods are running")
 			return false, nil
 		}
 
-		framework.Logf("OVN-Kubernetes cluster is healthy: %d nodes, %d ovnkube-node pods, %d running master pods",
-			len(nodes.Items), len(ovnNodePods.Items), runningMasterPods)
+		framework.Logf("OVN-Kubernetes cluster is healthy: %d nodes, %d ovnkube-node pods, %d running control-plane pods",
+			len(nodes.Items), len(ovnNodePods.Items), runningControlPlanePods)
 		return true, nil
 	})
+}
+
+// secondToLastIP returns the second-to-last usable IP in the given subnet.
+// Using the high end of the range avoids collisions with both OVN IPAM
+// (which allocates from lower end onwards) and Docker IPAM (which allocates from lower end onwards).
+// This assumes OVN-K CUDN IPAM won't allocate IPs from the top of the subnet range
+// for pods in these e2e tests.
+// Example: "10.100.0.0/24" -> 10.100.0.253, "fd00:100::/64" -> fd00:100::ffff:ffff:ffff:fffe
+func secondToLastIP(ipNet *net.IPNet) net.IP {
+	// Compute broadcast: network OR inverted mask
+	broadcast := make(net.IP, len(ipNet.IP))
+	for i := range ipNet.IP {
+		broadcast[i] = ipNet.IP[i] | ^ipNet.Mask[i]
+	}
+	// Subtract 2 from broadcast to get second-to-last usable IP
+	result := make(net.IP, len(broadcast))
+	copy(result, broadcast)
+	borrow := byte(2)
+	for i := len(result) - 1; i >= 0 && borrow > 0; i-- {
+		diff := int(result[i]) - int(borrow)
+		if diff < 0 {
+			result[i] = byte(diff + 256)
+			borrow = 1
+		} else {
+			result[i] = byte(diff)
+			borrow = 0
+		}
+	}
+	return result
 }
 
 // waitForNodeReadyState waits for the specified node to reach the desired Ready state within the given timeout
@@ -2066,4 +1845,65 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		}
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
+}
+
+// firstSubnetOf returns the first subnet of a given size within the provided
+// subnet
+func firstSubnetOf(subnet string, subnetSize int) string {
+	_, ipNet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		panic(fmt.Sprintf("firstSubnetOf: invalid subnet %q: %v", subnet, err))
+	}
+	ones, bits := ipNet.Mask.Size()
+	if subnetSize < ones || subnetSize > bits {
+		panic(fmt.Sprintf("firstSubnetOf: requested size /%d is not between min /%d and max /%d for %s", subnetSize, ones, bits, subnet))
+	}
+	return fmt.Sprintf("%s/%d", ipNet.IP, subnetSize)
+}
+
+// monitorTcpdumpOnNode creates a privileged host-network pod on the given node that runs
+// tcpdump on the specified interface with the provided filter. It blocks until ctx is
+// cancelled, then fetches the pod logs and deletes the monitor pod. Returns all captured
+// tcpdump output.
+func monitorTcpdumpOnNode(ctx context.Context, f *framework.Framework,
+	name, nodeName, nodeIface, options, filter string) (string, error) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: f.Namespace.Name,
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
+			HostNetwork: true,
+			Containers: []corev1.Container{
+				{
+					Name:  "traffic-monitor",
+					Image: images.Netshoot(),
+					Command: []string{
+						"/bin/bash",
+						"-c",
+						fmt.Sprintf("exec tcpdump -i %s %s %s", nodeIface, options, filter),
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: func(b bool) *bool { return &b }(true),
+					},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}
+
+	createdPod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "Failed to create traffic monitor pod")
+	err = e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, createdPod)
+	framework.ExpectNoError(err, "Monitor pod failed to start")
+
+	<-ctx.Done()
+	logs, err := e2ekubectl.RunKubectl(f.Namespace.Name, "logs", name)
+	if err != nil {
+		return "", err
+	}
+	return logs, nil
 }

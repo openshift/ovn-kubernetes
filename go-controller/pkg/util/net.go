@@ -18,10 +18,8 @@ import (
 	"github.com/vishvananda/netlink"
 
 	utilnet "k8s.io/utils/net"
-)
 
-const (
-	RoutingTableIDStart = 1000
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 )
 
 var ErrorNoIP = errors.New("no IP available")
@@ -309,6 +307,19 @@ func MatchAllIPNetsStringFamily(isIPv6 bool, ipnets []string) []string {
 	return out
 }
 
+// SplitIPStringByIPFamily splits a slice of IP address strings into IPv4 and IPv6 slices.
+func SplitIPStringByIPFamily(ips []string) (ipsv4, ipsv6 []string) {
+	for _, ip := range ips {
+		switch {
+		case utilnet.IsIPv6String(ip):
+			ipsv6 = append(ipsv6, ip)
+		default:
+			ipsv4 = append(ipsv4, ip)
+		}
+	}
+	return
+}
+
 // IsIPContainedInAnyCIDR returns true if ip is contained in any of the given ipnets
 func IsIPContainedInAnyCIDR(ip net.IP, ipnets ...*net.IPNet) bool {
 	for _, ipnet := range ipnets {
@@ -466,7 +477,7 @@ func IPNetsToIPs(ipNets []*net.IPNet) []net.IP {
 // CalculateRouteTableID will calculate route table ID based on the network
 // interface index
 func CalculateRouteTableID(ifIndex int) int {
-	return ifIndex + RoutingTableIDStart
+	return ifIndex + config.OvnKubeNode.RoutingTableIDStart
 }
 
 // RouteEqual compare two routes

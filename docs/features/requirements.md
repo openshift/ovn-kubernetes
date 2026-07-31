@@ -5,7 +5,7 @@ supported versions.
 
 | OVN-Kubernetes release | OVN release | nft binary | multus | CNI spec | k8s  | 
 |------------------------|-------------|------------|--------|----------|------|
-| master                 | 25.09       | 1.0.1+     | v4.1.3 | 1.1.0    | 1.35 |
+| master                 | 26.03       | 1.0.1+     | v4.1.3 | 1.1.0    | 1.35 |
 | 1.2                    | 25.09       | 1.0.1+     | v4.1.3 | 0.4.0    | 1.34 |
 | 1.1                    | 25.03       | 1.0.1+     | v4.1.3 | 0.4.0    | 1.33 |
 | 1.0                    | 24.03       | -          | v4.1.0 | 0.4.0    | 1.29 |
@@ -27,9 +27,10 @@ For kubelet network probes to work with UDN pods, the following are required:
   [6.1.112](https://cdn.kernel.org/pub/linux/kernel/v6.x/ChangeLog-6.1.112)
 - cgroupv2: required for kubelet probes to work with UDN pods
 
-## BGP and EVPN (ENABLE_ROUTE_ADVERTISEMENTS)
+## BGP, EVPN, and No-Overlay (ENABLE_ROUTE_ADVERTISEMENTS)
 
-[Feature link](bgp-integration/route-advertisements.md)
+- [Route Advertisements feature link](bgp-integration/route-advertisements.md)
+- [No-overlay feature link](bgp-integration/no-overlay.md)
 
 | OVN-Kubernetes release | frr-k8s | frr  | 
 |------------------------|---------|------|

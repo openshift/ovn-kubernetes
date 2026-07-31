@@ -19,6 +19,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/addresssetmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -128,9 +129,19 @@ func (c *Controller) syncNode(key string) error {
 	}
 	// We ensure node no re-route policies contemplating possible node IP
 	// address changes regardless of allocated services.
+
+	// Ensure cluster node address sets (shared cluster-wide resource)
+	clusterNodeIPsAddrSetDbIDs, err := c.addressSetManager.EnsureClusterNodeIPsAddressSet(addresssetmanager.ClusterNodeIPsEgressServiceBackRef)
+	if err != nil {
+		return fmt.Errorf("failed to ensure cluster node IP address set for EgressService: %w", err)
+	}
+	clusterNodesAddressSets, err := c.addressSetFactory.GetAddressSet(clusterNodeIPsAddrSetDbIDs)
+	if err != nil {
+		return fmt.Errorf("cannot ensure that addressSet %s exists %v", addresssetmanager.ClusterNodeIPsEgressServiceBackRef, err)
+	}
 	network := util.DefaultNetInfo{}
 	networkName := network.GetNetworkName()
-	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, networkName, c.GetNetworkScopedClusterRouterName(), c.controllerName, c.nodeLister, config.IPv4Mode, config.IPv6Mode)
+	err = c.ensureNoRerouteNodePolicies(c.nbClient, c.addressSetFactory, networkName, c.GetNetworkScopedClusterRouterName(), c.controllerName, clusterNodesAddressSets, config.IPv4Mode, config.IPv6Mode)
 	if err != nil {
 		return err
 	}
@@ -160,8 +171,8 @@ func (c *Controller) syncNode(key string) error {
 		return fmt.Errorf("failed to get default network gateway router join IPs for node %q: %w", n.Name, err)
 	}
 
-	// At this point the node exists and is ready
-	if config.OVNKubernetesFeature.EnableInterconnect && c.zone != types.OvnDefaultZone && c.isNodeInLocalZone(n) {
+	// At this point the node exists and is ready.
+	if c.zone != types.OvnDefaultZone && c.isNodeInLocalZone(n) {
 		if err := c.createDefaultRouteToExternalForIC(c.nbClient, c.GetNetworkScopedClusterRouterName(),
 			c.GetNetworkScopedGWRouterName(nodeName), c.Subnets(), gatewayIPs); err != nil {
 			return err
@@ -231,18 +242,16 @@ func (c *Controller) nodeStateFor(name string) (*nodeState, error) {
 		v6IP = ip
 	}
 
+	transitSwitchIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
+	if err != nil {
+		return nil, fmt.Errorf("unable to fetch router transit IP for node %s: %w", node, err)
+	}
 	var transitIPV4, transitIPV6 net.IP
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		transitSwitchIPs, err := util.ParseNodeTransitSwitchPortAddrs(node)
-		if err != nil {
-			return nil, fmt.Errorf("unable to fetch router transit IP for node %s: %w", node, err)
-		}
-		for _, ip := range transitSwitchIPs {
-			if utilnet.IsIPv4(ip.IP) {
-				transitIPV4 = ip.IP
-			} else if utilnet.IsIPv6(ip.IP) {
-				transitIPV6 = ip.IP
-			}
+	for _, ip := range transitSwitchIPs {
+		if utilnet.IsIPv4(ip.IP) {
+			transitIPV4 = ip.IP
+		} else if utilnet.IsIPv6(ip.IP) {
+			transitIPV6 = ip.IP
 		}
 	}
 

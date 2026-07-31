@@ -158,6 +158,9 @@ const (
 	// Packet marking
 	EgressIPNodeConnectionMark         = "1008"
 	EgressIPReplyTrafficConnectionMark = 42
+	// Packet mark for egress IP traffic on secondary host interfaces
+	// This mark will be cleared by node controller when SNAT is ready
+	EgressIPSecondaryInterfaceMark = "1009"
 
 	// primary user defined network's default join subnet value
 	// users can configure custom values using NADs
@@ -194,6 +197,7 @@ const (
 	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
 	OvnRouteAdvertisementsKey = OvnK8sPrefix + "/route-advertisements"
+	OvnDPUHostNodeLabel       = OvnK8sPrefix + "/dpu-host"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"
@@ -263,6 +267,8 @@ const (
 	//		"l2-network-b":"10"}
 	// }",
 	UDNLayer2NodeGRLRPTunnelIDAnnotation = "k8s.ovn.org/udn-layer2-node-gateway-router-lrp-tunnel-ids"
+	// OvnPodAnnotationName is the constant string representing the POD annotation key
+	OvnPodAnnotationName = OvnK8sPrefix + "/pod-networks"
 
 	// different user-defined network topology types defined in CNI netconf
 	Layer3Topology   = "layer3"

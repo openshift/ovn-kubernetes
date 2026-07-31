@@ -4,7 +4,6 @@
 package metrics
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,11 +17,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
-
-	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -67,7 +62,7 @@ type stopwatchStatistics struct {
 
 // MetricResourceRetryFailuresCount is the number of times retrying to reconcile a Kubernetes
 // resource reached the maximum retry limit and will not be retried. This metric doesn't
-// need Subsystem string since it is applicable for both master and node.
+// need Subsystem string since it is applicable for both control plane and node.
 var MetricResourceRetryFailuresCount = prometheus.NewCounter(prometheus.CounterOpts{
 	Namespace: types.MetricOvnkubeNamespace,
 	Name:      "resource_retry_failures_total",
@@ -389,32 +384,6 @@ func stopwatchShowMetricsUpdate(component string) {
 
 }
 
-// The `keepTrying` boolean when set to true will not return an error if we can't find pods with one of the given labels.
-// This is so that the caller can re-try again to see if the pods have appeared in the k8s cluster.
-func CheckPodRunsOnGivenNode(clientset kubernetes.Interface, labels []string, k8sNodeName string,
-	keepTrying bool) (bool, error) {
-	for _, label := range labels {
-		pods, err := clientset.CoreV1().Pods(config.Kubernetes.OVNConfigNamespace).List(context.TODO(), metav1.ListOptions{
-			LabelSelector:   label,
-			ResourceVersion: "0",
-		})
-		if err != nil {
-			klog.V(5).Infof("Failed to list Pods with label %q: %v. Retrying..", label, err)
-			return false, nil
-		}
-		for _, pod := range pods.Items {
-			if pod.Spec.NodeName == k8sNodeName {
-				return true, nil
-			}
-		}
-	}
-	if keepTrying {
-		return false, nil
-	}
-	return false, fmt.Errorf("a Pod matching at least one of the labels %q doesn't exist on this node %s",
-		strings.Join(labels, ","), k8sNodeName)
-}
-
 // stringFlagSetterFunc is a func used for setting string type flag.
 type stringFlagSetterFunc func(string) (string, error)
 
@@ -460,43 +429,22 @@ func writePlainText(statusCode int, text string, w http.ResponseWriter) {
 	fmt.Fprintln(w, text)
 }
 
-// StartMetricsServer runs the prometheus listener so that OVN K8s metrics can be collected.
-// It now reuses the unified MetricServer implementation so it can share plumbing with the
-// OVN/OVS metrics server. TLS and pprof behaviour remain unchanged.
-func StartMetricsServer(bindAddress string, enablePprof bool, certFile string, keyFile string,
-	stopChan <-chan struct{}, wg *sync.WaitGroup) {
-	opts := MetricServerOptions{
-		BindAddress: bindAddress,
-		CertFile:    certFile,
-		KeyFile:     keyFile,
-		EnablePprof: enablePprof,
-		// Use default registry so existing metric registrations keep working.
-		Registerer: prometheus.DefaultRegisterer,
-	}
+// StartMetricsServer runs the prometheus listener so that metrics can be collected.
+// It registers metrics based on the enabled flags in MetricServerOptions and returns
+// the MetricServer instance to allow dynamic metric registration via Enable* methods.
+func StartMetricsServer(opts MetricServerOptions, stopChan <-chan struct{}, wg *sync.WaitGroup) *MetricServer {
+	klog.Infof("Starting Metrics Server on address: %s", opts.BindAddress)
+	metricsServer := NewMetricServer(opts)
 
-	server := NewMetricServer(opts, nil, nil)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		server.Run(stopChan)
-	}()
-}
-
-// StartOVNMetricsServer runs the prometheus listener so that OVN metrics can be collected
-func StartOVNMetricsServer(opts MetricServerOptions,
-	ovsClient libovsdbclient.Client,
-	kubeClient kubernetes.Interface,
-	stopChan <-chan struct{}, wg *sync.WaitGroup) *MetricServer {
-
-	klog.Infof("Create OVN Metrics Server on address: %s", opts.BindAddress)
-	metricsServer := NewMetricServer(opts, ovsClient, kubeClient)
+	// Register metrics based on the enabled flags in opts.
+	// This is safe to call unconditionally as registerMetrics only registers
+	// metrics for which the corresponding Enable* flag is true.
 	metricsServer.registerMetrics()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		klog.Infof("OVN Metrics Server starts to run ...")
+		klog.Infof("Metrics Server starts to run ...")
 		metricsServer.Run(stopChan)
 	}()
 

@@ -73,6 +73,20 @@ func makeTemplate(name string) *Template {
 	return &Template{Name: name, Value: map[string]string{}}
 }
 
+// appendTemplateValue appends a comma-separated value to a template's
+// per-chassis entry. This is used when accumulating targets across
+// multiple port numbers into a single template.
+func appendTemplateValue(t *Template, chassisID, value string) {
+	if value == "" {
+		return
+	}
+	if existing := t.Value[chassisID]; existing != "" {
+		t.Value[chassisID] = existing + "," + value
+	} else {
+		t.Value[chassisID] = value
+	}
+}
+
 func forEachNBTemplateInMaps(templateMaps []TemplateMap, callback func(nbTemplate *nbdb.ChassisTemplateVar) bool) {
 	// First flatten the maps into *nbdb.ChassisTemplateVar records:
 	flattened := ChassisTemplateVarMap{}

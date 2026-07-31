@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/util/workqueue"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
@@ -42,20 +40,12 @@ type NodeHandler interface {
 	SyncNodes(nodes []*corev1.Node) error
 }
 
-// NetworkFilteringPolicy defines behavior differences for users of the shared node controller.
-// Basically for Cluster manager we do not filter for dynamic UDN, and for UDN controllers we do.
-// This will change in the future.
-type NetworkFilteringPolicy interface {
-	NodeHasNetwork(nodeName, netName string) bool
-	ShouldFilterByRemoteNetworkActivity(node *corev1.Node, netName string) bool
-}
-
 // NodeController reconciles node topology for all registered networks.
 type NodeController struct {
 	name string
 
 	nodeController controller.Controller
-	policy         NetworkFilteringPolicy
+	networkManager networkmanager.Interface
 	nodeLister     v1.NodeLister
 
 	// handlers maps network name to node handler.
@@ -93,15 +83,15 @@ type NodeController struct {
 
 const scopedNodeQueueKeySeparator = "|"
 
-// NewController builds a shared node controller with an injected behavior policy.
-func NewController(wf *factory.WatchFactory, name string, policy NetworkFilteringPolicy) *NodeController {
-	if policy == nil {
-		panic("node controller policy must not be nil")
+// NewController builds a shared node controller.
+func NewController(wf *factory.WatchFactory, name string, networkManager networkmanager.Interface) *NodeController {
+	if networkManager == nil {
+		panic("node controller network manager must not be nil")
 	}
 	nodeInformer := wf.NodeCoreInformer()
 	c := &NodeController{
 		name:                    name,
-		policy:                  policy,
+		networkManager:          networkManager,
 		nodeLister:              nodeInformer.Lister(),
 		handlers:                syncmap.NewSyncMap[NodeHandler](),
 		nodeReconciliation:      map[string]map[string]bool{},
@@ -113,7 +103,6 @@ func NewController(wf *factory.WatchFactory, name string, policy NetworkFilterin
 	}
 
 	nodeControllerConfig := &controller.ControllerConfig[corev1.Node]{
-		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		Informer:       nodeInformer.Informer(),
 		Lister:         nodeInformer.Lister().List,
 		MaxAttempts:    controller.InfiniteAttempts,
@@ -128,7 +117,7 @@ func NewController(wf *factory.WatchFactory, name string, policy NetworkFilterin
 
 // NewNodeController builds a controller that handles node events for all UDNs.
 func NewNodeController(wf *factory.WatchFactory, networkManager networkmanager.Interface) *NodeController {
-	return NewController(wf, "node-topology", &udnPolicy{networkManager: networkManager})
+	return NewController(wf, "node-topology", networkManager)
 }
 
 // Start starts the node worker.
@@ -255,7 +244,7 @@ func (c *NodeController) reconcileNode(key string) error {
 
 		oldNode := c.getCachedNode(netName, nodeName)
 		nodeHadNetwork := c.nodeHasNetwork(netName, nodeName)
-		nodeHasNetwork := c.policy.NodeHasNetwork(nodeName, netName)
+		nodeHasNetwork := c.networkManager.NodeHasNetwork(nodeName, netName)
 
 		if c.shouldFilterByRemoteNetworkActivity(newNode, netName) || c.shouldFilterByRemoteNetworkActivity(oldNode, netName) {
 			// If the node is going inactive we need to delete it and not update
@@ -546,18 +535,6 @@ func (c *NodeController) deleteNodeActive(netName, nodeName string) {
 // filtering should be applied for the node. This is limited to remote-zone
 // nodes; local-zone nodes always run unfiltered reconciliation.
 func (c *NodeController) shouldFilterByRemoteNetworkActivity(node *corev1.Node, netName string) bool {
-	return c.policy.ShouldFilterByRemoteNetworkActivity(node, netName)
-}
-
-type udnPolicy struct {
-	networkManager networkmanager.Interface
-}
-
-func (p *udnPolicy) NodeHasNetwork(nodeName, netName string) bool {
-	return p.networkManager.NodeHasNetwork(nodeName, netName)
-}
-
-func (p *udnPolicy) ShouldFilterByRemoteNetworkActivity(node *corev1.Node, netName string) bool {
 	if node == nil || netName == types.DefaultNetworkName || !config.OVNKubernetesFeature.EnableDynamicUDNAllocation {
 		return false
 	}
@@ -589,18 +566,17 @@ func parseScopedNodeQueueKey(key string) (nodeName, netName string) {
 	return parts[0], parts[1]
 }
 
-// Get returns a deep copy of a cached node by name.
+// getCachedNode returns a cached node by name for read-only access.
+// WARNING: The returned node MUST NOT be modified. It is a shared reference
+// from the controller cache. All verified usages are read-only.
 func (c *NodeController) getCachedNode(netName, nodeName string) *corev1.Node {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
-	node := c.nodeCache[netName][nodeName]
-	if node == nil {
-		return nil
-	}
-	return node.DeepCopy()
+	return c.nodeCache[netName][nodeName]
 }
 
-// Set stores a deep copy of a node.
+// setCachedNode stores a reference to the node in cache.
+// The node is from the k8s informer cache (immutable), safe to cache by reference.
 func (c *NodeController) setCachedNode(netName string, node *corev1.Node) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
@@ -612,19 +588,19 @@ func (c *NodeController) setCachedNode(netName string, node *corev1.Node) {
 		c.nodeCache[netName] = make(map[string]*corev1.Node)
 	}
 
-	c.nodeCache[netName][node.Name] = node.DeepCopy()
+	c.nodeCache[netName][node.Name] = node
 }
 
+// getLatestInformerNode returns the latest informer node for read-only access.
+// WARNING: The returned node MUST NOT be modified. It is a shared reference.
 func (c *NodeController) getLatestInformerNode(netName, nodeName string) *corev1.Node {
 	c.stateMu.RLock()
 	defer c.stateMu.RUnlock()
-	node := c.latestInformerNodeCache[netName][nodeName]
-	if node == nil {
-		return nil
-	}
-	return node.DeepCopy()
+	return c.latestInformerNodeCache[netName][nodeName]
 }
 
+// setLatestInformerNode stores a reference to the latest informer node in cache.
+// The node is from the k8s informer cache (immutable), safe to cache by reference.
 func (c *NodeController) setLatestInformerNode(netName string, node *corev1.Node) {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
@@ -636,7 +612,7 @@ func (c *NodeController) setLatestInformerNode(netName string, node *corev1.Node
 		c.latestInformerNodeCache[netName] = make(map[string]*corev1.Node)
 	}
 
-	c.latestInformerNodeCache[netName][node.Name] = node.DeepCopy()
+	c.latestInformerNodeCache[netName][node.Name] = node
 }
 
 // Delete removes a node from the cache.

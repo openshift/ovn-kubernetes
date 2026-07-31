@@ -1,0 +1,255 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
+package routeadvertisements
+
+import (
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+)
+
+// generateRawConfig generates raw FRR configuration. Main purpose is to
+// generates EVPN config sections based on the provided selected networks
+// IP-VRFs and MAC-VRFs. Also adds allowas-in origin to all neighbors, which is
+// needed for eBGP peers sharing our ASN and is a no-op for iBGP.
+//
+// Generated config structure:
+//
+//	router bgp <asn>                    <- genDefaultVRFSection
+//	 address-family ipv4 unicast        <- genUnicastSection (only if default VRF has neighbors)
+//	  neighbor <ip> allowas-in origin
+//	 exit-address-family
+//	 address-family ipv6 unicast
+//	  neighbor <ip> allowas-in origin
+//	 exit-address-family
+//	 address-family l2vpn evpn          <- genDefaultVRFEVPNSection (only if networks have MAC-VRFs/IP-VRFs)
+//	  neighbor <ip> activate
+//	  neighbor <ip> allowas-in origin
+//	  advertise-all-vni
+//	  vni <id>                          <- genVRFVNISection (one per MAC-VRF with RT, section only added when MAC-VRF RT is set)
+//	   route-target import <rt>
+//	   route-target export <rt>
+//	  exit-vni
+//	 exit-address-family
+//	exit
+//	!
+//	vrf <name>                          <- genVRFVNISection (one per IP-VRF)
+//	 vni <id>
+//	exit-vrf
+//	!
+//	router bgp <asn> vrf <name>         <- genNonDefaultVRFSection (one per non-default VRF)
+//	 address-family ipv4 unicast        <- genUnicastSection (only if VRF has neighbors i.e. VRF-Lite)
+//	  neighbor <ip> allowas-in origin
+//	 exit-address-family
+//	 address-family ipv6 unicast
+//	  neighbor <ip> allowas-in origin
+//	 exit-address-family
+//	 address-family l2vpn evpn          <- genNonDefaultVRFEVPNSection (only if network has IP-VRF)
+//	  advertise ipv4 unicast
+//	  advertise ipv6 unicast
+//	  route-target import <rt>
+//	  route-target export <rt>
+//	 exit-address-family
+//	exit
+//	!
+func generateRawConfig(selected *selectedNetworks, vrfNeighbors map[string][]string, vrfASNs map[string]uint32) string {
+	var buf strings.Builder
+
+	// handle default VRF router, neighbors sorted for deterministic config
+	// generation
+	neighbors := slices.Sorted(slices.Values(vrfNeighbors[""]))
+	buf.WriteString(genDefaultVRFSection(vrfASNs[""], neighbors, selected))
+
+	// handle VRF<->VNI mappings
+	ipVRFConfigMap := make(map[string]*ipVRFConfig, len(selected.ipVRFConfigs))
+	for _, cfg := range selected.ipVRFConfigs {
+		ipVRFConfigMap[cfg.VRFName] = cfg
+		buf.WriteString(genVRFVNISection(cfg))
+	}
+
+	// handle non default VRFs
+	for _, vrf := range slices.Sorted(maps.Keys(vrfASNs)) {
+		if vrf == "" {
+			continue
+		}
+		// neighbors sorted for deterministic config generation
+		neighbors := slices.Sorted(slices.Values(vrfNeighbors[vrf]))
+		buf.WriteString(genNonDefaultVRFSection(vrf, vrfASNs[vrf], neighbors, ipVRFConfigMap[vrf]))
+	}
+
+	return buf.String()
+}
+
+// genVRFVNISection generates VRF-to-VNI mapping.
+//
+//	vrf <name>
+//	 vni <id>
+//	exit-vrf
+//	!
+func genVRFVNISection(cfg *ipVRFConfig) string {
+	return fmt.Sprintf(`vrf %s
+ vni %d
+exit-vrf
+!
+`, cfg.VRFName, cfg.VNI)
+}
+
+// genDefaultVRFSection generates the default VRF router's unicast and EVPN address-families.
+//
+//	router bgp <asn>
+//	 ...
+//	exit
+//	!
+func genDefaultVRFSection(asn uint32, neighbors []string, selected *selectedNetworks) string {
+	if asn == 0 || len(neighbors) == 0 {
+		return ""
+	}
+
+	var buf strings.Builder
+
+	fmt.Fprintf(&buf, "router bgp %d\n", asn)
+
+	neighbors4, neighbors6 := util.SplitIPStringByIPFamily(neighbors)
+	buf.WriteString(genUnicastSection(neighbors4, neighbors6))
+	buf.WriteString(genDefaultVRFEVPNSection(neighbors, selected))
+
+	buf.WriteString("exit\n!\n")
+
+	return buf.String()
+}
+
+// genNonDefaultVRFSection generates a non-default VRF router's unicast and EVPN address-families.
+//
+//	router bgp <asn> vrf red
+//	 ...
+//	exit
+//	!
+func genNonDefaultVRFSection(vrf string, asn uint32, neighbors []string, cfg *ipVRFConfig) string {
+	if vrf == "" || asn == 0 {
+		return ""
+	}
+	if len(neighbors) == 0 && cfg == nil {
+		return ""
+	}
+
+	var buf strings.Builder
+
+	fmt.Fprintf(&buf, "router bgp %d vrf %s\n", asn, vrf)
+
+	neighbors4, neighbors6 := util.SplitIPStringByIPFamily(neighbors)
+	buf.WriteString(genUnicastSection(neighbors4, neighbors6))
+	buf.WriteString(genNonDefaultVRFEVPNSection(cfg))
+
+	buf.WriteString("exit\n!\n")
+
+	return buf.String()
+}
+
+// genUnicastSection generates unicast address-family sections for IPv4 and/or IPv6 neighbors.
+//
+//	address-family ipv4 unicast
+//	 neighbor <ip> allowas-in origin
+//	exit-address-family
+//	address-family ipv6 unicast
+//	 neighbor <ip> allowas-in origin
+//	exit-address-family
+func genUnicastSection(neighbors4, neighbors6 []string) string {
+	var buf strings.Builder
+
+	if len(neighbors4) > 0 {
+		buf.WriteString(" address-family ipv4 unicast\n")
+		for _, neighbor := range neighbors4 {
+			fmt.Fprintf(&buf, "  neighbor %s allowas-in origin\n", neighbor)
+		}
+		buf.WriteString(" exit-address-family\n")
+	}
+	if len(neighbors6) > 0 {
+		buf.WriteString(" address-family ipv6 unicast\n")
+		for _, neighbor := range neighbors6 {
+			fmt.Fprintf(&buf, "  neighbor %s allowas-in origin\n", neighbor)
+		}
+		buf.WriteString(" exit-address-family\n")
+	}
+	return buf.String()
+}
+
+// genDefaultVRFEVPNSection generates the l2vpn evpn address-family for the default VRF.
+//
+//	address-family l2vpn evpn
+//	 neighbor <ip> activate
+//	 neighbor <ip> allowas-in origin
+//	 advertise-all-vni
+//	 vni <id>                           <- (Section only added when MAC-VRF RT is set)
+//	  route-target import <rt>
+//	  route-target export <rt>
+//	 exit-vni
+//	exit-address-family
+func genDefaultVRFEVPNSection(neighbors []string, selected *selectedNetworks) string {
+	hasEVPN := len(selected.ipVRFConfigs) > 0 || len(selected.macVRFConfigs) > 0
+	if !hasEVPN {
+		return ""
+	}
+
+	var buf strings.Builder
+
+	buf.WriteString(" address-family l2vpn evpn\n")
+
+	for _, neighbor := range neighbors {
+		fmt.Fprintf(&buf, "  neighbor %s activate\n", neighbor)
+		// Needed for eBGP peers sharing our ASN; no-op for iBGP. Applied
+		// unconditionally because the peer type may be unknown (e.g.
+		// `remote-as auto`, not yet supported by frr-k8s but anticipated).
+		fmt.Fprintf(&buf, "  neighbor %s allowas-in origin\n", neighbor)
+	}
+	buf.WriteString("  advertise-all-vni\n")
+
+	for _, cfg := range selected.macVRFConfigs {
+		if cfg.RouteTarget == "" {
+			continue
+		}
+		fmt.Fprintf(&buf, "  vni %d\n", cfg.VNI)
+		fmt.Fprintf(&buf, "   route-target import %s\n", cfg.RouteTarget)
+		fmt.Fprintf(&buf, "   route-target export %s\n", cfg.RouteTarget)
+		buf.WriteString("  exit-vni\n")
+	}
+
+	buf.WriteString(" exit-address-family\n")
+
+	return buf.String()
+}
+
+// genNonDefaultVRFEVPNSection generates the l2vpn evpn address-family for a non-default VRF.
+//
+//	address-family l2vpn evpn
+//	 advertise ipv4 unicast
+//	 advertise ipv6 unicast
+//	 route-target import <rt>
+//	 route-target export <rt>
+//	exit-address-family
+func genNonDefaultVRFEVPNSection(cfg *ipVRFConfig) string {
+	if cfg == nil {
+		return ""
+	}
+
+	var buf strings.Builder
+	buf.WriteString(" address-family l2vpn evpn\n")
+
+	if cfg.HasIPv4 {
+		buf.WriteString("  advertise ipv4 unicast\n")
+	}
+	if cfg.HasIPv6 {
+		buf.WriteString("  advertise ipv6 unicast\n")
+	}
+	if cfg.RouteTarget != "" {
+		fmt.Fprintf(&buf, "  route-target import %s\n", cfg.RouteTarget)
+		fmt.Fprintf(&buf, "  route-target export %s\n", cfg.RouteTarget)
+	}
+
+	buf.WriteString(" exit-address-family\n")
+
+	return buf.String()
+}

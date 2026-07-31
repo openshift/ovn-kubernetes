@@ -88,18 +88,19 @@ Routing Policies
 ### EgressIP IP is assigned to a secondary host interface
 Note that this is unsupported for user defined networks.
 Lets now imagine the Egress IP(s) mentioned previously, are not hosted by the OVN primary network and is hosted
-by a secondary host network which is assigned to a standard linux interface, a redirect to the egress-able node management port IP address:
+by a secondary host network which is assigned to a standard linux interface, in addition to the policy we saw previously to redirect to the egress node,
+another policy is added to the egress node itself redirecting the egressIP traffic to the secondary host interface via the 
+node management port IP address:
 ```shell
 Routing Policies
-  1004 inport == "rtos-ovn-control-plane" && ip4.dst == 172.18.0.4 /* ovn-control-plane */                            reroute  10.244.0.2
-  1004 inport == "rtos-ovn-worker" && ip4.dst == 172.18.0.2 /* ovn-worker */                                          reroute  10.244.1.2
-  1004 inport == "rtos-ovn-worker2" && ip4.dst == 172.18.0.3 /* ovn-worker2 */                                        reroute  10.244.2.2
+  1004 inport == "rtos-ovn-worker" && ip4.dst == 172.18.0.121 /* ovn-worker */                                      reroute  10.244.1.2
 
-   102 (ip4.src == $a12749576804119081385 || ip4.src == $a16335301576733828072) && ip4.dst == $a11079093880111560446  allow    pkt_mark=1008
-   102 ip4.src == 10.244.0.0/16 && ip4.dst == 10.244.0.0/16                                                           allow
-   102 ip4.src == 10.244.0.0/16 && ip4.dst == 100.64.0.0/16                                                           allow
+  102 (ip4.src == $a8519615025667110816 || ip4.src == $a13607449821398607916) && ip4.dst == $a1042611113178530741   allow    pkt_mark=1008
+  102 ip4.src == 10.244.0.0/16 && ip4.dst == 10.244.0.0/16                                                          allow
+  102 ip4.src == 10.244.0.0/16 && ip4.dst == 100.64.0.0/16                                                          allow
+  102                                     pkt.mark == 42                                                            allow
 
-   100 ip4.src == 10.244.1.3                                                                                          reroute  10.244.1.2, 10.244.2.2
+  100 ip4.src == 10.244.0.13                                                                                        reroute  10.244.1.2  pkt_mark=1009
 ```
 
 IPTables will have the following chain in NAT table and also rules within that chain to source NAT to the correct IP address:
@@ -216,6 +217,33 @@ priority=103,ip,in_port=2,nw_src=<clusterSubnet> actions=drop
 priority=100,ip,in_port=2 actions=ct(commit,zone=64000,exec(set_field:0x1->ct_mark)),output:1
 ```
 
+In case of an egress IP assigned to a secondary host interface, a pkt_mark=1009 is added to the reroute policy in the egress node:
+```shell
+[root@ovn-worker ~]# ovn-nbctl lr-policy-list ovn_cluster_router
+Routing Policies
+      1004 inport == "rtos-ovn-worker" && ip4.dst == 172.18.0.121 /* ovn-worker */         reroute                10.244.1.2
+       102 (ip4.src == $a8519615025667110816 || ip4.src == $a13607449821398607916) && ip4.dst == $a1042611113178530741           allow               pkt_mark=1008
+       102 ip4.src == 10.244.0.0/16 && ip4.dst == 10.244.0.0/16           allow
+       102 ip4.src == 10.244.0.0/16 && ip4.dst == 100.64.0.0/16           allow
+       102                                     pkt.mark == 42           allow
+       100                             ip4.src == 10.244.0.13         reroute                10.244.1.2               pkt_mark=1009
+```
+
+And in each node an nftable chain is added in postrouting hook with priority `srcnat+1` 
+with a set of rules to drop marked (notice, 1009 == 0x000003f1) traffic from any pod CIDR subnet:
+```shell
+table inet ovn-kubernetes {
+	chain ovn-kube-egress-ip {
+		comment "OVN egress IP traffic handling"
+		type filter hook postrouting priority srcnat + 1; policy accept;
+		ip saddr 10.244.0.0/16 meta mark 0x000003f1 drop comment "Drop egress IP pod traffic from 10.244.0.0/16"
+	}
+}
+```
+
+This guarantees that while differences might occur in reconciliation time, traffic would not
+leak the egress secondary interface with the pod IP as source address (i.e., when the reroute LRP is applied before the SNAT).
+
 ## Special considerations for Egress IPs hosted by standard linux interfaces
 If you wish to assign an Egress IP to a standard linux interface (non OVS type), then the following is required:
 * Link is up
@@ -234,8 +262,8 @@ kubectl label nodes <node_name> k8s.ovn.org/egress-assignable=""
 
 ## Egress IP reachability
 
-Once a node has been labeled with `k8s.ovn.org/egress-assignable`, the EgressIP operator in the leader ovnkube-master pod will periodically check if that node is
-usable. EgressIPs assigned to a node that is no longer reachable will get revalidated and moved to another useable node.
+Once a node has been labeled with `k8s.ovn.org/egress-assignable`, the EgressIP controller in `ovnkube-cluster-manager` will periodically check if that node is
+usable. EgressIPs assigned to a node that is no longer reachable will get revalidated and moved to another usable node.
 
 Egress nodes normally have multiple IP addresses. For sake of Egress IP reachability, [the management](https://github.com/ovn-kubernetes/ovn-kubernetes/pull/2495) (aka internal SDN) addresses of the node are the ones used. In deployments of ovn-kubernetes this is known to be the `ovn-k8s-mp0` interface of a node.
 
@@ -279,4 +307,3 @@ egressip-node-healthcheck-port=9107
 - If available, the session uses the [same TLS certs](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/egressip_healthcheck.go#L78) used by ovnkube to connect to the northbound OVSDB server. Conversely, an insecure gRPC session is used when no certs are specified.
 - The [message used for probing](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/health.proto#L6) is the [standard service health](https://github.com/grpc/grpc/blob/master/src/proto/grpc/health/v1/health.proto) specified in gRPC.
 - [Special care was taken into consideration](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/82f167a3920c8c3cd0687ceb3e7a5ba64372be69/go-controller/pkg/ovn/healthcheck/egressip_healthcheck.go#L193-L195) to handle cases when the gRPC session bounced for normal reasons. EgressIP implementation will not declare a node unreachable under these circumstances.
-

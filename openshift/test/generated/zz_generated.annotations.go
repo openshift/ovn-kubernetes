@@ -53,141 +53,9 @@ var AppendedAnnotations = map[string]string{
 
 	"ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
+	"BGP: For BGP configured networks Validates BUM suppression is in effect for L2 EVPN networks MAC-VRF and IP-VRF": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+	"BGP: For BGP configured networks Validates BUM suppression is in effect for L2 EVPN networks MAC-VRF only": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
 
@@ -233,13 +101,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -247,15 +115,83 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
 
@@ -301,13 +237,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -315,15 +251,83 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
 
@@ -369,13 +373,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -383,83 +387,15 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
 
@@ -505,13 +441,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -519,15 +455,83 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Suite:openshift/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network Can reach KAPI service": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
 
@@ -573,13 +577,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -587,9 +591,9 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF Both networks are isolated": "[Disabled:Unimplemented]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
 
@@ -597,9 +601,151 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT disabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network Can reach KAPI service": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It can reach external servers on the same network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It can reach external servers on the same network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is a different node When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by a cluster node When it is the same node When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot be reached by an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network It cannot reach an external server on a different network When the network is IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On a different node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node Backing a ClusterIP service The first pod can reach the ClusterIP service on the same network When the networks are IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 2 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF random VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN EVPN IP-VRF shared VTEP Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN VRF-Lite Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 CUDN advertised Both networks are isolated": "[Disabled:Unimplemented]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
+
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer2": "[Disabled:Unimplemented]",
 
+	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3 no-overlay SNAT disabled unmanaged routing": "[Disabled:Unimplemented]",
+
+	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3 no-overlay SNAT enabled unmanaged routing": "[Disabled:Unimplemented]",
+
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3": "[Disabled:Unimplemented]",
+
+	"BGP: When an advertised CUDN network is dynamically allocated is accepted when the network is allocated on a subset of the nodes only": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created can connect to an external server and another cluster node after toggling default network advertisement off and back on": "[Disabled:Unimplemented]",
 
@@ -613,7 +759,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
@@ -673,7 +825,13 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
@@ -724,6 +882,72 @@ var AppendedAnnotations = map[string]string{
 	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod on the same network and different nodes should work": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks UDN pod to a different node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks UDN pod to local node should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks host to a different node UDN pod should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks host to a local UDN pod should not work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access a service in the same network": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access kapi in default network service": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access kapi service cluster IP directly": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should not be able to access a default network service": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should not be able to access a service in a different UDN": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access a UDN service": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access an advertised UDN pod on a different node": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access an advertised UDN pod on the same node": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod connectivity on different networks and different nodes": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod connectivity on different networks and same node": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and different nodes should work": "[Disabled:Unimplemented]",
+
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
 
 	"Check whether gateway-mtu-support annotation on node is set based on disable-pkt-mtu-check value when DisablePacketMTUCheck is either not set or set to false Verify whether gateway-mtu-support annotation is not set on nodes when DisablePacketMTUCheck is either not set or set to false": "[Disabled:Unimplemented]",
 
@@ -803,6 +1027,8 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect ClusterManagerController when networks exist before CNC creation single network: has both subnet and tunnel ID annotations L3 P-UDN": "[Disabled:Unimplemented]",
 
+	"ClusterNetworkConnect OVN-Kubernetes Controller Dynamic UDN allocation should connect cross-node L3 and L2 UDN pods through CNC when dynamic UDN allocation is enabled": "[Disabled:Unimplemented]",
+
 	"ClusterNetworkConnect OVN-Kubernetes Controller Multiple CNCs with overlapping network selection should maintain non-transitive connectivity when a network is selected by multiple CNCs": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect OVN-Kubernetes Controller Multiple CNCs with overlapping network selection should maintain non-transitive service connectivity when a network is selected by multiple CNCs": "[Disabled:Unimplemented]",
@@ -811,7 +1037,7 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect OVN-Kubernetes Controller Pod to pod connectivity validation should manage cross-network connectivity through CNC lifecycle": "[Disabled:Unimplemented]",
 
-	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation pod and service connectivity through CNC connectivity types toggling [Feature:NetworkConnect]": "[Disabled:Unimplemented]",
+	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation pod and service connectivity through CNC connectivity types toggling": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect OVN-Kubernetes Controller Service connectivity validation should maintain cross-network service connectivity after service protocol update": "[Disabled:Unimplemented]",
 
@@ -873,32 +1099,6 @@ var AppendedAnnotations = map[string]string{
 
 	"EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv6 pods": "[Disabled:Unimplemented]",
 
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the pods while the CR dynamic hop still references the same pods with the pod selector IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the namespace while the CR static hop still references the same namespace in the policy IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the namespace while the CR static hop still references the same namespace in the policy IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the namespace while the CR static hop still references the same namespace in the policy IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry remains unchanged when deleting the annotation in the namespace while the CR static hop still references the same namespace in the policy IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations and a policy CR and after the annotations are removed ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs TCP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs TCP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs UDP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway When migrating from Annotations to Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod when deleting the annotation and supported by a CR with the same gateway IPs UDP ipv6": "[Disabled:Unimplemented]",
-
 	"External Gateway When validating the Admin Policy Based External Route status Should update the status of a successful and failed CRs": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
@@ -925,27 +1125,27 @@ var AppendedAnnotations = map[string]string{
 
 	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv6": "[Disabled:Unimplemented]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod annotation update": "[Disabled:Unimplemented]",
-
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
+
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod label update": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod not ready": "[Disabled:Unimplemented]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod annotation update": "[Disabled:Unimplemented]",
-
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
+
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod label update": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod not ready": "[Disabled:Unimplemented]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod annotation update": "[Disabled:Unimplemented]",
-
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
+
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod label update": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod not ready": "[Disabled:Unimplemented]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod annotation update": "[Disabled:Unimplemented]",
-
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
+
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod label update": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod not ready": "[Disabled:Unimplemented]",
 
@@ -989,94 +1189,6 @@ var AppendedAnnotations = map[string]string{
 
 	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv6": "[Disabled:Unimplemented]",
 
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled TCP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled TCP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled UDP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations BFD e2e non-vxlan external gateway through an annotated gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled UDP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod annotation update": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod not ready": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod annotation update": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod delete": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod not ready": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod annotation update": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod delete": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod not ready": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod annotation update": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation ExternalGWPod annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod not ready": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway stale conntrack entry deletion validation Namespace annotation: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway CR ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a pod with external gateway CR ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled TCP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled TCP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled UDP ipv4": "[Disabled:Unimplemented]",
-
-	"External Gateway With annotations e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with external gateway annotations enabled UDP ipv6": "[Disabled:Unimplemented]",
-
-	"External Gateway e2e ingress gateway traffic validation Should validate ingress connectivity from an external gateway": "[Disabled:Unimplemented]",
-
-	"External Gateway e2e non-vxlan external gateway and update validation Should validate connectivity without vxlan before and after updating the namespace annotation to a new external gateway": "[Disabled:Unimplemented]",
-
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv4": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv6": "[Disabled:Unimplemented]",
@@ -1101,39 +1213,45 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with Secondary/Localnet with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress routed over evpn": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration failed of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Localnet with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Layer2 ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 with routed ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress routed": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 with routed ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress routed over evpn": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress routed": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Localnet with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Layer2 ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Localnet with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachineInstance with interface binding for UDN with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Layer2 ingress snat": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with Primary/Layer2 with snat ingress": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with Secondary/Localnet ingress snat": "[Disabled:Unimplemented]",
+
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
+
+	"Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN with Primary/Layer2 ingress snat": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after failed live migration": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after succeeded live migration": "[Disabled:Unimplemented]",
+
+	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should start multiple VMs with same hostname": "[Disabled:Unimplemented]",
 
 	"Load Balancer Service Tests with MetalLB Should ensure connectivity works on an external service when mtu changes in intermediate node": "[Disabled:Unimplemented]",
 
@@ -1141,11 +1259,11 @@ var AppendedAnnotations = map[string]string{
 
 	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and session affinity is set": "[Disabled:Unimplemented]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with 0 node ports when ETP=local": "[Disabled:Unimplemented]",
-
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with 0 node ports when named targetPorts are used and ETP=local": "[Disabled:Unimplemented]",
-
 	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with pmtud": "[Disabled:Unimplemented]",
+
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when ETP=local": "[Disabled:Unimplemented]",
+
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when named targetPorts are used and ETP=local": "[Disabled:Unimplemented]",
 
 	"Multi Homing A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
 
@@ -1286,8 +1404,6 @@ var AppendedAnnotations = map[string]string{
 	"Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that deny traffic using ingress deny-all for a localnet topology": "[Disabled:Unimplemented]",
 
 	"Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that deny traffic using pod selectors and wrong port range for a localnet topology": "[Disabled:Unimplemented]",
-
-	"Multi node zones interconnect Pod interconnectivity": "[Disabled:Unimplemented]",
 
 	"Multicast when multicast enabled for namespace should be able to receive multicast IGMP query": "[Disabled:Unimplemented]",
 
@@ -1433,6 +1549,18 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer3 UDN": "[Disabled:Unimplemented]",
 
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork add bad subnet should not cause change on existing NAD": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork add subnet not affecting existing node subnet assignment": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork can perform east/west traffic between nodes on different CIDR L3 primary network": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork add bad subnet should not cause change on existing NAD": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork add subnet not affecting existing node subnet assignment": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork can perform east/west traffic between nodes on different CIDR L3 primary network": "[Suite:openshift/conformance/parallel]",
+
 	"Network Segmentation pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network with custom network": "[Disabled:Unimplemented]",
 
 	"Network Segmentation pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network": "[Disabled:Unimplemented]",
@@ -1459,6 +1587,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
 
+	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
+
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, localnet": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, no-overlay, valid": "[Disabled:Unimplemented]",
@@ -1468,6 +1598,8 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, evpn": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
+
+	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid mtu": "[Disabled:Unimplemented]",
 
@@ -1589,6 +1721,14 @@ var AppendedAnnotations = map[string]string{
 
 	"Services Creates a service with session-affinity, and ensures it works after backend deletion": "[Disabled:Unimplemented]",
 
+	"Services Distributes external traffic to multiple host-network endpoints with different named target ports": "[Disabled:Unimplemented]",
+
+	"Services Distributes traffic to multiple endpoints with different named target ports": "[Disabled:Unimplemented]",
+
+	"Services Distributes traffic to multiple host-network endpoints with different named target ports": "[Disabled:Unimplemented]",
+
+	"Services Maintains service connectivity during rolling update when target port changes": "[Disabled:Unimplemented]",
+
 	"Services does not use host masquerade address as source IP address when communicating externally": "[Disabled:Unimplemented]",
 
 	"Services of type NodePort should be able to preserve UDP traffic when server pod cycles for a NodePort service via a different node": "[Disabled:Unimplemented]",
@@ -1701,11 +1841,11 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e control plane should provide Internet connection continuously when all ovnkube-control-plane pods are killed": "[Disabled:Unimplemented]",
 
-	"e2e control plane should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane": "[Disabled:Unimplemented]",
+	"e2e control plane should provide Internet connection continuously when all pods are killed on node running leader instance of ovnkube-control-plane": "[Disabled:Unimplemented]",
 
 	"e2e control plane should provide Internet connection continuously when ovnkube-node pod is killed": "[Disabled:Unimplemented]",
 
-	"e2e control plane should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed": "[Disabled:Unimplemented]",
+	"e2e control plane should provide Internet connection continuously when pod running leader instance of ovnkube-control-plane is killed": "[Disabled:Unimplemented]",
 
 	"e2e control plane should provide connection to external host by DNS name from a pod": "[Disabled:Unimplemented]",
 
@@ -1713,235 +1853,235 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e control plane test node readiness according to its defaults interface MTU size should get node ready with a big enough MTU": "[Disabled:Unimplemented]",
 
-	"e2e delete databases Should validate connectivity before and after deleting all the db-pods at once in HA mode": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
-	"e2e delete databases Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
 
-	"e2e delete databases recovering from deleting db files while maintaining connectivity when deleting both db files on ovnkube-db-0": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
-	"e2e delete databases recovering from deleting db files while maintaining connectivity when deleting both db files on ovnkube-db-1": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
-	"e2e delete databases recovering from deleting db files while maintaining connectivity when deleting both db files on ovnkube-db-2": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type Cluster Default of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Cluster Default Network of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation Network Segmentation: IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
 	"e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name": "[Disabled:Unimplemented]",
 

@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -73,7 +74,7 @@ func (bnnc *BaseNodeNetworkController) delDPUPodForNAD(pod *corev1.Pod, dpuCD *u
 			errs = append(errs, fmt.Errorf("failed to remove the old DPU connection status annotation for %s: %v", podDesc, err))
 		}
 	}
-	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
+	vfRepName, err := util.GetDPUOps().GetPortRepresentor(dpuCD.PfId, dpuCD.VfId)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("failed to get old VF representor for %s, dpuConnDetail %+v Representor port may have been deleted: %v", podDesc, dpuCD, err))
 	} else {
@@ -261,7 +262,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 
 	nadKey := ifInfo.NADKey
 	podDesc := fmt.Sprintf("pod %s/%s for NAD %s", pod.Namespace, pod.Name, nadKey)
-	vfRepName, err := util.GetSriovnetOps().GetVfRepresentorDPU(dpuCD.PfId, dpuCD.VfId)
+	vfRepName, err := util.GetDPUOps().GetPortRepresentor(dpuCD.PfId, dpuCD.VfId)
 	if err != nil {
 		klog.Infof("Failed to get VF representor for %s dpuConnDetail %+v: %v", podDesc, dpuCD, err)
 		return err
@@ -270,14 +271,14 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	// set netdevName so OVS interface can be added with external_ids:vf-netdev-name, and is able to
 	// be part of healthcheck.
 	ifInfo.NetdevName = vfRepName
-	vfPciAddress, err := util.GetSriovnetOps().GetPCIFromDeviceName(vfRepName)
+	deviceID, err := util.GetDPUOps().GetDeviceAddress(vfRepName)
 	if err != nil {
 		klog.Infof("Failed to get PCI address of VF rep %s: %v", vfRepName, err)
 		return err
 	}
 
 	klog.Infof("Adding VF representor %s for %s", vfRepName, podDesc)
-	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, "", vfRepName, ifInfo, dpuCD.SandboxId, vfPciAddress, getter)
+	err = cni.ConfigureOVS(context.TODO(), bnnc.ovsClient, pod.Namespace, pod.Name, "", vfRepName, ifInfo, dpuCD.SandboxId, deviceID, false, getter)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
@@ -327,8 +328,7 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *corev1.Pod, dpuCD *util.D
 
 	// remove from br-int
 	return wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(_ context.Context) (bool, error) {
-		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
-		if err != nil {
+		if err := ovsops.DeletePortWithInterfaces(bnnc.ovsClient, "br-int", vfRepName); err != nil {
 			return false, nil
 		}
 		klog.Infof("Port %s deleted from bridge br-int", vfRepName)

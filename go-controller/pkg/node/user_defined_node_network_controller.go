@@ -11,13 +11,14 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -44,6 +45,7 @@ func NewUserDefinedNodeNetworkController(
 	ruleManager *iprulemanager.Controller,
 	mpdm *managementport.MgmtPortDeviceManager,
 	defaultNetworkGateway Gateway,
+	ovsClient client.Client,
 ) (*UserDefinedNodeNetworkController, error) {
 
 	snnc := &UserDefinedNodeNetworkController{
@@ -53,6 +55,7 @@ func NewUserDefinedNodeNetworkController(
 			stopChan:                        make(chan struct{}),
 			wg:                              &sync.WaitGroup{},
 			networkManager:                  networkManager,
+			ovsClient:                       ovsClient,
 		},
 		mpdm: mpdm,
 	}
@@ -77,7 +80,7 @@ func (nc *UserDefinedNodeNetworkController) Start(_ context.Context) error {
 	klog.Infof("Starting UDN node network controller for network %s", nc.GetNetworkName())
 
 	// enable adding ovs ports for dpu pods in both primary and secondary user-defined networks
-	if (config.OVNKubernetesFeature.EnableMultiNetwork || util.IsNetworkSegmentationSupportEnabled()) && config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if (config.OVNKubernetesFeature.EnableMultiNetwork || util.IsNetworkSegmentationSupportEnabled()) && config.IsModeDPU() {
 		handler, err := nc.watchPodsDPU()
 		if err != nil {
 			return err
@@ -135,9 +138,13 @@ func (nc *UserDefinedNodeNetworkController) Cleanup() error {
 func (nc *UserDefinedNodeNetworkController) HandleNetworkRefChange(_ string, _ bool) {}
 
 func (nc *UserDefinedNodeNetworkController) shouldReconcileNetworkChange(old, new util.NetInfo) bool {
-	wasUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(old, nc.name)
-	isUDNNetworkAdvertisedAtNode := util.IsPodNetworkAdvertisedAtNode(new, nc.name)
-	return wasUDNNetworkAdvertisedAtNode != isUDNNetworkAdvertisedAtNode
+	switch {
+	case util.IsPodNetworkAdvertisedAtNode(old, nc.name) != util.IsPodNetworkAdvertisedAtNode(new, nc.name):
+		return true
+	case util.IsPodNetworkAdvertisedAtNodeDefaultVRF(old, nc.name) != util.IsPodNetworkAdvertisedAtNodeDefaultVRF(new, nc.name):
+		return true
+	}
+	return false
 }
 
 // Reconcile function reconciles three entities based on whether UDN network is advertised

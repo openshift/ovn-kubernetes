@@ -314,7 +314,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-bridge-remote-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=false "+
+						"external_ids:ovn-is-interconn=true "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
@@ -365,12 +365,12 @@ var _ = Describe("Node", func() {
 					Output: chassisUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only --data=bare --no-heading --columns=_uuid find "+
+					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --data=bare --no-heading --columns=_uuid find "+
 						"Encap chassis_name=%s", chassisUUID),
 					Output: encapUUID,
 				})
 				fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 --no-leader-only set encap "+
+					Cmd: fmt.Sprintf("ovn-sbctl --timeout=15 set encap "+
 						"%s options:dst_port=%d", encapUUID, encapPort),
 				})
 
@@ -420,7 +420,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-bridge-remote-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=false "+
+						"external_ids:ovn-is-interconn=true "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=false "+
@@ -490,7 +490,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-bridge-remote-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=false "+
+						"external_ids:ovn-is-interconn=true "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
@@ -565,7 +565,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-bridge-remote-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=false "+
+						"external_ids:ovn-is-interconn=true "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
@@ -640,7 +640,7 @@ var _ = Describe("Node", func() {
 						"external_ids:ovn-remote-probe-interval=%d "+
 						"external_ids:ovn-bridge-remote-probe-interval=%d "+
 						"other_config:bundle-idle-timeout=%d "+
-						"external_ids:ovn-is-interconn=false "+
+						"external_ids:ovn-is-interconn=true "+
 						"external_ids:ovn-monitor-all=true "+
 						"external_ids:ovn-ofctrl-wait-before-clear=0 "+
 						"external_ids:ovn-enable-lflow-cache=true "+
@@ -2194,6 +2194,37 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 				}
 			}()),
 		)
+	})
+
+	Describe("advertised UDN isolation nftables", func() {
+		const nodeName = "my-node"
+
+		BeforeEach(func() {
+			Expect(config.PrepareTestConfig()).To(Succeed())
+		})
+
+		It("sets up isolation sets for DPU host mode without NodePort", func() {
+			config.OvnKubeNode.Mode = types.NodeModeDPUHost
+			config.OVNKubernetesFeature.EnableMultiNetwork = true
+			config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+			config.Gateway.NodeportEnable = false
+
+			nft := nodenft.SetFakeNFTablesHelper()
+			ovnClient := util.GetOVNClientset()
+			wf, err := factory.NewNodeWatchFactory(ovnClient.GetNodeClientset(), nodeName)
+			Expect(err).NotTo(HaveOccurred())
+			defer wf.Shutdown()
+
+			routeManager := routemanager.NewController()
+			cnnci := NewCommonNodeNetworkControllerInfo(ovnClient.KubeClient, ovnClient.AdminPolicyRouteClient, wf, nil, nodeName, routeManager)
+			_, err = NewDefaultNodeNetworkController(cnnci, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = nft.ListElements(context.TODO(), "set", nftablesAdvertisedUDNsSetV4)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = nft.ListElements(context.TODO(), "set", nftablesAdvertisedUDNsSetV6)
+			Expect(err).NotTo(HaveOccurred())
+		})
 	})
 })
 

@@ -24,8 +24,8 @@ export KUBECONFIG=${KUBECONFIG:-${HOME}/ovn.conf}
 IPV6_SKIPPED_TESTS="Should be allowed by externalip services|\
 should provide connection to external host by DNS name from a pod|\
 should provide Internet connection continuously when ovnkube-node pod is killed|\
-should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed|\
-should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane|\
+should provide Internet connection continuously when pod running leader instance of ovnkube-control-plane is killed|\
+should provide Internet connection continuously when all pods are killed on node running leader instance of ovnkube-control-plane|\
 should provide Internet connection continuously when all ovnkube-control-plane pods are killed|\
 Should validate flow data of br-int is sent to an external gateway with netflow v5|\
 should be able to receive multicast IGMP query|\
@@ -109,8 +109,8 @@ if [ "$OVN_GATEWAY_MODE" == "local" ]; then
 fi
 
 # skipping the egress ip legacy health check test because it requires two
-# sequenced rollouts of both ovnkube-node and ovnkube-master that take a lot of
-# time.
+# sequenced rollouts of OVN-Kubernetes control plane components that take a lot
+# of time.
 skip "disabling egress nodes impeding Legacy health check"
 
 if [ "$ENABLE_MULTI_NET" != "true" ]; then
@@ -127,12 +127,6 @@ if [[ "${WHAT}" != "${IP_MIGRATION_TESTS}"* ]]; then
   skip "Node IP and MAC address migration"
 fi
 
-# Only run Multi node zones interconnect tests if they are explicitly requested
-MULTI_NODE_ZONES_TESTS="Multi node zones interconnect"
-if [[ "${WHAT}" != "${MULTI_NODE_ZONES_TESTS}"* ]]; then
-  skip "Multi node zones interconnect"
-fi
-
 # Only run external gateway tests if they are explicitly requested
 EXTERNAL_GATEWAY_TESTS="External Gateway"
 if [[ "${WHAT}" != "${EXTERNAL_GATEWAY_TESTS}"* ]]; then
@@ -147,8 +141,11 @@ fi
 
 # Only run network segmentation tests if they are explicitly requested
 NETWORK_SEGMENTATION_TESTS="Network Segmentation"
-if [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
-  skip $NETWORK_SEGMENTATION_TESTS
+if [[ "${WHAT}" = "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
+  require_label "Feature:NetworkSegmentation"
+  shift # don't "focus" on Network Segmentation since we filter by label
+elif [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
+  skip_label "Feature:NetworkSegmentation"
 fi
 
 # Only run cluster network connect tests if they are explicitly requested
@@ -170,6 +167,22 @@ fi
 
 if [ "$ENABLE_NO_OVERLAY" != true ]; then
   skip_label "Feature:NoOverlay"
+fi
+
+# RouteAdvertisements tests over dynamically allocated UDNs require a cluster
+# with both route advertisements and dynamic UDN allocation enabled.
+if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ] || [ "$DYNAMIC_UDN_ALLOCATION" != true ]; then
+  skip_label "Feature:RouteAdvertisementsDynamicUDN"
+fi
+
+# The "BGP: For BGP configured networks" tests (VRF-Lite and EVPN CUDNs) only
+# run in local gateway mode, while dynamic UDN allocation is only covered in
+# shared gateway mode lanes, so the two never overlap in CI. Skip them
+# explicitly on dynamic UDN clusters regardless: they set up and expect
+# per-network topology on every node, which does not hold with dynamic UDN
+# allocation (okep-5552).
+if [ "$DYNAMIC_UDN_ALLOCATION" == true ]; then
+  skip "BGP: For BGP configured networks"
 fi
 
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
@@ -206,15 +219,15 @@ else
     # tests that specifically expect the node SNAT to happen
     # TODO: expect the pod IP where it makes sense
     skip "e2e egress firewall policy validation with external containers"
-    skip "e2e egress IP validation Cluster Default Network \[OVN network\] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts"
-    skip "e2e egress IP validation Cluster Default Network \[OVN network\] Should validate the egress IP SNAT functionality against host-networked pods"
-    skip "e2e egress IP validation Cluster Default Network Should validate egress IP logic when one pod is managed by more than one egressIP object"
-    skip "e2e egress IP validation Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up"
+    skip "e2e egress IP validation on network of type Cluster Default \[OVN network\] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts"
+    skip "e2e egress IP validation on network of type Cluster Default \[OVN network\] Should validate the egress IP SNAT functionality against host-networked pods"
+    skip "e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object"
+    skip "e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up"
     skip "Pod to external server PMTUD when a client ovnk pod targeting an external server is created when tests are run towards the agnhost echo server queries to the hostNetworked server pod on another node shall work for UDP"
-    skip "e2e egress IP validation Cluster Default Network Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates"
+    skip "e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates"
 
     # https://issues.redhat.com/browse/OCPBUGS-55028
-    skip "e2e egress IP validation Cluster Default Network \[secondary-host-eip\]"
+    skip "e2e egress IP validation on network of type Cluster Default \[secondary-host-eip\]"
 
 
     # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5240
@@ -267,7 +280,7 @@ pushd e2e
 
 go mod download
 
-if [ "$ENABLE_EVPN" = true ]; then
+if [ "$ENABLE_EVPN" = true ] && [[ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}"* ]]; then
   # EVPN tests are parallel-safe (unique per-test resource names, randomized
   # subnets). Use the ginkgo CLI so that -procs=3 spawns 3 coordinated worker
   # processes — one per DescribeTable entry.  go test cannot drive Ginkgo

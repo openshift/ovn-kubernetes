@@ -35,10 +35,13 @@ Be trustworthy. During a review, your actions both build and help maintain the t
 
 ## Process
 
-* Reviewers are automatically assigned via the load-balancing algorithm using contributors from the ovn-kubernetes/ovn-kubernetes-members team.
-* Reviewers may opt out of reviewing of any PR or the reviewing process altogether by contacting committers or setting their github profile status as "busy" and removing themselves from any currently assigned PR.
+* **Reviewers for area-owned files** are automatically assigned when a PR touches files listed in `CODEOWNERS`. GitHub requests reviews from the owners listed on the matching pattern lines (area maintainers and reviewers alike). Merge authority is determined separately by the merge bot based on the `Area Maintainer:` header in `CODEOWNERS`.
+* If no area-specific pattern matches, reviewers are assigned via the load-balancing algorithm using contributors from the ovn-kubernetes/ovn-kubernetes-members team (configured in `CODEOWNERS`).
+* Area maintainers are appointed by the repo Maintainers (see [Area Maintainers](./GOVERNANCE.md#area-maintainers) in the governance docs).
+* **Area maintainer merge:** Area maintainers can merge PRs that **only** touch files within their area by commenting `/area-maintainer-approved` on the PR. The merge bot (`.github/workflows/area-merge.yml`) verifies that all changed files are within the commenter's area in `CODEOWNERS` and that all CI checks pass before merging. If CI is still running, the bot waits and merges automatically when checks go green. Area maintainers cannot use `/area-maintainer-approved` on their own PRs — the bot will reject the attempt; another area maintainer or repo maintainer must approve and merge instead. PRs touching files outside the area maintainer's scope require a committer from `ovn-kubernetes-committers` to merge.
+* Reviewers may opt out of reviewing of any PR or the reviewing process altogether by contacting committers or setting their GitHub profile status as "busy" and removing themselves from any currently assigned PR.
 * Reviewers should wait for automated checks to pass before reviewing
-* At least 1 approved review is required from a maintainer before a pull request can be merged
+* At least 1 approved review is required from a maintainer before a pull request can be merged. **Exception:** PRs that exclusively touch files within a single area (as defined in `CODEOWNERS`) may be merged by the designated area maintainer via `/area-maintainer-approved` without a full maintainer approval.
 * All CI checks must pass
 * If a PR is stuck for some reason it is down to the reviewer to determine the best course of action:
   * PRs may be closed if they are no longer relevant

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	netv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
@@ -15,17 +16,37 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utiludn "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
-func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.NetworkAttachmentDefinition, error) {
+func (c *Controller) updateNAD(obj client.Object, namespace string) (_ *netv1.NetworkAttachmentDefinition, err error) {
+	start := time.Now()
+	defer func() {
+		if err != nil || !config.Metrics.EnableScaleMetrics {
+			return
+		}
+		duration := time.Since(start)
+		// Record workflow phase metric for NAD sync
+		// Use network-scoped name to avoid collisions between same-name UDNs in different namespaces
+		networkName := obj.GetName()
+		switch o := obj.(type) {
+		case *userdefinednetworkv1.UserDefinedNetwork:
+			networkName = util.GenerateUDNNetworkName(o.Namespace, o.Name)
+		case *userdefinednetworkv1.ClusterUserDefinedNetwork:
+			networkName = util.GenerateCUDNNetworkName(o.Name)
+		}
+		metrics.RecordUDNNADSyncDuration(networkName, duration.Seconds())
+	}()
 	if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
 		// check if required UDN label is on namespace
 		ns, err := c.namespaceInformer.Lister().Get(namespace)
@@ -44,9 +65,9 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 		return nil, fmt.Errorf("failed to get NetworkAttachmentDefinition %s/%s from cache: %v", namespace, obj.GetName(), err)
 	}
 
-	renderOpts, err := c.allocateEVPNVIDsIfNeeded(obj)
+	renderOpts, err := c.allocateEVPNIDsIfNeeded(obj)
 	if err != nil {
-		return nil, fmt.Errorf("failed to allocate EVPN VIDs: %w", err)
+		return nil, fmt.Errorf("failed to allocate EVPN IDs: %w", err)
 	}
 
 	desiredNAD, err := c.renderNadFn(obj, namespace, renderOpts...)
@@ -116,8 +137,19 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (*netv1.Netw
 
 func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 	nad, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(obj.GetName())
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get NetworkAttachmentDefinition %s/%s from cache: %v", namespace, obj.GetName(), err)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get NetworkAttachmentDefinition %s/%s from cache: %v", namespace, obj.GetName(), err)
+		}
+		// Informer caches may lag object creation/deletion. Confirm a cache miss against the API
+		// before treating the NAD as absent and allowing cleanup bookkeeping to proceed.
+		nad, err = c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Get(context.Background(), obj.GetName(), metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to get NetworkAttachmentDefinition %s/%s from api: %v", namespace, obj.GetName(), err)
+		}
 	}
 	nadCopy := nad.DeepCopy()
 
@@ -153,14 +185,14 @@ func (c *Controller) deleteNAD(obj client.Object, namespace string) error {
 	return nil
 }
 
-// allocateEVPNVIDsIfNeeded checks if the object is an EVPN network and allocates VIDs if needed.
+// allocateEVPNIDsIfNeeded checks if the object is an EVPN network and allocates VIDs and reserves VNIs if needed.
 // Returns render options containing the allocated VIDs, or empty options for non-EVPN networks.
 // Returns an error if EVPN transport is requested but the feature flag is disabled.
 //
 // This function relies on the idempotency of AllocateID: if a VID was already allocated for a key
 // (either during recovery or a previous reconciliation), AllocateID returns the same VID.
 // This means VIDs are stable across reconciliations without needing to parse the existing NAD.
-func (c *Controller) allocateEVPNVIDsIfNeeded(obj client.Object) ([]template.RenderOption, error) {
+func (c *Controller) allocateEVPNIDsIfNeeded(obj client.Object) ([]template.RenderOption, error) {
 	spec := template.GetSpec(obj)
 	if spec.GetTransport() != userdefinednetworkv1.TransportOptionEVPN {
 		return nil, nil
@@ -177,8 +209,13 @@ func (c *Controller) allocateEVPNVIDsIfNeeded(obj client.Object) ([]template.Ren
 	}
 
 	networkName := obj.GetName()
-	var macVRFVID, ipVRFVID int
 
+	// ptr.Deref yields zero-value VRFConfig for nil VRFs, reserveVNIs skips VNI 0
+	if err := c.reserveVNIs(networkName, evpnCfg.VTEP, ptr.Deref(evpnCfg.MACVRF, userdefinednetworkv1.VRFConfig{}).VNI, ptr.Deref(evpnCfg.IPVRF, userdefinednetworkv1.VRFConfig{}).VNI); err != nil {
+		return nil, fmt.Errorf("failed to reserve VNIs: %w", err)
+	}
+
+	var macVRFVID, ipVRFVID int
 	// Allocate VID for MAC-VRF if present
 	if evpnCfg.MACVRF != nil {
 		vid, err := c.vidAllocator.AllocateID(macVRFKey(networkName))

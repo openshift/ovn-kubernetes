@@ -19,6 +19,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
@@ -27,6 +28,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 	e2eendpointslice "k8s.io/kubernetes/test/e2e/framework/endpointslice"
 
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -577,11 +580,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 									}
 									for _, ovnKubeNodePod := range ovnKubeNodePods.Items {
 										framework.Logf("Flushing the ip route cache on %s", ovnKubeNodePod.Name)
-										containerName := "ovnkube-node"
-										if isInterconnectEnabled() {
-											containerName = "ovnkube-controller"
-										}
-										_, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, "exec", ovnKubeNodePod.Name, "--container", containerName, "--",
+										_, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, "exec", ovnKubeNodePod.Name, "--container", getNodeContainerName(), "--",
 											"ip", "route", "flush", "cache")
 										framework.ExpectNoError(err, "Flushing the ip route cache failed")
 									}
@@ -982,7 +981,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		ginkgo.It("should listen on each host addresses", func() {
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
-			nodesHostnames := sets.NewString()
+			nodesHostnames := sets.New[string]()
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 			framework.ExpectNoError(err)
 
@@ -1026,7 +1025,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 
 			ginkgo.By("Selecting additional IP addresses for each node")
 			// add new secondary IP from node subnet to all nodes, if the cluster is v6 add an ipv6 address
-			toCurlAddresses := sets.NewString()
+			toCurlAddresses := sets.New[string]()
 			primaryIPv4Subnet, ipv6, err := primaryProviderNetwork.IPv4IPv6Subnets()
 			framework.ExpectNoError(err, "must get primary provider network subnets")
 			primaryNetworkSubnet := primaryIPv4Subnet
@@ -1144,7 +1143,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 						toCurlPort = int32(udpNodePort)
 					}
 
-					for _, address := range toCurlAddresses.List() {
+					for _, address := range sets.List(toCurlAddresses) {
 						if !isIPv6Cluster && utilnet.IsIPv6String(address) {
 							continue
 						}
@@ -1164,7 +1163,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		ginkgo.It("should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP", func() {
 			endPoints := make([]*v1.Pod, 0)
 			endpointsSelector := map[string]string{"servicebackend": "true"}
-			nodesHostnames := sets.NewString()
+			nodesHostnames := sets.New[string]()
 			isIPv6Cluster := IsIPv6Cluster(f.ClientSet)
 
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1274,6 +1273,10 @@ spec:
 				if len(egressIP.Items) > 1 {
 					framework.Failf("Didn't expect to retrieve more than one egress IP during the execution of this test, saw: %v", len(egressIP.Items))
 				}
+				if len(egressIP.Items[0].Status.Items) == 0 {
+					framework.Logf("EgressIP %s is not assigned to node %s yet", egressIP, egressNode)
+					return false, nil
+				}
 				return egressIP.Items[0].Status.Items[0].Node == egressNode, nil
 			})
 			if err != nil {
@@ -1299,7 +1302,7 @@ spec:
 			}
 			_, secondarySubnet, err := net.ParseCIDR(secondarySubnetStr)
 			framework.ExpectNoError(err, "must parse secondary subnet %q", secondarySubnetStr)
-			toCurlAddressesSecondary := sets.NewString()
+			toCurlAddressesSecondary := sets.New[string]()
 			for i, node := range nodes.Items {
 				addrAnnotation, ok := node.Annotations["k8s.ovn.org/host-cidrs"]
 				gomega.Expect(ok).To(gomega.BeTrue())
@@ -1403,7 +1406,7 @@ spec:
 				"a network that is a secondary host network and verify that the src IP is the expected egressIP %s, failed: %v",
 				egressPod.Namespace, egressPod.Name, egressIP, err)
 
-			externalSvcClientIPs := sets.NewString(serverExternalContainerIP)
+			externalSvcClientIPs := sets.New(serverExternalContainerIP)
 			for _, serviceSpec := range []*v1.Service{etpLocalSvc, etpClusterSvc} {
 				tcpNodePort, udpNodePort := nodePortsFromService(serviceSpec)
 
@@ -1412,7 +1415,7 @@ spec:
 					if protocol == "udp" {
 						toCurlPort = int32(udpNodePort)
 					}
-					for _, address := range toCurlAddressesSecondary.List() {
+					for _, address := range sets.List(toCurlAddressesSecondary) {
 						if !isIPv6Cluster && utilnet.IsIPv6String(address) {
 							continue
 						}
@@ -1615,7 +1618,882 @@ spec:
 			}
 		})
 	})
+
+	// This test verifies that a ClusterIP service remains reachable during a
+	// rolling update that changes the container's target port. During the
+	// rolling update, endpoint slices will contain endpoints with different
+	// target port numbers for the same named port. OVN-K must program LB
+	// rules for all distinct target ports so that both old and new pods
+	// remain reachable.
+	//
+	// The test pauses the rollout once both target ports are observed in the
+	// endpoint slices. While paused, no pods are being terminated, so every
+	// request must succeed -- any failure indicates that OVN-K failed to
+	// program LB rules for both target ports (the SDN-3551 bug).
+	ginkgo.It("Maintains service connectivity during rolling update when target port changes", func() {
+		namespace := f.Namespace.Name
+		ctx := context.TODO()
+
+		const (
+			deploymentName = "rolling-update-backend"
+			svcName        = "rolling-update-svc"
+			portName       = "http"
+			svcPort        = int32(80)
+			oldTargetPort  = int32(8080)
+			newTargetPort  = int32(9090)
+		)
+		replicas := int32(4)
+
+		ginkgo.By(fmt.Sprintf("Creating a deployment with %d replicas listening on port %d", replicas, oldTargetPort))
+		labels := map[string]string{"app": "rolling-update-test"}
+		maxUnavailable := intstr.FromInt(0)
+		maxSurge := intstr.FromInt(1)
+		deployment := &appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      deploymentName,
+				Namespace: namespace,
+			},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: &replicas,
+				Selector: &metav1.LabelSelector{
+					MatchLabels: labels,
+				},
+				Strategy: appsv1.DeploymentStrategy{
+					Type: appsv1.RollingUpdateDeploymentStrategyType,
+					RollingUpdate: &appsv1.RollingUpdateDeployment{
+						MaxUnavailable: &maxUnavailable,
+						MaxSurge:       &maxSurge,
+					},
+				},
+				Template: v1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: labels,
+					},
+					Spec: v1.PodSpec{
+						Containers: []v1.Container{
+							{
+								Name:    "agnhost",
+								Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+								Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", oldTargetPort)},
+								Ports: []v1.ContainerPort{
+									{
+										Name:          portName,
+										ContainerPort: oldTargetPort,
+										Protocol:      v1.ProtocolTCP,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		_, err := cs.AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for deployment to become ready")
+		err = wait.PollImmediate(framework.Poll, 2*time.Minute, func() (bool, error) {
+			dp, err := cs.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			return dp.Status.ReadyReplicas == replicas, nil
+		})
+		framework.ExpectNoError(err, "deployment did not become ready in time")
+
+		ginkgo.By("Creating a ClusterIP service with named target port")
+		svc := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName,
+				Namespace: namespace,
+			},
+			Spec: v1.ServiceSpec{
+				Selector: labels,
+				Type:     v1.ServiceTypeClusterIP,
+				Ports: []v1.ServicePort{
+					{
+						Name:       portName,
+						Protocol:   v1.ProtocolTCP,
+						Port:       svcPort,
+						TargetPort: intstr.FromString(portName),
+					},
+				},
+			},
+		}
+		svc, err = cs.CoreV1().Services(namespace).Create(ctx, svc, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Creating an exec pod for connectivity checks")
+		execPod := e2epod.CreateExecPodOrFail(ctx, cs, namespace, "exec-pod-rolling-update", nil)
+
+		serviceAddr := net.JoinHostPort(svc.Spec.ClusterIP, fmt.Sprintf("%d", svcPort))
+		curlCmd := fmt.Sprintf("curl -q -s --connect-timeout 3 http://%s/", serviceAddr)
+
+		ginkgo.By("Verifying initial service connectivity")
+		gomega.Eventually(func() error {
+			stdout, err := e2epodoutput.RunHostCmd(namespace, execPod.Name, curlCmd)
+			if err != nil {
+				return fmt.Errorf("connection failed: %v", err)
+			}
+			if strings.TrimSpace(stdout) == "" {
+				return fmt.Errorf("empty response from service")
+			}
+			framework.Logf("Initial connectivity check succeeded, got response: %s", strings.TrimSpace(stdout))
+			return nil
+		}, 30*time.Second, framework.Poll).Should(gomega.Succeed())
+
+		ginkgo.By("Recording initial (old) pod names before rolling update")
+		oldPodNames := sets.New[string]()
+		podList, err := cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app=rolling-update-test",
+		})
+		framework.ExpectNoError(err)
+		for _, pod := range podList.Items {
+			oldPodNames.Insert(pod.Name)
+		}
+		framework.Logf("Old pod names: %v", oldPodNames.UnsortedList())
+
+		ginkgo.By(fmt.Sprintf("Triggering rolling update: changing target port from %d to %d", oldTargetPort, newTargetPort))
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			deployment, err = cs.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			deployment.Spec.Template.Spec.Containers[0].Command = []string{
+				"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", newTargetPort),
+			}
+			deployment.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort = newTargetPort
+			_, err = cs.AppsV1().Deployments(namespace).Update(ctx, deployment, metav1.UpdateOptions{})
+			return err
+		})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for endpoint slices to contain both old and new target ports")
+		err = wait.PollImmediate(time.Second, 2*time.Minute, func() (bool, error) {
+			ports, err := getReadyEndpointSlicePorts(cs, namespace, svcName)
+			if err != nil {
+				framework.Logf("Transient error listing endpoint slices: %v", err)
+				return false, nil
+			}
+			if ports.Has(oldTargetPort) && ports.Has(newTargetPort) {
+				framework.Logf("Detected both target ports in endpoint slices: %v", ports.UnsortedList())
+				return true, nil
+			}
+			framework.Logf("Current target ports in endpoint slices: %v (waiting for both %d and %d)",
+				ports.UnsortedList(), oldTargetPort, newTargetPort)
+			return false, nil
+		})
+		framework.ExpectNoError(err, "timed out waiting for both target ports to appear in endpoint slices")
+
+		ginkgo.By("Pausing the rolling update to freeze the multi-port state")
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			deployment, err = cs.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			deployment.Spec.Paused = true
+			_, err = cs.AppsV1().Deployments(namespace).Update(ctx, deployment, metav1.UpdateOptions{})
+			return err
+		})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for all backend pods to be running and ready (no in-flight terminations)")
+		err = wait.PollImmediate(framework.Poll, 1*time.Minute, func() (bool, error) {
+			pods, err := cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+				LabelSelector: "app=rolling-update-test",
+			})
+			if err != nil {
+				return false, err
+			}
+			for _, pod := range pods.Items {
+				if pod.DeletionTimestamp != nil {
+					framework.Logf("Pod %s is still terminating", pod.Name)
+					return false, nil
+				}
+				if pod.Status.Phase != v1.PodRunning {
+					framework.Logf("Pod %s is in phase %s", pod.Name, pod.Status.Phase)
+					return false, nil
+				}
+				ready := false
+				for _, cond := range pod.Status.Conditions {
+					if cond.Type == v1.PodReady && cond.Status == v1.ConditionTrue {
+						ready = true
+						break
+					}
+				}
+				if !ready {
+					framework.Logf("Pod %s is not ready", pod.Name)
+					return false, nil
+				}
+			}
+			framework.Logf("All %d backend pods are running and ready", len(pods.Items))
+			return true, nil
+		})
+		framework.ExpectNoError(err, "timed out waiting for all pods to be running and ready after pause")
+
+		ginkgo.By("Verifying endpoint slices still contain both target ports while paused")
+		var portNumbers sets.Set[int32]
+		gomega.Eventually(func() error {
+			var err error
+			portNumbers, err = getReadyEndpointSlicePorts(cs, namespace, svcName)
+			return err
+		}, 30*time.Second, framework.Poll).Should(gomega.Succeed())
+		framework.Logf("Target ports in endpoint slices while paused: %v", portNumbers.UnsortedList())
+		gomega.Expect(portNumbers.Has(oldTargetPort) && portNumbers.Has(newTargetPort)).To(gomega.BeTrue(),
+			"expected both target ports %d and %d in endpoint slices while paused, got: %v",
+			oldTargetPort, newTargetPort, portNumbers.UnsortedList())
+
+		ginkgo.By("Identifying new pods created by the rolling update")
+		newPodNames := sets.New[string]()
+		podList, err = cs.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app=rolling-update-test",
+		})
+		framework.ExpectNoError(err)
+		for _, pod := range podList.Items {
+			if pod.DeletionTimestamp == nil && !oldPodNames.Has(pod.Name) {
+				newPodNames.Insert(pod.Name)
+			}
+		}
+		framework.Logf("New pod names (listening on port %d): %v", newTargetPort, newPodNames.UnsortedList())
+		gomega.Expect(newPodNames.Len()).To(gomega.BeNumerically(">", 0),
+			"expected at least one new pod after rolling update pause")
+
+		ginkgo.By("Verifying service traffic reaches both old and new pods (validates SDN-3551 fix)")
+		// Without the SDN-3551 fix, OVN-K programs LB backends with only
+		// one target port, so traffic never reaches pods on the other port.
+		// We verify that responses come from both old pods (port 8080) and
+		// new pods (port 9090), proving the LB has correct entries for both.
+		hitOld := sets.New[string]()
+		hitNew := sets.New[string]()
+		gomega.Eventually(func() error {
+			stdout, err := e2epodoutput.RunHostCmd(namespace, execPod.Name, curlCmd)
+			if err != nil {
+				return fmt.Errorf("connection failed: %v", err)
+			}
+			hostname := strings.TrimSpace(stdout)
+			if hostname == "" {
+				return fmt.Errorf("empty response from service")
+			}
+			if oldPodNames.Has(hostname) {
+				hitOld.Insert(hostname)
+			} else if newPodNames.Has(hostname) {
+				hitNew.Insert(hostname)
+			}
+			if hitOld.Len() > 0 && hitNew.Len() > 0 {
+				return nil
+			}
+			return fmt.Errorf("have not yet hit both old and new pods: hitOld=%v, hitNew=%v",
+				hitOld.UnsortedList(), hitNew.UnsortedList())
+		}, 30*time.Second, 500*time.Millisecond).Should(gomega.Succeed(),
+			"traffic must reach both old pods (port %d) and new pods (port %d) to confirm LB has rules for both target ports",
+			oldTargetPort, newTargetPort)
+		framework.Logf("Confirmed traffic reached old pods %v and new pods %v", hitOld.UnsortedList(), hitNew.UnsortedList())
+
+		ginkgo.By("Resuming the rolling update")
+		err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			deployment, err = cs.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			deployment.Spec.Paused = false
+			_, err = cs.AppsV1().Deployments(namespace).Update(ctx, deployment, metav1.UpdateOptions{})
+			return err
+		})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for the rolling update to complete")
+		err = wait.PollImmediate(framework.Poll, 3*time.Minute, func() (bool, error) {
+			dp, err := cs.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			return dp.Status.UpdatedReplicas == replicas &&
+				dp.Status.ReadyReplicas == replicas &&
+				dp.Status.AvailableReplicas == replicas, nil
+		})
+		framework.ExpectNoError(err, "rolling update did not complete in time")
+
+		ginkgo.By("Verifying service connectivity after the rolling update completes")
+		gomega.Eventually(func() error {
+			stdout, err := e2epodoutput.RunHostCmd(namespace, execPod.Name, curlCmd)
+			if err != nil {
+				return fmt.Errorf("connection failed: %v", err)
+			}
+			if strings.TrimSpace(stdout) == "" {
+				return fmt.Errorf("empty response from service")
+			}
+			framework.Logf("Post-rollout connectivity check succeeded, got response: %s", strings.TrimSpace(stdout))
+			return nil
+		}, 30*time.Second, framework.Poll).Should(gomega.Succeed())
+
+		ginkgo.By("Verifying all endpoint slices with ready endpoints now use only the new target port")
+		gomega.Eventually(func() error {
+			ports, err := getReadyEndpointSlicePorts(cs, namespace, svcName)
+			if err != nil {
+				return fmt.Errorf("listing endpoint slices: %v", err)
+			}
+			if ports.Has(oldTargetPort) {
+				return fmt.Errorf("old target port %d still present in endpoint slices: %v", oldTargetPort, ports.UnsortedList())
+			}
+			if !ports.Has(newTargetPort) {
+				return fmt.Errorf("new target port %d not found in endpoint slices: %v", newTargetPort, ports.UnsortedList())
+			}
+			return nil
+		}, 2*time.Minute, framework.Poll).Should(gomega.Succeed(),
+			"after rolling update completes, all endpoint slices should use the new target port")
+	})
+
+	// This test verifies that a ClusterIP service with multiple endpoints
+	// using different numerical values for the same named port correctly
+	// load-balances across all target ports. This can occur in steady state
+	// when pods with different container images resolve a named port to
+	// different numbers, or transiently during rolling updates.
+	ginkgo.It("Distributes traffic to multiple endpoints with different named target ports", func() {
+		namespace := f.Namespace.Name
+		ctx := context.TODO()
+
+		const (
+			svcName  = "multi-target-port-svc"
+			portName = "http"
+			svcPort  = int32(80)
+			port1    = int32(8080)
+			port2    = int32(9090)
+		)
+
+		labels := map[string]string{"app": "multi-target-port"}
+
+		ginkgo.By(fmt.Sprintf("Creating first pod listening on port %d", port1))
+		pod1 := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "backend-port-1",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Spec: v1.PodSpec{
+				Containers: []v1.Container{
+					{
+						Name:    "agnhost",
+						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", port1)},
+						Ports: []v1.ContainerPort{
+							{
+								Name:          portName,
+								ContainerPort: port1,
+								Protocol:      v1.ProtocolTCP,
+							},
+						},
+					},
+				},
+			},
+		}
+		_, err := cs.CoreV1().Pods(namespace).Create(ctx, pod1, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By(fmt.Sprintf("Creating second pod listening on port %d", port2))
+		pod2 := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "backend-port-2",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Spec: v1.PodSpec{
+				Containers: []v1.Container{
+					{
+						Name:    "agnhost",
+						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", port2)},
+						Ports: []v1.ContainerPort{
+							{
+								Name:          portName,
+								ContainerPort: port2,
+								Protocol:      v1.ProtocolTCP,
+							},
+						},
+					},
+				},
+			},
+		}
+		_, err = cs.CoreV1().Pods(namespace).Create(ctx, pod2, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for both pods to be running and ready")
+		err = e2epod.WaitForPodsRunningReady(ctx, cs, namespace, 2, 2*time.Minute)
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Creating a ClusterIP service with a named target port")
+		svc := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName,
+				Namespace: namespace,
+			},
+			Spec: v1.ServiceSpec{
+				Selector: labels,
+				Type:     v1.ServiceTypeClusterIP,
+				Ports: []v1.ServicePort{
+					{
+						Name:       portName,
+						Protocol:   v1.ProtocolTCP,
+						Port:       svcPort,
+						TargetPort: intstr.FromString(portName),
+					},
+				},
+			},
+		}
+		svc, err = cs.CoreV1().Services(namespace).Create(ctx, svc, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for endpoint slices to contain both target ports")
+		err = wait.PollImmediate(framework.Poll, 1*time.Minute, func() (bool, error) {
+			ports, err := getReadyEndpointSlicePorts(cs, namespace, svcName)
+			if err != nil {
+				return false, nil
+			}
+			if ports.Has(port1) && ports.Has(port2) {
+				framework.Logf("Endpoint slices contain both ports: %v", ports.UnsortedList())
+				return true, nil
+			}
+			framework.Logf("Current endpoint slice ports: %v (waiting for both %d and %d)", ports.UnsortedList(), port1, port2)
+			return false, nil
+		})
+		framework.ExpectNoError(err, "timed out waiting for both target ports in endpoint slices")
+
+		ginkgo.By("Creating a client pod to curl the service")
+		clientPod := e2epod.NewAgnhostPod(namespace, "curl-client", nil, nil, nil)
+		clientPod.Spec.Containers[0].Command = []string{"sleep", "infinity"}
+		clientPod = e2epod.NewPodClient(f).CreateSync(ctx, clientPod)
+
+		ginkgo.By("Verifying service traffic reaches both backends (different target ports)")
+		clusterIP := svc.Spec.ClusterIP
+		curlCmd := fmt.Sprintf("curl -q -s --connect-timeout 2 http://%s/",
+			net.JoinHostPort(clusterIP, fmt.Sprintf("%d", svcPort)))
+
+		hitPod1 := false
+		hitPod2 := false
+		gomega.Eventually(func() error {
+			stdout, err := e2epodoutput.RunHostCmd(namespace, clientPod.Name, curlCmd)
+			if err != nil {
+				return fmt.Errorf("connection failed: %v", err)
+			}
+			hostname := strings.TrimSpace(stdout)
+			if hostname == "" {
+				return fmt.Errorf("empty response from service")
+			}
+			framework.Logf("Got response from: %s", hostname)
+			if hostname == pod1.Name {
+				hitPod1 = true
+			} else if hostname == pod2.Name {
+				hitPod2 = true
+			}
+			if hitPod1 && hitPod2 {
+				return nil
+			}
+			return fmt.Errorf("have not yet hit both pods: hitPod1=%v, hitPod2=%v", hitPod1, hitPod2)
+		}, 30*time.Second, 500*time.Millisecond).Should(gomega.Succeed(),
+			"traffic must reach both endpoints (ports %d and %d) to confirm LB has rules for all target ports",
+			port1, port2)
+		framework.Logf("Confirmed traffic reached both pods: %s (port %d) and %s (port %d)",
+			pod1.Name, port1, pod2.Name, port2)
+	})
+
+	// This test verifies that ETP=Local NodePort services with host-networked
+	// endpoints correctly load-balance across multiple target ports when
+	// using named ports. Two host-network pods on the same node listen on
+	// different ports but share the same named port in their container spec.
+	// The OpenFlow group installed on breth0 must select between both target
+	// ports for new incoming connections.
+	ginkgo.It("Distributes traffic to multiple host-network endpoints with different named target ports", func() {
+		namespace := f.Namespace.Name
+		ctx := context.TODO()
+
+		const (
+			svcName  = "host-net-multi-port-svc"
+			portName = "http"
+			svcPort  = int32(80)
+		)
+		port1 := int32(infraprovider.Get().GetK8HostPort())
+		port2 := int32(infraprovider.Get().GetK8HostPort())
+		gomega.Expect(port1).ToNot(gomega.Equal(port2),
+			"allocated host ports must differ")
+
+		ginkgo.By("Selecting a schedulable node for host-network pods")
+		nodeList, err := e2enode.GetBoundedReadySchedulableNodes(ctx, cs, 1)
+		framework.ExpectNoError(err)
+		gomega.Expect(nodeList.Items).ToNot(gomega.BeEmpty())
+		nodeName := nodeList.Items[0].Name
+
+		labels := map[string]string{"app": "host-net-multi-port"}
+
+		ginkgo.By(fmt.Sprintf("Creating first host-network pod listening on port %d", port1))
+		pod1 := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "host-net-pod-1",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Spec: v1.PodSpec{
+				NodeName:    nodeName,
+				HostNetwork: true,
+				Containers: []v1.Container{
+					{
+						Name:    "agnhost",
+						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port1), "--udp-port=-1"},
+						Ports: []v1.ContainerPort{
+							{
+								Name:          portName,
+								ContainerPort: port1,
+								Protocol:      v1.ProtocolTCP,
+							},
+						},
+					},
+				},
+			},
+		}
+		_, err = cs.CoreV1().Pods(namespace).Create(ctx, pod1, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By(fmt.Sprintf("Creating second host-network pod listening on port %d", port2))
+		pod2 := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "host-net-pod-2",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Spec: v1.PodSpec{
+				NodeName:    nodeName,
+				HostNetwork: true,
+				Containers: []v1.Container{
+					{
+						Name:    "agnhost",
+						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port2), "--udp-port=-1"},
+						Ports: []v1.ContainerPort{
+							{
+								Name:          portName,
+								ContainerPort: port2,
+								Protocol:      v1.ProtocolTCP,
+							},
+						},
+					},
+				},
+			},
+		}
+		_, err = cs.CoreV1().Pods(namespace).Create(ctx, pod2, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for both pods to be running and ready")
+		err = e2epod.WaitForPodsRunningReady(ctx, cs, namespace, 2, 2*time.Minute)
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Creating an ETP=Local NodePort service with a named target port")
+		svc := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName,
+				Namespace: namespace,
+			},
+			Spec: v1.ServiceSpec{
+				Selector:              labels,
+				Type:                  v1.ServiceTypeNodePort,
+				IPFamilyPolicy:        ptr.To(v1.IPFamilyPolicyPreferDualStack),
+				ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
+				Ports: []v1.ServicePort{
+					{
+						Name:       portName,
+						Protocol:   v1.ProtocolTCP,
+						Port:       svcPort,
+						TargetPort: intstr.FromString(portName),
+					},
+				},
+			},
+		}
+		svc, err = cs.CoreV1().Services(namespace).Create(ctx, svc, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		nodePort := svc.Spec.Ports[0].NodePort
+
+		ginkgo.By("Waiting for endpoint slices to contain both target ports")
+		err = wait.PollImmediate(framework.Poll, 1*time.Minute, func() (bool, error) {
+			ports, err := getReadyEndpointSlicePorts(cs, namespace, svcName)
+			if err != nil {
+				return false, nil
+			}
+			if ports.Has(port1) && ports.Has(port2) {
+				framework.Logf("Endpoint slices contain both ports: %v", ports.UnsortedList())
+				return true, nil
+			}
+			framework.Logf("Current endpoint slice ports: %v (waiting for both %d and %d)", ports.UnsortedList(), port1, port2)
+			return false, nil
+		})
+		framework.ExpectNoError(err, "timed out waiting for both target ports in endpoint slices")
+
+		ginkgo.By("Creating a client pod on a different node to send external traffic")
+		clientNodeName := nodeName
+		if len(nodeList.Items) > 1 {
+			clientNodeName = nodeList.Items[1].Name
+		}
+		clientPod := e2epod.NewAgnhostPod(namespace, "curl-client", nil, nil, nil)
+		clientPod.Spec.NodeName = clientNodeName
+		clientPod.Spec.Containers[0].Command = []string{"sleep", "infinity"}
+		clientPod = e2epod.NewPodClient(f).CreateSync(ctx, clientPod)
+
+		ginkgo.By(fmt.Sprintf("Curling NodePort %d on node %s to verify traffic reaches both target ports", nodePort, nodeName))
+		nodeIP := nodeList.Items[0].Status.Addresses[0].Address
+		curlCmd := fmt.Sprintf("curl -q -s --max-time 2 --connect-timeout 1 http://%s/serverport",
+			net.JoinHostPort(nodeIP, fmt.Sprintf("%d", nodePort)))
+
+		hitPort1 := false
+		hitPort2 := false
+		gomega.Eventually(func() error {
+			stdout, err := e2epodoutput.RunHostCmd(namespace, clientPod.Name, curlCmd)
+			if err != nil {
+				return fmt.Errorf("connection failed: %v", err)
+			}
+			resp := strings.TrimSpace(stdout)
+			if resp == "" {
+				return fmt.Errorf("empty response from service")
+			}
+			framework.Logf("Got response from server port: %s", resp)
+			if resp == fmt.Sprintf("%d", port1) {
+				hitPort1 = true
+			} else if resp == fmt.Sprintf("%d", port2) {
+				hitPort2 = true
+			}
+			if hitPort1 && hitPort2 {
+				return nil
+			}
+			return fmt.Errorf("have not yet hit both ports: hitPort1=%v, hitPort2=%v", hitPort1, hitPort2)
+		}, 30*time.Second, 500*time.Millisecond).Should(gomega.Succeed(),
+			"traffic must reach both host-network endpoints (ports %d and %d) via the OpenFlow select group",
+			port1, port2)
+		framework.Logf("Confirmed traffic reached both target ports %d and %d", port1, port2)
+	})
+
+	// This test verifies that external NodePort traffic arriving at breth0
+	// (in_port=physical) is load-balanced across multiple host-network target
+	// ports via the OpenFlow select group. A host-network client on a
+	// different node ensures traffic traverses the physical network and
+	// enters the target node's OVS bridge from the external port, exercising
+	// the breth0 ETP=Local DNAT path rather than the OVN LB pipeline.
+	ginkgo.It("Distributes external traffic to multiple host-network endpoints with different named target ports", func() {
+		namespace := f.Namespace.Name
+		ctx := context.TODO()
+
+		const (
+			svcName  = "host-ext-multi-port-svc"
+			portName = "http"
+			svcPort  = int32(80)
+		)
+		port1 := int32(infraprovider.Get().GetK8HostPort())
+		port2 := int32(infraprovider.Get().GetK8HostPort())
+		gomega.Expect(port1).ToNot(gomega.Equal(port2),
+			"allocated host ports must differ")
+
+		ginkgo.By("Selecting 2 schedulable nodes")
+		nodeList, err := e2enode.GetBoundedReadySchedulableNodes(ctx, cs, 2)
+		framework.ExpectNoError(err)
+		gomega.Expect(len(nodeList.Items)).To(gomega.BeNumerically(">", 1),
+			"need at least 2 nodes so the client sends traffic via the physical network")
+		serverNodeName := nodeList.Items[0].Name
+		clientNodeName := nodeList.Items[1].Name
+
+		labels := map[string]string{"app": "host-ext-multi-port"}
+
+		ginkgo.By(fmt.Sprintf("Creating first host-network pod on %s listening on port %d", serverNodeName, port1))
+		pod1 := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "host-net-pod-1",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Spec: v1.PodSpec{
+				NodeName:    serverNodeName,
+				HostNetwork: true,
+				Containers: []v1.Container{
+					{
+						Name:    "agnhost",
+						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port1), "--udp-port=-1"},
+						Ports: []v1.ContainerPort{
+							{
+								Name:          portName,
+								ContainerPort: port1,
+								Protocol:      v1.ProtocolTCP,
+							},
+						},
+					},
+				},
+			},
+		}
+		_, err = cs.CoreV1().Pods(namespace).Create(ctx, pod1, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By(fmt.Sprintf("Creating second host-network pod on %s listening on port %d", serverNodeName, port2))
+		pod2 := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "host-net-pod-2",
+				Namespace: namespace,
+				Labels:    labels,
+			},
+			Spec: v1.PodSpec{
+				NodeName:    serverNodeName,
+				HostNetwork: true,
+				Containers: []v1.Container{
+					{
+						Name:    "agnhost",
+						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port2), "--udp-port=-1"},
+						Ports: []v1.ContainerPort{
+							{
+								Name:          portName,
+								ContainerPort: port2,
+								Protocol:      v1.ProtocolTCP,
+							},
+						},
+					},
+				},
+			},
+		}
+		_, err = cs.CoreV1().Pods(namespace).Create(ctx, pod2, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Waiting for both pods to be running and ready")
+		err = e2epod.WaitForPodsRunningReady(ctx, cs, namespace, 2, 2*time.Minute)
+		framework.ExpectNoError(err)
+
+		ginkgo.By("Creating an ETP=Local NodePort service with a named target port")
+		svc := &v1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      svcName,
+				Namespace: namespace,
+			},
+			Spec: v1.ServiceSpec{
+				Selector:              labels,
+				Type:                  v1.ServiceTypeNodePort,
+				IPFamilyPolicy:        ptr.To(v1.IPFamilyPolicyPreferDualStack),
+				ExternalTrafficPolicy: v1.ServiceExternalTrafficPolicyLocal,
+				Ports: []v1.ServicePort{
+					{
+						Name:       portName,
+						Protocol:   v1.ProtocolTCP,
+						Port:       svcPort,
+						TargetPort: intstr.FromString(portName),
+					},
+				},
+			},
+		}
+		svc, err = cs.CoreV1().Services(namespace).Create(ctx, svc, metav1.CreateOptions{})
+		framework.ExpectNoError(err)
+		nodePort := svc.Spec.Ports[0].NodePort
+
+		ginkgo.By("Waiting for endpoint slices to contain both target ports")
+		err = wait.PollImmediate(framework.Poll, 1*time.Minute, func() (bool, error) {
+			ports, err := getReadyEndpointSlicePorts(cs, namespace, svcName)
+			if err != nil {
+				return false, nil
+			}
+			if ports.Has(port1) && ports.Has(port2) {
+				framework.Logf("Endpoint slices contain both ports: %v", ports.UnsortedList())
+				return true, nil
+			}
+			framework.Logf("Current endpoint slice ports: %v (waiting for both %d and %d)", ports.UnsortedList(), port1, port2)
+			return false, nil
+		})
+		framework.ExpectNoError(err, "timed out waiting for both target ports in endpoint slices")
+
+		ginkgo.By(fmt.Sprintf("Creating a host-network client pod on %s", clientNodeName))
+		clientPod := e2epod.NewAgnhostPod(namespace, "curl-host-client", nil, nil, nil)
+		clientPod.Spec.NodeName = clientNodeName
+		clientPod.Spec.HostNetwork = true
+		for k := range clientPod.Spec.Containers {
+			if clientPod.Spec.Containers[k].Name == "agnhost-container" {
+				clientPod.Spec.Containers[k].Command = []string{"sleep", "infinity"}
+				clientPod.Spec.Containers[k].SecurityContext.Privileged = pointer.Bool(true)
+			}
+		}
+		clientPod = e2epod.NewPodClient(f).CreateSync(ctx, clientPod)
+
+		serverNode := nodeList.Items[0]
+		serverNodeIPs := e2enode.GetAddresses(&serverNode, v1.NodeInternalIP)
+		gomega.Expect(serverNodeIPs).ToNot(gomega.BeEmpty())
+
+		for _, serverNodeIP := range serverNodeIPs {
+			addrLabel := "IPv4"
+			if utilnet.IsIPv6String(serverNodeIP) {
+				addrLabel = "IPv6"
+			}
+
+			ginkgo.By(fmt.Sprintf("Curling %s NodePort %d on %s (%s) to verify traffic reaches both target ports",
+				addrLabel, nodePort, serverNodeName, serverNodeIP))
+			curlCmd := fmt.Sprintf("curl -q -s --max-time 2 --connect-timeout 1 http://%s/serverport",
+				net.JoinHostPort(serverNodeIP, fmt.Sprintf("%d", nodePort)))
+
+			hitPort1 := false
+			hitPort2 := false
+			gomega.Eventually(func() error {
+				stdout, err := e2epodoutput.RunHostCmd(namespace, clientPod.Name, curlCmd)
+				if err != nil {
+					return fmt.Errorf("connection failed: %v", err)
+				}
+				resp := strings.TrimSpace(stdout)
+				if resp == "" {
+					return fmt.Errorf("empty response from service")
+				}
+				framework.Logf("[%s] Got response from server port: %s", addrLabel, resp)
+				if resp == fmt.Sprintf("%d", port1) {
+					hitPort1 = true
+				} else if resp == fmt.Sprintf("%d", port2) {
+					hitPort2 = true
+				}
+				if hitPort1 && hitPort2 {
+					return nil
+				}
+				return fmt.Errorf("have not yet hit both ports via %s: hitPort1=%v, hitPort2=%v", addrLabel, hitPort1, hitPort2)
+			}, 30*time.Second, 500*time.Millisecond).Should(gomega.Succeed(),
+				"external traffic via %s must reach both host-network endpoints (ports %d and %d) via breth0 OpenFlow group",
+				addrLabel, port1, port2)
+			framework.Logf("[%s] Confirmed traffic reached both target ports %d and %d", addrLabel, port1, port2)
+		}
+	})
+
 })
+
+// getReadyEndpointSlicePorts returns the set of target port numbers from endpoint
+// slices that have at least one ready endpoint. Slices with no endpoints or no
+// ready endpoints are excluded.
+func getReadyEndpointSlicePorts(cs clientset.Interface, namespace, svcName string) (sets.Set[int32], error) {
+	slices, err := cs.DiscoveryV1().EndpointSlices(namespace).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("kubernetes.io/service-name=%s", svcName),
+	})
+	if err != nil {
+		return nil, err
+	}
+	ports := sets.New[int32]()
+	for _, slice := range slices.Items {
+		if len(slice.Endpoints) == 0 {
+			continue
+		}
+		hasReady := false
+		for _, ep := range slice.Endpoints {
+			cond := ep.Conditions
+			ready := cond.Ready == nil || *cond.Ready
+			serving := cond.Serving == nil || *cond.Serving
+			terminating := cond.Terminating != nil && *cond.Terminating
+			if ready && serving && !terminating {
+				hasReady = true
+				break
+			}
+		}
+		if !hasReady {
+			continue
+		}
+		for _, port := range slice.Ports {
+			if port.Port != nil {
+				ports.Insert(*port.Port)
+			}
+		}
+	}
+	return ports, nil
+}
 
 func getServiceBackendsFromPod(execPod *v1.Pod, serviceIP string, servicePort int) []string {
 	connectionAttempts := 15
@@ -1753,6 +2631,7 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", feature.Serv
 		svcName                     = "lbservice-test"
 		backendName                 = "lb-backend-pod"
 		endpointHTTPPort            = 80
+		endpointAgnhostPort         = 10000
 		endpointUDPPort             = 10001
 		loadBalancerYaml            = "loadbalancer.yaml"
 		bgpAddYaml                  = "bgpAdd.yaml"
@@ -1824,6 +2703,12 @@ spec:
         ports:
         - name: http
           containerPort: 80
+      - name: agnhost
+        image: ` + images.AgnHost() + `
+        command: ["/agnhost", "netexec", "--http-port=10000"]
+        ports:
+        - name: agnhost
+          containerPort: 10000
       - name: udp-server
         image: ` + images.UDPServerSrcIPPrinter() + `
         imagePullPolicy: Always
@@ -1845,6 +2730,10 @@ spec:
     port: 80
     protocol: TCP
     targetPort: 80
+  - name: agnhost
+    port: 10000
+    protocol: TCP
+    targetPort: 10000
   - name: udp
     port: 10001
     protocol: UDP
@@ -1902,18 +2791,6 @@ metadata:
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", "egressip", "--ignore-not-found=true")
 		e2ekubectl.RunKubectlOrDie("default", "label", "node", nonBackendNodeName, "k8s.ovn.org/egress-assignable-")
 	})
-
-	tryWgetLoadBalancer := func(externalContainer infraapi.ExternalContainer, svcLoadBalancerIP string) {
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			_, err := wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
-			if err != nil {
-				framework.Logf("retrying wget to %s: %v", svcLoadBalancerIP, err)
-				return false, nil
-			}
-			return true, nil
-		})
-		framework.ExpectNoError(err, "failed to curl load balancer service")
-	}
 
 	ginkgo.It("Should ensure connectivity works on an external service when mtu changes in intermediate node", func() {
 		err := WaitForServingAndReadyServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*180)
@@ -2003,9 +2880,6 @@ metadata:
 
 		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
-
-		numberOfETPRules := pokeNodeIPTableRules(backendNodeName, "OVN-KUBE-EXTERNALIP")
-		gomega.Expect(numberOfETPRules).To(gomega.Equal(5))
 
 		primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "must fetch primary provider network")
@@ -2135,7 +3009,29 @@ spec:
 		}
 	})
 
-	ginkgo.It("Should ensure load balancer service works with 0 node ports when ETP=local", func() {
+	testLBEndpoints := func(externalContainer infraapi.ExternalContainer, svcLoadBalancerIP string, wantEndpoints int) {
+		target := fmt.Sprintf("http://%s/hostname", util.JoinHostPortInt32(svcLoadBalancerIP, endpointAgnhostPort))
+		gotEndpoints := make(map[string]int)
+		// Give the test extra time, to ensure we eventually hit all endpoints
+		totalTimeout := retryTimeout * time.Duration(wantEndpoints)
+		_ = wait.PollImmediate(retryInterval, totalTimeout, func() (bool, error) {
+			endpoint, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"curl", "-s", "-g", target})
+			if err != nil {
+				framework.Logf("retrying curl to %s: %v", svcLoadBalancerIP, err)
+				return false, nil
+			}
+			gotEndpoints[endpoint]++
+			if gotEndpoints[endpoint] == 1 {
+				framework.Logf("reached endpoint %s", endpoint)
+			}
+			done := len(gotEndpoints) == wantEndpoints
+			return done, nil
+		})
+		gomega.Expect(len(gotEndpoints)).NotTo(gomega.BeZero(), "failed to reach any endpoint of service %s", svcLoadBalancerIP)
+		gomega.Expect(len(gotEndpoints)).To(gomega.Equal(wantEndpoints), "failed to reach the expected number of load balancer endpoints")
+	}
+
+	ginkgo.It("Should ensure load balancer service works without node ports when ETP=local", func() {
 
 		err := WaitForServingAndReadyServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*180)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
@@ -2145,29 +3041,15 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		noSNATServicesSet := "mgmtport-no-snat-services-v4"
-		if utilnet.IsIPv6String(svcLoadBalancerIP) {
-			noSNATServicesSet = "mgmtport-no-snat-services-v6"
-		}
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 2, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 5, "OVN-KUBE-EXTERNALIP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-
 		primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "must get primary provider network")
 
 		ginkgo.By("waiting for BGP route to be installed on the FRR router")
 		waitForFRRBGPRoute(svcLoadBalancerIP, externalRouterContainerName, primaryProviderNetwork)
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
 		externalContainer := infraapi.ExternalContainer{Name: externalClientContainerName}
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
 		ginkgo.By("patching service " + svcName + " to allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
 
@@ -2185,56 +3067,20 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 10, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 8, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
-		framework.ExpectNoError(err, "failed to curl load balancer service")
-
-		pktSize := 60
-		if utilnet.IsIPv6String(svcLoadBalancerIP) {
-			pktSize = 80
-		}
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		// FIXME: This used to check that the no-snat rule had been hit, but nftables
-		// doesn't attach counters to rules unless you explicitly request them, which
-		// we don't... Is this check really needed?
-
-		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
+		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure rules are also getting recreated correctly")
 		e2ekubectl.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
 		err = e2eendpointslice.WaitForEndpointCount(context.TODO(), f.ClientSet, namespaceName, svcName, 3)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		// number of rules/elements should have decreased by 2 (one for the TCP port,
-		// one for UDP)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 8, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 6, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
-		framework.ExpectNoError(err, "failed to curl load balancer service")
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		// FIXME: This used to check that the no-snat rule had been hit, but nftables
-		// doesn't attach counters to rules unless you explicitly request them, which
-		// we don't... Is this check really needed?
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 3)
 	})
 
-	ginkgo.It("Should ensure load balancer service works with 0 node ports when named targetPorts are used and ETP=local", func() {
+	ginkgo.It("Should ensure load balancer service works without node ports when named targetPorts are used and ETP=local", func() {
 		err := WaitForServingAndReadyServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*180)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
@@ -2243,98 +3089,24 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		checkExactETPRules := func(noSNATServicesSet string) {
-			svc, err := f.ClientSet.CoreV1().Services(namespaceName).Get(context.TODO(), svcName, metav1.GetOptions{})
-			framework.ExpectNoError(err)
-
-			// Retrieve the loadbalancer's IP
-			var lbIP string
-			if len(svc.Status.LoadBalancer.Ingress) > 0 {
-				lbIP = svc.Status.LoadBalancer.Ingress[0].IP
-			}
-
-			discoveryClient := f.ClientSet.DiscoveryV1()
-			endpointSlices, err := discoveryClient.EndpointSlices(namespaceName).List(context.TODO(), metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("kubernetes.io/service-name=%s", svcName),
-			})
-			framework.ExpectNoError(err)
-
-			// Retrieve unique addresses from all endpointslices
-			uniqueAddresses := sets.New[string]()
-			for _, es := range endpointSlices.Items {
-				uniqueAddresses = uniqueAddresses.Union(getServingAndReadyEndpointSliceAddresses(es))
-			}
-
-			mask := 32
-			if utilnet.IsIPv6String(lbIP) {
-				mask = 128
-			}
-
-			// Build regex patterns for iptables rules using lbIP and uniqueAddresses
-			var patterns []string
-			var sets [][]string
-			for address := range uniqueAddresses {
-				tcpPattern := fmt.Sprintf(".*-A OVN-KUBE-ETP -d %s/%d -p tcp -m tcp --dport 80 -m statistic "+
-					"--mode random --probability .* -j DNAT --to-destination %s$",
-					regexp.QuoteMeta(lbIP), mask, regexp.QuoteMeta(net.JoinHostPort(address, "80")))
-				patterns = append(patterns, tcpPattern)
-				udpPattern := fmt.Sprintf(".*-A OVN-KUBE-ETP -d %s/%d -p udp -m udp --dport 10001 -m statistic "+
-					"--mode random --probability .* -j DNAT --to-destination %s$",
-					regexp.QuoteMeta(lbIP), mask, regexp.QuoteMeta(net.JoinHostPort(address, "10001")))
-				patterns = append(patterns, udpPattern)
-
-				sets = append(sets, []string{address, "tcp", "80"})
-				sets = append(sets, []string{address, "udp", "10001"})
-			}
-			err = wait.PollImmediate(retryInterval, retryTimeout, checkIPTablesRulesPresent(backendNodeName, patterns))
-			framework.ExpectNoError(err, "Couldn't fetch the correct iptables rules, expected to find: %v, err: %v", patterns, err)
-			err = wait.PollImmediate(retryInterval, retryTimeout, checkNFTElementsPresent(backendNodeName, noSNATServicesSet, sets))
-			framework.ExpectNoError(err, "Couldn't fetch the correct nft elements, expected to find: %v, err: %v", sets, err)
-		}
-
-		noSNATServicesSet := "mgmtport-no-snat-services-v4"
-		if utilnet.IsIPv6String(svcLoadBalancerIP) {
-			noSNATServicesSet = "mgmtport-no-snat-services-v6"
-		}
-
-		// Initial sanity check.
-		ginkgo.By("checking number of firewall rules for baseline")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 2, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 5, "OVN-KUBE-EXTERNALIP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
 		externalContainer := infraapi.ExternalContainer{Name: externalClientContainerName}
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
 		// Patch the service to use named ports.
 		ginkgo.By("patching service " + svcName + " to named ports")
 		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/ports/0/targetPort", "http")
 		framework.ExpectNoError(err)
-		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/ports/1/targetPort", "udp")
+		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/ports/1/targetPort", "agnhost")
 		framework.ExpectNoError(err)
-		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.ports[0].targetPort}'")
-		gomega.Expect(output).To(gomega.Equal("'http'"))
-		output = e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.ports[1].targetPort}'")
-		gomega.Expect(output).To(gomega.Equal("'udp'"))
+		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/ports/2/targetPort", "udp")
+		framework.ExpectNoError(err)
+		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.ports[1].targetPort}'")
+		gomega.Expect(output).To(gomega.Equal("'agnhost'"))
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
-		ginkgo.By("checking number of firewall rules for named ports")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 2, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 5, "OVN-KUBE-EXTERNALIP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-		externalContainer = infraapi.ExternalContainer{Name: externalClientContainerName}
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
+
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
 		// Patch the service to use allocateLoadBalancerNodeProts=false and externalTrafficPolicy=local.
 		ginkgo.By("patching service " + svcName + " to allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
@@ -2353,71 +3125,17 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		ginkgo.By("checking number of firewall rules for allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 10, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 8, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
-		ginkgo.By("checking exact ETP firewall rules for allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
-		checkExactETPRules(noSNATServicesSet)
-
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
-
-		pktSize := 60
-		if utilnet.IsIPv6String(svcLoadBalancerIP) {
-			pktSize = 80
-		}
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		// FIXME: This used to check that the no-snat rule had been hit, but nftables
-		// doesn't attach counters to rules unless you explicitly request them, which
-		// we don't... Is this check really needed?
-
-		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
+		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure rules are also getting recreated correctly")
 		e2ekubectl.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
 		err = WaitForServingAndReadyServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 3, time.Second, time.Second*180)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		// number of rules/elements should have decreased by 2 (one for the TCP port,
-		// one for UDP)
-		ginkgo.By("checking number of firewall rules after scale down")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 8, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 6, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		ginkgo.By("checking exact ETP firewall rules for allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local after scale down")
-		checkExactETPRules(noSNATServicesSet)
-
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		// FIXME: This used to check that the no-snat rule had been hit, but nftables
-		// doesn't attach counters to rules unless you explicitly request them, which
-		// we don't... Is this check really needed?
-
-		// Also test proper deletion logic.
-		ginkgo.By("deleting the service")
-		e2ekubectl.RunKubectlOrDie("default", "delete", "service", svcName)
-		ginkgo.By("checking number of firewall rules after service delete")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 2, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 3, "OVN-KUBE-EXTERNALIP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 3)
 	})
 
 	ginkgo.It("Should ensure load balancer service works when ETP=local and session affinity is set", func() {
@@ -2692,6 +3410,10 @@ spec:
 			json.Unmarshal([]byte(egressIPStdout), &egressIP)
 			if len(egressIP.Items) > 1 {
 				framework.Failf("Didn't expect to retrieve more than one egress IP during the execution of this test, saw: %v", len(egressIP.Items))
+			}
+			if len(egressIP.Items[0].Status.Items) == 0 {
+				framework.Logf("EgressIP %s is not assigned to node %s yet", egressIP1.String(), nonBackendNodeName)
+				return false, nil
 			}
 			return egressIP.Items[0].Status.Items[0].Node == nonBackendNodeName, nil
 		})

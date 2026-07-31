@@ -69,16 +69,16 @@ func generateAdvertisedUDNIsolationExpectedNB(testData []libovsdbtest.TestData, 
 func generateGatewayInitExpectedNB(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
 	expectedNodeSwitch *nbdb.LogicalSwitch, nodeName string, clusterIPSubnets []*net.IPNet, hostSubnets []*net.IPNet,
 	l3GatewayConfig *util.L3GatewayConfig, joinLRPIPs, defLRPIPs []*net.IPNet, skipSnat bool, nodeMgmtPortIP,
-	gatewayMTU string) []libovsdbtest.TestData {
+	gatewayMTU string, nodeIPsForClusterNodeIPAS ...string) []libovsdbtest.TestData {
 	return generateGatewayInitExpectedNBWithPodNetworkAdvertised(testData, expectedOVNClusterRouter, expectedNodeSwitch,
 		nodeName, clusterIPSubnets, hostSubnets, l3GatewayConfig, joinLRPIPs, defLRPIPs, skipSnat, nodeMgmtPortIP,
-		gatewayMTU, false) // Default to no pod network advertised
+		gatewayMTU, false, nodeIPsForClusterNodeIPAS...) // Default to no pod network advertised
 }
 
 func generateGatewayInitExpectedNBWithPodNetworkAdvertised(testData []libovsdbtest.TestData, expectedOVNClusterRouter *nbdb.LogicalRouter,
 	expectedNodeSwitch *nbdb.LogicalSwitch, nodeName string, clusterIPSubnets []*net.IPNet, hostSubnets []*net.IPNet,
 	l3GatewayConfig *util.L3GatewayConfig, joinLRPIPs, defLRPIPs []*net.IPNet, skipSnat bool, nodeMgmtPortIP,
-	gatewayMTU string, isPodNetworkAdvertised bool) []libovsdbtest.TestData {
+	gatewayMTU string, isPodNetworkAdvertised bool, nodeIPsForClusterNodeIPAS ...string) []libovsdbtest.TestData {
 
 	GRName := "GR_" + nodeName
 	gwSwitchPort := types.JoinSwitchToGWRouterPrefix + GRName
@@ -230,7 +230,11 @@ func generateGatewayInitExpectedNBWithPodNetworkAdvertised(testData []libovsdbte
 	})
 	var egressNodeIPsASv4, egressNodeIPsASv6 *nbdb.AddressSet
 	if config.OVNKubernetesFeature.EnableEgressIP {
-		egressNodeIPsASv4, egressNodeIPsASv6 = buildEgressIPNodeAddressSets(physicalIPs)
+		nodeIPs := physicalIPs
+		if len(nodeIPsForClusterNodeIPAS) > 0 {
+			nodeIPs = nodeIPsForClusterNodeIPAS
+		}
+		egressNodeIPsASv4, egressNodeIPsASv6 = buildEgressIPNodeAddressSets(nodeIPs)
 		if config.IPv4Mode {
 			testData = append(testData, egressNodeIPsASv4)
 		}
@@ -323,10 +327,7 @@ func generateGatewayInitExpectedNBWithPodNetworkAdvertised(testData []libovsdbte
 	}
 	testData = append(testData, copp)
 
-	dynamicNeighRouters := "true"
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		dynamicNeighRouters = "false"
-	}
+	dynamicNeighRouters := "false"
 
 	testData = append(testData, &nbdb.LogicalRouter{
 		UUID: GRName + "-UUID",
@@ -549,11 +550,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			GRName := "GR_" + nodeName
 
-			dynamicNeighRouters := "true"
-
-			if config.OVNKubernetesFeature.EnableInterconnect {
-				dynamicNeighRouters = "false"
-			}
+			dynamicNeighRouters := "false"
 
 			expectedOVNGatewayRouter := &nbdb.LogicalRouter{
 				UUID: GRName + "-UUID",
@@ -666,10 +663,7 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 			}
 			GRName := "GR_" + nodeName
 
-			dynamicNeighRouters := "true"
-			if config.OVNKubernetesFeature.EnableInterconnect {
-				dynamicNeighRouters = "false"
-			}
+			dynamicNeighRouters := "false"
 
 			expectedOVNGatewayRouter := &nbdb.LogicalRouter{
 				UUID: GRName + "-UUID",
@@ -2110,6 +2104,117 @@ var _ = ginkgo.Describe("Gateway Init Operations", func() {
 	})
 })
 
+var _ = ginkgo.Describe("Gateway Router static routes to the distributed router", func() {
+	const (
+		drNextHop      = "100.65.0.1"
+		clusterSubnet  = "10.193.0.0/16"
+		nodeHostSubnet = "10.193.0.0/24"
+	)
+
+	var (
+		fakeOvn      *FakeOVN
+		gwRouterName = types.GWRouterPrefix + nodeName
+	)
+
+	ginkgo.BeforeEach(func() {
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.Gateway.Mode = config.GatewayModeShared
+		config.Gateway.EphemeralPortRange = config.DefaultEphemeralPortRange
+		fakeOvn = NewFakeOVN(true)
+	})
+
+	ginkgo.AfterEach(func() {
+		fakeOvn.shutdown()
+	})
+
+	// drRoutePrefixes returns the IP prefixes of the gateway router's static
+	// routes whose nexthop is the distributed router (ovn_cluster_router) join
+	// switch port.
+	drRoutePrefixes := func() []string {
+		routes, err := libovsdbops.GetRouterLogicalRouterStaticRoutesWithPredicate(
+			fakeOvn.nbClient,
+			&nbdb.LogicalRouter{Name: gwRouterName},
+			func(item *nbdb.LogicalRouterStaticRoute) bool {
+				return item.Nexthop == drNextHop
+			})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		prefixes := make([]string, 0, len(routes))
+		for _, route := range routes {
+			prefixes = append(prefixes, route.IPPrefix)
+		}
+		return prefixes
+	}
+
+	// runUpdate seeds a gateway router (plus any pre-existing static routes) and
+	// invokes updateGWRouterStaticRoutes for the default network.
+	runUpdate := func(gwConfig *GatewayConfig, seedRoutes ...*nbdb.LogicalRouterStaticRoute) {
+		gwRouter := &nbdb.LogicalRouter{
+			UUID: gwRouterName + "-UUID",
+			Name: gwRouterName,
+		}
+		nbData := []libovsdbtest.TestData{gwRouter}
+		for _, route := range seedRoutes {
+			nbData = append(nbData, route)
+			gwRouter.StaticRoutes = append(gwRouter.StaticRoutes, route.UUID)
+		}
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: nbData}, &corev1.NodeList{
+			Items: []corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Name: nodeName}},
+			},
+		})
+
+		gw := newGatewayManager(fakeOvn, nodeName)
+		externalRouterPort := types.GWRouterToExtSwitchPrefix + gwRouterName
+		gomega.Expect(gw.updateGWRouterStaticRoutes(gwConfig, externalRouterPort, gwRouter)).To(gomega.Succeed())
+	}
+
+	newGWConfig := func() *GatewayConfig {
+		return &GatewayConfig{
+			annoConfig:                 &util.L3GatewayConfig{},
+			hostSubnets:                ovntest.MustParseIPNets(nodeHostSubnet),
+			clusterSubnets:             ovntest.MustParseIPNets(clusterSubnet),
+			ovnClusterLRPToJoinIfAddrs: ovntest.MustParseIPNets(drNextHop + "/16"),
+		}
+	}
+
+	ginkgo.It("routes the whole cluster subnet via the distributed router in overlay mode", func() {
+		// default (empty) transport == overlay
+		runUpdate(newGWConfig())
+		gomega.Expect(drRoutePrefixes()).To(gomega.ConsistOf(clusterSubnet))
+	})
+
+	ginkgo.It("routes only the node host subnet via the distributed router in no-overlay mode", func() {
+		config.Default.Transport = types.NetworkTransportNoOverlay
+		runUpdate(newGWConfig())
+		gomega.Expect(drRoutePrefixes()).To(gomega.ConsistOf(nodeHostSubnet))
+	})
+
+	ginkgo.It("removes a stale cluster subnet route via the distributed router in no-overlay mode", func() {
+		config.Default.Transport = types.NetworkTransportNoOverlay
+		staleRoute := &nbdb.LogicalRouterStaticRoute{
+			UUID:     "stale-cluster-subnet-route-UUID",
+			IPPrefix: clusterSubnet,
+			Nexthop:  drNextHop,
+		}
+		runUpdate(newGWConfig(), staleRoute)
+		// the stale /16 must be gone, leaving only the node's /24
+		gomega.Expect(drRoutePrefixes()).To(gomega.ConsistOf(nodeHostSubnet))
+	})
+
+	ginkgo.It("removes a stale node host subnet route via the distributed router in overlay mode", func() {
+		// default (empty) transport == overlay; simulate an upgrade from
+		// no-overlay where the GR was left with only the node's /24 route.
+		staleRoute := &nbdb.LogicalRouterStaticRoute{
+			UUID:     "stale-host-subnet-route-UUID",
+			IPPrefix: nodeHostSubnet,
+			Nexthop:  drNextHop,
+		}
+		runUpdate(newGWConfig(), staleRoute)
+		// the stale /24 must be gone, leaving only the cluster /16
+		gomega.Expect(drRoutePrefixes()).To(gomega.ConsistOf(clusterSubnet))
+	})
+})
+
 func newGatewayManager(ovn *FakeOVN, nodeName string) *GatewayManager {
 	controller := ovn.controller
 	return NewGatewayManager(
@@ -2120,6 +2225,7 @@ func newGatewayManager(ovn *FakeOVN, nodeName string) *GatewayManager {
 		controller.GetNetInfo(),
 		ovn.watcher,
 		nodecontroller.NewNodeAnnotationCache(),
+		ovn.addressSetManager,
 		WithLoadBalancerGroups(
 			controller.routerLoadBalancerGroupUUID,
 			controller.clusterLoadBalancerGroupUUID,
@@ -2160,7 +2266,7 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 	ginkgo.Context("when network is not advertised", func() {
 		ginkgo.It("returns empty match for Layer3 topology", func() {
 			netInfo.topology = types.Layer3Topology
-			match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, false, utilnet.IPv4)
+			match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, false, utilnet.IPv4, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(match).To(gomega.BeEmpty())
 		})
@@ -2170,7 +2276,7 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 			defer func() { config.Layer2UsesTransitRouter = originalValue }()
 			config.Layer2UsesTransitRouter = true
 			netInfo.topology = types.Layer2Topology
-			match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, false, utilnet.IPv4)
+			match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, false, utilnet.IPv4, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(match).To(gomega.BeEmpty())
 		})
@@ -2180,7 +2286,7 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 			defer func() { config.Layer2UsesTransitRouter = originalValue }()
 			config.Layer2UsesTransitRouter = false
 			netInfo.topology = types.Layer2Topology
-			match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, false, utilnet.IPv4)
+			match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, false, utilnet.IPv4, nil)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			expectedMatch := fmt.Sprintf("outport == %q", types.GWRouterToExtSwitchPrefix+netInfo.GetNetworkScopedGWRouterName(nodeName))
 			gomega.Expect(match).To(gomega.Equal(expectedMatch))
@@ -2201,7 +2307,7 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 
 				ginkgo.It("returns empty match for Layer3 topology", func() {
 					netInfo.topology = types.Layer3Topology
-					match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4)
+					match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4, nil)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					gomega.Expect(match).To(gomega.BeEmpty())
 				})
@@ -2211,7 +2317,7 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 				ginkgo.BeforeEach(func() {
 					config.Gateway.Mode = config.GatewayModeLocal
 					addressSetFactory = addressset.NewOvnAddressSetFactory(fakeOvn.nbClient, config.IPv4Mode, config.IPv6Mode)
-					dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName)
+					dbIDs := getClusterNodeIPsAddrSetDbIDsForTest()
 					as, err := addressSetFactory.EnsureAddressSet(dbIDs)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					err = as.AddAddresses([]string{"10.0.0.1"})
@@ -2220,9 +2326,10 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 
 				ginkgo.It("returns destination match for Layer3 topology", func() {
 					netInfo.topology = types.Layer3Topology
-					match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4)
+					dbIDs := getClusterNodeIPsAddrSetDbIDsForTest()
+					match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4, dbIDs)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
-					as, err := addressSetFactory.GetAddressSet(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName))
+					as, err := addressSetFactory.GetAddressSet(dbIDs)
 					gomega.Expect(err).NotTo(gomega.HaveOccurred())
 					v4Hash, _ := as.GetASHashNames()
 					expectedMatch := fmt.Sprintf("ip4.dst == $%s", v4Hash)
@@ -2234,7 +2341,7 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 		ginkgo.Context("when outbound SNAT is disabled", func() {
 			ginkgo.BeforeEach(func() {
 				addressSetFactory = addressset.NewOvnAddressSetFactory(fakeOvn.nbClient, config.IPv4Mode, config.IPv6Mode)
-				dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName)
+				dbIDs := getClusterNodeIPsAddrSetDbIDsForTest()
 				as, err := addressSetFactory.EnsureAddressSet(dbIDs)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = as.AddAddresses([]string{"10.0.0.1"})
@@ -2243,9 +2350,10 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 
 			ginkgo.It("returns destination match for Layer3 topology", func() {
 				netInfo.topology = types.Layer3Topology
-				match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4)
+				dbIDs := getClusterNodeIPsAddrSetDbIDsForTest()
+				match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4, dbIDs)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				as, err := addressSetFactory.GetAddressSet(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName))
+				as, err := addressSetFactory.GetAddressSet(dbIDs)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				v4Hash, _ := as.GetASHashNames()
 				expectedMatch := fmt.Sprintf("ip4.dst == $%s", v4Hash)
@@ -2257,9 +2365,10 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 				defer func() { config.Layer2UsesTransitRouter = originalValue }()
 				config.Layer2UsesTransitRouter = true
 				netInfo.topology = types.Layer2Topology
-				match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4)
+				dbIDs := getClusterNodeIPsAddrSetDbIDsForTest()
+				match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4, dbIDs)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				as, err := addressSetFactory.GetAddressSet(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName))
+				as, err := addressSetFactory.GetAddressSet(dbIDs)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				v4Hash, _ := as.GetASHashNames()
 				expectedMatch := fmt.Sprintf("ip4.dst == $%s", v4Hash)
@@ -2271,9 +2380,10 @@ var _ = ginkgo.Describe("GetNetworkScopedClusterSubnetSNATMatch", func() {
 				defer func() { config.Layer2UsesTransitRouter = originalValue }()
 				config.Layer2UsesTransitRouter = false
 				netInfo.topology = types.Layer2Topology
-				match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4)
+				dbIDs := getClusterNodeIPsAddrSetDbIDsForTest()
+				match, err := GetNetworkScopedClusterSubnetSNATMatch(fakeOvn.nbClient, netInfo, nodeName, true, utilnet.IPv4, dbIDs)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
-				as, err := addressSetFactory.GetAddressSet(getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName))
+				as, err := addressSetFactory.GetAddressSet(dbIDs)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				v4Hash, _ := as.GetASHashNames()
 				expectedMatch := fmt.Sprintf("outport == %q && ip4.dst == $%s", types.GWRouterToExtSwitchPrefix+netInfo.GetNetworkScopedGWRouterName(nodeName), v4Hash)
@@ -2334,7 +2444,7 @@ var _ = ginkgo.Describe("AddPodSNATOps", func() {
 		controller = fakeOvn.controller
 
 		// Create address set for node IPs (required for SNAT match)
-		dbIDs := getEgressIPAddrSetDbIDs(NodeIPAddrSetName, types.DefaultNetworkName, types.DefaultNetworkControllerName)
+		dbIDs := getClusterNodeIPsAddrSetDbIDsForTest()
 		nodeIPAddrSet, asErr := controller.addressSetFactory.EnsureAddressSet(dbIDs)
 		gomega.Expect(asErr).NotTo(gomega.HaveOccurred())
 		asErr = nodeIPAddrSet.AddAddresses([]string{nodeIP, nodeIPv6})

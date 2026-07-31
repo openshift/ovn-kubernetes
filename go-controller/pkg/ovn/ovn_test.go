@@ -69,7 +69,6 @@ const (
 	fakeUUIDv6                  = "8a86f6d8-7972-4253-b0bd-ddbef66e9304"
 	fakePgUUID                  = "bf02f460-5058-4689-8fcb-d31a1e484ed2"
 	ovnClusterPortGroupUUID     = fakePgUUID
-	testICZone                  = "test"
 	coppUUID                    = "copp-UUID"
 )
 
@@ -105,7 +104,7 @@ func (ni *testNetInfo) OutboundSNAT() string {
 }
 
 type FakeOVN struct {
-	fakeClient        *util.OVNMasterClientset
+	fakeClient        *util.OVNKubeControllerClientset
 	watcher           *factory.WatchFactory
 	controller        *DefaultNetworkController
 	stopChan          chan struct{}
@@ -203,7 +202,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			v1Objects = append(v1Objects, object)
 		}
 	}
-	o.fakeClient = &util.OVNMasterClientset{
+	o.fakeClient = &util.OVNKubeControllerClientset{
 		KubeClient:               fake.NewSimpleClientset(v1Objects...),
 		ANPClient:                anpfake.NewSimpleClientset(anpObjects...),
 		EgressIPClient:           egressipfake.NewSimpleClientset(egressIPObjects...),
@@ -261,7 +260,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	// (e.g., on GitHub).
 	factory.SetEventQueueSize(10)
 
-	o.watcher, err = factory.NewMasterWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewOVNKubeControllerWatchFactory(o.fakeClient)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)
@@ -279,6 +278,9 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	}
 
 	o.portCache = NewPortCache(o.stopChan)
+	o.addressSetManager = addresssetmanager.NewAddressSetManager(o.watcher.PodCoreInformer(),
+		o.watcher.NamespaceInformer(), o.watcher.NodeCoreInformer(), o.nbClient, o.networkManager.Interface().GetNetworkNameForNADKey)
+
 	kubeOVN := &kube.KubeOVN{
 		Kube:      kube.Kube{KClient: o.fakeClient.KubeClient},
 		EIPClient: o.fakeClient.EgressIPClient,
@@ -291,13 +293,12 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 		o.portCache,
 		o.networkManager.Interface(),
 		o.asf,
+		o.addressSetManager,
 		config.IPv4Mode,
 		config.IPv6Mode,
 		"",
 		types.DefaultNetworkControllerName,
 	)
-	o.addressSetManager = addresssetmanager.NewAddressSetManager(o.watcher.PodCoreInformer(),
-		o.watcher.NamespaceInformer(), o.watcher.NodeCoreInformer(), o.nbClient, o.networkManager.Interface().GetNetworkNameForNADKey)
 
 	if o.asf == nil {
 		o.eIPController.addressSetFactory = addressset.NewOvnAddressSetFactory(o.nbClient, config.IPv4Mode, config.IPv6Mode)
@@ -440,7 +441,7 @@ func resetNBClient(ctx context.Context, nbClient libovsdbclient.Client) {
 // NewOvnController creates a new OVN controller for creating logical network
 // infrastructure and policy
 func NewOvnController(
-	ovnClient *util.OVNMasterClientset,
+	ovnClient *util.OVNKubeControllerClientset,
 	wf *factory.WatchFactory,
 	stopChan chan struct{},
 	addressSetFactory addressset.AddressSetFactory,
@@ -592,7 +593,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 		if err != nil {
 			nbZoneFailed = true
 			zone := types.OvnDefaultZone
-			if config.OVNKubernetesFeature.EnableInterconnect && config.Default.Zone != "" {
+			if config.Default.Zone != "" {
 				zone = config.Default.Zone
 			}
 			err = createTestNBGlobal(o.nbClient, zone)
@@ -628,7 +629,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 		switch topoType {
 		case types.Layer3Topology:
 			l3Controller, err := NewLayer3UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
-				o.eIPController, o.portCache, o.addressSetManager, o.udnNodeController)
+				o.eIPController, o.portCache, o.addressSetManager, o.udnNodeController, o.controller.ServiceController())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l3Controller.addressSetFactory = asf
@@ -637,7 +638,7 @@ func (o *FakeOVN) NewUserDefinedNetworkController(netattachdef *nettypes.Network
 			o.fullL3UDNControllers[netName] = l3Controller
 		case types.Layer2Topology:
 			l2Controller, err := NewLayer2UserDefinedNetworkController(cnci, mutableNetInfo, o.networkManager.Interface(), nil,
-				o.portCache, o.eIPController, o.addressSetManager, o.udnNodeController)
+				o.portCache, o.eIPController, o.addressSetManager, o.udnNodeController, o.controller.ServiceController())
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if o.asf != nil { // use fake asf only when enabled
 				l2Controller.addressSetFactory = asf

@@ -3,7 +3,7 @@
 
 # build image for ovn overlay network cni plugin
 
-# ovnkube-db.yaml, ovnkube-node.yaml, and onvkube-master.yaml use this image.
+# OVN-Kubernetes deployment components use this image.
 # This image is built from files in this directory and pushed to
 # a docker registry that is accesseble on each node.
 
@@ -74,4 +74,6 @@ BRANCH = $(shell git rev-parse  --symbolic-full-name HEAD)
 COMMIT = $(shell git rev-parse  HEAD)
 bld: ../../go-controller/_output/go/bin/ovnkube
 	find ../../go-controller/_output/go/bin/ -maxdepth 1 -type f -exec cp -f {} . \;
+	rm -rf LICENSES
+	cp -R ../../LICENSES .
 	echo "ref: ${BRANCH}  commit: ${COMMIT}" > git_info

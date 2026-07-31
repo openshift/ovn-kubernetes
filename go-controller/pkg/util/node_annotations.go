@@ -23,7 +23,7 @@ import (
 )
 
 // This handles the annotations used by the node to pass information about its local
-// network configuration to the master:
+// network configuration to the ovnkube controller:
 //
 //   annotations:
 //     k8s.ovn.org/l3-gateway-config: |
@@ -546,6 +546,21 @@ func UpdateUDNLayer2NodeGRLRPTunnelIDs(annotations map[string]string, netName st
 		return nil, err
 	}
 	return annotations, nil
+}
+
+// GetNodeUDNLayer2TunnelIDAnnotationNetworkNames returns the network names present in
+// the UDNLayer2NodeGRLRPTunnelIDAnnotation on the given node. Used by stale network
+// cleanup to discover L2 primary UDN networks that don't appear in node-subnets.
+func GetNodeUDNLayer2TunnelIDAnnotationNetworkNames(node *corev1.Node) ([]string, error) {
+	tunnelIDsMap, err := parseNetworkMapAnnotation(node.Annotations, types.UDNLayer2NodeGRLRPTunnelIDAnnotation)
+	if err != nil {
+		return nil, err
+	}
+	networks := make([]string, 0, len(tunnelIDsMap))
+	for netName := range tunnelIDsMap {
+		networks = append(networks, netName)
+	}
+	return networks, nil
 }
 
 func UDNLayer2NodeUsesTransitRouter(node *corev1.Node) bool {

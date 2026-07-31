@@ -33,14 +33,10 @@ convert_cni() {
   echo "Patched OVN config:"
   echo "${FIXED_OVNCONFIG}"
   printf '%s' "${FIXED_OVNCONFIG}" | kubectl apply -f -
-  # restart ovnkube-master
+  # restart OVN-Kubernetes control plane components
   # FIXME: kubectl rollout restart deployment leaves the old pod hanging 
-  # as workaround we delete the master directly. When deployed with
-  # OVN_INTERCONNECT_ENABLE=true, the db and cm pods need that too.
+  # as workaround we delete the control plane pods directly.
   # Depending on how kind was deployed, the pods have different labels.
-  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-db ||:
-  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-zone-controller ||:
-  kubectl -n ovn-kubernetes delete pod -l name=ovnkube-master ||:
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-control-plane ||:
   kubectl -n ovn-kubernetes delete pod -l name=ovnkube-identity ||:
 
@@ -48,6 +44,26 @@ convert_cni() {
   kubectl -n ovn-kubernetes rollout restart daemonset ovnkube-node
   kubectl -n ovn-kubernetes rollout status daemonset ovnkube-node
   echo "Updated CNI"
+}
+
+curl_service_from_node() {
+  local node=$1
+  local target=$2
+  local attempts=${3:-6}
+  local interval=${4:-2}
+  local timeout=${5:-5}
+
+  for i in $(seq 1 "${attempts}"); do
+    if docker exec "${node}" curl --max-time "${timeout}" --silent --show-error --fail "${target}" >/dev/null; then
+      echo "Validated ${target} from node ${node} after ${i} attempt(s)"
+      return 0
+    fi
+    if [ "${i}" -eq "${attempts}" ]; then
+      return 1
+    fi
+    echo "Waiting for ${target} to be reachable from node ${node} (${i}/${attempts})"
+    sleep "${interval}"
+  done
 }
 
 convert_k8s_control_plane(){
@@ -292,11 +308,11 @@ IPS=()
 CLUSTER_IPV4=$(kubectl get services my-service-v4 -o jsonpath='{.spec.clusterIPs[0]}')
 IPS+=("${CLUSTER_IPV4}:8081")
 CLUSTER_IPV6=$(kubectl get services my-service-v6 -o jsonpath='{.spec.clusterIPs[0]}')
-IPS+=("\[${CLUSTER_IPV6}\]:8080")
+IPS+=("[${CLUSTER_IPV6}]:8080")
 
 for n in $NODES; do
-  for ip in ${IPS[@]}; do
-    docker exec $n curl --connect-timeout 5 $ip
+  for ip in "${IPS[@]}"; do
+    curl_service_from_node "${n}" "${ip}"
   done
 done
 

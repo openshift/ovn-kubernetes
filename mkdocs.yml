@@ -87,9 +87,10 @@ nav:
     - Internal Subnets: design/ovn-kubernetes-subnets.md
     - Kubevirt VM Live Migration: features/live-migration.md
   - Getting Started:
-    - Launching OVN-Kubernetes: installation/launching-ovn-kubernetes-on-kind.md
+    - Launching OVN-Kubernetes sandbox env: installation/launching-ovn-kubernetes-on-kind.md
     - Launching OVN-Kubernetes Using Helm: installation/launching-ovn-kubernetes-with-helm.md
     - Launching OVN-Kubernetes with DPU Acceleration: installation/launching-ovn-kubernetes-with-dpu.md
+    - Launching OVN-Kubernetes with kubeadm: installation/INSTALL.KUBEADM.md
     - Configuration Guide: getting-started/configuration.md
     - Requirements: features/requirements.md
     - CLI Guide: getting-started/cli-guide.md
@@ -100,6 +101,7 @@ nav:
       - Contributing Guide: governance/CONTRIBUTING.md
       - Governance: governance/GOVERNANCE.md
       - Reviewing Guide: governance/REVIEWING.md
+      - Project Areas: developer-guide/areas.md
       - Coding Guide: developer-guide/developer.md
       - OVN-Kubernetes Container Images: developer-guide/image-build.md
       - Documentation Guide: developer-guide/documentation.md
@@ -117,9 +119,12 @@ nav:
       - UserDefinedNetwork: api-reference/userdefinednetwork-api-spec.md
       - RouteAdvertisements: api-reference/routeadvertisements-api-spec.md
       - ClusterNetworkConnect: api-reference/clusternetworkconnect-api-spec.md
+      - VTEP: api-reference/vtep-api-spec.md
   - Features:
     - Universal Connectivity:
       - UserDefinedNetwork: features/user-defined-networks/user-defined-networks.md
+      - Connecting UserDefinedNetworks: features/user-defined-networks/cluster-network-connect.md
+      - Dynamic UDN Node Allocation: features/user-defined-networks/dynamic-udn.md
     - NetworkSecurityControls:
       - AdminNetworkPolicy: features/network-security-controls/admin-network-policy.md
       - NetworkPolicy: features/network-security-controls/network-policy.md
@@ -147,6 +152,8 @@ nav:
       - OVS Acceleration with DOCA datapath: features/hardware-offload/ovs-doca.md
     - BGP Integration:
       - Route Advertisements: features/bgp-integration/route-advertisements.md
+      - No-Overlay Mode: features/bgp-integration/no-overlay.md
+      - EVPN: features/bgp-integration/evpn.md
   - Troubleshooting:
     - Introduction: troubleshooting/debugging.md
     - OVNKube Trace: troubleshooting/ovnkube-trace.md
@@ -170,5 +177,7 @@ nav:
     - EVPN: okeps/okep-5088-evpn.md
     - DPU Healthcheck: okeps/okep-5674-dpu-healthcheck.md
     - Extend Primary UDN/CUDN to Support Multiple Cluster Subnets in Layer3 Topology: okeps/okep-5377-extend-udn-to-support-multiple-cluster-subnets-in-layer3-topology.md
+    - VRF-Lite Shared Gateway Mode with Uplinks: okeps/okep-6019-vrf-lite-shared-gateway-external-bridges.md
+    - Disable Port Security: okeps/okep-3926-disable-port-security.md
   - Blog:
     - blog/index.md

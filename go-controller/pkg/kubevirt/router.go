@@ -10,6 +10,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
@@ -24,14 +25,21 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
+// DeleteRoutingForMigratedPodWithZone deletes migrated-pod routes and policies for the specified OVN zone.
 func DeleteRoutingForMigratedPodWithZone(nbClient libovsdbclient.Client, pod *corev1.Pod, zone string) error {
-	vm := ExtractVMNameFromPod(pod)
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return err
+	}
+	if vmDescription == nil {
+		return nil
+	}
 	predicate := func(itemExternalIDs map[string]string) bool {
 		containsZone := true
 		if zone != "" {
 			containsZone = itemExternalIDs[OvnZoneExternalIDKey] == zone
 		}
-		return containsZone && externalIDsContainsVM(itemExternalIDs, vm)
+		return containsZone && externalIDsContainsVM(itemExternalIDs, ptr.To(vmDescription.Key()))
 	}
 	routePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return predicate(item.ExternalIDs)
@@ -48,26 +56,20 @@ func DeleteRoutingForMigratedPodWithZone(nbClient libovsdbclient.Client, pod *co
 	return nil
 }
 
+// DeleteRoutingForMigratedPod deletes migrated-pod routes and policies across all OVN zones.
 func DeleteRoutingForMigratedPod(nbClient libovsdbclient.Client, pod *corev1.Pod) error {
 	return DeleteRoutingForMigratedPodWithZone(nbClient, pod, "")
 }
 
-// EnsureLocalZonePodAddressesToNodeRoute will add static routes and policies to ovn_cluster_route logical router
-// to ensure VM traffic work as expected after live migration if the pod is running at the local/global zone.
+// EnsureLocalZonePodAddressesToNodeRoute adds static routes and policies to the ovn_cluster_router logical router
+// so VM traffic works as expected after live migration when the pod is running in the local/global zone.
 //
 // NOTE: IC with multiple nodes per zone is not supported
 //
-// Following is the list of NB logical resources created depending if it's interconnected or not:
+// Following is the list of NB logical resources created:
 //
-// IC (on node per zone):
-//   - static route with cluster wide CIDR as src-ip prefix and nexthop GR, it has less
+//   - static route with cluster wide CIDR as src-ip prefix and nexthop GR; it has less
 //     priority than route to use overlay in case of pod to pod communication
-//
-// NO IC:
-//   - low priority policy with src VM ip and reroute GR, since it has low priority
-//     it will not override the policy to enroute pod to pod traffic using overlay
-//
-// Both:
 //   - static route with VM ip as dst-ip prefix and output port the LRP pointing to the VM's node switch
 func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
 	lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, nadKey string, clusterSubnets []config.CIDRNetworkEntry) error {
@@ -94,61 +96,31 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 		return nil
 	}
 
-	// For interconnect at static route with a cluster-wide src-ip address is
-	// needed to route egress n/s traffic
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		// NOTE: EIP & ESVC use same route and if this is already present thanks to those features,
-		// this will be a no-op
-		node, err := watchFactory.GetNode(pod.Spec.NodeName)
-		if err != nil {
-			return fmt.Errorf("failed getting to list node %q for pod %s/%s: %w", pod.Spec.NodeName, pod.Namespace, pod.Name, err)
-		}
-		gatewayIPs, err := udn.GetGWRouterIPs(node, &util.DefaultNetInfo{})
-		if err != nil {
-			return fmt.Errorf("failed to get default network gateway router join IPs for node %q: %w", node.Name, err)
-		}
-		if err := libovsdbutil.CreateDefaultRouteToExternal(nbClient, types.OVNClusterRouter,
-			types.GWRouterPrefix+pod.Spec.NodeName, clusterSubnets, gatewayIPs); err != nil {
-			return err
-		}
+	// NOTE: EIP & ESVC use same route and if this is already present thanks to
+	// those features, this will be a no-op.
+	node, err := watchFactory.GetNode(pod.Spec.NodeName)
+	if err != nil {
+		return fmt.Errorf("failed getting to list node %q for pod %s/%s: %w", pod.Spec.NodeName, pod.Namespace, pod.Name, err)
+	}
+	gatewayIPs, err := udn.GetGWRouterIPs(node, &util.DefaultNetInfo{})
+	if err != nil {
+		return fmt.Errorf("failed to get default network gateway router join IPs for node %q: %w", node.Name, err)
+	}
+	if err := libovsdbutil.CreateDefaultRouteToExternal(nbClient, types.OVNClusterRouter,
+		types.GWRouterPrefix+pod.Spec.NodeName, clusterSubnets, gatewayIPs); err != nil {
+		return err
 	}
 
-	lrpName := types.GWRouterToJoinSwitchPrefix + types.GWRouterPrefix + pod.Spec.NodeName
-	lrpAddresses, err := libovsdbutil.GetLRPAddrs(nbClient, lrpName)
-	if err != nil {
-		return fmt.Errorf("failed configuring pod routing when reading LRP %s addresses: %v", lrpName, err)
-	}
 	for _, podIP := range podAnnotation.IPs {
 		podAddress := podIP.IP.String()
-
-		if !config.OVNKubernetesFeature.EnableInterconnect {
-			// Policy to with low priority to route traffic to the gateway
-			ipFamily := utilnet.IPFamilyOfCIDR(podIP)
-			nodeGRAddress, err := util.MatchFirstIPNetFamily(ipFamily == utilnet.IPv6, lrpAddresses)
-			if err != nil {
-				return err
-			}
-
-			// adds a policy so that a migrated pods egress traffic
-			// will be routed to the local GR where it now resides
-			match := fmt.Sprintf("ip%s.src == %s", ipFamily, podAddress)
-			egressPolicy := nbdb.LogicalRouterPolicy{
-				Match:    match,
-				Action:   nbdb.LogicalRouterPolicyActionReroute,
-				Nexthops: []string{nodeGRAddress.IP.String()},
-				Priority: types.EgressLiveMigrationReroutePriority,
-				ExternalIDs: map[string]string{
-					OvnZoneExternalIDKey:         OvnLocalZone,
-					VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
-					NamespaceExternalIDsKey:      pod.Namespace,
-				},
-			}
-			if err := libovsdbops.CreateOrUpdateLogicalRouterPolicyWithPredicate(nbClient, types.OVNClusterRouter, &egressPolicy, func(item *nbdb.LogicalRouterPolicy) bool {
-				return item.Priority == egressPolicy.Priority && item.Match == egressPolicy.Match && item.Action == egressPolicy.Action
-			}); err != nil {
-				return fmt.Errorf("failed adding point to point policy for pod %s/%s : %v", pod.Namespace, pod.Name, err)
-			}
+		vmDescription, err := NewVMDescriptionFromPod(pod)
+		if err != nil {
+			return err
 		}
+		if vmDescription == nil {
+			return nil
+		}
+
 		// Add a route for reroute ingress traffic to the VM port since
 		// the subnet is alien to ovn_cluster_router
 		outputPort := types.RouterToSwitchPrefix + pod.Spec.NodeName
@@ -159,7 +131,7 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 			OutputPort: &outputPort,
 			ExternalIDs: map[string]string{
 				OvnZoneExternalIDKey:         OvnLocalZone,
-				VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
+				VirtualMachineExternalIDsKey: vmDescription.Key().Name,
 				NamespaceExternalIDsKey:      pod.Namespace,
 			},
 		}
@@ -173,8 +145,8 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 	return nil
 }
 
-// EnsureRemoteZonePodAddressesToNodeRoute will add static routes when live
-// migrated pod belongs to remote zone to send traffic over transwitch switch
+// EnsureRemoteZonePodAddressesToNodeRoute adds static routes when a live
+// migrated pod belongs to a remote zone, sending traffic over the transit switch
 // port of the node where the pod is running:
 //   - A dst-ip with live migrated pod ip as prefix and nexthop the pod's
 //     current node transit switch port.
@@ -224,6 +196,13 @@ func EnsureRemoteZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory,
 	if err != nil {
 		return err
 	}
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return err
+	}
+	if vmDescription == nil {
+		return nil
+	}
 	for _, podIP := range podAnnotation.IPs {
 		ipFamily := utilnet.IPFamilyOfCIDR(podIP)
 		transitSwitchPortAddr, err := util.MatchFirstIPNetFamily(ipFamily == utilnet.IPv6, transitSwitchPortAddrs)
@@ -236,7 +215,7 @@ func EnsureRemoteZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory,
 			Policy:   &nbdb.LogicalRouterStaticRoutePolicyDstIP,
 			ExternalIDs: map[string]string{
 				OvnZoneExternalIDKey:         OvnRemoteZone,
-				VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
+				VirtualMachineExternalIDsKey: vmDescription.Key().Name,
 				NamespaceExternalIDsKey:      pod.Namespace,
 			},
 		}
@@ -259,14 +238,14 @@ func virtualMachineReady(watchFactory *factory.WatchFactory, pod *corev1.Pod) (b
 		return false, nil
 	}
 
-	// When a virtual machine start up this
-	// label is the signal from KubeVirt to notify that the VM is
+	// When a virtual machine starts up, this
+	// label signals from KubeVirt that the VM is
 	// ready to receive traffic.
 	targetNode := pod.Labels[kubevirtv1.NodeNameLabel]
 
 	// This annotation only appears on live migration scenarios and it signals
 	// that target VM pod is ready to receive traffic so we can route
-	// taffic to it.
+	// traffic to it.
 	targetReadyTimestamp := pod.Annotations[kubevirtv1.MigrationTargetReadyTimestamp]
 
 	// VM is ready to receive traffic

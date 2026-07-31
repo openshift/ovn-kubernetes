@@ -10,11 +10,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/onsi/ginkgo/v2"
@@ -29,9 +27,7 @@ import (
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
 	"github.com/pkg/errors"
-	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -39,12 +35,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
-	e2edeployment "k8s.io/kubernetes/test/e2e/framework/deployment"
 	e2eendpointslice "k8s.io/kubernetes/test/e2e/framework/endpointslice"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
-	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
@@ -59,9 +53,11 @@ const (
 	redirectPort         = "13337"
 	defaultPodInterface  = "eth0"
 	udnPodInterface      = "ovn-udn1"
-)
 
-type podCondition = func(pod *v1.Pod) (bool, error)
+	localNodePortConvergenceTimeout      = 10 * time.Second
+	localNodePortConvergencePollInterval = 1 * time.Second
+	localNodePortStableProbeCount        = 3
+)
 
 // setupHostRedirectPod
 func setupHostRedirectPod(f *framework.Framework, externalContainer infraapi.ExternalContainer, nodeName, nodeIP string, isIPv6 bool) error {
@@ -525,6 +521,60 @@ func IsGatewayModeLocal(cs kubernetes.Interface) bool {
 	return l3Config.Mode == config.GatewayModeLocal
 }
 
+// validateStableLocalEndpointViaExternalContainer probes a NodePort until several consecutive
+// hostname/client-IP response pairs match the expected local endpoint. currentResponses is
+// returned for failure diagnostics only; transient non-local responses do not affect success
+// after the service converges.
+func validateStableLocalEndpointViaExternalContainer(externalContainer infraapi.ExternalContainer, protocol, nodeAddress string, nodePort int32, expectedResponses sets.Set[string]) (sets.Set[string], error) {
+	ginkgo.GinkgoHelper()
+	var currentResponses sets.Set[string]
+	consecutiveMatches := 0
+	var lastErr error
+
+	err := wait.PollUntilContextTimeout(context.Background(), localNodePortConvergencePollInterval, localNodePortConvergenceTimeout, true, func(context.Context) (bool, error) {
+		// hostname and clientip are two separate requests; the consecutive-match
+		// requirement below absorbs any transient mismatch between them.
+		epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress, nodePort, "hostname")
+		rawClientIP := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress, nodePort, "clientip")
+		currentResponses = sets.New[string]()
+
+		matched := false
+		switch {
+		case epHostname == "" || rawClientIP == "":
+			lastErr = fmt.Errorf("empty response hostname=%q clientIP=%q", epHostname, rawClientIP)
+		default:
+			epClientIP, _, err := net.SplitHostPort(rawClientIP)
+			if err != nil {
+				lastErr = fmt.Errorf("failed to parse client ip %q: %w", rawClientIP, err)
+				break
+			}
+			currentResponses.Insert(epHostname, epClientIP)
+			if matched = currentResponses.Equal(expectedResponses); !matched {
+				lastErr = fmt.Errorf("observed responses %v, expected %v", currentResponses, expectedResponses)
+			}
+		}
+
+		if !matched {
+			consecutiveMatches = 0
+			return false, nil
+		}
+		consecutiveMatches++
+		if consecutiveMatches == localNodePortStableProbeCount {
+			return true, nil
+		}
+		lastErr = fmt.Errorf("observed expected responses %v for %d/%d consecutive probes", currentResponses, consecutiveMatches, localNodePortStableProbeCount)
+		return false, nil
+	})
+
+	if err != nil {
+		if lastErr != nil {
+			return currentResponses, fmt.Errorf("timed out waiting for stable local nodeport responses: %w", lastErr)
+		}
+		return currentResponses, err
+	}
+	return currentResponses, nil
+}
+
 // restartOVNKubeNodePod restarts the ovnkube-node pod from namespace, running on nodeName
 func restartOVNKubeNodePod(clientset kubernetes.Interface, namespace string, nodeName string) error {
 	ovnKubeNodePods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
@@ -627,7 +677,7 @@ func findOvnKubeControlPlaneNode(namespace, controlPlanePodName, leaseName strin
 	framework.ExpectNoError(err, fmt.Sprintf("Unable to retrieve leases (%s)"+
 		"from %s %v", leaseName, namespace, err))
 
-	framework.Logf("master instance of %s is running on node %s", controlPlanePodName, ovnkubeControlPlaneNode)
+	framework.Logf("leader instance of %s is running on node %s", controlPlanePodName, ovnkubeControlPlaneNode)
 	// Strip leading and trailing quotes if present
 	if ovnkubeControlPlaneNode[0] == '\'' || ovnkubeControlPlaneNode[0] == '"' {
 		ovnkubeControlPlaneNode = ovnkubeControlPlaneNode[1 : len(ovnkubeControlPlaneNode)-1]
@@ -681,18 +731,8 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			framework.Failf("Unable to connect/talk to the internet: %v", err)
 		}
 
-		if isInterconnectEnabled() {
-			controlPlanePodName = "ovnkube-control-plane"
-			// in "one node per zone" config, ovnkube-controller doesn't create leader election lease
-			if !singleNodePerZone() {
-				controlPlaneLeaseName = "ovn-kubernetes-master-ovn-control-plane"
-			} else {
-				controlPlaneLeaseName = "ovn-kubernetes-master"
-			}
-		} else {
-			controlPlanePodName = "ovnkube-master"
-			controlPlaneLeaseName = "ovn-kubernetes-master"
-		}
+		controlPlanePodName = "ovnkube-control-plane"
+		controlPlaneLeaseName = "ovn-kubernetes-master"
 
 		controlPlanePods, err := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(context.Background(), metav1.ListOptions{
 			LabelSelector: "name=" + controlPlanePodName,
@@ -767,11 +807,11 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		}, "5s", "500ms").ShouldNot(gomega.Equal(0))
 	})
 
-	ginkgo.It("should provide Internet connection continuously when pod running master instance of ovnkube-control-plane is killed", func() {
+	ginkgo.It("should provide Internet connection continuously when pod running leader instance of ovnkube-control-plane is killed", func() {
 		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
 
 		ovnKubeControlPlaneNode, err := findOvnKubeControlPlaneNode(deploymentconfig.Get().OVNKubernetesNamespace(), controlPlanePodName, controlPlaneLeaseName)
-		framework.ExpectNoError(err, fmt.Sprintf("unable to find current master of %s cluster %v", controlPlanePodName, err))
+		framework.ExpectNoError(err, fmt.Sprintf("unable to find current leader of %s cluster %v", controlPlanePodName, err))
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
 			defer ginkgo.GinkgoRecover()
@@ -812,11 +852,11 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 		framework.ExpectNoError(err, "one or more nodes failed to go back ready, schedulable, and untainted")
 	})
 
-	ginkgo.It("should provide Internet connection continuously when all pods are killed on node running master instance of ovnkube-control-plane", func() {
+	ginkgo.It("should provide Internet connection continuously when all pods are killed on node running leader instance of ovnkube-control-plane", func() {
 		ginkgo.By(fmt.Sprintf("Running container which tries to connect to %s in a loop", extDNSIP))
 		ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 		ovnKubeControlPlaneNode, err := findOvnKubeControlPlaneNode(ovnKubeNamespace, controlPlanePodName, controlPlaneLeaseName)
-		framework.ExpectNoError(err, fmt.Sprintf("unable to find current master of %s cluster %v", controlPlanePodName, err))
+		framework.ExpectNoError(err, fmt.Sprintf("unable to find current leader of %s cluster %v", controlPlanePodName, err))
 
 		podChan, errChan := make(chan *v1.Pod), make(chan error)
 		go func() {
@@ -1179,7 +1219,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 	endpointsSelector := map[string]string{"servicebackend": "true"}
 
 	var endPoints []*v1.Pod
-	var nodesHostnames sets.String
+	var nodesHostnames sets.Set[string]
 	var maxTries int
 	var nodes *v1.NodeList
 	var newNodeAddresses []string
@@ -1195,7 +1235,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1275,7 +1315,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							continue
 						}
 
-						responses := sets.NewString()
+						responses := sets.New[string]()
 						valid := false
 						nodePort := nodeTCPPort
 						if protocol == "udp" {
@@ -1285,6 +1325,9 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 						ginkgo.By("Hitting the nodeport on " + node.Name + " and reaching all the endpoints " + protocol)
 						for i := 0; i < maxTries; i++ {
 							epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "hostname")
+							if epHostname == "" {
+								continue
+							}
 							responses.Insert(epHostname)
 
 							// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
@@ -1420,10 +1463,13 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							for _, protocol := range []string{"http", "udp"} {
 								port := protocolPorts[protocol]
 								ginkgo.By(fmt.Sprintf("Hitting nodeport %s/%d on %s with IP %s and reaching all the endpoints ", protocol, port, nodeName, address))
-								responses := sets.NewString()
+								responses := sets.New[string]()
 								valid := false
 								for i := 0; i < maxTries; i++ {
 									epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, address, port, "hostname")
+									if epHostname == "" {
+										continue
+									}
 									responses.Insert(epHostname)
 
 									// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
@@ -1475,9 +1521,8 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							continue
 						}
 
-						responses := sets.NewString()
 						// Fill expected responses, it should hit the nodeLocal endpoints and not SNAT packet IP
-						expectedResponses := sets.NewString()
+						expectedResponses := sets.New[string]()
 
 						if utilnet.IsIPv6String(nodeAddress.Address) {
 							expectedResponses.Insert(node.Name+"-ep", externalContainer.GetIPv6())
@@ -1485,29 +1530,16 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 							expectedResponses.Insert(node.Name+"-ep", externalContainer.GetIPv4())
 						}
 
-						valid := false
 						nodePort := nodeTCPPort
 						if protocol == "udp" {
 							nodePort = nodeUDPPort
 						}
 
 						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
-
-						for i := 0; i < maxTries; i++ {
-							epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "hostname")
-							epClientIP := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "clientip")
-							epClientIP, _, err = net.SplitHostPort(epClientIP)
-							framework.ExpectNoError(err, "failed to parse client ip:port")
-							responses.Insert(epHostname, epClientIP)
-
-							if responses.Equal(expectedResponses) {
-								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s", node.Name, nodeAddress.Address, epClientIP)
-								valid = true
-								break
-							}
-
-						}
-						gomega.Expect(valid).To(gomega.Equal(true), fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
+						currentResponses, err := validateStableLocalEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, expectedResponses)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Current Responses=%v", node.Name, expectedResponses, currentResponses))
+						framework.Logf("Validated stable local endpoint responses for node %s with address %s", node.Name, nodeAddress.Address)
 					}
 				}
 			}
@@ -1607,7 +1639,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1708,7 +1740,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 
 			for _, protocol := range []string{"http", "udp"} {
 				for _, externalAddress := range newNodeAddresses {
-					responses := sets.NewString()
+					responses := sets.New[string]()
 					valid := false
 					externalPort := int32(clusterHTTPPort)
 					if protocol == "udp" {
@@ -1718,6 +1750,9 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 					ginkgo.By("Hitting the external service on " + externalAddress + " and reaching all the endpoints " + protocol)
 					for i := 0; i < maxTries; i++ {
 						epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, externalAddress, externalPort, "hostname")
+						if epHostname == "" {
+							continue
+						}
 						responses.Insert(epHostname)
 
 						// each endpoint returns its hostname. By doing this, we validate that each ep was reached at least once.
@@ -1747,8 +1782,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 	f := wrappedTestFramework("nodeport-ingress-test")
 	hostNetEndpointsSelector := map[string]string{"hostNetservicebackend": "true"}
 	var endPoints []*v1.Pod
-	var nodesHostnames sets.String
-	maxTries := 0
+	var nodesHostnames sets.Set[string]
 	var nodes *v1.NodeList
 	var providerCtx infraapi.Context
 	var isDualStack bool
@@ -1770,7 +1804,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 
 		ginkgo.BeforeEach(func() {
 			endPoints = make([]*v1.Pod, 0)
-			nodesHostnames = sets.NewString()
+			nodesHostnames = sets.New[string]()
 
 			var err error
 			nodes, err = e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
@@ -1803,9 +1837,6 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 				framework.ExpectNoError(err)
 				endPoints = append(endPoints, hostNetPod)
 				nodesHostnames.Insert(hostNetPod.Name)
-
-				// this is arbitrary and mutuated from k8s network e2e tests. We aim to hit all the endpoints at least once
-				maxTries = len(endPoints)*len(endPoints) + 30
 			}
 
 			ginkgo.By("Creating an external container to send the traffic from")
@@ -1851,9 +1882,8 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							continue
 						}
 
-						responses := sets.NewString()
 						// Fill expected responses, it should hit the nodeLocal endpoints and not SNAT packet IP
-						expectedResponses := sets.NewString()
+						expectedResponses := sets.New[string]()
 
 						if utilnet.IsIPv6String(nodeAddress.Address) {
 							expectedResponses.Insert(node.Name, externalContainer.GetIPv6())
@@ -1861,29 +1891,16 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 							expectedResponses.Insert(node.Name, externalContainer.GetIPv4())
 						}
 
-						valid := false
 						nodePort := nodeTCPPort
 						if protocol == "udp" {
 							nodePort = nodeUDPPort
 						}
 
 						ginkgo.By("Hitting the nodeport on " + node.Name + " and trying to reach only the local endpoint with protocol " + protocol)
-						for i := 0; i < maxTries; i++ {
-							epHostname := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "hostname")
-							epClientIP := pokeEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, "clientip")
-							epClientIP, _, err = net.SplitHostPort(epClientIP)
-							framework.ExpectNoError(err, "failed to parse client ip:port")
-							responses.Insert(epHostname, epClientIP)
-
-							if responses.Equal(expectedResponses) {
-								framework.Logf("Validated local endpoint on node %s with address %s, and packet src IP %s ", node.Name, nodeAddress.Address, epClientIP)
-								valid = true
-								break
-							}
-
-						}
-						gomega.Expect(valid).To(gomega.Equal(true),
-							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Actual Responses=%v", node.Name, expectedResponses, responses))
+						currentResponses, err := validateStableLocalEndpointViaExternalContainer(externalContainer, protocol, nodeAddress.Address, nodePort, expectedResponses)
+						gomega.Expect(err).NotTo(gomega.HaveOccurred(),
+							fmt.Sprintf("Validation failed for node %s. Expected Responses=%v, Current Responses=%v", node.Name, expectedResponses, currentResponses))
+						framework.Logf("Validated stable local endpoint responses for node %s with address %s", node.Name, nodeAddress.Address)
 					}
 				}
 			}
@@ -2121,353 +2138,3 @@ func getNodePodCIDRs(nodeName, netName string) (string, string, error) {
 
 	return "", "", fmt.Errorf("could not parse annotation %q for network %s", annotation, netName)
 }
-
-var _ = ginkgo.Describe("e2e delete databases", func() {
-	const (
-		svcname           string = "delete-db"
-		databasePodPrefix string = "ovnkube-db"
-		northDBFileName   string = "ovnnb_db.db"
-		southDBFileName   string = "ovnsb_db.db"
-		dirDB             string = "/etc/ovn"
-		haModeMinDb       int    = 0
-		haModeMaxDb       int    = 2
-	)
-	var allDBFiles = []string{path.Join(dirDB, northDBFileName), path.Join(dirDB, southDBFileName)}
-
-	f := wrappedTestFramework(svcname)
-
-	// WaitForPodConditionAllowNotFoundError is a wrapper for WaitForPodCondition that allows at most 6 times for the pod not to be found.
-	WaitForPodConditionAllowNotFoundErrors := func(f *framework.Framework, ns, podName, desc string, timeout time.Duration, condition podCondition) error {
-		max_tries := 6               // 6 tries to waiting for the pod to restart
-		cooldown := 10 * time.Second // 10 sec to cooldown between each try
-		for i := 0; i < max_tries; i++ {
-			err := e2epod.WaitForPodCondition(context.TODO(), f.ClientSet, ns, podName, desc, 5*time.Minute, condition)
-			if apierrors.IsNotFound(err) {
-				// pod not found,try again after cooldown
-				time.Sleep(cooldown)
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-		return fmt.Errorf("gave up after waiting %v for pod %q to be %q: pod is not found", timeout, podName, desc)
-	}
-
-	// waitForPodToFinishFullRestart waits for a the pod to finish its reset cycle and returns.
-	waitForPodToFinishFullRestart := func(f *framework.Framework, pod *v1.Pod) {
-		podClient := f.ClientSet.CoreV1().Pods(pod.Namespace)
-		// loop until pod with new UID exists
-		err := wait.PollImmediate(retryInterval, 5*time.Minute, func() (bool, error) {
-			newPod, err := podClient.Get(context.Background(), pod.Name, metav1.GetOptions{})
-			if apierrors.IsNotFound(err) {
-				return true, nil
-			} else if err != nil {
-				return false, err
-			}
-
-			return pod.UID != newPod.UID, nil
-		})
-		framework.ExpectNoError(err)
-
-		// during this stage on the restarting process we can encounter "pod not found" errors.
-		// these types of errors are valid because the pod is restarting so there will be a period of time it is unavailable
-		// so we will use "WaitForPodConditionAllowNotFoundErrors" in order to handle properly those errors.
-		err = WaitForPodConditionAllowNotFoundErrors(f, pod.Namespace, pod.Name, "running and ready", 5*time.Minute, testutils.PodRunningReady)
-		if err != nil {
-			framework.Failf("pod %v did not reach running and ready state: %v", pod.Name, err)
-		}
-	}
-
-	deletePod := func(f *framework.Framework, namespace string, podName string) {
-		podClient := f.ClientSet.CoreV1().Pods(namespace)
-		_, err := podClient.Get(context.Background(), podName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return
-		}
-
-		err = podClient.Delete(context.Background(), podName, metav1.DeleteOptions{})
-		framework.ExpectNoError(err, "failed to delete pod "+podName)
-	}
-
-	fileExistsOnPod := func(f *framework.Framework, namespace string, pod *v1.Pod, file string) bool {
-		containerFlag := fmt.Sprintf("-c=%s", pod.Spec.Containers[0].Name)
-		_, err := e2ekubectl.RunKubectl(namespace, "exec", pod.Name, containerFlag, "--", "ls", file)
-		if err == nil {
-			return true
-		}
-		if strings.Contains(err.Error(), fmt.Sprintf("ls: cannot access '%s': No such file or directory", file)) {
-			return false
-		}
-		framework.Failf("failed to check if file %s exists on pod: %s, err: %v", file, pod.Name, err)
-		return false
-	}
-
-	getDeployment := func(f *framework.Framework, namespace string, deploymentName string) *appsv1.Deployment {
-		deploymentClient := f.ClientSet.AppsV1().Deployments(namespace)
-		deployment, err := deploymentClient.Get(context.TODO(), deploymentName, metav1.GetOptions{})
-		framework.ExpectNoError(err, "should get %s deployment", deploymentName)
-
-		return deployment
-	}
-
-	allFilesExistOnPod := func(f *framework.Framework, namespace string, pod *v1.Pod, files []string) bool {
-		for _, file := range files {
-			if !fileExistsOnPod(f, namespace, pod, file) {
-				framework.Logf("file %s not exists", file)
-				return false
-			}
-			framework.Logf("file %s exists", file)
-		}
-		return true
-	}
-
-	deleteFileFromPod := func(f *framework.Framework, namespace string, pod *v1.Pod, file string) {
-		containerFlag := fmt.Sprintf("-c=%s", pod.Spec.Containers[0].Name)
-		e2ekubectl.RunKubectl(namespace, "exec", pod.Name, containerFlag, "--", "rm", file)
-		if fileExistsOnPod(f, namespace, pod, file) {
-			framework.Failf("Error: failed to delete file %s", file)
-		}
-		framework.Logf("file %s deleted ", file)
-	}
-
-	singlePodConnectivityTest := func(f *framework.Framework, podName string) {
-		framework.Logf("Running container which tries to connect to API server in a loop")
-
-		podChan, errChan := make(chan *v1.Pod), make(chan error)
-		go func() {
-			defer ginkgo.GinkgoRecover()
-			checkContinuousConnectivity(f, "", podName, getApiAddress(), 443, 10, 30, podChan, errChan)
-		}()
-
-		err := <-errChan
-		framework.ExpectNoError(err)
-
-		testPod := <-podChan
-
-		framework.Logf("Test pod running on %q", testPod.Spec.NodeName)
-		framework.ExpectNoError(<-errChan)
-	}
-
-	twoPodsContinuousConnectivityTest := func(f *framework.Framework, node1Name string, node2Name string, syncChan chan string, errChan chan error) {
-		const (
-			pod1Name                  string        = "connectivity-test-pod1"
-			pod2Name                  string        = "connectivity-test-pod2"
-			podPort                   uint16        = 8080
-			timeIntervalBetweenChecks time.Duration = 2 * time.Second
-		)
-
-		_, err := createGenericPod(f, pod1Name, node1Name, f.Namespace.Name, getAgnHostHTTPPortBindFullCMD(podPort))
-		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
-		_, err = createGenericPod(f, pod2Name, node2Name, f.Namespace.Name, getAgnHostHTTPPortBindFullCMD(podPort))
-		framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod2Name)
-
-		pod2IP := getPodAddress(pod2Name, f.Namespace.Name)
-
-		ginkgo.By("Checking initial connectivity from one pod to the other and verifying that the connection is achieved")
-
-		stdout, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname",
-			net.JoinHostPort(pod2IP, fmt.Sprintf("%d", podPort))))
-
-		if err != nil || stdout != pod2Name {
-			errChan <- fmt.Errorf("Error: attempted connection to pod %s found err:  %v", pod2Name, err)
-		}
-
-		syncChan <- "connectivity test pods are ready"
-
-	L:
-		for {
-			select {
-			case msg := <-syncChan:
-				framework.Logf("%s: finish connectivity test.", msg)
-				break L
-			default:
-				stdout, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", pod1Name, "--", "curl", fmt.Sprintf("%s/hostname",
-					net.JoinHostPort(pod2IP, fmt.Sprintf("%d", podPort))))
-				if err != nil || stdout != pod2Name {
-					errChan <- err
-					framework.Failf("Error: attempted connection to pod %s found err:  %v", pod2Name, err)
-				}
-				time.Sleep(timeIntervalBetweenChecks)
-			}
-		}
-
-		errChan <- nil
-	}
-
-	ginkgo.DescribeTable("recovering from deleting db files while maintaining connectivity",
-		func(db_pod_num int, DBFileNamesToDelete []string) {
-			var (
-				db_pod_name = fmt.Sprintf("%s-%d", databasePodPrefix, db_pod_num)
-			)
-			if db_pod_num < haModeMinDb || db_pod_num > haModeMaxDb {
-				framework.Failf("invalid db_pod_num.")
-				return
-			}
-
-			// Adding db file path
-			for i, file := range DBFileNamesToDelete {
-				DBFileNamesToDelete[i] = path.Join(dirDB, file)
-			}
-
-			nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 2)
-			framework.ExpectNoError(err)
-			if len(nodes.Items) < 2 {
-				ginkgo.Skip("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
-			}
-			framework.Logf("connectivity test before deleting db files")
-			framework.Logf("test simple connectivity from new pod to API server, before deleting db files")
-			singlePodConnectivityTest(f, "before-delete-db-files")
-			framework.Logf("setup two pods for continuous connectivity test")
-			syncChan, errChan := make(chan string), make(chan error)
-			node1Name, node2Name := nodes.Items[0].GetName(), nodes.Items[1].GetName()
-			go func() {
-				defer ginkgo.GinkgoRecover()
-				twoPodsContinuousConnectivityTest(f, node1Name, node2Name, syncChan, errChan)
-			}()
-
-			select {
-			case msg := <-syncChan:
-				// wait for the connectivity test pods to be ready
-				framework.Logf("%s: delete and restart db pods.", msg)
-			case err := <-errChan:
-				// fail if error is returned before test pods are ready
-				framework.Fail(err.Error())
-			}
-
-			// Start the db disruption - delete the db files and delete the db-pod in order to emulate the cluster/pod restart
-
-			// Retrieve the DB pod
-			ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-			dbPod, err := f.ClientSet.CoreV1().Pods(ovnKubeNamespace).Get(context.Background(), db_pod_name, metav1.GetOptions{})
-			framework.ExpectNoError(err, fmt.Sprintf("unable to get pod: %s, err: %v", db_pod_name, err))
-
-			// Check that all files are on the db pod
-			framework.Logf("make sure that all the db files are on db pod %s", dbPod.Name)
-			if !allFilesExistOnPod(f, ovnKubeNamespace, dbPod, allDBFiles) {
-				framework.Failf("Error: db files not found")
-			}
-			// Delete the db files from the db-pod
-			framework.Logf("deleting db files from db pod")
-			for _, db_file := range DBFileNamesToDelete {
-				deleteFileFromPod(f, ovnKubeNamespace, dbPod, db_file)
-			}
-			// Delete the db-pod in order to emulate the cluster/pod restart
-			framework.Logf("deleting db pod %s", dbPod.Name)
-			deletePod(f, ovnKubeNamespace, dbPod.Name)
-
-			framework.Logf("wait for db pod to finish full restart")
-			waitForPodToFinishFullRestart(f, dbPod)
-
-			// Check db files existence
-			// Check that all files are on pod
-			framework.Logf("make sure that all the db files are on db pod %s", dbPod.Name)
-			if !allFilesExistOnPod(f, ovnKubeNamespace, dbPod, allDBFiles) {
-				framework.Failf("Error: db files not found")
-			}
-
-			// disruption over.
-			syncChan <- "disruption over"
-			framework.ExpectNoError(<-errChan)
-
-			framework.Logf("test simple connectivity from new pod to API server, after recovery")
-			singlePodConnectivityTest(f, "after-delete-db-files")
-		},
-
-		// One can choose to delete only specific db file (uncomment the requested lines)
-
-		// db pod 0
-		ginkgo.Entry("when deleting both db files on ovnkube-db-0", 0, []string{northDBFileName, southDBFileName}),
-		// ginkgo.Entry("when delete north db on ovnkube-db-0", 0, []string{northDBFileName}),
-		// ginkgo.Entry("when delete south db on ovnkube-db-0", 0, []string{southDBFileName}),
-
-		// db pod 1
-		ginkgo.Entry("when deleting both db files on ovnkube-db-1", 1, []string{northDBFileName, southDBFileName}),
-		// ginkgo.Entry("when delete north db on ovnkube-db-1", 1, []string{northDBFileName}),
-		// ginkgo.Entry("when delete south db on ovnkube-db-1", 1, []string{southDBFileName}),
-
-		// db pod 2
-		ginkgo.Entry("when deleting both db files on ovnkube-db-2", 2, []string{northDBFileName, southDBFileName}),
-		// ginkgo.Entry("when delete north db on ovnkube-db-2", 2, []string{northDBFileName}),
-		// ginkgo.Entry("when delete south db on ovnkube-db-2", 2, []string{southDBFileName}),
-	)
-
-	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once in Non-HA mode", func() {
-		if isInterconnectEnabled() {
-			e2eskipper.Skipf(
-				"No separate db pods in muliple zones interconnect deployment",
-			)
-		}
-		ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-		dbDeployment := getDeployment(f, ovnKubeNamespace, "ovnkube-db")
-		dbPods, err := e2edeployment.GetPodsForDeployment(context.TODO(), f.ClientSet, dbDeployment)
-		if err != nil {
-			framework.Failf("Error: Failed to get pods, err: %v", err)
-		}
-		if dbPods.Size() == 0 {
-			framework.Failf("Error: db pods not found")
-		}
-
-		framework.Logf("test simple connectivity from new pod to API server,before deleting db pods")
-		singlePodConnectivityTest(f, "before-delete-db-pods")
-
-		framework.Logf("deleting all the db pods")
-
-		for _, dbPod := range dbPods.Items {
-			dbPodName := dbPod.Name
-			framework.Logf("deleting db pod: %v", dbPodName)
-			// Delete the db-pod in order to emulate the pod restart
-			dbPod.Status.Message = "check"
-			deletePod(f, ovnKubeNamespace, dbPodName)
-		}
-
-		framework.Logf("wait for all the Deployment to become ready again after pod deletion")
-		err = e2edeployment.WaitForDeploymentComplete(f.ClientSet, dbDeployment)
-		framework.ExpectNoError(err, "failed to wait for DB deployment to complete")
-
-		framework.Logf("all the pods finish full restart")
-
-		framework.Logf("test simple connectivity from new pod to API server,after recovery")
-		singlePodConnectivityTest(f, "after-delete-db-pods")
-	})
-
-	ginkgo.It("Should validate connectivity before and after deleting all the db-pods at once in HA mode", func() {
-		ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-		dbPods, err := e2epod.GetPods(context.TODO(), f.ClientSet, ovnKubeNamespace, map[string]string{"name": databasePodPrefix})
-		if err != nil {
-			framework.Failf("Error: Failed to get pods, err: %v", err)
-		}
-		if len(dbPods) == 0 {
-			framework.Failf("Error: db pods not found")
-		}
-
-		framework.Logf("test simple connectivity from new pod to API server,before deleting db pods")
-		singlePodConnectivityTest(f, "before-delete-db-pods")
-
-		framework.Logf("deleting all the db pods")
-		for _, dbPod := range dbPods {
-			dbPodName := dbPod.Name
-			framework.Logf("deleting db pod: %v", dbPodName)
-			// Delete the db-pod in order to emulate the pod restart
-			dbPod.Status.Message = "check"
-			deletePod(f, ovnKubeNamespace, dbPodName)
-		}
-
-		framework.Logf("wait for all the pods to finish full restart")
-		var wg sync.WaitGroup
-		for _, pod := range dbPods {
-			wg.Add(1)
-			go func(pod v1.Pod) {
-				defer ginkgo.GinkgoRecover()
-				defer wg.Done()
-				waitForPodToFinishFullRestart(f, &pod)
-			}(pod)
-		}
-		wg.Wait()
-		framework.Logf("all the pods finish full restart")
-
-		framework.Logf("test simple connectivity from new pod to API server,after recovery")
-		singlePodConnectivityTest(f, "after-delete-db-pods")
-	})
-})

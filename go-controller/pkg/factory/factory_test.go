@@ -351,8 +351,9 @@ func (c *handlerCalls) getDeleted() int {
 
 var _ = Describe("Watch Factory Operations", func() {
 	var (
-		ovnClientset                        *util.OVNMasterClientset
+		ovnClientset                        *util.OVNKubeControllerClientset
 		ovnCMClientset                      *util.OVNClusterManagerClientset
+		ovnNodeClientset                    *util.OVNNodeClientset
 		fakeClient                          *fake.Clientset
 		egressIPFakeClient                  *egressipfake.Clientset
 		egressFirewallFakeClient            *egressfirewallfake.Clientset
@@ -424,11 +425,10 @@ var _ = Describe("Watch Factory Operations", func() {
 		nadsFakeClient = &nadsfake.Clientset{}
 		networkQoSFakeClient = &networkqosfake.Clientset{}
 
-		ovnClientset = &util.OVNMasterClientset{
+		ovnClientset = &util.OVNKubeControllerClientset{
 			KubeClient:            fakeClient,
 			ANPClient:             adminNetworkPolicyFakeClient,
 			EgressIPClient:        egressIPFakeClient,
-			CloudNetworkClient:    cloudNetworkFakeClient,
 			EgressFirewallClient:  egressFirewallFakeClient,
 			EgressQoSClient:       egressQoSFakeClient,
 			EgressServiceClient:   egressServiceFakeClient,
@@ -443,6 +443,12 @@ var _ = Describe("Watch Factory Operations", func() {
 			EgressServiceClient:   egressServiceFakeClient,
 			EgressFirewallClient:  egressFirewallFakeClient,
 			IPAMClaimsClient:      ipamClaimsFakeClient,
+			NetworkAttchDefClient: nadsFakeClient,
+		}
+		ovnNodeClientset = &util.OVNNodeClientset{
+			KubeClient:            fakeClient,
+			EgressIPClient:        egressIPFakeClient,
+			EgressServiceClient:   egressServiceFakeClient,
 			NetworkAttchDefClient: nadsFakeClient,
 		}
 
@@ -593,11 +599,11 @@ var _ = Describe("Watch Factory Operations", func() {
 	Context("when a processExisting is given", func() {
 		testExisting := func(objType reflect.Type, namespace string, sel labels.Selector, priority int) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
-			} else if objType == CloudPrivateIPConfigType {
+				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeName)
+			} else if objType == CloudPrivateIPConfigType || objType == IPAMClaimsType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewMasterWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -617,11 +623,11 @@ var _ = Describe("Watch Factory Operations", func() {
 
 		testExistingFilteredHandler := func(objType reflect.Type, realObj reflect.Type, namespace string, sel labels.Selector, priority int) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
-			} else if objType == CloudPrivateIPConfigType {
+				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeName)
+			} else if objType == CloudPrivateIPConfigType || objType == IPAMClaimsType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewMasterWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -664,12 +670,6 @@ var _ = Describe("Watch Factory Operations", func() {
 			policies = append(policies, newPolicy("denyall", "default"))
 			pods = append(pods, newPod("pod1", "default"))
 			testExistingFilteredHandler(PodType, LocalPodSelectorType, "default", nil, 3)
-		})
-
-		It("is called for each existing policy: PeerNamespaceSelectorType", func() {
-			policies = append(policies, newPolicy("denyall", "default"))
-			pods = append(pods, newPod("pod1", "default"))
-			testExistingFilteredHandler(NamespaceType, PeerNamespaceSelectorType, "default", nil, 2)
 		})
 
 		It("is called for each existing endpointSlice", func() {
@@ -753,11 +753,11 @@ var _ = Describe("Watch Factory Operations", func() {
 	Context("when existing items are known to the informer", func() {
 		testExisting := func(objType reflect.Type) {
 			if objType == EndpointSliceType {
-				wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+				wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeName)
 			} else if objType == CloudPrivateIPConfigType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewMasterWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -859,7 +859,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			for i := uint32(1); i <= defaultNumEventQueues*15; i++ {
 				pods = append(pods, newPod(fmt.Sprintf("pod%d", i), "default"))
 			}
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -878,7 +878,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when EgressIP is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -891,7 +891,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressFirewall is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -904,7 +904,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressQoS is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -917,7 +917,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressService is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -930,7 +930,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when Admin Network Policy is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -948,7 +948,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when Persistent IPs feature is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -962,7 +962,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when NetworkQoS is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewMasterWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -1007,7 +1007,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	}
 
 	It("responds to pod add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1043,7 +1043,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to pod replace with create/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1086,7 +1086,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple pod add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1169,7 +1169,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to namespace add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1205,7 +1205,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to node add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1241,7 +1241,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple node add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1339,7 +1339,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			nodes = append(nodes, node)
 		}
 
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1418,7 +1418,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespaces = append(namespaces, namespace)
 		}
 
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1504,7 +1504,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespaces = append(namespaces, namespace)
 		}
 
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1529,7 +1529,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				// Expect updates to be processed after Add
 				ot.mu.Lock()
 				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(8), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.added).To(Equal(10), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(0))
 				ot.updated++
 				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceActive))
@@ -1542,10 +1542,10 @@ var _ = Describe("Watch Factory Operations", func() {
 				// Verify that deletes were processed after the updates and adds
 				ot.mu.Lock()
 				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(8), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(8), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(10))
-				ot.deleted = ot.deleted - 2
+				Expect(ot.added).To(Equal(10), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(10), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
+				Expect(ot.deleted).To(Equal(1))
+				ot.deleted = ot.deleted * 10
 				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceTerminating))
 			},
 		})
@@ -1570,7 +1570,7 @@ var _ = Describe("Watch Factory Operations", func() {
 				// Expect updates to be processed after Add
 				ot.mu.Lock()
 				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(8), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.added).To(Equal(10), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
 				Expect(ot.updated).To(Equal(1), "update for EIP namespace %s processed before initial namespace update!", newNamespace.Name)
 				ot.updated = ot.updated * 10
 				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceActive))
@@ -1583,48 +1583,8 @@ var _ = Describe("Watch Factory Operations", func() {
 				// Verify that deletes were processed after the updates and adds
 				ot.mu.Lock()
 				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(8), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(8), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
-				Expect(ot.deleted).To(Equal(1))
-				ot.deleted = ot.deleted * 10
-				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceTerminating))
-			},
-		})
-		peernsh, c3 := addPriorityHandler(wf, NamespaceType, PeerNamespaceSelectorType, cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				namespace := obj.(*corev1.Namespace)
-				ot, ok := testNamespaces[namespace.Name]
-				Expect(ok).To(BeTrue())
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(10), "add for peer namespace %s processed before EIP namespace add!", namespace.Name)
-				ot.added = ot.added - 2
-				Expect(namespace.Status.Phase).To(BeEmpty())
-			},
-			UpdateFunc: func(_, new interface{}) {
-				defer GinkgoRecover()
-				newNamespace := new.(*corev1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Expect updates to be processed after Add
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(8), "update for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(10), "update for peer namespace %s processed before EIP namespace update!", newNamespace.Name)
-				ot.updated = ot.updated - 2
-				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceActive))
-			},
-			DeleteFunc: func(obj interface{}) {
-				defer GinkgoRecover()
-				newNamespace := obj.(*corev1.Namespace)
-				ot, ok := testNamespaces[newNamespace.Name]
-				Expect(ok).To(BeTrue())
-				// Verify that deletes were processed after the updates and adds
-				ot.mu.Lock()
-				defer ot.mu.Unlock()
-				Expect(ot.added).To(Equal(8), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
-				Expect(ot.updated).To(Equal(8), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
+				Expect(ot.added).To(Equal(10), "delete for EIP namespace %s processed before add was processed in all handlers!", newNamespace.Name)
+				Expect(ot.updated).To(Equal(10), "delete for EIP namespace %s processed before update was processed in all handlers!", newNamespace.Name)
 				Expect(ot.deleted).To(Equal(0))
 				ot.deleted++
 				Expect(newNamespace.Status.Phase).To(Equal(corev1.NamespaceTerminating))
@@ -1643,23 +1603,21 @@ var _ = Describe("Watch Factory Operations", func() {
 		// Adds are done synchronously at handler addition time
 		for _, ot := range testNamespaces {
 			ot.mu.Lock()
-			// (((0 + 1) * 10) - 2) = 8
-			Expect(ot.added).To(Equal(8), "missing add for namespace %s", ot.namespace.Name)
+			// ((0 + 1) * 10) = 10
+			Expect(ot.added).To(Equal(10), "missing add for namespace %s", ot.namespace.Name)
 			ot.mu.Unlock()
 		}
 		Expect(c1.getAdded()).To(Equal(len(testNamespaces)))
 		Expect(c2.getAdded()).To(Equal(len(testNamespaces)))
-		Expect(c3.getAdded()).To(Equal(len(testNamespaces)))
 		<-done
 		// Updates are async and may take a bit longer to finish
 		Eventually(c1.getUpdated, 10).Should(Equal(len(testNamespaces)))
 		Eventually(c2.getUpdated, 10).Should(Equal(len(testNamespaces)))
-		Eventually(c3.getUpdated, 10).Should(Equal(len(testNamespaces)))
 
 		for _, ot := range testNamespaces {
 			ot.mu.Lock()
-			// (((0 + 1) * 10) - 2) = 8
-			Expect(ot.updated).To(Equal(8), "missing update for namespace %s", ot.namespace.Name)
+			// ((0 + 1) * 10) = 10
+			Expect(ot.updated).To(Equal(10), "missing update for namespace %s", ot.namespace.Name)
 			ot.mu.Unlock()
 		}
 
@@ -1675,22 +1633,20 @@ var _ = Describe("Watch Factory Operations", func() {
 		// Deletes are async and may take a bit longer to finish
 		Eventually(c1.getDeleted, 10).Should(Equal(len(testNamespaces)))
 		Eventually(c2.getDeleted, 10).Should(Equal(len(testNamespaces)))
-		Eventually(c3.getDeleted, 10).Should(Equal(len(testNamespaces)))
 
 		for _, ot := range testNamespaces {
 			ot.mu.Lock()
-			// (((0 + 1) * 10) - 2) = 8
-			Expect(ot.deleted).To(Equal(8), "missing delete for namespace %s", ot.namespace.Name)
+			// ((0 + 1) * 10) = 10
+			Expect(ot.deleted).To(Equal(10), "missing delete for namespace %s", ot.namespace.Name)
 			ot.mu.Unlock()
 		}
 
 		wf.RemoveNamespaceHandler(nsh)
 		wf.RemoveNamespaceHandler(eipnsh)
-		wf.RemoveNamespaceHandler(peernsh)
 	})
 
 	It("responds to policy add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1726,7 +1682,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to endpointslices add/update/delete events", func() {
-		wf, err = NewNodeWatchFactory(ovnClientset.GetNodeClientset(), nodeName)
+		wf, err = NewNodeWatchFactory(ovnNodeClientset, nodeName)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1764,7 +1720,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to service add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1800,7 +1756,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to egressFirewall add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1835,7 +1791,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressFirewallHandler(h)
 	})
 	It("responds to egressIP add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1905,7 +1861,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveCloudPrivateIPConfigHandler(h)
 	})
 	It("responds to egressQoS add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1940,7 +1896,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressQoSHandler(h)
 	})
 	It("responds to egressService add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1983,7 +1939,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressServiceHandler(h)
 	})
 	It("responds to admin network policy add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2018,7 +1974,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveAdminNetworkPolicyHandler(h)
 	})
 	It("responds to baseline admin network policy add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2062,7 +2018,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveBaselineAdminNetworkPolicyHandler(h)
 	})
 	It("responds to IPAMClaims add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2100,7 +2056,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to networkQoS add/update/delete events", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2136,7 +2092,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("stops processing events after the handler is removed", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2167,7 +2123,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("filters correctly by label and namespace", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2239,7 +2195,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("correctly handles object updates that cause filter changes", func() {
-		wf, err = NewMasterWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())

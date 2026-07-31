@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 	v1pod "k8s.io/kubernetes/pkg/api/v1/pod"
 
+	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	adminpolicybasedrouteapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	adminpolicybasedrouteinformer "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/informers/externalversions/adminpolicybasedroute/v1"
 	adminpolicybasedroutelisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/listers/adminpolicybasedroute/v1"
@@ -209,7 +210,7 @@ type externalPolicyManager struct {
 	// routePolicySyncCache is a cache of configures states for policies, key is policyName.
 	routePolicySyncCache *syncmap.SyncMap[*routePolicyState]
 	// networkClient is an interface that exposes add and delete GW IPs. There are 2 structs that implement this contract: one to interface with the north bound DB and another one for the conntrack.
-	// the north bound is used by the master controller to add and delete the logical static routes, whilst the conntrack is used by the node controller to ensure that the ECMP entries are removed
+	// the north bound is used by ovnkube-controller to add and delete the logical static routes, whilst the conntrack is used by the node-side controller to ensure that the ECMP entries are removed
 	// when a gateway IP is no longer an egress access point.
 	netClient networkClient
 
@@ -255,19 +256,19 @@ func newExternalPolicyManager(
 		routeLister:   apbRouteInformer.Lister(),
 		routeInformer: apbRouteInformer.Informer(),
 		routeQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
+			controllerutil.DefaultRateLimiter[string](),
 			workqueue.TypedRateLimitingQueueConfig[string]{Name: "adminpolicybasedexternalroutes"},
 		),
 		podLister:   podInformer.Lister(),
 		podInformer: podInformer.Informer(),
 		podQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Pod](time.Second, 5*time.Second, 5),
+			controllerutil.DefaultRateLimiter[*corev1.Pod](),
 			workqueue.TypedRateLimitingQueueConfig[*corev1.Pod]{Name: "apbexternalroutepods"},
 		),
 		namespaceLister:   namespaceInformer.Lister(),
 		namespaceInformer: namespaceInformer.Informer(),
 		namespaceQueue: workqueue.NewTypedRateLimitingQueueWithConfig(
-			workqueue.NewTypedItemFastSlowRateLimiter[*corev1.Namespace](time.Second, 5*time.Second, 5),
+			controllerutil.DefaultRateLimiter[*corev1.Namespace](),
 			workqueue.TypedRateLimitingQueueConfig[*corev1.Namespace]{Name: "apbexternalroutenamespaces"},
 		),
 		updatePolicyStatusFunc: updatePolicyStatusFunc,

@@ -46,7 +46,6 @@ import (
 	lsm "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/logical_switch_manager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/routeimport"
 	zoneic "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/zone_interconnect"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/persistentips"
 	ovnretry "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/syncmap"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -101,8 +100,6 @@ type BaseNetworkController struct {
 	retryNetworkPolicies *ovnretry.RetryFramework
 	// retry framework for network policies
 	retryMultiNetworkPolicies *ovnretry.RetryFramework
-	// retry framework for IPAMClaims
-	retryIPAMClaims *ovnretry.RetryFramework
 
 	// nodeReconciler is the shared node controller used by controllers that
 	// reconcile node topology through pkg/controllers/node.
@@ -114,16 +111,12 @@ type BaseNetworkController struct {
 	podHandler *factory.Handler
 	// namespace events factory Handler
 	namespaceHandler *factory.Handler
-	// ipam claims events factory Handler
-	ipamClaimsHandler *factory.Handler
 
 	// A cache of all logical switches seen by the watcher and their subnets
 	lsManager *lsm.LogicalSwitchManager
 
 	// An utility to allocate the PodAnnotation to pods
 	podAnnotationAllocator *pod.PodAnnotationAllocator
-
-	ipamClaimsReconciler *persistentips.IPAMClaimReconciler
 
 	// A cache of all logical ports known to the controller
 	logicalPortCache *PortCache
@@ -200,11 +193,13 @@ type BaseNetworkController struct {
 func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed func(string)) error {
 	// gather some information first
 	var reconcileNodes []string
+	subnetsChanged := clusterSubnetsChanged(oc, netInfo)
 	oc.localZoneNodes.Range(func(key, _ any) bool {
 		nodeName := key.(string)
 		wasAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
 		isAdvertised := util.IsPodNetworkAdvertisedAtNode(netInfo, nodeName)
-		if wasAdvertised == isAdvertised {
+		reconcileSubnetChange := subnetsChanged && (isAdvertised || config.OVNKubernetesFeature.EnableEgressIP)
+		if wasAdvertised == isAdvertised && !reconcileSubnetChange {
 			// noop
 			return true
 		}
@@ -229,6 +224,20 @@ func (oc *BaseNetworkController) reconcile(netInfo util.NetInfo, setNodeFailed f
 		return fmt.Errorf("failed to reconcile network information for network %s: %v", oc.GetNetworkName(), err)
 	}
 	return oc.doReconcile(reconcileRoutes, reconcilePendingPods, reconcileNodes, setNodeFailed, reconcileNamespaces.List())
+}
+
+func clusterSubnetsChanged(old, new util.NetInfo) bool {
+	oldSubnets := sets.New[string]()
+	for _, subnet := range old.Subnets() {
+		oldSubnets.Insert(subnet.CIDR.String())
+	}
+
+	newSubnets := sets.New[string]()
+	for _, subnet := range new.Subnets() {
+		newSubnets.Insert(subnet.CIDR.String())
+	}
+
+	return !oldSubnets.Equal(newSubnets)
 }
 
 func (oc *BaseNetworkController) updateNADKeysChanged(nadKeys []string) bool {
@@ -521,39 +530,6 @@ func (bnc *BaseNetworkController) syncNodeClusterRouterPort(node *corev1.Node, h
 		return err
 	}
 
-	if util.IsNetworkSegmentationSupportEnabled() &&
-		bnc.IsPrimaryNetwork() && !config.OVNKubernetesFeature.EnableInterconnect &&
-		(bnc.TopologyType() == types.Layer3Topology ||
-			bnc.TopologyType() == types.Layer2Topology) {
-		// since in nonIC the ovn_cluster_router is distributed, we must specify the gatewayPort for the
-		// conditional SNATs to signal OVN which gatewayport should be chosen if there are mutiple distributed
-		// gateway ports. Now that the LRP is created, let's update the NATs to reflect that.
-		lrp := nbdb.LogicalRouterPort{
-			Name: lrpName,
-		}
-		logicalRouterPort, err := libovsdbops.GetLogicalRouterPort(bnc.nbClient, &lrp)
-		if err != nil {
-			return fmt.Errorf("failed to fetch gatewayport %s for network %q on node %q, err: %w",
-				lrpName, bnc.GetNetworkName(), node.Name, err)
-		}
-		gatewayPort := logicalRouterPort.UUID
-		p := func(item *nbdb.NAT) bool {
-			return item.ExternalIDs[types.NetworkExternalID] == bnc.GetNetworkName() &&
-				item.LogicalPort != nil && *item.LogicalPort == lrpName && item.Match != ""
-		}
-		nonICConditonalSNATs, err := libovsdbops.FindNATsWithPredicate(bnc.nbClient, p)
-		if err != nil {
-			return fmt.Errorf("failed to fetch conditional NATs %s for network %q on node %q, err: %w",
-				lrpName, bnc.GetNetworkName(), node.Name, err)
-		}
-		for _, nat := range nonICConditonalSNATs {
-			nat.GatewayPort = &gatewayPort
-		}
-		if err := libovsdbops.CreateOrUpdateNATs(bnc.nbClient, &logicalRouter, nonICConditonalSNATs...); err != nil {
-			return fmt.Errorf("failed to fetch conditional NATs %s for network %q on node %q, err: %w",
-				lrpName, bnc.GetNetworkName(), node.Name, err)
-		}
-	}
 	return nil
 }
 
@@ -766,60 +742,6 @@ func (bnc *BaseNetworkController) deleteNamespaceLocked(ns string) (*namespaceIn
 		nsInfo.Unlock()
 		return nil, nil
 	}
-	if nsInfo.addressSet != nil {
-		// Empty the address set, then delete it after an interval.
-		if err := nsInfo.addressSet.SetAddresses(nil); err != nil {
-			klog.Errorf("Warning: failed to empty address set for deleted NS %s: %v", ns, err)
-		}
-
-		// Delete the address set after a short delay.
-		// This is to avoid OVN warnings while the address set is still
-		// referenced from NBDB ACLs until the NetworkPolicy handlers remove
-		// them.
-		addressSet := nsInfo.addressSet
-		go func() {
-			select {
-			case <-bnc.stopChan:
-				return
-			case <-time.After(20 * time.Second):
-				maybeDeleteAddressSet := func() bool {
-					bnc.namespacesMutex.Lock()
-					nsInfo := bnc.namespaces[ns]
-					if nsInfo == nil {
-						defer bnc.namespacesMutex.Unlock()
-					} else {
-						bnc.namespacesMutex.Unlock()
-						nsInfo.Lock()
-						defer nsInfo.Unlock()
-						bnc.namespacesMutex.Lock()
-						defer bnc.namespacesMutex.Unlock()
-						if nsInfo != bnc.namespaces[ns] {
-							// somebody deleted the namespace while waiting for
-							// its lock, check again in case it was added back
-							return false
-						}
-						// if somebody recreated the namespace during the delay,
-						// check if it has an address set
-						if nsInfo.addressSet != nil {
-							klog.V(5).Infof("Skipping deferred deletion of AddressSet for NS %s: recreated", ns)
-							return true
-						}
-					}
-					klog.V(5).Infof("Finishing deferred deletion of AddressSet for NS %s", ns)
-					if err := addressSet.Destroy(); err != nil {
-						klog.Errorf("Failed to delete AddressSet for NS %s: %v", ns, err.Error())
-					}
-					return true
-				}
-				for {
-					done := maybeDeleteAddressSet()
-					if done {
-						break
-					}
-				}
-			}
-		}()
-	}
 	if nsInfo.portGroupName != "" {
 		err := libovsdbops.DeletePortGroups(bnc.nbClient, nsInfo.portGroupName)
 		if err != nil {
@@ -921,14 +843,9 @@ func (bnc *BaseNetworkController) syncNodeManagementPort(node *corev1.Node, swit
 // addLocalPodToNamespaceLocked returns the ops needed to add the pod's IP to the namespace
 // address set and the port UUID (if applicable) to the namespace port group.
 // This function must be called with the nsInfo lock taken.
-func (bnc *BaseNetworkController) addLocalPodToNamespaceLocked(nsInfo *namespaceInfo, ips []*net.IPNet, portUUID string) ([]ovsdb.Operation, error) {
+func (bnc *BaseNetworkController) addLocalPodToNamespaceLocked(nsInfo *namespaceInfo, portUUID string) ([]ovsdb.Operation, error) {
 	var ops []ovsdb.Operation
 	var err error
-
-	if ops, err = nsInfo.addressSet.AddAddressesReturnOps(util.IPNetsIPToStringSlice(ips)); err != nil {
-		return nil, err
-	}
-
 	if portUUID != "" && nsInfo.portGroupName != "" {
 		if ops, err = libovsdbops.AddPortsToPortGroupOps(bnc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
 			return nil, err
@@ -1040,9 +957,6 @@ func (bnc *BaseNetworkController) GetNetworkRole(pod *corev1.Pod) (string, error
 // that have no overlay or that use EVPN, and this method would typically be
 // used to inhibit the configuration of interconnect resources in those cases.
 func (bnc *BaseNetworkController) hasInterconnectTransport() bool {
-	if !config.OVNKubernetesFeature.EnableInterconnect {
-		return false
-	}
 	switch bnc.Transport() {
 	case types.NetworkTransportEVPN, types.NetworkTransportNoOverlay:
 		return false

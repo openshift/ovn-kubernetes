@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"net"
 
-	"github.com/containernetworking/cni/pkg/types"
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 )
 
 // NetConf is CNI NetConf with DeviceID
 type NetConf struct {
-	types.NetConf
+	cnitypes.NetConf
 	// Role is valid only on L3 / L2 topologies. Not on localnet.
 	// It allows for using this network to be either secondary or
 	// primary user defined network for the pod.
@@ -89,6 +89,12 @@ type NetConf struct {
 	// When omitted, the default OVN overlay transport is used.
 	Transport string `json:"transport,omitempty"`
 
+	// OutboundSNAT configures SNAT behavior for outbound traffic from pods
+	// on user-defined networks in no-overlay mode.
+	// Valid values are "enabled" and "disabled".
+	// Only valid when Transport is "no-overlay".
+	OutboundSNAT string `json:"outboundSNAT,omitempty"`
+
 	// EVPNConfig contains configuration for EVPN mode.
 	// Only valid when Transport is "evpn".
 	EVPN *EVPNConfig `json:"evpn,omitempty"`
@@ -120,9 +126,9 @@ type NetConf struct {
 // v1.3.0 changed types.NetConf from a distinct type to a type alias for PluginConf,
 // causing PluginConf.MarshalJSON to be promoted into any struct embedding types.NetConf.
 func (n NetConf) MarshalJSON() ([]byte, error) {
-	// cniConf is a new type with the same layout as types.PluginConf but without
+	// cniConf is a new type with the same layout as cnitypes.PluginConf but without
 	// its MarshalJSON method, so embedding it uses standard struct marshaling.
-	type cniConf types.PluginConf
+	type cniConf cnitypes.PluginConf
 	type netConf struct {
 		cniConf
 		Role                  string      `json:"role,omitempty"`
@@ -140,6 +146,7 @@ func (n NetConf) MarshalJSON() ([]byte, error) {
 		AllowPersistentIPs    bool        `json:"allowPersistentIPs,omitempty"`
 		PhysicalNetworkName   string      `json:"physicalNetworkName,omitempty"`
 		Transport             string      `json:"transport,omitempty"`
+		OutboundSNAT          string      `json:"outboundSNAT,omitempty"`
 		EVPN                  *EVPNConfig `json:"evpn,omitempty"`
 		DeviceID              string      `json:"deviceID,omitempty"`
 		LogFile               string      `json:"logFile,omitempty"`
@@ -168,6 +175,7 @@ func (n NetConf) MarshalJSON() ([]byte, error) {
 		AllowPersistentIPs:    n.AllowPersistentIPs,
 		PhysicalNetworkName:   n.PhysicalNetworkName,
 		Transport:             n.Transport,
+		OutboundSNAT:          n.OutboundSNAT,
 		EVPN:                  n.EVPN,
 		DeviceID:              n.DeviceID,
 		LogFile:               n.LogFile,

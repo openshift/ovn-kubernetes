@@ -195,7 +195,7 @@ type Layer3UserDefinedNetworkController struct {
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
-	// Controller in charge of services
+	// Shared controller in charge of services. Nil for cleanup-only controllers.
 	svcController *svccontroller.Controller
 
 	// EgressIP controller utilized only to initialize a network with OVN polices to support EgressIP functionality.
@@ -212,6 +212,7 @@ func NewLayer3UserDefinedNetworkController(
 	portCache *PortCache,
 	addressSetManager *addresssetmanager.AddressSetManager,
 	nodeReconciler *nodecontroller.NodeController,
+	serviceController *svccontroller.Controller,
 ) (*Layer3UserDefinedNetworkController, error) {
 
 	stopChan := make(chan struct{})
@@ -266,24 +267,10 @@ func NewLayer3UserDefinedNetworkController(
 		}
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		oc.zoneICHandler = zoneic.NewZoneInterconnectHandler(oc.GetNetInfo(), cnci.nbClient, cnci.sbClient, cnci.watchFactory)
-	}
+	oc.zoneICHandler = zoneic.NewZoneInterconnectHandler(oc.GetNetInfo(), cnci.nbClient, cnci.sbClient, cnci.watchFactory)
 
 	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
-		var err error
-		oc.svcController, err = svccontroller.NewController(
-			cnci.client, cnci.nbClient,
-			cnci.watchFactory.ServiceCoreInformer(),
-			cnci.watchFactory.EndpointSliceCoreInformer(),
-			cnci.watchFactory.NodeCoreInformer(),
-			networkManager,
-			cnci.recorder,
-			oc.GetNetInfo(),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create new service controller for network=%s: %w", netInfo.GetNetworkName(), err)
-		}
+		oc.svcController = serviceController
 	}
 
 	if oc.allocatesPodAnnotation() {
@@ -357,6 +344,7 @@ func (oc *Layer3UserDefinedNetworkController) Start(_ context.Context) error {
 		return err
 	}
 	if err := oc.run(); err != nil {
+		oc.DeregisterServiceNetwork()
 		oc.DeregisterNodeHandler()
 		return err
 	}
@@ -370,6 +358,7 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 		return
 	}
 	klog.Infof("Stop %s UDN controller of network %s", oc.TopologyType(), oc.GetNetworkName())
+	oc.DeregisterServiceNetwork()
 	oc.DeregisterNodeHandler()
 	close(oc.stopChan)
 	oc.stopChan = nil
@@ -393,8 +382,8 @@ func (oc *Layer3UserDefinedNetworkController) Stop() {
 	}
 }
 
-// Cleanup cleans up logical entities for the given network, called from net-attach-def routine
-// could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
+// Cleanup cleans up logical entities for the given network, called from the
+// net-attach-def routine or stale network cleanup.
 func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	// cleans up related OVN logical entities
 	var ops []ovsdb.Operation
@@ -477,10 +466,8 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 		return fmt.Errorf("failed to deleting routers/switches of network %s: %v", netName, err)
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		if err = oc.zoneICHandler.Cleanup(); err != nil {
-			return fmt.Errorf("failed to delete interconnect transit switch of network %s: %v", netName, err)
-		}
+	if err = oc.zoneICHandler.Cleanup(); err != nil {
+		return fmt.Errorf("failed to delete interconnect transit switch of network %s: %v", netName, err)
 	}
 
 	// Delete all load balancers owned by this network to prevent orphaned LBs.
@@ -502,6 +489,11 @@ func (oc *Layer3UserDefinedNetworkController) Cleanup() error {
 	cleanupLoadBalancerGroups(oc.nbClient, oc.GetNetInfo(),
 		oc.switchLoadBalancerGroupUUID, oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID)
 
+	// Cleanup noOverlay SNAT exemption address set
+	if err := cleanupNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName); err != nil {
+		klog.Warningf("Failed to cleanup noOverlay SNAT exemption address set for network %s: %v", netName, err)
+	}
+
 	return nil
 }
 
@@ -521,8 +513,8 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 
 	if oc.svcController != nil {
 		startSvc := time.Now()
-		// Services should be started after nodes to prevent LB churn
-		err := oc.StartServiceController(oc.wg, true)
+		// Services should be registered after nodes to prevent LB churn.
+		err := oc.RegisterServiceNetwork(true)
 		endSvc := time.Since(startSvc)
 
 		metrics.MetricOVNKubeControllerSyncDuration.WithLabelValues("service_" + oc.GetNetworkName()).Set(endSvc.Seconds())
@@ -597,13 +589,16 @@ func (oc *Layer3UserDefinedNetworkController) waitForLocalZoneNodeLogicalSwitche
 }
 
 func (oc *Layer3UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) error {
-	return oc.BaseNetworkController.reconcile(
+	if err := oc.BaseNetworkController.reconcile(
 		netInfo,
 		func(node string) {
 			oc.addNodeFailed.Store(node, true)
 			oc.gatewaysFailed.Store(node, true)
 		},
-	)
+	); err != nil {
+		return err
+	}
+	return oc.ReconcileServiceNetwork()
 }
 
 func (oc *Layer3UserDefinedNetworkController) RegisterNodeHandler() error {
@@ -642,7 +637,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 					syncNode:              true,
 					syncClusterRouterPort: true,
 					syncMgmtPort:          true,
-					syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+					syncZoneIC:            true,
 					syncGw:                true,
 					syncReroute:           true,
 				}
@@ -683,7 +678,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 				syncNode:              true,
 				syncClusterRouterPort: true,
 				syncMgmtPort:          true,
-				syncZoneIC:            config.OVNKubernetesFeature.EnableInterconnect,
+				syncZoneIC:            true,
 				syncGw:                true,
 				syncReroute:           true,
 			}
@@ -701,7 +696,7 @@ func (oc *Layer3UserDefinedNetworkController) ReconcileNode(oldNode, newNode *co
 	}
 
 	if oldNode == nil {
-		return oc.addUpdateRemoteNodeEvent(newNode, config.OVNKubernetesFeature.EnableInterconnect)
+		return oc.addUpdateRemoteNodeEvent(newNode, true)
 	}
 
 	zoneClusterChanged := oc.nodeZoneClusterChanged(oldNode, newNode)
@@ -720,7 +715,16 @@ func (oc *Layer3UserDefinedNetworkController) SyncNodes(nodes []*corev1.Node) er
 	return oc.syncNodes(nodesToInterfaces(nodes))
 }
 
-func (oc *Layer3UserDefinedNetworkController) init() error {
+func (oc *Layer3UserDefinedNetworkController) init() (err error) {
+	start := time.Now()
+	defer func() {
+		if err == nil && config.Metrics.EnableScaleMetrics {
+			duration := time.Since(start)
+			metrics.RecordUDNNBDBProgrammedDuration(oc.TopologyType(), duration.Seconds())
+			klog.Infof("Recorded NBDB programmed duration for network %s: %v", oc.GetNetworkName(), duration)
+		}
+	}()
+
 	if err := oc.gatherJoinSwitchIPs(); err != nil {
 		return fmt.Errorf("failed to gather join switch IPs for network %s: %v", oc.GetNetworkName(), err)
 	}
@@ -765,6 +769,16 @@ func (oc *Layer3UserDefinedNetworkController) init() error {
 		oc.switchLoadBalancerGroupUUID = switchLBGroupUUID
 		oc.routerLoadBalancerGroupUUID = routerLBGroupUUID
 	}
+
+	// Initialize noOverlay SNAT exemption address set when using noOverlay transport with outboundSNAT enabled
+	// This is needed for both local and shared gateway modes
+	if oc.GetNetInfo().Transport() == types.NetworkTransportNoOverlay &&
+		oc.GetNetInfo().OutboundSNAT() == types.NoOverlaySNATEnabled {
+		if _, err := initNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName); err != nil {
+			return fmt.Errorf("failed to initialize noOverlay SNAT exemption address set for network %s: %w", oc.GetNetworkName(), err)
+		}
+	}
+
 	return nil
 }
 
@@ -833,6 +847,21 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 	if nSyncs.syncNode { // do this only if it is a new node add
 		errors := oc.addAllPodsOnNode(node.Name)
 		errs = append(errs, errors...)
+	}
+
+	// Sync noOverlay SNAT exemption address set BEFORE gateway initialization
+	// This must happen before the gateway creates SNAT rules that reference the address set
+	if oc.GetNetInfo().Transport() == types.NetworkTransportNoOverlay &&
+		oc.GetNetInfo().OutboundSNAT() == types.NoOverlaySNATEnabled &&
+		(nSyncs.syncNode || nSyncs.syncGw) {
+		hostAddrs, err := util.GetNodeHostAddrs(node)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to get host addresses for node %s: %w", node.Name, err))
+		} else {
+			if err := syncNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName, hostAddrs); err != nil {
+				errs = append(errs, fmt.Errorf("failed to sync noOverlay SNAT exemption address set: %w", err))
+			}
+		}
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() && oc.IsPrimaryNetwork() {
@@ -936,8 +965,11 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateRemoteNodeEvent(node *cor
 // externalIP = "169.254.0.12"; which is the masqueradeIP for this L3 UDN
 // so all in all we want to condionally SNAT all packets that are coming from pods hosted on this node,
 // which are leaving via UDN's mpX interface to the UDN's masqueradeIP.
-// If isUDNAdvertised is true, then we want to SNAT all packets that are coming from pods on this network
-// leaving towards nodeIPs on the cluster to masqueradeIP. If network is advertise then the SNAT looks like this:
+// If isUDNAdvertised is true, then we want to SNAT packets from pods on this network
+// leaving towards cluster node IPs and UDN-enabled service IPs to the masqueradeIP.
+// In shared gateway mode, advertised SNAT keeps NAT.match empty and uses
+// NAT.allowed_ext_ips to point directly at those address sets. Local gateway mode
+// keeps the destination address-set checks in NAT.match, for example:
 // "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/24"
 func (oc *Layer3UserDefinedNetworkController) addOrUpdateUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node, isUDNAdvertised bool) error {
 	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
@@ -1203,6 +1235,7 @@ func (oc *Layer3UserDefinedNetworkController) newGatewayManager(nodeName string)
 		oc.GetNetInfo(),
 		oc.watchFactory,
 		oc.nodeAnnotationCache,
+		oc.addressSetManager,
 		oc.gatewayOptions()...,
 	)
 }
@@ -1240,15 +1273,39 @@ func (oc *Layer3UserDefinedNetworkController) gatewayManagerForNode(nodeName str
 	}
 }
 
-func (oc *Layer3UserDefinedNetworkController) StartServiceController(wg *sync.WaitGroup, runRepair bool) error {
-	useLBGroups := oc.clusterLoadBalancerGroupUUID != ""
-	// use 5 workers like most of the kubernetes controllers in the kubernetes controller-manager
-	// do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988
-	err := oc.svcController.Run(5, oc.stopChan, wg, runRepair, useLBGroups, false)
+func (oc *Layer3UserDefinedNetworkController) RegisterServiceNetwork(runRepair bool) error {
+	err := oc.svcController.RegisterNetwork(oc.GetNetInfo(), oc.serviceNetworkOptions(runRepair))
 	if err != nil {
-		return fmt.Errorf("error running OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+		return fmt.Errorf("error registering OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
 	}
 	return nil
+}
+
+func (oc *Layer3UserDefinedNetworkController) ReconcileServiceNetwork() error {
+	if oc.svcController == nil {
+		return nil
+	}
+	if err := oc.svcController.ReconcileNetwork(oc.GetNetInfo(), oc.serviceNetworkOptions(false)); err != nil {
+		return fmt.Errorf("error reconciling OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+	}
+	return nil
+}
+
+func (oc *Layer3UserDefinedNetworkController) serviceNetworkOptions(runRepair bool) svccontroller.NetworkOptions {
+	// Do not use LB templates for UDNs - OVN bug https://issues.redhat.com/browse/FDP-988.
+	return svccontroller.NetworkOptions{
+		RunRepair:    runRepair,
+		UseLBGroups:  oc.clusterLoadBalancerGroupUUID != "",
+		UseTemplates: false,
+	}
+}
+
+func (oc *Layer3UserDefinedNetworkController) DeregisterServiceNetwork() {
+	if oc.svcController != nil {
+		if err := oc.svcController.DeregisterNetwork(oc.GetNetworkName()); err != nil {
+			klog.Errorf("Error deregistering OVN-Kubernetes Services controller for network %s: %v", oc.GetNetworkName(), err)
+		}
+	}
 }
 
 // HandleNetworkRefChange marks the node for interconnect sync so a queued update does not skip it.

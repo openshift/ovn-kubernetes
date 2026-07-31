@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -71,18 +70,12 @@ func (c *ExternalGatewayMasterController) Repair() error {
 		return nil
 	}
 
-	annotatedGWIPsMap, err := c.buildExternalIPGatewaysFromAnnotations()
-	if err != nil {
-		return fmt.Errorf("cannot retrieve the annotated gateway IPs:%w", err)
-	}
-
 	// compare caches and see if OVN routes are stale
 	for podIP, ovnRoutes := range ovnRouteCache {
 		// pod IP does not exist in the cluster
 		// remove route and any hybrid policy
 		expectedNextHopsPolicy, okPolicy := policyGWIPsMap[podIP]
-		expectedNextHopsAnnotation, okAnnotation := annotatedGWIPsMap[podIP]
-		if !okPolicy && !okAnnotation {
+		if !okPolicy {
 			// No external gateways found for this Pod IP
 			continue
 		}
@@ -111,9 +104,6 @@ func (c *ExternalGatewayMasterController) Repair() error {
 				if ovnRoute.shouldExist {
 					continue
 				}
-			}
-			if expectedNextHopsAnnotation != nil {
-				ovnRoute.shouldExist = c.processOVNRoute(ovnRoute, expectedNextHopsAnnotation.gwList, podIP, expectedNextHopsAnnotation, false)
 			}
 		}
 	}
@@ -177,8 +167,7 @@ func (c *ExternalGatewayMasterController) Repair() error {
 		for ip, node := range ovnHybridCache {
 			// check if this pod IP has a corresponding policy, if not, remove it
 			_, okPolicy := policyGWIPsMap[ip]
-			_, okAnnotation := annotatedGWIPsMap[ip]
-			if !okPolicy && !okAnnotation {
+			if !okPolicy {
 				klog.Infof("CleanHybridPRoutes: Removing IP: %s from hybrid route policy", ip)
 				if err := c.nbClient.delHybridRoutePolicyForPod(net.ParseIP(ip), node); err != nil {
 					return fmt.Errorf("CleanHybridPRoutes: error while removing hybrid policy for pod IP: %s, on node: %s, error: %v",
@@ -280,99 +269,6 @@ func (c *ExternalGatewayMasterController) processOVNRoute(ovnRoute *ovnRoute, gw
 		}
 	}
 	return false
-}
-
-func (c *ExternalGatewayMasterController) buildExternalIPGatewaysFromAnnotations() (map[string]*managedGWIPs, error) {
-	clusterRouteCache := make(map[string]*managedGWIPs, 0)
-
-	nsList, err := c.mgr.namespaceLister.List(labels.Everything())
-	if err != nil {
-		return nil, err
-	}
-	for _, ns := range nsList {
-		if nsGWIPs, ok := ns.Annotations[util.RoutingExternalGWsAnnotation]; ok && nsGWIPs != "" {
-			var bfdEnabled bool
-			ips := sets.Set[string]{}
-			for _, ip := range strings.Split(nsGWIPs, ",") {
-				podIPStr := utilnet.ParseIPSloppy(ip).String()
-				ips.Insert(podIPStr)
-			}
-
-			if _, ok := ns.Annotations[util.BfdAnnotation]; ok {
-				bfdEnabled = true
-			}
-			gwInfo := gateway_info.NewGatewayInfo(ips, bfdEnabled)
-			nsPodList, err := c.mgr.podLister.Pods(ns.Name).List(labels.Everything())
-			if err != nil {
-				return nil, err
-			}
-			// set static gateway ips for all pods in the namespace
-			populateManagedGWIPsCacheForPods(gwInfo, clusterRouteCache, nsPodList)
-		}
-	}
-
-	podList, err := c.mgr.podLister.List(labels.Everything())
-	if err != nil {
-		return nil, err
-	}
-	for _, pod := range podList {
-		networkName, ok := pod.Annotations[util.RoutingNetworkAnnotation]
-		if !ok {
-			continue
-		}
-		targetNamespaces, ok := pod.Annotations[util.RoutingNamespaceAnnotation]
-		if !ok {
-			continue
-		}
-		foundGws, err := getExGwPodIPs(pod, networkName)
-		if err != nil {
-			klog.Errorf("Error getting exgw IPs for pod: %s, error: %v", pod.Name, err)
-			return nil, err
-		}
-		if foundGws.Len() == 0 {
-			klog.Errorf("No pod IPs found for pod %s/%s", pod.Namespace, pod.Name)
-			continue
-		}
-		var bfdEnabled bool
-		if _, ok := pod.Annotations[util.BfdAnnotation]; ok {
-			bfdEnabled = true
-		}
-		gwInfo := gateway_info.NewGatewayInfo(foundGws, bfdEnabled)
-		for _, targetNs := range strings.Split(targetNamespaces, ",") {
-			nsPodList, err := c.mgr.podLister.Pods(targetNs).List(labels.Everything())
-			if err != nil {
-				return nil, err
-			}
-			// set dynamic gateway ips for all pods in the targetNamespaces
-			populateManagedGWIPsCacheForPods(gwInfo, clusterRouteCache, nsPodList)
-		}
-	}
-	return clusterRouteCache, nil
-}
-
-func populateManagedGWIPsCacheForPods(gwInfo *gateway_info.GatewayInfo, cache map[string]*managedGWIPs, podList []*corev1.Pod) {
-	for gwIP := range gwInfo.Gateways {
-		for _, pod := range podList {
-			// ignore completed pods, host networked pods, pods not scheduled
-			if util.PodWantsHostNetwork(pod) || util.PodCompleted(pod) || !util.PodScheduled(pod) {
-				continue
-			}
-			for _, podIP := range pod.Status.PodIPs {
-				podIPStr := utilnet.ParseIPSloppy(podIP.IP).String()
-				if utilnet.IsIPv6String(gwIP) != utilnet.IsIPv6String(podIPStr) {
-					continue
-				}
-				if _, ok := cache[podIPStr]; !ok {
-					cache[podIPStr] = &managedGWIPs{
-						namespacedName: ktypes.NamespacedName{Namespace: pod.Namespace, Name: pod.Name},
-						nodeName:       pod.Spec.NodeName,
-						gwList:         gateway_info.NewGatewayInfoList(),
-					}
-				}
-				cache[podIPStr].gwList.InsertOverwrite(gateway_info.NewGatewayInfo(sets.New(gwIP), gwInfo.BFDEnabled))
-			}
-		}
-	}
 }
 
 // Build cache of routes in OVN

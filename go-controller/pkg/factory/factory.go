@@ -181,7 +181,7 @@ const (
 	// resync time is 0, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
-	// ovnkube master (currently, it is just a 'get' loop)
+	// ovnkube controller (currently, it is just a 'get' loop)
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	resyncInterval        = 0
@@ -215,7 +215,6 @@ func SetEventQueueSize(newEventQueueSize uint32) {
 }
 
 // types for dynamic handlers created when adding a network policy
-type peerNamespaceSelector struct{}
 type localPodSelector struct{}
 
 // types for handlers related to egress IP
@@ -231,7 +230,7 @@ type endpointSliceForGateway struct{}
 type serviceForFakeNodePortWatcher struct{} // only for unit tests
 
 var (
-	// Resource types used in ovnk master
+	// Resource types used in the ovnkube control plane
 	PodType                         reflect.Type = reflect.TypeOf(&corev1.Pod{})
 	ServiceType                     reflect.Type = reflect.TypeOf(&corev1.Service{})
 	EndpointSliceType               reflect.Type = reflect.TypeOf(&discovery.EndpointSlice{})
@@ -248,7 +247,6 @@ var (
 	EgressServiceType               reflect.Type = reflect.TypeOf(&egressserviceapi.EgressService{})
 	AdminNetworkPolicyType          reflect.Type = reflect.TypeOf(&anpapi.AdminNetworkPolicy{})
 	BaselineAdminNetworkPolicyType  reflect.Type = reflect.TypeOf(&anpapi.BaselineAdminNetworkPolicy{})
-	PeerNamespaceSelectorType       reflect.Type = reflect.TypeOf(&peerNamespaceSelector{})
 	LocalPodSelectorType            reflect.Type = reflect.TypeOf(&localPodSelector{})
 	NetworkAttachmentDefinitionType reflect.Type = reflect.TypeOf(&nadapi.NetworkAttachmentDefinition{})
 	MultiNetworkPolicyType          reflect.Type = reflect.TypeOf(&mnpapi.MultiNetworkPolicy{})
@@ -264,42 +262,6 @@ var (
 	EndpointSliceForGatewayType               reflect.Type = reflect.TypeOf(&endpointSliceForGateway{})
 	ServiceForFakeNodePortWatcherType         reflect.Type = reflect.TypeOf(&serviceForFakeNodePortWatcher{}) // only for unit tests
 )
-
-// NewMasterWatchFactory initializes a new watch factory for:
-// a) ovnkube controller + cluster manager or
-// b) ovnkube controller + node
-// c) all-in-one a.k.a ovnkube controller + cluster-manager + node
-// processes.
-func NewMasterWatchFactory(ovnClientset *util.OVNMasterClientset) (*WatchFactory, error) {
-	wf, err := NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
-	if err != nil {
-		return nil, err
-	}
-	wf.cpipcFactory = ocpcloudnetworkinformerfactory.NewSharedInformerFactory(ovnClientset.CloudNetworkClient, resyncInterval)
-	if util.PlatformTypeIsEgressIPCloudProvider() {
-		wf.informers[CloudPrivateIPConfigType], err = newQueuedInformer(eventQueueSize, CloudPrivateIPConfigType,
-			wf.cpipcFactory.Cloud().V1().CloudPrivateIPConfigs().Informer(), wf.stopChan, minNumEventQueues)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Initialize VTEP factory for EVPN support in combined mode (cluster-manager + ovnkube-controller).
-	if util.IsEVPNEnabled() {
-		wf.vtepFactory = vtepinformerfactory.NewSharedInformerFactory(ovnClientset.VTEPClient, resyncInterval)
-		// make sure shared informer is created for a factory, so on wf.vtepFactory.Start() it is initialized and caches are synced.
-		wf.vtepFactory.K8s().V1().VTEPs().Informer()
-	}
-
-	// Initialize FRR factory for Route Advertisement support in combined mode (cluster-manager + ovnkube-controller).
-	if util.IsRouteAdvertisementsEnabled() {
-		wf.frrFactory = frrinformerfactory.NewSharedInformerFactory(ovnClientset.FRRClient, resyncInterval)
-		// make sure shared informer is created for a factory, so on wf.frrFactory.Start() it is initialized and caches are synced.
-		wf.frrFactory.Api().V1beta1().FRRConfigurations().Informer()
-	}
-
-	return wf, nil
-}
 
 // Informer transform to trim object fields for memory efficiency.
 func informerObjectTrim(obj interface{}) (interface{}, error) {
@@ -353,7 +315,7 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 	// resync time is 12 hours, none of the resources being watched in ovn-kubernetes have
 	// any race condition where a resync may be required e.g. cni executable on node watching for
 	// events on pods and assuming that an 'ADD' event will contain the annotations put in by
-	// ovnkube master (currently, it is just a 'get' loop)
+	// ovnkube controller (currently, it is just a 'get' loop)
 	// the downside of making it tight (like 10 minutes) is needless spinning on all resources
 	// However, AddEventHandlerWithResyncPeriod can specify a per handler resync period
 	wf := &WatchFactory{
@@ -527,14 +489,6 @@ func NewOVNKubeControllerWatchFactory(ovnClientset *util.OVNKubeControllerClient
 			return nil, err
 		}
 
-		if config.OVNKubernetesFeature.EnablePersistentIPs && !config.OVNKubernetesFeature.EnableInterconnect {
-			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-			wf.informers[IPAMClaimsType], err = newQueuedInformer(eventQueueSize, IPAMClaimsType,
-				wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(), wf.stopChan, minNumEventQueues)
-			if err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	if util.IsNetworkSegmentationSupportEnabled() {
@@ -929,7 +883,7 @@ func NewNodeWatchFactory(ovnClientset *util.OVNNodeClientset, nodeName string) (
 	// need to configure OVS interfaces for Pods on secondary networks in the DPU mode
 	// need to know what is the primary network for a namespace on the CNI side, which
 	// needs the NAD factory whenever the UDN feature is used.
-	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || config.OvnKubeNode.Mode == types.NodeModeDPU) {
+	if config.OVNKubernetesFeature.EnableMultiNetwork && (config.OVNKubernetesFeature.EnableNetworkSegmentation || config.IsModeDPU()) {
 		wf.nadFactory = nadinformerfactory.NewSharedInformerFactory(ovnClientset.NetworkAttchDefClient, resyncInterval)
 		wf.informers[NetworkAttachmentDefinitionType], err = newQueuedInformer(eventQueueSize,
 			NetworkAttachmentDefinitionType, wf.nadFactory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer(),
@@ -1091,23 +1045,21 @@ func NewClusterManagerWatchFactory(ovnClientset *util.OVNClusterManagerClientset
 			return nil, err
 		}
 
-		if config.OVNKubernetesFeature.EnableInterconnect {
-			wf.informers[PodType], err = newQueuedInformer(eventQueueSize,
-				PodType, wf.iFactory.Core().V1().Pods().Informer(),
-				wf.stopChan, defaultNumEventQueues)
+		wf.informers[PodType], err = newQueuedInformer(eventQueueSize,
+			PodType, wf.iFactory.Core().V1().Pods().Informer(),
+			wf.stopChan, defaultNumEventQueues)
+		if err != nil {
+			return nil, err
+		}
+
+		if config.OVNKubernetesFeature.EnablePersistentIPs {
+			wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
+			wf.informers[IPAMClaimsType], err = newQueuedInformer(eventQueueSize,
+				IPAMClaimsType,
+				wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(),
+				wf.stopChan, minNumEventQueues)
 			if err != nil {
 				return nil, err
-			}
-
-			if config.OVNKubernetesFeature.EnablePersistentIPs {
-				wf.ipamClaimsFactory = ipamclaimsfactory.NewSharedInformerFactory(ovnClientset.IPAMClaimsClient, resyncInterval)
-				wf.informers[IPAMClaimsType], err = newQueuedInformer(eventQueueSize,
-					IPAMClaimsType,
-					wf.ipamClaimsFactory.K8s().V1alpha1().IPAMClaims().Informer(),
-					wf.stopChan, minNumEventQueues)
-				if err != nil {
-					return nil, err
-				}
 			}
 		}
 	}
@@ -1294,7 +1246,7 @@ type AddHandlerFuncType func(namespace string, sel labels.Selector, funcs cache.
 // Priority of the handler is what determine which handler would get an event first
 // This is relevant only for handlers that are sharing the same resources:
 // Pods: shared by PodType (0), EgressIPPodType (1), LocalPodSelectorType (3)
-// Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1), PeerNamespaceSelectorType (2)
+// Namespaces: shared by NamespaceType (0), EgressIPNamespaceType (1)
 // Nodes: shared by NodeType (0), EgressNodeType (1)
 // By default handlers get the defaultHandlerPriority which is 0 (highest priority). Higher the number, lower the priority to get an event.
 // Example: EgressIPPodType will always get the pod event after PodType
@@ -1307,8 +1259,6 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 		return 3
 	case EgressIPNamespaceType:
 		return 1
-	case PeerNamespaceSelectorType:
-		return 2
 	case EgressNodeType:
 		return 1
 	default:
@@ -1349,7 +1299,7 @@ func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandler
 			return wf.AddFilteredPodHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil
 
-	case PeerNamespaceSelectorType, EgressIPNamespaceType:
+	case EgressIPNamespaceType:
 		return func(namespace string, sel labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddFilteredNamespaceHandler(namespace, sel, funcs, processExisting, priority)
 		}, nil

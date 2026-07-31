@@ -23,6 +23,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	udnfakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -31,14 +33,15 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
-	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	coreinformermocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	v1mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -90,7 +93,7 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{})
+		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{}, nil)
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).NotTo(HaveOccurred())
@@ -121,7 +124,7 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
 		ofm := getDummyOpenflowManager()
-		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{openflowManager: ofm})
+		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{openflowManager: ofm}, nil)
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).To(HaveOccurred()) // we don't have the gateway pieces setup so its expected to fail here
@@ -149,7 +152,7 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{})
+		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{}, nil)
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).NotTo(HaveOccurred())
@@ -180,10 +183,30 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		kubeMock         kubemocks.Interface
 		v4NodeIP         = "192.168.1.10/24"
 		v6NodeIP         = "fc00:f853:ccd:e793::3/64"
+		ovsClient        libovsdbclient.Client
+		ovsCleanup       *libovsdbtest.Context
 	)
 	BeforeEach(func() {
 		// Restore global default values before each testcase
 		Expect(config.PrepareTestConfig()).To(Succeed())
+		// Skip the encap-update path inside addressManager.sync() — these tests
+		// don't fake ovn-appctl and aren't exercising encap reconciliation.
+		config.Default.EncapIP = "test-encap-ip"
+		var ovsErr error
+		ovsClient, ovsCleanup, ovsErr = libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+			OVSData: []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"breth0-uuid"}},
+				&vswitchd.Bridge{
+					UUID:  "breth0-uuid",
+					Name:  "breth0",
+					Ports: []string{"breth0-port-uuid", "eth0-port-uuid"},
+				},
+				&vswitchd.Port{UUID: "breth0-port-uuid", Name: "breth0", Interfaces: []string{"breth0-iface-uuid"}},
+				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "system"},
+				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0"},
+			},
+		})
+		Expect(ovsErr).NotTo(HaveOccurred())
 		// Use a larger masq subnet to allow OF manager to allocate IPs for UDNs.
 		config.Gateway.V6MasqueradeSubnet = "fd69::/112"
 		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/17"
@@ -262,6 +285,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 	AfterEach(func() {
 		close(stopCh)
 		wg.Wait()
+		ovsCleanup.Cleanup()
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
 		util.ResetRunner()
@@ -305,8 +329,6 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		nodeLister := v1mocks.NodeLister{}
 		nodeInformer.On("Lister").Return(&nodeLister)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
-		nodenft.SetFakeNFTablesHelper()
-		util.SetFakeIPTablesHelpers()
 
 		kubeFakeClient := fake.NewSimpleClientset(
 			&corev1.NodeList{
@@ -363,16 +385,11 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		mgtPortMAC = util.IPAddrToHWAddr(util.GetNodeManagementIfAddr(ipNet).IP).String()
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", routeManager, NetInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", routeManager, NetInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = testNS.Do(func(ns.NetNS) error {
 			defer GinkgoRecover()
-			// need this for getGatewayNextHops
-			fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-				Cmd:    "ovs-vsctl --timeout=15 port-to-br eth0",
-				Output: "breth0",
-			})
 			setManagementPortFakeCommands(fexec, nodeName)
 			setUpGatewayFakeOVSCommands(fexec)
 			deleteStaleManagementPortFakeCommands(fexec, mgtPort)
@@ -381,7 +398,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			setUpUDNOpenflowManagerFakeOVSCommands(fexec)
 			getDeletionFakeOVSCommands(fexec, mgtPort)
 
-			gatewayNextHops, gatewayIntf, err := getGatewayNextHops()
+			gatewayNextHops, gatewayIntf, err := getGatewayNextHops(ovsClient)
 			Expect(err).NotTo(HaveOccurred())
 
 			// create dummy management interface
@@ -410,6 +427,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeLocal,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
 			stop := make(chan struct{})
@@ -429,7 +447,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 
 			By("creating a UDN controller for user-defined primary network")
 			cnnci := CommonNodeNetworkControllerInfo{name: nodeName, watchFactory: &factoryMock}
-			controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, vrf, ipRulesManager, nil, localGw)
+			controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, vrf, ipRulesManager, nil, localGw, nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(controller.gateway).To(Not(BeNil()))
 			Expect(controller.gateway.ruleManager).To(Not(BeNil()))
@@ -468,7 +486,24 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 					udnRules = append(udnRules, rule)
 				}
 			}
-			Expect(udnRules).To(HaveLen(3))
+			Expect(udnRules).To(HaveLen(4))
+			var v4PacketMarkRule, v6PacketMarkRule, v4MasqIPRule, v6MasqIPRule bool
+			for _, rule := range udnRules {
+				switch {
+				case rule.Family == netlink.FAMILY_V4 && rule.Mark != 0:
+					v4PacketMarkRule = true
+				case rule.Family == netlink.FAMILY_V6 && rule.Mark != 0:
+					v6PacketMarkRule = true
+				case rule.Family == netlink.FAMILY_V4 && rule.Dst != nil:
+					v4MasqIPRule = true
+				case rule.Family == netlink.FAMILY_V6 && rule.Dst != nil:
+					v6MasqIPRule = true
+				}
+			}
+			Expect(v4PacketMarkRule).To(BeTrue())
+			Expect(v6PacketMarkRule).To(BeTrue())
+			Expect(v4MasqIPRule).To(BeTrue())
+			Expect(v6MasqIPRule).To(BeTrue())
 
 			By("delete the network and ensure its associated VRF device is also deleted")
 			cnode := node.DeepCopy()

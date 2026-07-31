@@ -72,7 +72,6 @@ details)
 (... details on what changes will be made to ovnkube to achieve the
 proposal; go as deep as possible; use diagrams wherever it makes sense)
 
-* add details for differences between default mode and interconnect mode if any
 * add details for differences between lgw and sgw modes if any
 * add config knob details if any
 
@@ -103,8 +102,13 @@ when the next release is planned for
 ## Backwards Compatibility
 
 (Describe any backwards compatibility considerations for this feature.
-This should include any changes to the API, datapath, or other components
-that may be backwards incompatible.)
+This should include:)
+
+- Any changes to the API, datapath, or other components that may be backwards incompatible.
+- E2E tests: When introducing new functionality, prefer adding new E2E tests rather than
+  modifying existing ones. Existing E2E tests should continue to validate that the current
+  API remains functional. If you must modify existing E2E tests, ensure the changes do not
+  break validation of the current API behavior.
 
 ## Alternatives
 

@@ -8,6 +8,7 @@
   * [Development Environment Setup](#development-environment-setup)
   * [Sign Your Commits](#sign-your-commits)
   * [Pull Request Checklist](#pull-request-checklist)
+  * [AI Guidelines](#ai-guidelines)
 
 Welcome! We are glad that you want to contribute to our project! 💖
 
@@ -75,16 +76,15 @@ The best way to reach us with a question when contributing is to ask on:
 
 ## Pull Request Lifecycle
 
-1. When you open a PR a maintainer will automatically be assigned for review
+1. When you open a PR a reviewer will automatically be assigned. This need not be a maintainer.
 2. Make sure that your PR is passing CI - if you need help with failing checks please feel free to ask!
-3. Once it is passing all CI checks, a maintainer will review your PR and you may be asked to make changes.
-4. When you have received at least one approval from a maintainer, that maintainer will merge your PR.
+3. Once the assigned reviewer approves (+1), a maintainer (see `MAINTAINERS.md` for the current list) will review and merge your PR. You may be asked to make additional changes by maintainer post reviewer's approval.
 
 In some cases, other changes may conflict with your PR. If this happens, you will get notified by a comment in the issue that your PR requires a rebase, and the `needs-rebase` label will be applied. Once a rebase has been performed, this label will be automatically removed.
 
 ## Development Environment Setup
 
-You can easily setup a developer environment by following the instructions [here](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/kind.md).
+You can easily setup a developer environment by following the instructions [here](https://ovn-kubernetes.io/installation/launching-ovn-kubernetes-on-kind/).
 
 ## Sign Your Commits
 
@@ -195,3 +195,44 @@ make test
 * All modular changes must be accompanied by new unit tests if they don't exist already.
 
 * All functional changes and new features must be accompanied by extensive end-to-end test coverage
+
+* Documentation updates are required when user-facing behavior changes
+
+## AI Guidelines
+
+You may use AI tools when preparing your contribution (issue, pull request etc...).
+As the author, you are responsible for understanding every change you submit.
+
+* Review and test AI-generated changes yourself before submitting. Do not rely
+  on reviewers to perform the first review.
+* Be prepared to explain any change in your PR. If you cannot explain why a
+  change was made, the PR may be closed.
+* Respond to review comments in your own words. Reviewers want to engage
+  directly with you, not with generated responses.
+* If you used AI tools when preparing your PR, disclose this (see
+  [Disclosure](#disclosure) below).
+* All contributions must follow this guide and use commit messages that align
+  with our [commit message guidelines](#commit-message-guidelines). Large
+  AI-generated PRs and AI-generated commit messages are discouraged.
+
+### Disclosure
+
+Disclose AI tool use when it has materially contributed to what you submit.
+You must still adhere to our [DCO](#dco) and sign off commits.
+
+**How to disclose:** Use the "Special notes for your reviewer" section in the
+PR, and optionally add a trailer to the commit. Acceptable commit trailer
+formats include:
+
+* `Assisted-by: Tool Name and/or Model Name <contact@example.com>`
+* `Co-authored-by: Tool Name and/or Model Name <contact@example.com>`
+
+Many AI tools add `Co-authored-by` automatically; that is acceptable.
+
+**Requires disclosure:** AI wrote or suggested code, tests, documentation, or
+commit messages that you used; AI suggested an approach or refactor that
+shaped the implementation.
+
+**Does not require disclosure:** General Q&A or learning, IDE autocomplete,
+using AI to explain existing code, asking AI to review your code, or
+spell-check and minor fixes. When in doubt, disclose.

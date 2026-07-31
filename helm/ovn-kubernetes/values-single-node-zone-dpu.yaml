@@ -5,15 +5,9 @@
 tags:
   ovs-node: false
   ovn-ipsec: false
-  ovnkube-db: false
-  ovnkube-db-raft: false
-  ovnkube-master: false
-  ovnkube-node: false
   ovnkube-control-plane: false
   ovnkube-node-dpu-host: false
-  ovnkube-node-dpu: false
   ovnkube-single-node-zone: false
-  ovnkube-zone-controller: false
 
 # -- Whether or not call `lookup` Helm function, set it to `true` if you want to run `helm dry-run/template/lint`
 skipCallToK8s: false
@@ -27,6 +21,10 @@ global:
   gatewayMode: shared
   # -- Optional extra gateway options
   gatewayOpts: ""
+  # -- Use simulated DPU operations instead of SR-IOV/switchdev hardware (for Kind/VM-based DPU simulation)
+  simulateDpu: false
+  # -- The DPU-side representor interface for the host's uplink (PF). Required for simulated environments where switchdev metadata is unavailable.
+  dpuHostGatewayRepresentorInterface: ""
   # -- This allows ovnkube-node to run without SYS_ADMIN capability, by performing interface setup in the CNI plugin
   unprivilegedMode: false
   # -- The v4 join subnet used for assigning join switch IPv4 addresses
@@ -69,6 +67,9 @@ global:
   enableNetworkSegmentation: false
   # -- Configure to use route advertisements feature with ovn-kubernetes
   enableRouteAdvertisements: false
+  # -- Optional Linux routing table ID start used by ovnkube-node for generated VRF/route tables.
+  # -- Minimum: 1000. If unset, ovnkube-node uses its built-in default.
+  # routingTableIDStart: 1002
   # -- Configure to enable no-overlay mode for the default network
   enableNoOverlay: false
   # -- Configure to enable SNAT for outbound traffic in no-overlay mode
@@ -85,11 +86,9 @@ global:
   enablePreconfiguredUDNAddresses: false
   # -- Configure to enable IPsec
   enableIpsec: false
-  # -- Use SSL transport to NB/SB db and northd
+  # -- Use SSL transport for the Egress IP gRPC health-check (NB cert paths
+  # are reused for this; OVN NB/SB DB connections are always unix sockets).
   enableSsl: false
-  # -- Configure to enable interconnecting multiple zones
-  # @default -- true
-  enableInterconnect: true
   # -- Configure to use AdminPolicyBasedExternalRoute CRD feature with ovn-kubernetes
   enableMultiExternalGateway: false
   # -- Configure to use stateless network policy feature with ovn-kubernetes
@@ -98,7 +97,7 @@ global:
   enableSvcTemplate: false
   # -- Enables metrics related to scaling
   enableMetricsScale: ""
-  # -- Enables monitoring OVN-Kubernetes master and OVN configuration duration
+  # -- Enables monitoring OVN-Kubernetes control plane and OVN configuration duration
   enableConfigDuration: ""
   # -- Indicates if ovn-controller should enable/disable the logical flow in-memory cache when processing Southbound database logical flow changes
   # @default -- true
@@ -112,7 +111,7 @@ global:
   enablePersistentIPs: false
   # -- Configure to use DNSNameResolver feature with ovn-kubernetes
   enableDNSNameResolver: false
-  # -- Whether to disable SNAT of egress traffic in namespaces annotated with routing-external-gws
+  # -- Whether to disable SNAT of egress traffic in namespaces with external gateways configured via AdminPolicyBasedExternalRoute CRs
   disableSnatMultipleGws: ""
   # -- Controls if forwarding is allowed on OVNK controlled interfaces
   # @default -- false

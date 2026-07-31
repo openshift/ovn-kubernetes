@@ -13,12 +13,19 @@ DUALSTACK_CONVERSION?=false
 # Coredump detection settings
 # Directory where kind clusters store coredumps
 COREDUMP_DIR?=/tmp/kind/logs/coredumps
+# Processes to skip when checking for coredumps (pipe-separated for grep)
+# https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5782
+# https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6299
+#
+# Don't remove this skip until we trust frr enough not to puke coredumps that
+# often.
+SKIPPED_COREDUMPS?=zebra|bgpd|mgmtd|bfdd
 
-# Check for coredumps and fail if any are found
+# Check for coredumps and fail if any are found (excluding skipped processes)
 # Usage: $(call check-coredumps)
 define check-coredumps
 	@if [ -d "$(COREDUMP_DIR)" ]; then \
-		coredumps=$$(find "$(COREDUMP_DIR)" -maxdepth 1 -type f 2>/dev/null); \
+		coredumps=$$(find "$(COREDUMP_DIR)" -maxdepth 1 -type f 2>/dev/null | grep -v -E '$(SKIPPED_COREDUMPS)' || true); \
 		if [ -n "$$coredumps" ]; then \
 			echo "ERROR: Coredumps found:"; \
 			echo "$$coredumps"; \
@@ -45,7 +52,7 @@ shard-%:
 	PLATFORM_IPV6_SUPPORT=$(PLATFORM_IPV6_SUPPORT) \
 	DUALSTACK_CONVERSION=$(DUALSTACK_CONVERSION) \
 	SINGLE_NODE_CLUSTER=$(SINGLE_NODE_CLUSTER) \
-	./scripts/e2e-kind.sh $@ $(WHAT)
+	./scripts/e2e-kind.sh $@ "$(WHAT)"
 	$(call check-coredumps)
 
 # control-plane: coredump check is handled by the test framework (wrappedTestFramework)
@@ -56,7 +63,7 @@ control-plane:
 	PLATFORM_IPV4_SUPPORT=$(PLATFORM_IPV4_SUPPORT) \
 	PLATFORM_IPV6_SUPPORT=$(PLATFORM_IPV6_SUPPORT) \
 	OVN_HA=$(OVN_HA) \
-	./scripts/e2e-cp.sh $(WHAT)
+	./scripts/e2e-cp.sh "$(WHAT)"
 
 .PHONY: conformance
 conformance:
@@ -73,5 +80,5 @@ tools:
 .PHONY: traffic-flow-tests
 traffic-flow-tests:
 	TRAFFIC_FLOW_TESTS=$(TRAFFIC_FLOW_TESTS) \
-	./scripts/traffic-flow-tests.sh $(WHAT)
+	./scripts/traffic-flow-tests.sh "$(WHAT)"
 	$(call check-coredumps)

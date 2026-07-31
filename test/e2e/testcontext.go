@@ -66,6 +66,9 @@ func ProcessTestContextAndSetupLogging() {
 		t.Provider = "skeleton"
 	}
 
+	// verify service accounts are created for namespaces before tests run
+	t.VerifyServiceAccount = true
+
 	var err error
 	t.CloudConfig.Provider, err = framework.SetupProviderConfig(t.Provider)
 	if err != nil {

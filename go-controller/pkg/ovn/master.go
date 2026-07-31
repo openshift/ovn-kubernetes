@@ -395,24 +395,22 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		return fmt.Errorf("failed to sync chassis: error: %v", err)
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		// Chassis cleanup should happen regardless of transport mode to cleanup
-		// any stale remote chassis entries (e.g., from overlay->no-overlay migration)
-		if err := oc.zoneChassisHandler.SyncNodes(kNodes); err != nil {
-			return fmt.Errorf("zoneChassisHandler failed to sync nodes: error: %w", err)
-		}
+	// Chassis cleanup should happen regardless of transport mode to cleanup
+	// any stale remote chassis entries (e.g., from overlay->no-overlay migration)
+	if err := oc.zoneChassisHandler.SyncNodes(kNodes); err != nil {
+		return fmt.Errorf("zoneChassisHandler failed to sync nodes: error: %w", err)
+	}
 
-		// Interconnect resource sync depends on transport mode:
-		// - For overlay: ensure transit switch exists and cleanup stale resources
-		// - For no-overlay: cleanup all interconnect resources (nodes and transit switch)
-		if oc.Transport() == types.NetworkTransportNoOverlay {
-			if err := oc.zoneICHandler.Cleanup(); err != nil {
-				return fmt.Errorf("zoneICHandler failed to cleanup: error: %w", err)
-			}
-		} else {
-			if err := oc.zoneICHandler.CleanupStaleNodes(kNodes); err != nil {
-				return fmt.Errorf("zoneICHandler failed to cleanup stale nodes: error: %w", err)
-			}
+	// Interconnect resource sync depends on transport mode:
+	// - For overlay: ensure transit switch exists and cleanup stale resources
+	// - For no-overlay: cleanup all interconnect resources (nodes and transit switch)
+	if oc.Transport() == types.NetworkTransportNoOverlay {
+		if err := oc.zoneICHandler.Cleanup(); err != nil {
+			return fmt.Errorf("zoneICHandler failed to cleanup: error: %w", err)
+		}
+	} else {
+		if err := oc.zoneICHandler.CleanupStaleNodes(kNodes); err != nil {
+			return fmt.Errorf("zoneICHandler failed to cleanup stale nodes: error: %w", err)
 		}
 	}
 
@@ -666,7 +664,7 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 		}
 	}
 
-	if nSyncs.syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+	if nSyncs.syncZoneIC {
 		// Always call zone chassis handler's AddLocalZoneNode function to mark
 		// this node's chassis record in Southbound db as a local zone chassis.
 		// This is required even when the default network uses no-overlay transport,
@@ -735,7 +733,7 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, 
 	}
 
 	var err error
-	if syncZoneIC && config.OVNKubernetesFeature.EnableInterconnect {
+	if syncZoneIC {
 		// Always create remote chassis entry with geneve encapsulation.
 		// This is needed even when the default network uses no-overlay transport,
 		// because user-defined networks may still use overlay transport and require
@@ -790,24 +788,15 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *corev1.Node) error 
 		return err
 	}
 
-	if config.OVNKubernetesFeature.EnableInterconnect {
-		if err := oc.zoneICHandler.DeleteNode(node); err != nil {
+	if err := oc.zoneICHandler.DeleteNode(node); err != nil {
+		return err
+	}
+	if !oc.isLocalZoneNode(node) {
+		if err := oc.zoneChassisHandler.DeleteRemoteZoneNode(node); err != nil {
 			return err
 		}
-		if !oc.isLocalZoneNode(node) {
-			if err := oc.zoneChassisHandler.DeleteRemoteZoneNode(node); err != nil {
-				return err
-			}
-		}
-		oc.syncZoneICFailed.Delete(node.Name)
 	}
-
-	// Remove management port IP and node's gateway-router-lrp-ifaddr
-	// from address_set specific to HostNetworkNamespace
-	if err := oc.delIPFromHostNetworkNamespaceAddrSet(node); err != nil {
-		return fmt.Errorf("failed to delete IPs from %s address_set: %v",
-			config.Kubernetes.HostNetworkNamespace, err)
-	}
+	oc.syncZoneICFailed.Delete(node.Name)
 
 	oc.lsManager.DeleteSwitch(node.Name)
 	oc.addNodeFailed.Delete(node.Name)
@@ -815,7 +804,6 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *corev1.Node) error 
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
 	oc.localZoneNodes.Delete(node.Name)
-	oc.syncHostNetAddrSetFailed.Delete(node.Name)
 
 	return nil
 }
@@ -877,82 +865,6 @@ func (oc *DefaultNetworkController) deleteHoNodeEvent(node *corev1.Node) error {
 	return nil
 }
 
-// addIPToHostNetworkNamespaceAddrSet adds management port IP and node's
-// gateway-router-lrp-ifaddr to address_set created for HostNetworkNamespace.
-// This function gets called from both AddResource & UpdateResource to add IPs
-// to address_set for both local and remote zone nodes.
-func (oc *DefaultNetworkController) addIPToHostNetworkNamespaceAddrSet(node *corev1.Node) error {
-	var hostNetworkPolicyIPs []net.IP
-
-	if util.NoHostSubnet(node) {
-		return nil
-	}
-	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
-	if err != nil {
-		parsedErr := err
-		if !oc.isLocalZoneNode(node) {
-			parsedErr = types.NewSuppressedError(err)
-		}
-		return fmt.Errorf("error parsing annotation for node %s: %w", node.Name, parsedErr)
-	}
-
-	// add the host network IPs for this node to host network namespace's address set
-	if err = func() error {
-		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
-		if hostNetworkNamespace != "" {
-			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
-			if err != nil {
-				return fmt.Errorf("failed to ensure namespace locked: %v", err)
-			}
-			defer nsUnlock()
-			if err = nsInfo.addressSet.AddAddresses(util.StringSlice(hostNetworkPolicyIPs)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}(); err != nil {
-		return err
-	}
-	return nil
-}
-
-// delIPFromHostNetworkNamespaceAddrSet removes management port IP and node's
-// gateway-router-lrp-ifaddr from address_set created for HostNetworkNamespace.
-// This function gets called from deleteOVNNodeEvent to remove IPs from address_set
-// for both local and remote zone nodes
-func (oc *DefaultNetworkController) delIPFromHostNetworkNamespaceAddrSet(node *corev1.Node) error {
-	var hostNetworkPolicyIPs []net.IP
-
-	hostNetworkPolicyIPs, err := oc.getHostNamespaceAddressesForNode(node)
-	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// if annotation is not set for node subnet or node GW router LRP IP address, we can assume nothing was added to the
-			// host network namespace address set. We depend on both annotations to be set before configuring the address set.
-			return nil
-		}
-		return fmt.Errorf("error parsing annotation for node %s: %v", node.Name, err)
-	}
-
-	// delete host network IPs for this node from host network namespace's address set
-	if err = func() error {
-		hostNetworkNamespace := config.Kubernetes.HostNetworkNamespace
-		if hostNetworkNamespace != "" {
-			nsInfo, nsUnlock, err := oc.ensureNamespaceLocked(hostNetworkNamespace, true, nil)
-			if err != nil {
-				return fmt.Errorf("failed to ensure namespace locked: %v", err)
-			}
-			defer nsUnlock()
-			if err = nsInfo.addressSet.DeleteAddresses(util.StringSlice(hostNetworkPolicyIPs)); err != nil {
-				return err
-			}
-		}
-		return nil
-	}(); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (oc *DefaultNetworkController) newGatewayManager(nodeName string) *GatewayManager {
 	gatewayManager := NewGatewayManager(
 		nodeName,
@@ -962,6 +874,7 @@ func (oc *DefaultNetworkController) newGatewayManager(nodeName string) *GatewayM
 		oc.GetNetInfo(),
 		oc.watchFactory,
 		nodecontroller.NewNodeAnnotationCache(),
+		oc.addressSetManager,
 		oc.gatewayOptions()...,
 	)
 	return gatewayManager

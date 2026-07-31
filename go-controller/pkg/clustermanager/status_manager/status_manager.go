@@ -8,14 +8,12 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager/zone_tracker"
@@ -26,6 +24,7 @@ import (
 	egressqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	networkqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -52,6 +51,10 @@ type resourceManager[T any] interface {
 	cleanupStatus(obj *T, applyOpts *metav1.ApplyOptions) error
 }
 
+type relevantZoneProvider[T any] interface {
+	getRelevantZones(obj *T, zones sets.Set[string]) (sets.Set[string], error)
+}
+
 // typedStatusManager manages status for a resource of type T.
 type typedStatusManager[T any] struct {
 	name string
@@ -74,7 +77,6 @@ func newStatusManager[T any](name string, informer cache.SharedIndexInformer,
 	controllerConfig := &controller.ControllerConfig[T]{
 		Informer:       informer,
 		Lister:         lister,
-		RateLimiter:    workqueue.NewTypedItemFastSlowRateLimiter[string](time.Second, 5*time.Second, 5),
 		ObjNeedsUpdate: m.needsUpdate,
 		Reconcile:      m.updateStatus,
 		Threadiness:    1,
@@ -201,38 +203,49 @@ func (m *typedStatusManager[T]) updateStatus(key string) error {
 			return nil
 		}
 
-		messages := m.resource.getMessages(obj)
-		if len(messages) == 0 {
-			return nil
-		}
-
-		// first, make sure no stale zones are present.
-		// every zone has exactly 1 status message
-		if len(messages) > zones.Len() {
-			for _, message := range messages {
-				if zoneID := types.GetZoneFromStatus(message); !zones.Has(zoneID) {
-					// stale zone, remove
-					// use zoneID as fieldManager to reset fields owned by that zone
-					applyAsZoneController := &metav1.ApplyOptions{
-						Force:        true,
-						FieldManager: zoneID,
-					}
-					klog.Infof("StatusManager %s: delete stale zone %s", m.name, zoneID)
-					err = m.resource.cleanupStatus(obj, applyAsZoneController)
-					if err != nil {
-						return fmt.Errorf("StatusManager %s: failed to cleanup status for stale zone %s: %w", m.name, zoneID, err)
-					}
-				}
+		relevantZones := zones.Clone()
+		if provider, ok := any(m.resource).(relevantZoneProvider[T]); ok {
+			relevantZones, err = provider.getRelevantZones(obj, zones)
+			if err != nil {
+				return fmt.Errorf("StatusManager %s: failed to determine relevant zones for %s/%s: %w", m.name, namespace, name, err)
 			}
 		}
 
+		messages := m.resource.getMessages(obj)
+
+		// First, make sure no stale zones are present. This includes deleted zones and
+		// zones that are no longer relevant for the object's current active topology.
+		staleZonesCleaned := false
+		for _, message := range messages {
+			if zoneID := types.GetZoneFromStatus(message); !relevantZones.Has(zoneID) {
+				// stale zone, remove
+				// use zoneID as fieldManager to reset fields owned by that zone
+				applyAsZoneController := &metav1.ApplyOptions{
+					Force:        true,
+					FieldManager: zoneID,
+				}
+				klog.Infof("StatusManager %s: delete stale zone %s", m.name, zoneID)
+				err = m.resource.cleanupStatus(obj, applyAsZoneController)
+				if err != nil {
+					return fmt.Errorf("StatusManager %s: failed to cleanup status for stale zone %s: %w", m.name, zoneID, err)
+				}
+				staleZonesCleaned = true
+			}
+		}
+		if staleZonesCleaned {
+			// The cleanup patches will trigger a new reconcile with a fresh view of per-zone
+			// messages. Avoid aggregating with the stale in-memory status.
+			return nil
+		}
+
 		// now calculate accumulated status.
-		// if not all zones reported status, clean it up, since the status is considered unknown until all zone report results.
+		// if not all relevant zones reported status, clean it up, since the status is
+		// considered unknown until all relevant zones report results.
 		applyAsStatusManager := &metav1.ApplyOptions{
 			Force:        true,
 			FieldManager: clusterManagerName,
 		}
-		applyEmptyOrFailed := len(messages) < zones.Len()
+		applyEmptyOrFailed := relevantZones.Len() == 0 || len(messages) < relevantZones.Len()
 		return m.resource.updateStatus(obj, applyAsStatusManager, applyEmptyOrFailed)
 	})
 }
@@ -256,7 +269,7 @@ type resourceReconciler interface {
 	ReconcileAll()
 }
 
-func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManagerClientset) *StatusManager {
+func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManagerClientset, networkManager networkmanager.Interface) *StatusManager {
 	sm := &StatusManager{
 		typedManagers: map[string]resourceReconciler{},
 		zonesLock:     sync.RWMutex{},
@@ -281,7 +294,7 @@ func NewStatusManager(wf *factory.WatchFactory, ovnClient *util.OVNClusterManage
 			"egressfirewalls_statusmanager",
 			wf.EgressFirewallInformer().Informer(),
 			wf.EgressFirewallInformer().Lister().List,
-			newEgressFirewallManager(wf.EgressFirewallInformer().Lister(), ovnClient.EgressFirewallClient),
+			newEgressFirewallManager(wf.EgressFirewallInformer().Lister(), wf.NodeCoreInformer().Lister(), ovnClient.EgressFirewallClient, networkManager),
 			sm.withZonesRLock,
 		)
 		sm.typedManagers["egressfirewalls"] = egressFirewallManager

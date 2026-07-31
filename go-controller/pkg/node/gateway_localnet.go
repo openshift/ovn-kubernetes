@@ -7,6 +7,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -14,23 +15,29 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func initLocalGateway(hostSubnets []*net.IPNet, mgmtPort managementport.Interface) error {
-	if config.OvnKubeNode.Mode == types.NodeModeDPU {
+	if config.IsModeDPU() {
 		return nil
 	}
 
-	klog.Info("Adding iptables masquerading rules for new local gateway")
+	klog.Info("Adding iptables/nftables masquerading rules for new local gateway")
 
-	var allCIDRs []*net.IPNet
+	// Set up iptables filter rules to allow traffic to/from the management port.
 	ifName := mgmtPort.GetInterfaceName()
+	if err := initLocalGatewayIPTFilterRules(ifName); err != nil {
+		return fmt.Errorf("failed to configure local forwarding rules for: %s, err: %v", ifName, err)
+	}
 
-	// First pass: collect all CIDRs and setup iptables filter rules per interface
+	// Set up nftables masquerade rules for this node's subnets.
+	var allCIDRs []*net.IPNet
 	for _, hostSubnet := range hostSubnets {
 		// local gateway mode uses mp0 as default path for all ingress traffic into OVN
 		nextHop, err := util.MatchFirstIPNetFamily(utilnet.IsIPv6CIDR(hostSubnet), mgmtPort.GetAddresses())
@@ -38,18 +45,11 @@ func initLocalGateway(hostSubnets []*net.IPNet, mgmtPort managementport.Interfac
 			return fmt.Errorf("failed to find management port address: %w", err)
 		}
 
-		// add iptables masquerading for mp0 to exit the host for egress
 		cidr := nextHop.IP.Mask(nextHop.Mask)
 		cidrNet := &net.IPNet{IP: cidr, Mask: nextHop.Mask}
 		allCIDRs = append(allCIDRs, cidrNet)
-
-		// Setup iptables filter rules for this interface/CIDR
-		if err := initLocalGatewayIPTFilterRules(ifName, cidrNet); err != nil {
-			return fmt.Errorf("failed to add local NAT rules for: %s, err: %v", ifName, err)
-		}
 	}
 
-	// setup nftables masquerade rules for all CIDRs (v4, v6 or dualstack)
 	if len(allCIDRs) > 0 {
 		if err := initLocalGatewayNFTNATRules(allCIDRs...); err != nil {
 			return fmt.Errorf("failed to setup nftables masquerade rules: %w", err)
@@ -88,26 +88,35 @@ func getLocalAddrs() (map[string]net.IPNet, error) {
 	return localAddrSet, nil
 }
 
-func cleanupLocalnetGateway(physnet string) error {
-	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
+func cleanupLocalnetGateway(ovsClient libovsdbclient.Client, physnet string) error {
+	if config.IsModeDPUHost() {
 		return nil
 	}
-	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-		"external_ids:ovn-bridge-mappings")
+	ovs, err := ovsops.GetOpenvSwitch(ovsClient)
 	if err != nil {
-		return fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			// Nothing configured yet — nothing to clean up.
+			return nil
+		}
+		return fmt.Errorf("failed to get Open_vSwitch row: %w", err)
 	}
-	bridgeMappings := strings.Split(stdout, ",")
-	for _, bridgeMapping := range bridgeMappings {
-		m := strings.Split(bridgeMapping, ":")
+	mappings := ovs.ExternalIDs["ovn-bridge-mappings"]
+	if mappings == "" {
+		return nil
+	}
+	for _, bridgeMapping := range strings.Split(mappings, ",") {
+		m := strings.SplitN(bridgeMapping, ":", 2)
+		if len(m) != 2 || m[1] == "" {
+			klog.Warningf("Ignoring malformed ovn-bridge-mappings entry %q", bridgeMapping)
+			continue
+		}
 		if physnet == m[0] {
 			bridgeName := m[1]
-			_, stderr, err = util.RunOVSVsctl("--", "--if-exists", "del-br", bridgeName)
-			if err != nil {
-				return fmt.Errorf("failed to ovs-vsctl del-br %s stderr:%s (%v)", bridgeName, stderr, err)
+			if err := ovsops.DeleteBridge(ovsClient, bridgeName); err != nil {
+				return fmt.Errorf("failed to delete bridge %s: %w", bridgeName, err)
 			}
 			break
 		}
 	}
-	return err
+	return nil
 }

@@ -20,13 +20,14 @@ import (
 	"testing"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
-	cni020 "github.com/containernetworking/cni/pkg/types/020"
+	current "github.com/containernetworking/cni/pkg/types/100"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	utiltesting "k8s.io/client-go/util/testing"
-
-	"github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -56,16 +57,7 @@ func clientDoCNI(t *testing.T, client *http.Client, req *Request) ([]byte, int) 
 	return body, resp.StatusCode
 }
 
-var expectedResult cnitypes.Result
-
-func serverHandleCNI(request *PodRequest, _ *ClientSet, _ *KubeAPIAuth, _ networkmanager.Interface, _ client.Client) ([]byte, error) {
-	if request.Command == CNIAdd {
-		return json.Marshal(&expectedResult)
-	} else if request.Command == CNIDel || request.Command == CNIUpdate || request.Command == CNICheck || request.Command == CNIStatus {
-		return nil, nil
-	}
-	return nil, fmt.Errorf("unhandled CNI command %v", request.Command)
-}
+var expectedResult *current.Result
 
 func makeCNIArgs(namespace, name string) string {
 	return fmt.Sprintf("K8S_POD_NAMESPACE=%s;K8S_POD_NAME=%s", namespace, name)
@@ -87,11 +79,32 @@ func TestCNIServer(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 	socketPath := filepath.Join(tmpDir, serverSocketName)
-	fakeClient := fake.NewSimpleClientset()
+	// Pre-create the pod with the OVN pod-networks annotation so
+	// GetPodWithAnnotations resolves immediately during cmdAdd. The IP in the
+	// annotation flows through getCNIResult into the response we'll verify.
+	podObj := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			UID:       k8stypes.UID("test-pod-uid"),
+			Annotations: map[string]string{
+				"k8s.ovn.org/pod-networks": `{"default":{"ip_address":"10.0.0.2/24","mac_address":"0a:58:0a:00:00:02"}}`,
+			},
+		},
+		Spec: corev1.PodSpec{NodeName: nodeName},
+	}
+	fakeClient := fake.NewSimpleClientset(podObj)
 	err = config.PrepareTestConfig()
 	if err != nil {
 		t.Fatalf("failed to prepare test config: %v", err)
 	}
+
+	// Stub out the host-side interface ops so getCNIResult can run without
+	// touching real netns/OVS. Restore at end.
+	origInterfaceOps := podRequestInterfaceOps
+	podRequestInterfaceOps = &podRequestInterfaceOpsStub{}
+	defer func() { podRequestInterfaceOps = origInterfaceOps }()
+
 	fakeClientset := &util.OVNNodeClientset{
 		KubeClient: fakeClient,
 	}
@@ -103,16 +116,16 @@ func TestCNIServer(t *testing.T) {
 		t.Fatalf("failed to start watch factory: %v", err)
 	}
 
-	ovsClient, err := newOVSClientWithExternalIDs(map[string]string{})
+	ovsClient, ovsCleanup, err := newOVSClientWithExternalIDs(map[string]string{})
 	if err != nil {
 		t.Fatalf("failed to call newOVSClientWithExternalIDs: %v", err)
 	}
+	t.Cleanup(ovsCleanup.Cleanup)
 	s, err := NewCNIServer(wf, fakeClient, networkmanager.Default().Interface(), ovsClient, nil)
 	if err != nil {
 		t.Fatalf("error creating CNI server: %v", err)
 	}
 	// override request handler
-	s.handlePodRequestFunc = serverHandleCNI
 	if err := s.Start(tmpDir); err != nil {
 		t.Fatalf("error starting CNI server: %v", err)
 	}
@@ -125,20 +138,24 @@ func TestCNIServer(t *testing.T) {
 		},
 	}
 
+	// Build the expected Result that getCNIResult would return for the pod
+	// annotation above + the podRequestInterfaceOps.
 	expectedIP, expectedNet, _ := net.ParseCIDR("10.0.0.2/24")
-	expectedResult = &cni020.Result{
-		IP4: &cni020.IPConfig{
-			IP: net.IPNet{
-				IP:   expectedIP,
-				Mask: expectedNet.Mask,
-			},
+	expectedResult = &current.Result{
+		Interfaces: []*current.Interface{
+			{Name: "host_eth0"},
+			{Name: "eth0", Sandbox: "/var/run/netns/" + namespace + "_" + name},
 		},
+		IPs: []*current.IPConfig{{
+			Interface: current.Int(1),
+			Address:   net.IPNet{IP: expectedIP, Mask: expectedNet.Mask},
+		}},
 	}
 
 	type testcase struct {
 		name        string
 		request     *Request
-		result      cnitypes.Result
+		result      *current.Result
 		errorPrefix string
 	}
 
@@ -284,12 +301,12 @@ func TestCNIServer(t *testing.T) {
 				t.Fatalf("[%s] expected status %v but got %v", tc.name, http.StatusOK, code)
 			}
 			if tc.result != nil {
-				result := &cni020.Result{}
-				if err := json.Unmarshal(body, result); err != nil {
+				resp := &Response{}
+				if err := json.Unmarshal(body, resp); err != nil {
 					t.Fatalf("[%s] failed to unmarshal response '%s': %v", tc.name, string(body), err)
 				}
-				if !reflect.DeepEqual(result, tc.result) {
-					t.Fatalf("[%s] expected result %v but got %v", tc.name, tc.result, result)
+				if !reflect.DeepEqual(resp.Result, tc.result) {
+					t.Fatalf("[%s] expected result %v but got %v", tc.name, tc.result, resp.Result)
 				}
 			}
 		} else {
@@ -327,10 +344,11 @@ func TestCNIServerStatusNotReady(t *testing.T) {
 		t.Fatalf("failed to start watch factory: %v", err)
 	}
 
-	ovsClient, err := newOVSClientWithExternalIDs(map[string]string{})
+	ovsClient, ovsCleanup, err := newOVSClientWithExternalIDs(map[string]string{})
 	if err != nil {
 		t.Fatalf("failed to call newOVSClientWithExternalIDs: %v", err)
 	}
+	t.Cleanup(ovsCleanup.Cleanup)
 	dpuHealth := &fakeDPUHealth{ready: false, reason: "lease expired"}
 	s, err := NewCNIServer(wf, fakeClient, networkmanager.Default().Interface(), ovsClient, dpuHealth)
 	if err != nil {
@@ -396,6 +414,60 @@ func TestCNIServerStatusNotReady(t *testing.T) {
 		} else if len(body) != 0 {
 			t.Fatalf("[%s] expected empty body for success, got %q", tc.name, string(body))
 		}
+	}
+}
+
+func TestNewCNIServerRequiresOVSClientInPrivilegedMode(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	fakeClient := fake.NewSimpleClientset()
+	fakeClientset := &util.OVNNodeClientset{
+		KubeClient: fakeClient,
+	}
+	wf, err := factory.NewNodeWatchFactory(fakeClientset, nodeName)
+	if err != nil {
+		t.Fatalf("failed to create watch factory: %v", err)
+	}
+
+	tests := []struct {
+		name             string
+		mode             string
+		unprivilegedMode bool
+		wantErr          bool
+	}{
+		{
+			name:    "full mode privileged requires ovs client",
+			mode:    ovntypes.NodeModeFull,
+			wantErr: true,
+		},
+		{
+			name:             "full mode unprivileged allows nil ovs client",
+			mode:             ovntypes.NodeModeFull,
+			unprivilegedMode: true,
+		},
+		{
+			name: "dpu host privileged allows nil ovs client",
+			mode: ovntypes.NodeModeDPUHost,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config.OvnKubeNode.Mode = tt.mode
+			config.UnprivilegedMode = tt.unprivilegedMode
+
+			_, err := NewCNIServer(wf, fakeClient, networkmanager.Default().Interface(), nil, nil)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "OVS client is required in privileged mode") {
+					t.Fatalf("expected OVS client error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected NewCNIServer to succeed, got %v", err)
+			}
+		})
 	}
 }
 

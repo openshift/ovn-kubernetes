@@ -35,6 +35,7 @@ import (
 	vtepscheme "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/scheme"
 	vteplisters "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/listers/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
@@ -260,6 +261,7 @@ func (c *Controller) handleVTEPDeletion(vtep *vtepv1.VTEP) error {
 		return fmt.Errorf("failed to remove finalizer from VTEP %s: %w", vtep.Name, err)
 	}
 	klog.Infof("Removed finalizer from VTEP %s, deletion unblocked", vtep.Name)
+	metrics.DeleteVTEPCondition(vtep.Name)
 	return nil
 }
 
@@ -453,12 +455,15 @@ func (c *Controller) validateNodeVTEPIPs(vtep *vtepv1.VTEP) error {
 }
 
 func (c *Controller) handleManagedModeNotSupported(vtep *vtepv1.VTEP) error {
-	vtepRef, err := reference.GetReference(vtepscheme.Scheme, vtep)
-	if err != nil {
-		return fmt.Errorf("failed to get object reference for VTEP %s: %w", vtep.Name, err)
+	existingCond := meta.FindStatusCondition(vtep.Status.Conditions, conditionTypeAccepted)
+	if existingCond == nil || existingCond.Status != metav1.ConditionFalse || existingCond.Reason != reasonManagedModeNotSupported {
+		vtepRef, err := reference.GetReference(vtepscheme.Scheme, vtep)
+		if err != nil {
+			return fmt.Errorf("failed to get object reference for VTEP %s: %w", vtep.Name, err)
+		}
+		c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonManagedModeNotSupported,
+			"Managed VTEP mode is not yet implemented; only Unmanaged mode is currently supported")
 	}
-	c.eventRecorder.Event(vtepRef, corev1.EventTypeWarning, reasonManagedModeNotSupported,
-		"Managed VTEP mode is not yet implemented; only Unmanaged mode is currently supported")
 
 	return c.updateStatusCondition(vtep, conditionTypeAccepted, metav1.ConditionFalse,
 		reasonManagedModeNotSupported,
