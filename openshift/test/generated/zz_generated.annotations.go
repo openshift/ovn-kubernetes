@@ -1459,6 +1459,12 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Disabled:Unimplemented]",
 
+	"Network Segmentation Uplink default-VRF egress maps multiple CUDNs to the same Uplink bridge": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation Uplink route advertisements uses the default VRF as the BGP peering path": "[Suite:openshift/conformance/parallel]",
+
 	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network pod connected to UserDefinedNetwork cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network should create NetworkAttachmentDefinition according to spec": "[Suite:openshift/conformance/parallel]",
@@ -1553,13 +1559,25 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork add subnet not affecting existing node subnet assignment": "[Suite:openshift/conformance/parallel]",
 
-	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork can perform east/west traffic between nodes on different CIDR L3 primary network": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork with L3 primary network can perform east/west traffic between nodes on different CIDR": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork with L3 primary network can perform host to pod traffic via UDN VRF between nodes on different CIDR": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork with L3 primary network can perform host to pod traffic via UDN VRF between nodes on same CIDR": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork with L3 primary network can perform host to pod traffic via UDN VRF on same node": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork add bad subnet should not cause change on existing NAD": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork add subnet not affecting existing node subnet assignment": "[Suite:openshift/conformance/parallel]",
 
-	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork can perform east/west traffic between nodes on different CIDR L3 primary network": "[Suite:openshift/conformance/parallel]",
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork with L3 primary network can perform east/west traffic between nodes on different CIDR": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork with L3 primary network can perform host to pod traffic via UDN VRF between nodes on different CIDR": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork with L3 primary network can perform host to pod traffic via UDN VRF between nodes on same CIDR": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation layer3 primary network with multi-subnets created using UserDefinedNetwork with L3 primary network can perform host to pod traffic via UDN VRF on same node": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation pod2Egress on a user defined primary network created using ClusterUserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer2 network with custom network": "[Disabled:Unimplemented]",
 
@@ -1640,6 +1658,14 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation: Network Policies on a user defined primary network pods within namespace should be isolated when deny policy is present in L2 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation: Network Policies on a user defined primary network pods within namespace should be isolated when deny policy is present in L3 dualstack primary UDN": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation: Node Annotations Tunnel ID Annotations should NOT allocate tunnel ID annotations for L3 networks": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation: Node Annotations Tunnel ID Annotations should NOT allocate tunnel ID annotations for secondary L2 networks": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation: Node Annotations Tunnel ID Annotations should clean up tunnel ID annotations when UDN is deleted with transit router topology": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation: Node Annotations Tunnel ID Annotations should have all nodes with transit router settings Layer2TopologyVersion set to 2.0": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation: Preconfigured Layer2 UDN duplicate IP validation with primary UDN layer 2 pods should fail when creating second pod with duplicate static IP IPv4 duplicate": "[Suite:openshift/conformance/parallel]",
 
@@ -1794,6 +1820,8 @@ var AppendedAnnotations = map[string]string{
 	"Unidling With non annotated service Should not generate a NeedPods event when backends were added and then removed": "[Disabled:Unimplemented]",
 
 	"Unidling With non annotated service Should not generate a NeedPods event when has backend": "[Disabled:Unimplemented]",
+
+	"Uplink route advertisements with Dynamic UDN allocation allows node-disjoint Dynamic CUDNs to share a targetVRF auto Uplink and rejects overlap": "[Suite:openshift/conformance/parallel]",
 
 	"blocking ICMP needs frag when a client VM pod with 1500 MTU targets a host networked pod should be able to send large TCP packet and not get a route cache entry": "[Disabled:Unimplemented]",
 
