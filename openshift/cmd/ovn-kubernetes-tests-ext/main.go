@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -12,6 +13,9 @@ import (
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
+
+	kclientset "k8s.io/client-go/kubernetes"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -39,6 +43,7 @@ const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+	featureLabelEgressIP            = "Feature:EgressIP"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -64,7 +69,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Future feature-based filters can be added here
+	// EgressIP tests: only include on clusters with baremetal infrastructure
+	egressIPEnabled := ocpInfra.CheckForEgressIP()
+	if !egressIPEnabled && spec.Labels.Has(featureLabelEgressIP) {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
@@ -127,6 +136,15 @@ func main() {
 		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
+		}
+		if ocpInfra.CheckForEgressIP() {
+			client, err := kclientset.NewForConfig(cfg)
+			if err != nil {
+				panic(fmt.Errorf("failed to create kubernetes clientset: %w", err))
+			}
+			if err := ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+				panic(fmt.Errorf("failed to initialize primary IP allocator: %w", err))
+			}
 		}
 	})
 
