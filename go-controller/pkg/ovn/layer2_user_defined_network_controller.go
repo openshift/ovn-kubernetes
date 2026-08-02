@@ -494,7 +494,7 @@ func (oc *Layer2UserDefinedNetworkController) init() (err error) {
 	}
 
 	_, err = oc.initializeLogicalSwitch(
-		oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+		oc.GetNetworkScopedSwitchName(""),
 		oc.Subnets(),
 		excludeSubnets,
 		oc.ReservedSubnets(),
@@ -735,7 +735,7 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 			if !config.Layer2UsesTransitRouter {
 				routerName = oc.GetNetworkScopedGWRouterName(node.Name)
 			}
-			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch),
+			if _, err := oc.syncNodeManagementPort(node, oc.GetNetworkScopedSwitchName(""),
 				routerName, hostSubnets); err != nil {
 				errs = append(errs, err)
 				oc.mgmtPortFailed.Store(node.Name, true)
@@ -833,8 +833,9 @@ func (oc *Layer2UserDefinedNetworkController) addSwitchPortForRemoteNodeGR(node 
 
 	remotePortAddr := remoteGRPortMac.String() + " " + strings.Join(remoteGRPortNetworks, " ")
 	klog.V(5).Infof("The remote port addresses for node %s in network %s are %s", node.Name, oc.GetNetworkName(), remotePortAddr)
+	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName("")}
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.SwitchToRouterPrefix + oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch) + "_" + node.Name,
+		Name:      types.SwitchToRouterPrefix + sw.Name + "_" + node.Name,
 		Type:      "remote",
 		Addresses: []string{remotePortAddr},
 	}
@@ -867,7 +868,6 @@ func (oc *Layer2UserDefinedNetworkController) addSwitchPortForRemoteNodeGR(node 
 		libovsdbops.RequestedTnlKey:  strconv.Itoa(tunnelID),
 		libovsdbops.RequestedChassis: chassisID,
 	}
-	sw := nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)}
 	err = libovsdbops.CreateOrUpdateLogicalSwitchPortsOnSwitch(oc.nbClient, &sw, &logicalSwitchPort)
 	if err != nil {
 		return fmt.Errorf("failed to create port %v on logical switch %q: %v", logicalSwitchPort, sw.Name, err)
@@ -876,10 +876,10 @@ func (oc *Layer2UserDefinedNetworkController) addSwitchPortForRemoteNodeGR(node 
 }
 
 func (oc *Layer2UserDefinedNetworkController) cleanupSwitchPortForRemoteNodeGR(nodeName string) error {
+	sw := &nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName("")}
 	logicalSwitchPort := &nbdb.LogicalSwitchPort{
-		Name: types.SwitchToRouterPrefix + oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch) + "_" + nodeName,
+		Name: types.SwitchToRouterPrefix + sw.Name + "_" + nodeName,
 	}
-	sw := &nbdb.LogicalSwitch{Name: oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)}
 	return libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, sw, logicalSwitchPort)
 }
 
@@ -1003,10 +1003,10 @@ func (oc *Layer2UserDefinedNetworkController) addTransitRouterRoutes(node *corev
 }
 
 func (oc *Layer2UserDefinedNetworkController) delPortForRemoteNodeGR(node *corev1.Node) error {
-	swName := oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch)
+	swName := oc.GetNetworkScopedSwitchName("")
 	sw := &nbdb.LogicalSwitch{Name: swName}
 	logicalSwitchPort := &nbdb.LogicalSwitchPort{
-		Name: types.SwitchToRouterPrefix + oc.GetNetworkScopedSwitchName(types.OVNLayer2Switch) + "_" + node.Name,
+		Name: types.SwitchToRouterPrefix + swName + "_" + node.Name,
 	}
 	if err := libovsdbops.DeleteLogicalSwitchPorts(oc.nbClient, sw, logicalSwitchPort); err != nil {
 		return fmt.Errorf("failed to delete remote GR switch port %q from layer 2 switch %q for the node %q, error: %w",
@@ -1098,7 +1098,7 @@ func (oc *Layer2UserDefinedNetworkController) cleanupInterconnectSetupForRemoteN
 // "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/16"
 func (oc *Layer2UserDefinedNetworkController) addOrUpdateUDNClusterSubnetEgressSNAT(localPodSubnets []*net.IPNet,
 	nodeName string, isUDNAdvertised bool) error {
-	outputPort := oc.getCRToSwitchPortName(oc.GetNetworkScopedSwitchName(""))
+	outputPort := oc.GetNetworkScopedRouterToSwitchPortName("")
 	routerName := oc.GetNetworkScopedClusterRouterName()
 	if !config.Layer2UsesTransitRouter {
 		routerName = oc.GetNetworkScopedGWRouterName(nodeName)
@@ -1135,14 +1135,15 @@ func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Nod
 		return nil, fmt.Errorf("failed to get masquerade IPs, network %s (%d): %v", networkName, networkID, err)
 	}
 
-	l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses, masqIPs...)
+	for _, masqIP := range masqIPs {
+		hostMask := util.GetIPFullMask(masqIP.IP)
+		l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses,
+			&net.IPNet{IP: masqIP.IP, Mask: hostMask})
+	}
 
 	// Always SNAT to the per network masquerade IP.
 	var externalIPs []net.IP
 	for _, masqIP := range masqIPs {
-		if masqIP == nil {
-			continue
-		}
 		externalIPs = append(externalIPs, masqIP.IP)
 	}
 
@@ -1319,11 +1320,11 @@ func (oc *Layer2UserDefinedNetworkController) syncClusterRouterPorts(node *corev
 
 	// Connect the switch to the router.
 	logicalSwitchPort := nbdb.LogicalSwitchPort{
-		Name:      types.SwitchToTransitRouterPrefix + switchName,
+		Name:      oc.GetNetworkScopedSwitchToRouterPortName(""),
 		Type:      "router",
 		Addresses: []string{"router"},
 		Options: map[string]string{
-			libovsdbops.RouterPort: types.TransitRouterToSwitchPrefix + switchName,
+			libovsdbops.RouterPort: oc.GetNetworkScopedRouterToSwitchPortName(""),
 		},
 		ExternalIDs: map[string]string{
 			types.NetworkExternalID:  oc.GetNetworkName(),
@@ -1424,7 +1425,7 @@ func (oc *Layer2UserDefinedNetworkController) ensureUpgradeTopology(node *corev1
 
 	// now add masq subnet to the router port, this ensures that only one port respond to the
 	// ARP/NDP requests for the masq IPs
-	lrpName := oc.getCRToSwitchPortName(switchName)
+	lrpName := oc.GetNetworkScopedRouterToSwitchPortName("")
 	trRouterPort, err := libovsdbops.GetLogicalRouterPort(oc.nbClient, &nbdb.LogicalRouterPort{Name: lrpName})
 	if err != nil {
 		return fmt.Errorf("failed to get logical router port %s: %w", lrpName, err)
@@ -1434,8 +1435,8 @@ func (oc *Layer2UserDefinedNetworkController) ensureUpgradeTopology(node *corev1
 		return fmt.Errorf("failed to get masquerade IPs, network %s (%d): %w", oc.GetNetworkName(), oc.GetNetworkID(), err)
 	}
 
-	existingNetworkSet := sets.New[string](trRouterPort.Networks...)
-	newNetworksSet := sets.New[string](util.IPNetsToStringSlice(masqSubnets)...)
+	existingNetworkSet := sets.New(trRouterPort.Networks...)
+	newNetworksSet := sets.New(util.IPNetsToStringSlice(masqSubnets)...)
 	// Only add masq IPs if they are not already present
 	if existingNetworkSet.IsSuperset(newNetworksSet) {
 		return nil
@@ -1463,7 +1464,7 @@ func (oc *Layer2UserDefinedNetworkController) cleanupUpgradeTopology() error {
 		return fmt.Errorf("failed to delete logical router port %s: %w", upgradeRouterPortName, err)
 	}
 	// 2. Delete masq IPs from the router port as it is no longer needed
-	lrpName := oc.getCRToSwitchPortName(switchName)
+	lrpName := oc.GetNetworkScopedRouterToSwitchPortName("")
 	masqSubnets, err := udn.GetUDNMgmtPortMasqueradeIPs(oc.GetNetworkID())
 	if err != nil {
 		return fmt.Errorf("failed to get masquerade IPs, network %s (%d): %w", oc.GetNetworkName(), oc.GetNetworkID(), err)

@@ -1323,6 +1323,8 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 			userDefinedNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
 			podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
 
+			Expect(ConfigureAdvertisedNetworkIsolation(fakeOvn.nbClient)).To(Succeed())
+
 			// Step 4: Start watching nodes to trigger addUpdateLocalNodeEvent()
 			By("Starting node watch on L3 UDN controller")
 			Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
@@ -1477,6 +1479,8 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 
 			userDefinedNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
 			podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
+
+			Expect(ConfigureAdvertisedNetworkIsolation(fakeOvn.nbClient)).To(Succeed())
 
 			// Step 4: Create and advertise a pod on the CUDN to trigger gateway SNAT creation
 			By("Starting node watch on L3 UDN controller for shared gateway mode")
@@ -2061,14 +2065,14 @@ func expectedLogicalRouterPolicy(routerPolicyUUID1 string, netInfo util.NetInfo,
 		priority      = 1004
 		rerouteAction = "reroute"
 	)
+	inport := netInfo.GetNetworkScopedRouterToSwitchPortName(nodeName)
 	networkScopedSwitchName := netInfo.GetNetworkScopedSwitchName(nodeName)
-	lrpName := fmt.Sprintf("%s%s", types.RouterToSwitchPrefix, networkScopedSwitchName)
 
 	return &nbdb.LogicalRouterPolicy{
 		UUID:        routerPolicyUUID1,
 		Action:      rerouteAction,
 		ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
-		Match:       fmt.Sprintf("inport == %q && ip4.dst == %s /* %s */", lrpName, destIP, networkScopedSwitchName),
+		Match:       fmt.Sprintf("inport == %q && ip4.dst == %s /* %s */", inport, destIP, networkScopedSwitchName),
 		Nexthops:    []string{nextHop},
 		Priority:    priority,
 	}
@@ -2118,7 +2122,7 @@ func nodePhysicalIPAddress() *net.IPNet {
 func udnGWSNATAddress() *net.IPNet {
 	return &net.IPNet{
 		IP:   net.ParseIP("169.254.169.13"),
-		Mask: net.CIDRMask(24, 32),
+		Mask: net.CIDRMask(32, 32),
 	}
 }
 
@@ -2168,9 +2172,7 @@ func expectedExternalSwitchAndLSPs(netInfo util.NetInfo, gwConfig util.L3Gateway
 
 func externalSwitchRouterPortOptions(gatewayRouterName string) map[string]string {
 	return map[string]string{
-		"nat-addresses":             "router",
-		"exclude-lb-vips-from-garp": "true",
-		libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + gatewayRouterName,
+		libovsdbops.RouterPort: types.GWRouterToExtSwitchPrefix + gatewayRouterName,
 	}
 }
 
@@ -2232,6 +2234,7 @@ func gwRouterOptions(gwConfig util.L3GatewayConfig) map[string]string {
 		"chassis":                       gwConfig.ChassisID,
 		"always_learn_from_arp_request": "false",
 		"dynamic_neigh_routers":         dynamicNeighRouters,
+		"disable_garp_rarp":             "true",
 	}
 }
 
