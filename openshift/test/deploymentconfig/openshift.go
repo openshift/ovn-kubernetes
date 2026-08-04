@@ -71,6 +71,12 @@ func (m openshift) GetAgnHostContainerImage() string {
 	return imageutils.GetE2EImage(imageutils.Agnhost)
 }
 
+func (m openshift) GetExternalAgnHostContainerImage() string {
+	// External containers run under podman on the bare-metal hypervisor and
+	// cannot authenticate to the cluster's mirrored image registry.
+	return "registry.k8s.io/e2e-test-images/agnhost:2.40"
+}
+
 func (m openshift) IsConfigurationEnabled(config api.Config) bool {
 	return false
 }
