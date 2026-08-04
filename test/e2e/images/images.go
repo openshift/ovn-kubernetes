@@ -23,13 +23,15 @@ var (
 	metallbLBService      = "quay.io/itssurya/dev-images:metallb-lbservice"
 	udpServerSrcIPPrinter = "quay.io/itssurya/dev-images:udp-server-srcip-printer"
 	frr                   = "quay.io/frrouting/frr:10.5.3"
-	
-	agnHostOverride = ""
-	extraImages []string
+
+	agnHostOverride         = ""
+	externalAgnHostOverride = ""
+	extraImages             []string
 )
 
 func init() {
 	agnHostOverride = os.Getenv("AGNHOST_IMAGE")
+	externalAgnHostOverride = os.Getenv("EXTERNAL_AGNHOST_IMAGE")
 	if iperf3Override := os.Getenv("IPERF3_IMAGE"); iperf3Override != "" {
 		iperf3 = iperf3Override
 	}
@@ -55,6 +57,13 @@ func AgnHost() string {
 		return agnHostOverride
 	}
 	return deploymentconfig.Get().GetAgnHostContainerImage()
+}
+
+func ExternalAgnHost() string {
+	if externalAgnHostOverride != "" {
+		return externalAgnHostOverride
+	}
+	return AgnHost()
 }
 
 func IPerf3() string {
