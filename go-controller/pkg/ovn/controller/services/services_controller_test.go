@@ -6,6 +6,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"strings"
 	"testing"
@@ -13,7 +14,6 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types"
 	"github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
-	"golang.org/x/exp/maps"
 
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
@@ -65,7 +65,7 @@ func newControllerWithDBSetupForNetwork(dbSetup libovsdbtest.TestSetup, netInfo 
 
 	client := util.GetOVNClientset().GetOVNKubeControllerClientset()
 
-	factoryMock, err := factory.NewOVNKubeControllerWatchFactory(client)
+	factoryMock, err := factory.NewOVNKubeControllerWatchFactory(client, "test-node")
 	if err != nil {
 		return nil, err
 	}

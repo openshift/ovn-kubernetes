@@ -134,14 +134,23 @@ var _ = Describe("User Defined Network Controller", func() {
 	}
 
 	// markCUDNForDeletion marks a CUDN for deletion by setting its DeletionTimestamp to the current time.
+	// The controller may concurrently update the CUDN from a stale lister copy (e.g. re-adding the
+	// finalizer), and the fake client performs no resourceVersion conflict checks, so such an update
+	// silently clears the DeletionTimestamp. Retry until a fresh Get observes the mark persisted.
 	markCUDNForDeletion := func(name string) {
 		GinkgoHelper()
-		cudnObj, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), name, metav1.GetOptions{})
-		Expect(err).NotTo(HaveOccurred())
 		now := metav1.Now()
-		cudnObj.DeletionTimestamp = &now
-		_, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudnObj, metav1.UpdateOptions{})
-		Expect(err).NotTo(HaveOccurred())
+		Eventually(func() bool {
+			cudnObj, err := cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), name, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			if !cudnObj.DeletionTimestamp.IsZero() {
+				return true
+			}
+			cudnObj.DeletionTimestamp = &now
+			_, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Update(context.Background(), cudnObj, metav1.UpdateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			return false
+		}, 2*time.Second, 50*time.Millisecond).Should(BeTrue(), "DeletionTimestamp should persist on ClusterUserDefinedNetwork %q", name)
 	}
 
 	Context("manager", func() {
@@ -518,6 +527,31 @@ var _ = Describe("User Defined Network Controller", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(actualNAD).To(Equal(expectedNAD), "NAD should exist in test namespaces")
 				}
+			})
+
+			It("should report an error when spec.uplinks is set but the Uplink feature is disabled", func() {
+				config.OVNKubernetesFeature.EnableUplink = false
+				nsName := "red"
+				cudn := testLayer2SecondaryClusterUDN("test-uplink-disabled", nsName)
+				cudn.Spec.Uplinks = []string{"tenant-blue"}
+
+				c = newTestController(template.RenderNetAttachDefManifest, testNamespace(nsName), cudn)
+				Expect(c.Run()).To(Succeed())
+
+				Eventually(func() []metav1.Condition {
+					var err error
+					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return normalizeConditions(filterTransportConditions(cudn.Status.Conditions))
+				}).Should(Equal([]metav1.Condition{{
+					Type:    "NetworkCreated",
+					Status:  "False",
+					Reason:  "NetworkAttachmentDefinitionSyncError",
+					Message: "spec.uplinks is set but the Uplink feature is disabled, ignoring this CUDN",
+				}}), "status should report the Uplink feature is disabled")
+
+				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).Get(context.Background(), cudn.Name, metav1.GetOptions{})
+				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "NAD must not be created when the Uplink feature is disabled")
 			})
 
 			It("should allocate VID for EVPN network NAD", func() {
@@ -2676,7 +2710,7 @@ var _ = Describe("User Defined Network Controller", func() {
 			Eventually(func() float64 {
 				val, _ := getCUDNCountMetricValue("Secondary", "Layer2", "Default")
 				return val
-			}).Should(Equal(expected), "CUDN count metric should decrement by exactly one after deletion")
+			}, 2*time.Second, 50*time.Millisecond).Should(Equal(expected), "CUDN count metric should decrement by exactly one after deletion")
 		})
 
 		It("should record NetworkCreated=True condition metric on successful CUDN creation", func() {
