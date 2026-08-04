@@ -88,6 +88,8 @@ type NetInfo interface {
 	GetNetworkScopedExtPortName(bridgeID, nodeName string) string
 	GetNetworkScopedLoadBalancerName(lbName string) string
 	GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string
+	GetNetworkScopedRouterToSwitchPortName(nodeName string) string
+	GetNetworkScopedSwitchToRouterPortName(nodeName string) string
 
 	// GetNetInfo is an identity method used to get the specific NetInfo
 	// implementation
@@ -548,6 +550,14 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName s
 	return nInfo.GetNetworkScopedName(lbGroupName)
 }
 
+func (nInfo *DefaultNetInfo) GetNetworkScopedRouterToSwitchPortName(nodeName string) string {
+	return types.RouterToSwitchPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
+}
+
+func (nInfo *DefaultNetInfo) GetNetworkScopedSwitchToRouterPortName(nodeName string) string {
+	return types.SwitchToRouterPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
+}
+
 func (nInfo *DefaultNetInfo) canReconcile(netInfo NetInfo) bool {
 	_, ok := netInfo.(*DefaultNetInfo)
 	return ok
@@ -759,6 +769,18 @@ func (nInfo *userDefinedNetInfo) GetNetworkScopedLoadBalancerName(lbName string)
 
 func (nInfo *userDefinedNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string {
 	return nInfo.GetNetworkScopedName(lbGroupName)
+}
+
+// GetNetworkScopedRouterToSwitchPortName returns the router to switch port name (rtos-).
+// Not applicable for Localnet topology.
+func (nInfo *userDefinedNetInfo) GetNetworkScopedRouterToSwitchPortName(nodeName string) string {
+	return types.RouterToSwitchPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
+}
+
+// GetNetworkScopedSwitchToRouterPortName returns the switch to router port name (stor-).
+// Not applicable for Localnet topology.
+func (nInfo *userDefinedNetInfo) GetNetworkScopedSwitchToRouterPortName(nodeName string) string {
+	return types.SwitchToRouterPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
 }
 
 // getPrefix returns if the logical entities prefix for this network
@@ -1843,4 +1865,10 @@ func getFirstAvailableIP(subnets []*net.IPNet, excludeIPs sets.Set[string]) net.
 		}
 	}
 	return nil
+}
+
+// GetNetworkScopedSwitchToRouterPortNameFromSwitchName returns the
+// switch-to-router port name for the given switch name.
+func GetNetworkScopedSwitchToRouterPortNameFromSwitchName(switchName string) string {
+	return types.SwitchToRouterPrefix + switchName
 }

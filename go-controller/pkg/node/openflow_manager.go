@@ -145,6 +145,10 @@ func (c *openflowManager) syncFlows() {
 			klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.exGWFlowCache)
 		}
 	}
+
+	if err := c.defaultBridge.SyncNoFlood(); err != nil {
+		klog.Errorf("Failed to sync no-flood port config for bridge %s: %v", c.defaultBridge.GetBridgeName(), err)
+	}
 }
 
 // since we share the host's k8s node IP, add OpenFlow flows
