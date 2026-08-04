@@ -18,7 +18,7 @@ var (
 
 func FixturePath(elem ...string) string {
 	extractOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "otp-testdata-")
+		dir, err := os.MkdirTemp("", "ote-testdata-")
 		if err != nil {
 			panic(err)
 		}

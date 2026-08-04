@@ -12,8 +12,8 @@ import (
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
-	// import OTP migrated tests
-	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/otp"
+	// import OTE migrated tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
@@ -39,24 +39,10 @@ import (
 
 var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 
-var otpBlockingTests = []string{
-	"Add OVN flow count metric",
-	"Record update to cache versus port binding",
-	"Add mechanism to record duration for k8 kinds",
-}
-
-func isOTPBlocking(name string) bool {
-	for _, title := range otpBlockingTests {
-		if strings.Contains(name, title) {
-			return true
-		}
-	}
-	return false
-}
-
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
+	featureLabelMetrics             = "Feature:Metrics"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
 
@@ -186,10 +172,6 @@ func main() {
 		}
 
 		switch {
-		case isOTP && isOTPBlocking(spec.Name):
-			spec.Lifecycle = extensiontests.LifecycleBlocking
-		case isOTP:
-			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case blockingTests.Has(spec.Name):

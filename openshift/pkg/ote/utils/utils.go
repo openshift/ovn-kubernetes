@@ -1,4 +1,4 @@
-package otputils
+package oteutils
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	g "github.com/onsi/ginkgo/v2"
 	o "github.com/onsi/gomega"
 	exutil "github.com/openshift/origin/test/extended/util"
-	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/otp/testdata"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/ote/testdata"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	e2e "k8s.io/kubernetes/test/e2e/framework"
@@ -653,7 +653,7 @@ func WaitPodReady(oc *exutil.CLI, namespace string, podName string) {
 	if err != nil {
 		podDescribe := DescribePod(oc, namespace, podName)
 		e2e.Logf("oc describe pod %v.", podName)
-		e2e.Logf(podDescribe)
+		e2e.Logf("%s", podDescribe)
 	}
 	o.Expect(err).NotTo(o.HaveOccurred(), fmt.Sprintf("pod %v is not ready", podName))
 }
@@ -1056,33 +1056,6 @@ func GetNodeIP(oc *exutil.CLI, nodeName string) (string, string) {
 	return InternalIP2, InternalIP1
 }
 
-// get CLuster Manager's leader info
-func GetLeaderInfo(oc *exutil.CLI, namespace string, cmName string, networkType string) string {
-	if networkType == "ovnkubernetes" {
-		linuxNodeList, err := GetAllNodesbyOSType(oc, "linux")
-		o.Expect(err).NotTo(o.HaveOccurred())
-		o.Expect(linuxNodeList).NotTo(o.BeEmpty())
-		podName, getPodNameErr := GetOVNKPodOnNode(oc, namespace, cmName, linuxNodeList[0])
-		o.Expect(getPodNameErr).NotTo(o.HaveOccurred())
-		o.Expect(podName).NotTo(o.BeEmpty())
-		return podName
-	}
-	output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("cm", "openshift-network-controller", "-n", namespace, "-o=jsonpath={.metadata.annotations.control-plane\\.alpha\\.kubernetes\\.io\\/leader}").Output()
-	o.Expect(err).NotTo(o.HaveOccurred())
-	var sdnAnnotations map[string]interface{}
-	json.Unmarshal([]byte(output), &sdnAnnotations)
-	leaderNodeName := sdnAnnotations["holderIdentity"].(string)
-	o.Expect(leaderNodeName).NotTo(o.BeEmpty())
-	ocGetPods, podErr := oc.AsAdmin().WithoutNamespace().Run("get").Args("-n", "openshift-sdn", "pod", "-l app=sdn", "-o=wide").OutputToFile("ocgetpods.txt")
-	defer os.RemoveAll(ocGetPods)
-	o.Expect(podErr).NotTo(o.HaveOccurred())
-	rawGrepOutput, rawGrepErr := exec.Command("bash", "-c", "cat "+ocGetPods+" | grep "+leaderNodeName+" | awk '{print $1}'").Output()
-	o.Expect(rawGrepErr).NotTo(o.HaveOccurred())
-	leaderPodName := strings.TrimSpace(string(rawGrepOutput))
-	e2e.Logf("The leader Pod's Name: %v", leaderPodName)
-	return leaderPodName
-}
-
 func CheckSDNMetrics(oc *exutil.CLI, url string, metrics string) {
 	var metricsOutput []byte
 	var metricsLog []byte
@@ -1325,10 +1298,10 @@ func UpdateEgressIPObject(oc *exutil.CLI, egressIPObjectName string, egressIP st
 		}
 		if !strings.Contains(output, egressIP) {
 			e2e.Logf("Wait for new IP %s applied,try next round.", egressIP)
-			e2e.Logf(output)
+			e2e.Logf("%s", output)
 			return false, nil
 		}
-		e2e.Logf(output)
+		e2e.Logf("%s", output)
 		return true, nil
 	})
 	o.Expect(egressipErr).NotTo(o.HaveOccurred(), fmt.Sprintf("Failed to apply new egressIP %s:%v", egressIP, egressipErr))
@@ -1907,7 +1880,7 @@ func CheckLogMessageInPod(oc *exutil.CLI, namespace string, containerName string
 		return true, nil
 	})
 	if checkErr != nil {
-		return podLogs, fmt.Errorf(fmt.Sprintf("fail to get expected log in pod %v, err: %v", podName, err))
+		return podLogs, fmt.Errorf("fail to get expected log in pod %v, err: %v", podName, err)
 	}
 	return podLogs, nil
 }
@@ -2075,7 +2048,7 @@ func GetRouterID(oc *exutil.CLI, nodeName string) (string, error) {
 			routerID = cmdOutputLines[1]
 			return true, nil
 		}
-		e2e.Logf("%v,Waiting for expected result to be synced, try again ...,")
+		e2e.Logf("Waiting for expected result to be synced, try again ...")
 		return false, nil
 	})
 	if checkOVNDbErr != nil {
@@ -2391,7 +2364,7 @@ func GetHostsubnetByEIP(oc *exutil.CLI, expectedEIP string) string {
 		ip, err := GetEgressIPByKind(oc, "hostsubnet", nodeList.Items[i].Name, 1)
 		o.Expect(err).NotTo(o.HaveOccurred())
 		if ip[0] == expectedEIP {
-			e2e.Logf("Found node %v host egressip %v ", v.Name)
+			e2e.Logf("Found node %v host egressip %v", v.Name, ip[0])
 			nodeHostsEIP = nodeList.Items[i].Name
 			break
 		}
@@ -2812,7 +2785,7 @@ func ConfigIPSecAtRuntime(oc *exutil.CLI, targetStatus string) (err error) {
 		e2e.Logf("Both IPsec container and host pods will be launched.")
 		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("ds", "-n", "openshift-ovn-kubernetes").Output()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		e2e.Logf("The ds in openshift-ovn-kubernetes are : \n", output)
+		e2e.Logf("The ds in openshift-ovn-kubernetes are:\n%s", output)
 		o.Expect(strings.Contains(output, "ovn-ipsec-containerized")).Should(o.BeTrue())
 		o.Expect(strings.Contains(output, "ovn-ipsec-host")).Should(o.BeTrue())
 		e2e.Logf("Verify CNO status shows progress state")
@@ -2827,7 +2800,7 @@ func ConfigIPSecAtRuntime(oc *exutil.CLI, targetStatus string) (err error) {
 		o.Eventually(func() bool {
 			output, err = oc.AsAdmin().WithoutNamespace().Run("get").Args("ds", "-n", "openshift-ovn-kubernetes").Output()
 			o.Expect(err).NotTo(o.HaveOccurred())
-			e2e.Logf("The ds in openshift-ovn-kubernetes are : \n", output)
+			e2e.Logf("The ds in openshift-ovn-kubernetes are:\n%s", output)
 			return !strings.Contains(output, "ovn-ipsec-containerized")
 		}, "300s", "30s").ShouldNot(o.BeNil(), "Timeout for waiting ovn-ipsec-containerized being removed!")
 		e2e.Logf("Wait ipsec host pods running in openshift-ovn-kubernetes")
@@ -3019,7 +2992,7 @@ func CheckAllClusterOperatorsState(oc *exutil.CLI, interval int, timeout int) {
 				return false, err
 			}
 			if matched, _ := regexp.MatchString("True.*False.*False", output); !matched {
-				e2e.Logf("Operator %s on hosted cluster is in state:%s", output)
+				e2e.Logf("Operator %s on hosted cluster is in state:%s", clusterOperator, output)
 				return false, nil
 			}
 			return true, nil
@@ -3154,7 +3127,7 @@ func WaitMachineOnROSAReady(oc *exutil.CLI, machineName string, namespace string
 			return false, nil
 		}
 		if !strings.Contains(status, "Running") {
-			e2e.Logf("Machine %v is in %v, not in Running state, retrying...", status)
+			e2e.Logf("Machine %v is in %v, not in Running state, retrying...", machineName, status)
 			return false, nil
 		}
 		return true, nil
@@ -3257,7 +3230,7 @@ func DisableNodeIdentityWebhook(oc *exutil.CLI, namespace string, cmName string)
 		result := true
 		_, cmErr := oc.AsAdmin().Run("get").Args("configmap/"+cmName, "-n", namespace).Output()
 		if cmErr != nil {
-			e2e.Logf(fmt.Sprintf("Wait for configmap/%s to be created", cmName))
+			e2e.Logf("Wait for configmap/%s to be created", cmName)
 			result = false
 		}
 		return result
@@ -3561,7 +3534,7 @@ func CheckNodeAccessibilityFromAPod(oc *exutil.CLI, nodeName, ns, podName string
 		for _, nodeIPv4Addr := range allNodeIPsv4 {
 			_, err := e2eoutput.RunHostCmd(ns, podName, "ping -c 2 "+nodeIPv4Addr)
 			if err != nil {
-				e2e.Logf(fmt.Sprintf("Access to node %s failed at interface %s", nodeName, nodeIPv4Addr))
+				e2e.Logf("Access to node %s failed at interface %s", nodeName, nodeIPv4Addr)
 				return false
 			}
 		}
@@ -3570,7 +3543,7 @@ func CheckNodeAccessibilityFromAPod(oc *exutil.CLI, nodeName, ns, podName string
 		for _, nodeIPv6Addr := range allNodeIPsv6 {
 			_, err := e2eoutput.RunHostCmd(ns, podName, "ping -c 2 "+nodeIPv6Addr)
 			if err != nil {
-				e2e.Logf(fmt.Sprintf("Access to node %s failed at interface %s", nodeName, nodeIPv6Addr))
+				e2e.Logf("Access to node %s failed at interface %s", nodeName, nodeIPv6Addr)
 				return false
 			}
 		}
@@ -3678,7 +3651,7 @@ func GetIPv4AndIPWithPrefixForNICOnNode(oc *exutil.CLI, node, nic string) (strin
 	matches := re.FindStringSubmatch(output)
 	o.Expect(len(matches) > 1).Should(o.BeTrue())
 	ipAddressWithPrefix := matches[1]
-	e2e.Logf("IP address with prefix:", ipAddressWithPrefix)
+	e2e.Logf("IP address with prefix: %s", ipAddressWithPrefix)
 
 	ipParts := strings.Split(ipAddressWithPrefix, "/")
 	ipAddress := ipParts[0]
@@ -3910,7 +3883,7 @@ func CheckIPv6PublicAccess(oc *exutil.CLI) bool {
 	curlCMD := "curl -6 www.google.com --connect-timeout 5 -I"
 	output, err := DebugNode(oc, workNode, "bash", "-c", curlCMD)
 	if !strings.Contains(output, "HTTP") || err != nil {
-		e2e.Logf(output)
+		e2e.Logf("%s", output)
 		e2e.Logf("Unable to access the public Internet with IPv6 from the cluster.")
 		return false
 	}
@@ -4152,7 +4125,7 @@ func VerifyPodConnCrossNodesSpecNS(oc *exutil.CLI, namespace, podLabel string) b
 					o.Expect(err).NotTo(o.HaveOccurred())
 					e2e.Logf("Checking the if the pods's located nodes in SchedulingDisabled or NotReady status.")
 					output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("node", srcNode, dstNode).Output()
-					e2e.Logf(output)
+					e2e.Logf("%s", output)
 					o.Expect(err).NotTo(o.HaveOccurred())
 					if strings.Contains(output, "SchedulingDisabled") || strings.Contains(output, "NotReady") {
 						continue
@@ -4171,7 +4144,7 @@ func VerifyPodConnCrossNodesSpecNS(oc *exutil.CLI, namespace, podLabel string) b
 						o.Expect(err).NotTo(o.HaveOccurred())
 						e2e.Logf("Checking the if the pods's located nodes in SchedulingDisabled or NotReady status.")
 						output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("node", srcNode, dstNode).Output()
-						e2e.Logf(output)
+						e2e.Logf("%s", output)
 						o.Expect(err).NotTo(o.HaveOccurred())
 						if strings.Contains(output, "SchedulingDisabled") || strings.Contains(output, "NotReady") {
 							continue
@@ -4295,7 +4268,7 @@ func GetNodeMTU(oc *exutil.CLI, nodeName string) int {
 	cmdMTU := `ip a show br-ex |grep mtu`
 	out, err := DebugNodeWithChroot(oc, nodeName, "bash", "-c", cmdMTU)
 	o.Expect(err).NotTo(o.HaveOccurred())
-	e2e.Logf(out)
+	e2e.Logf("%s", out)
 	// Define regex to  capute mtu value
 	re := regexp.MustCompile(`mtu (\d+)`)
 	match := re.FindStringSubmatch(out)
@@ -4574,7 +4547,6 @@ func SetupOperatorCatalogSource(oc *exutil.CLI, operatorName, defaultCatalogSour
 
 	return defaultCatalogSourceName
 }
-
 
 // --- Helper functions migrated from openshift-tests-private ---
 
