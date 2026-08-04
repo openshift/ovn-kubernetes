@@ -769,7 +769,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
@@ -785,7 +785,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
@@ -835,7 +835,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
@@ -851,7 +851,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
@@ -901,7 +901,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
@@ -917,7 +917,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Disabled:Unimplemented]",
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
 
