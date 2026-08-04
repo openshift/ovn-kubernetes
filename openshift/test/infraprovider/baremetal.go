@@ -290,8 +290,9 @@ type linkInfo struct {
 }
 
 type ipAddressInfo struct {
-	Family string `json:"family"`
-	Local  string `json:"local"`
+	Family    string `json:"family"`
+	Local     string `json:"local"`
+	PrefixLen int    `json:"prefixlen"`
 }
 
 // findHypervisorNodeInterface retrieves attached interface for the matching subnets from the hypervisor node.
