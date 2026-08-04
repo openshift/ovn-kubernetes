@@ -4347,5 +4347,5 @@ func (e *EgressIPController) getTopologyScopedLocalZoneRouterName(ni util.NetInf
 }
 
 func isEgressIPForUDNSupported() bool {
-	return config.OVNKubernetesFeature.EnableNetworkSegmentation
+	return util.IsNetworkSegmentationSupportEnabled()
 }
