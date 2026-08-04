@@ -87,7 +87,11 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 				Namespace: "foo",
 				Name:      "dummy",
 				Labels: map[string]string{
+					kubevirtv1.AppLabel:                "virt-launcher",
 					kubevirtv1.VirtualMachineNameLabel: t.vmName,
+				},
+				Annotations: map[string]string{
+					kubevirtv1.DomainAnnotation: t.vmName,
 				},
 			},
 		}
