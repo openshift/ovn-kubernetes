@@ -306,7 +306,8 @@ func (b *BridgeConfiguration) setDPUHostGatewayConfiguration(nodeName string) er
 // and moving gateway IPs/MACs onto the selected host interface.
 func NewUnmanagedBridgeConfiguration(ovsClient libovsdbclient.Client, bridgeName, hostInterfaceName, nodeName,
 	physicalNetworkName string, gwIPs []*net.IPNet, macAddress net.HardwareAddr) (*BridgeConfiguration, error) {
-	if _, err := ovsops.GetBridge(ovsClient, bridgeName); err != nil {
+	bridge, err := ovsops.GetBridge(ovsClient, bridgeName)
+	if err != nil {
 		return nil, fmt.Errorf("failed to find OVS bridge %s: %w", bridgeName, err)
 	}
 	if len(gwIPs) == 0 {
@@ -329,7 +330,10 @@ func NewUnmanagedBridgeConfiguration(ovsClient libovsdbclient.Client, bridgeName
 	if gwIface == "" || config.IsModeDPU() {
 		gwIface = bridgeName
 		if config.IsModeDPU() {
-			gwIfaceRep, err = util.GetDPUOps().GetDPUHostRepInterface(ovsClient, bridgeName)
+			// Uplink host interfaces may be backed by a VF or SF, not just a
+			// PF, so select the representor by its host peer MAC rather than
+			// assuming the bridge holds a single PF representor.
+			gwIfaceRep, err = util.GetDPUOps().FindHostRepresentorByPeerMAC(ovsClient, bridge, macAddress, nodeName)
 			if err != nil {
 				return nil, err
 			}
@@ -650,6 +654,10 @@ func gatewayReady(patchPort string) bool {
 	return true
 }
 
+// getIntfName returns the physical uplink interface of the gateway OVS bridge
+// gatewayIntf, as derived by util.GetNicName (external-ids:bridge-uplink,
+// single system-type port, or the "br<nic>" name convention), and verifies
+// that the result is plugged into OVS (has an ofport).
 func getIntfName(ovsClient libovsdbclient.Client, gatewayIntf string) (string, error) {
 	// The given (or autodetected) interface is an OVS bridge and this could be
 	// created by us using util.NicToBridge() or it was pre-created by the user.

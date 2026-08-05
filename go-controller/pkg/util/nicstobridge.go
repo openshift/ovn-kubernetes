@@ -23,6 +23,7 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
@@ -115,9 +116,21 @@ func GetNicName(ovsClient libovsdbclient.Client, brName string) (string, error) 
 	systemPorts := make([]string, 0)
 	for port, ifaces := range portsToInterfaces {
 		for _, iface := range ifaces {
-			if iface.Type == "system" {
-				systemPorts = append(systemPorts, port)
+			if iface.Type != "system" {
+				continue
 			}
+			// On a DPU, host function representors are system-type ports too,
+			// but they can never be the bridge's physical uplink; don't let
+			// them make the uplink ambiguous.
+			if config.IsModeDPU() && GetDPUOps().IsHostFacingRepresentor(iface.Name) {
+				klog.V(5).Infof("Bridge %s: ignoring host representor %s while deriving the physical uplink",
+					brName, iface.Name)
+				continue
+			}
+			systemPorts = append(systemPorts, port)
+			// A port qualifies at most once, even when it carries several
+			// system interfaces (e.g. a bond).
+			break
 		}
 	}
 	if len(systemPorts) == 1 {

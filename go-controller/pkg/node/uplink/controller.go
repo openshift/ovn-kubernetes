@@ -4,7 +4,6 @@
 package uplink
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
@@ -1020,20 +1020,50 @@ func (r defaultOVSBridgeResolver) BridgeUplink(bridgeName string) (string, error
 	for _, port := range ports {
 		for _, interfaceID := range port.Interfaces {
 			iface, ok := interfacesByID[interfaceID]
-			if ok && iface.Type == "system" {
-				systemPorts = append(systemPorts, port.Name)
+			if !ok || iface.Type != "system" {
+				continue
 			}
+			// On a DPU, host function representors are system-type ports too,
+			// but they can never be the bridge's physical uplink; don't let
+			// them make the uplink ambiguous.
+			if config.IsModeDPU() && util.GetDPUOps().IsHostFacingRepresentor(iface.Name) {
+				klog.V(5).Infof("Bridge %s: ignoring host representor %s while deriving the physical uplink",
+					bridgeName, iface.Name)
+				continue
+			}
+			systemPorts = append(systemPorts, port.Name)
+			// A port qualifies at most once, even when it carries several
+			// system interfaces (e.g. a bond).
+			break
 		}
 	}
 
 	var uplinkName string
 	if len(systemPorts) == 1 {
+		// Assume port name == interface name; only bonds break this (checked below).
 		uplinkName = systemPorts[0]
-	} else {
+		if _, err := libovsdbops.GetOVSInterface(r.ovsClient, uplinkName); err != nil {
+			if !errors.Is(err, libovsdbclient.ErrNotFound) {
+				return "", newDiscoveryError(
+					uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound,
+					fmt.Errorf("failed to get interface for bridge %s candidate uplink %s: %w", bridgeName, uplinkName, err),
+				)
+			}
+			// An OVS-level bond is a Port (e.g. bond0) whose Interfaces have
+			// different names (e.g. eth0, eth1), so the lookup above finds no
+			// Interface for it; it cannot be the uplink itself, so let the
+			// fallbacks decide.
+			uplinkName = ""
+		}
+	}
+	if uplinkName == "" {
 		if len(systemPorts) > 1 {
 			klog.Infof("Found more than one system Type ports on the OVS bridge %s, so skipping "+
 				"this method of determining the uplink port", bridgeName)
 		}
+		// NicToBridge sets bridge-uplink on bridges OVN-Kubernetes creates
+		// itself; pre-provisioned Uplink bridges carry it only if the
+		// platform set it, so this fallback might not work for them.
 		uplinkName = bridge.ExternalIDs["bridge-uplink"]
 		if uplinkName == "" && strings.HasPrefix(bridgeName, "br") {
 			uplinkName = strings.TrimPrefix(bridgeName, "br")
@@ -1046,6 +1076,10 @@ func (r defaultOVSBridgeResolver) BridgeUplink(bridgeName string) (string, error
 		)
 	}
 
+	// TODO: OVS-level bonds are still unsupported past this point: the
+	// resolved name is later used to read the uplink's ofport for flow
+	// programming and to apply per-netdev settings, which assume a single
+	// interface. Kernel bonds attached as a single interface work today.
 	uplinkInterfaces, err := ovsops.FindInterfacesWithPredicate(r.ovsClient, func(iface *vswitchd.Interface) bool {
 		return iface.Name == uplinkName
 	})
@@ -1075,23 +1109,31 @@ func (r defaultOVSBridgeResolver) ResolveByHostMAC(hostMAC net.HardwareAddr, nod
 	sort.Slice(bridges, func(i, j int) bool {
 		return bridges[i].Name < bridges[j].Name
 	})
+	var lookupErrors []error
 	for _, bridge := range bridges {
 		if bridge.Name == ovsIntegrationBridge {
 			continue
 		}
-		bridgeMAC, err := util.GetDPUOps().GetHostGatewayMACAddress(r.ovsClient, bridge.Name, nodeName)
+		rep, err := util.GetDPUOps().FindHostRepresentorByPeerMAC(r.ovsClient, bridge, hostMAC, nodeName)
 		if err != nil {
-			klog.V(5).Infof("Failed to read DPU host MAC for bridge %s: %v", bridge.Name, err)
+			if !errors.Is(err, util.ErrHostRepresentorNotFound) {
+				// Keep searching the remaining bridges, but remember why this
+				// one could not be inspected so a total miss can report it.
+				lookupErrors = append(lookupErrors, err)
+			}
+			klog.V(5).Infof("Bridge %s does not back host MAC %s: %v", bridge.Name, hostMAC, err)
 			continue
 		}
-		if bytes.Equal(bridgeMAC, hostMAC) {
-			return bridge.Name, nil
-		}
+		klog.Infof("Resolved Uplink host MAC %s to OVS bridge %s via DPU representor %s",
+			hostMAC, bridge.Name, rep)
+		return bridge.Name, nil
 	}
-	return "", newDiscoveryError(
-		uplinkv1alpha1.UplinkStateReasonBridgeNotFound,
-		fmt.Errorf("failed to find DPU bridge for host MAC %s", hostMAC),
-	)
+
+	err = fmt.Errorf("failed to find DPU bridge for host MAC %s", hostMAC)
+	if len(lookupErrors) > 0 {
+		err = fmt.Errorf("%w: %v", err, kerrors.NewAggregate(lookupErrors))
+	}
+	return "", newDiscoveryError(uplinkv1alpha1.UplinkStateReasonBridgeNotFound, err)
 }
 
 func (r defaultOVSBridgeResolver) bridgeForPortOrInterface(name string) (string, error) {
