@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -101,7 +102,7 @@ func CreateMachineSetFromExisting(oc *exutil.CLI, name string, replicas int) {
 	modifiedJSON, err := json.Marshal(ms)
 	o.Expect(err).NotTo(o.HaveOccurred())
 
-	tmpFile := fmt.Sprintf("/tmp/machineset-%s.json", name)
+	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("machineset-%s.json", name))
 	err = os.WriteFile(tmpFile, modifiedJSON, 0644)
 	o.Expect(err).NotTo(o.HaveOccurred())
 
@@ -122,10 +123,7 @@ func DeleteMachineSet(oc *exutil.CLI, name string) {
 
 func WaitForMachineSetRunning(oc *exutil.CLI, replicas int, name string) {
 	e2e.Logf("Waiting for MachineSet %s to have %d running replicas...", name, replicas)
-	if replicas >= 1 {
-		time.Sleep(180 * time.Second)
-	}
-	pollErr := wait.Poll(60*time.Second, 1200*time.Second, func() (bool, error) {
+	pollErr := wait.PollUntilContextTimeout(context.Background(), 60*time.Second, 1200*time.Second, true, func(ctx context.Context) (bool, error) {
 		msg, _ := oc.AsAdmin().WithoutNamespace().Run("get").Args(MapiMachineset, name, "-o=jsonpath={.status.readyReplicas}", "-n", MachineAPINamespace).Output()
 		readyStr := strings.TrimSpace(msg)
 		if readyStr == "" {
@@ -174,7 +172,7 @@ func WaitForMachineSetNodesReady(oc *exutil.CLI, name string) {
 
 func WaitForMachineSetDeleted(oc *exutil.CLI, name string) {
 	e2e.Logf("Waiting for MachineSet %s machines to disappear...", name)
-	wait.Poll(60*time.Second, 1200*time.Second, func() (bool, error) {
+	wait.PollUntilContextTimeout(context.Background(), 60*time.Second, 1200*time.Second, true, func(ctx context.Context) (bool, error) {
 		machineNames, _ := oc.AsAdmin().WithoutNamespace().Run("get").Args(MapiMachine, "-o=jsonpath={.items[*].metadata.name}", "-l", "machine.openshift.io/cluster-api-machineset="+name, "-n", MachineAPINamespace).Output()
 		if machineNames != "" {
 			e2e.Logf("Machines still exist, waiting...")
@@ -269,7 +267,7 @@ func GetFirstCoreOsWorkerNode(oc *exutil.CLI) (string, error) {
 }
 
 func AssertPodToBeReady(oc *exutil.CLI, podName string, namespace string) {
-	err := wait.Poll(5*time.Second, 120*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 120*time.Second, true, func(ctx context.Context) (bool, error) {
 		status, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("pod", podName, "-n", namespace, "-o=jsonpath={.status.phase}").Output()
 		if err != nil {
 			return false, nil
@@ -284,7 +282,7 @@ func AssertWaitPollNoErr(err error, msg string) {
 }
 
 func CheckNetworkOperatorStatus(oc *exutil.CLI) error {
-	return wait.Poll(10*time.Second, 300*time.Second, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("clusteroperators", "network", "-o=jsonpath={.status.conditions}").Output()
 		if err != nil {
 			return false, nil

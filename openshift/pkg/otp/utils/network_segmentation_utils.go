@@ -140,7 +140,7 @@ func RunOcWithRetry(oc *exutil.CLI, cmd string, args ...string) (string, error) 
 }
 
 func (pod *UdnPodResource) CreateUdnPod(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace, "LABEL="+pod.Label)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -152,7 +152,7 @@ func (pod *UdnPodResource) CreateUdnPod(oc *exutil.CLI) {
 }
 
 func (pod *UdnPodResourceNode) CreateUdnPodNode(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace, "LABEL="+pod.Label, "NODENAME="+pod.Nodename)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -164,7 +164,7 @@ func (pod *UdnPodResourceNode) CreateUdnPodNode(oc *exutil.CLI) {
 }
 
 func (pod *UdnPodWithProbeResource) CreateUdnPodWithProbe(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace, "LABEL="+pod.Label, "PORT="+strconv.Itoa(pod.Port), "FAILURETHRESHOLD="+strconv.Itoa(pod.Failurethreshold), "PERIODSECONDS="+strconv.Itoa(pod.Periodseconds))
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -176,7 +176,7 @@ func (pod *UdnPodWithProbeResource) CreateUdnPodWithProbe(oc *exutil.CLI) {
 }
 
 func (pod *UdnPodSecNADResource) CreateUdnPodWithSecNAD(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace, "LABEL="+pod.Label, "ANNOTATION="+pod.Annotation)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -188,7 +188,7 @@ func (pod *UdnPodSecNADResource) CreateUdnPodWithSecNAD(oc *exutil.CLI) {
 }
 
 func (pod *UdnPodSecNADResourceNode) CreateUdnPodWithSecNADNode(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace, "LABEL="+pod.Label, "NADNAME="+pod.Nadname, "NODENAME="+pod.Nodename)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -200,7 +200,7 @@ func (pod *UdnPodSecNADResourceNode) CreateUdnPodWithSecNADNode(oc *exutil.CLI) 
 }
 
 func (nad *UdnNetDefResource) CreateUdnNad(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", nad.Template, "-p", "NADNAME="+nad.Nadname, "NAMESPACE="+nad.Namespace, "NAD_NETWORK_NAME="+nad.NadNetworkName, "TOPOLOGY="+nad.Topology, "SUBNET="+nad.Subnet, "NET_ATTACH_DEF_NAME="+nad.NetAttachDefName, "ROLE="+nad.Role)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -1110,7 +1110,7 @@ func GetPodIPUDNv6(oc *exutil.CLI, namespace string, podName string, netName str
 func (rcPingPod *ReplicationControllerPingPodResource) CreateReplicaController(oc *exutil.CLI) {
 	e2e.Logf("Creating replication controller from template")
 	replicasString := fmt.Sprintf("REPLICAS=%v", rcPingPod.Replicas)
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", rcPingPod.Template, "-p", "PODNAME="+rcPingPod.Name,
 			"NAMESPACE="+rcPingPod.Namespace, replicasString)
 		if err1 != nil {

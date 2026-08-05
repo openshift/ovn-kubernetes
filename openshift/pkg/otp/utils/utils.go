@@ -274,7 +274,7 @@ type NamedPortPodResource struct {
 }
 
 func (pod *PingPodResource) CreatePingPod(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -286,7 +286,7 @@ func (pod *PingPodResource) CreatePingPod(oc *exutil.CLI) {
 }
 
 func (pod *PingPodResourceNode) CreatePingPodNode(oc *exutil.CLI) {
-	err := wait.Poll(3*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 3*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace, "NODENAME="+pod.Nodename)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -298,7 +298,7 @@ func (pod *PingPodResourceNode) CreatePingPodNode(oc *exutil.CLI) {
 }
 
 func (pod *PingPodResourceWinNode) CreatePingPodWinNode(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplate(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace, "IMAGE="+pod.Image, "NODENAME="+pod.Nodename)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -311,7 +311,7 @@ func (pod *PingPodResourceWinNode) CreatePingPodWinNode(oc *exutil.CLI) {
 
 func ApplyResourceFromTemplate(oc *exutil.CLI, parameters ...string) error {
 	var configFile string
-	err := wait.Poll(3*time.Second, 15*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 3*time.Second, 15*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.Run("process").Args(parameters...).OutputToFile(GetRandomString() + "ping-pod.json")
 		if err != nil {
 			e2e.Logf("the err:%v, and try next round", err)
@@ -327,7 +327,7 @@ func ApplyResourceFromTemplate(oc *exutil.CLI, parameters ...string) error {
 }
 
 func (egressIP *EgressIPResource1) CreateEgressIPObject1(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", egressIP.Template, "-p", "NAME="+egressIP.Name, "EGRESSIP1="+egressIP.EgressIP1, "EGRESSIP2="+egressIP.EgressIP2)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -343,7 +343,7 @@ func (egressIP *EgressIPResource1) DeleteEgressIPObject1(oc *exutil.CLI) {
 }
 
 func (egressIP *EgressIPResource1) CreateEgressIPObject2(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", egressIP.Template, "-p", "NAME="+egressIP.Name, "EGRESSIP1="+egressIP.EgressIP1, "NSLABELKEY="+egressIP.NsLabelKey, "NSLABELVALUE="+egressIP.NsLabelValue, "PODLABELKEY="+egressIP.PodLabelKey, "PODLABELVALUE="+egressIP.PodLabelValue)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -355,7 +355,7 @@ func (egressIP *EgressIPResource1) CreateEgressIPObject2(oc *exutil.CLI) {
 }
 
 func (egressFirewall *EgressFirewall1) CreateEgressFWObject1(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", egressFirewall.Template, "-p", "NAME="+egressFirewall.Name, "NAMESPACE="+egressFirewall.Namespace)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -371,7 +371,7 @@ func (egressFirewall *EgressFirewall1) DeleteEgressFWObject1(oc *exutil.CLI) {
 }
 
 func (egressFirewall *EgressFirewall2) CreateEgressFW2Object(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", egressFirewall.Template, "-p", "NAME="+egressFirewall.Name, "NAMESPACE="+egressFirewall.Namespace, "RULETYPE="+egressFirewall.Ruletype, "CIDR="+egressFirewall.Cidr)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -383,7 +383,7 @@ func (egressFirewall *EgressFirewall2) CreateEgressFW2Object(oc *exutil.CLI) {
 }
 
 func (EFW *EgressFirewall5) CreateEgressFW5Object(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		parameters := []string{"--ignore-unknown-parameters=true", "-f", EFW.Template, "-p", "NAME=" + EFW.Name, "NAMESPACE=" + EFW.Namespace, "RULETYPE1=" + EFW.Ruletype1, "RULENAME1=" + EFW.Rulename1, "RULEVALUE1=" + EFW.Rulevalue1, "PROTOCOL1=" + EFW.Protocol1, "PORTNUMBER1=" + strconv.Itoa(EFW.Portnumber1), "RULETYPE2=" + EFW.Ruletype2, "RULENAME2=" + EFW.Rulename2, "RULEVALUE2=" + EFW.Rulevalue2, "PROTOCOL2=" + EFW.Protocol2, "PORTNUMBER2=" + strconv.Itoa(EFW.Portnumber2)}
 		err1 := ApplyResourceFromTemplateByAdmin(oc, parameters...)
 		if err1 != nil {
@@ -396,7 +396,7 @@ func (EFW *EgressFirewall5) CreateEgressFW5Object(oc *exutil.CLI) {
 }
 
 func (eNPL *EgressNetworkpolicy) CreateEgressNetworkPolicyObj(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		parameters := []string{"--ignore-unknown-parameters=true", "-f", eNPL.Template, "-p", "NAME=" + eNPL.Name, "NAMESPACE=" + eNPL.Namespace, "RULETYPE=" + eNPL.Ruletype, "RULENAME=" + eNPL.Rulename, "RULEVALUE=" + eNPL.Rulevalue}
 		err1 := ApplyResourceFromTemplateByAdmin(oc, parameters...)
 		if err1 != nil {
@@ -410,7 +410,7 @@ func (eNPL *EgressNetworkpolicy) CreateEgressNetworkPolicyObj(oc *exutil.CLI) {
 
 // Single CIDR on Dual stack
 func (ipBlock_policy *IpBlockCIDRsDual) CreateipBlockCIDRObjectDual(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ipBlock_policy.Template, "-p", "NAME="+ipBlock_policy.Name, "NAMESPACE="+ipBlock_policy.Namespace, "cidrIpv6="+ipBlock_policy.CidrIpv6, "cidrIpv4="+ipBlock_policy.CidrIpv4)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -423,7 +423,7 @@ func (ipBlock_policy *IpBlockCIDRsDual) CreateipBlockCIDRObjectDual(oc *exutil.C
 
 // Single CIDR on single stack
 func (ipBlock_policy *IpBlockCIDRsSingle) CreateipBlockCIDRObjectSingle(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ipBlock_policy.Template, "-p", "NAME="+ipBlock_policy.Name, "NAMESPACE="+ipBlock_policy.Namespace, "CIDR="+ipBlock_policy.Cidr)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -436,7 +436,7 @@ func (ipBlock_policy *IpBlockCIDRsSingle) CreateipBlockCIDRObjectSingle(oc *exut
 
 // Single IP Block with except clause on Dual stack
 func (ipBlock_except_policy *IpBlockCIDRsExceptDual) CreateipBlockExceptObjectDual(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 
 		policyApplyError := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ipBlock_except_policy.Template, "-p", "NAME="+ipBlock_except_policy.Name, "NAMESPACE="+ipBlock_except_policy.Namespace, "CIDR_IPv6="+ipBlock_except_policy.CidrIpv6, "EXCEPT_IPv6="+ipBlock_except_policy.CidrIpv6Except, "CIDR_IPv4="+ipBlock_except_policy.CidrIpv4, "EXCEPT_IPv4="+ipBlock_except_policy.CidrIpv4Except)
 		if policyApplyError != nil {
@@ -450,7 +450,7 @@ func (ipBlock_except_policy *IpBlockCIDRsExceptDual) CreateipBlockExceptObjectDu
 
 // Single IP Block with except clause on Single stack
 func (ipBlock_except_policy *IpBlockCIDRsExceptSingle) CreateipBlockExceptObjectSingle(oc *exutil.CLI, except bool) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 
 		policyApplyError := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ipBlock_except_policy.Template, "-p", "NAME="+ipBlock_except_policy.Name, "NAMESPACE="+ipBlock_except_policy.Namespace, "CIDR="+ipBlock_except_policy.Cidr, "EXCEPT="+ipBlock_except_policy.Except)
 		if policyApplyError != nil {
@@ -464,7 +464,7 @@ func (ipBlock_except_policy *IpBlockCIDRsExceptSingle) CreateipBlockExceptObject
 
 // Function to create ingress or egress policy with multiple CIDRs on Dual Stack Cluster
 func (ipBlock_cidrs_policy *IpBlockCIDRsDual) CreateIPBlockMultipleCIDRsObjectDual(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ipBlock_cidrs_policy.Template, "-p", "NAME="+ipBlock_cidrs_policy.Name, "NAMESPACE="+ipBlock_cidrs_policy.Namespace, "cidrIpv6="+ipBlock_cidrs_policy.CidrIpv6, "cidrIpv4="+ipBlock_cidrs_policy.CidrIpv4, "cidr2Ipv4="+ipBlock_cidrs_policy.Cidr2Ipv4, "cidr2Ipv6="+ipBlock_cidrs_policy.Cidr2Ipv6, "cidr3Ipv4="+ipBlock_cidrs_policy.Cidr3Ipv4, "cidr3Ipv6="+ipBlock_cidrs_policy.Cidr3Ipv6)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -477,7 +477,7 @@ func (ipBlock_cidrs_policy *IpBlockCIDRsDual) CreateIPBlockMultipleCIDRsObjectDu
 
 // Function to create ingress or egress policy with multiple CIDRs on Single Stack Cluster
 func (ipBlock_cidrs_policy *IpBlockCIDRsSingle) CreateIPBlockMultipleCIDRsObjectSingle(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ipBlock_cidrs_policy.Template, "-p", "NAME="+ipBlock_cidrs_policy.Name, "NAMESPACE="+ipBlock_cidrs_policy.Namespace, "CIDR="+ipBlock_cidrs_policy.Cidr, "CIDR2="+ipBlock_cidrs_policy.Cidr2, "CIDR3="+ipBlock_cidrs_policy.Cidr3)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -489,7 +489,7 @@ func (ipBlock_cidrs_policy *IpBlockCIDRsSingle) CreateIPBlockMultipleCIDRsObject
 }
 
 func (service *GenericServiceResource) CreateServiceFromParams(oc *exutil.CLI) {
-	err := wait.Poll(3*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 3*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", service.Template, "-p", "SERVICENAME="+service.Servicename, "NAMESPACE="+service.Namespace, "PROTOCOL="+service.Protocol, "SELECTOR="+service.Selector, "serviceType="+service.ServiceType, "ipFamilyPolicy="+service.IpFamilyPolicy, "internalTrafficPolicy="+service.InternalTrafficPolicy, "externalTrafficPolicy="+service.ExternalTrafficPolicy)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -501,7 +501,7 @@ func (service *GenericServiceResource) CreateServiceFromParams(oc *exutil.CLI) {
 }
 
 func (service *WindowGenericServiceResource) CreateWinServiceFromParams(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", service.Template, "-p", "SERVICENAME="+service.Servicename, "NAMESPACE="+service.Namespace, "PROTOCOL="+service.Protocol, "SELECTOR="+service.Selector, "serviceType="+service.ServiceType, "ipFamilyPolicy="+service.IpFamilyPolicy, "internalTrafficPolicy="+service.InternalTrafficPolicy, "externalTrafficPolicy="+service.ExternalTrafficPolicy)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -513,7 +513,7 @@ func (service *WindowGenericServiceResource) CreateWinServiceFromParams(oc *exut
 }
 
 func (egressrouter *EgressrouterMultipleDst) CreateEgressRouterMultipeDst(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", egressrouter.Template, "-p", "NAME="+egressrouter.Name, "NAMESPACE="+egressrouter.Namespace, "RESERVEDIP="+egressrouter.Reservedip, "GATEWAY="+egressrouter.Gateway, "DSTIP1="+egressrouter.Destinationip1, "DSTIP2="+egressrouter.Destinationip2, "DSTIP3="+egressrouter.Destinationip3)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -525,7 +525,7 @@ func (egressrouter *EgressrouterMultipleDst) CreateEgressRouterMultipeDst(oc *ex
 }
 
 func (egressrouter *EgressrouterRedSDN) CreateEgressRouterRedSDN(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", egressrouter.Template, "-p", "NAME="+egressrouter.Name, "NAMESPACE="+egressrouter.Namespace, "RESERVEDIP="+egressrouter.Reservedip, "GATEWAY="+egressrouter.Gateway, "DSTIP="+egressrouter.Destinationip, "LABELKEY="+egressrouter.Labelkey, "LABELVALUE="+egressrouter.Labelvalue)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -556,7 +556,7 @@ func RemoveResource(oc *exutil.CLI, asAdmin bool, withoutNamespace bool, paramet
 	}
 	o.Expect(err).NotTo(o.HaveOccurred())
 
-	err = wait.Poll(3*time.Second, 120*time.Second, func() (bool, error) {
+	err = wait.PollUntilContextTimeout(context.Background(), 3*time.Second, 120*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := DoAction(oc, "get", asAdmin, withoutNamespace, parameters...)
 		if err != nil && (strings.Contains(output, "NotFound") || strings.Contains(output, "No resources found")) {
 			e2e.Logf("the resource is delete successfully")
@@ -585,7 +585,7 @@ func DoAction(oc *exutil.CLI, action string, asAdmin bool, withoutNamespace bool
 
 func ApplyResourceFromTemplateByAdmin(oc *exutil.CLI, parameters ...string) error {
 	var configFile string
-	err := wait.Poll(3*time.Second, 15*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 3*time.Second, 15*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().Run("process").Args(parameters...).OutputToFile(GetRandomString() + "resource.json")
 		if err != nil {
 			e2e.Logf("the err:%v, and try next round", err)
@@ -640,7 +640,7 @@ func Contains(s []string, str string) bool {
 }
 
 func WaitPodReady(oc *exutil.CLI, namespace string, podName string) {
-	err := wait.Poll(5*time.Second, 60*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		status, err1 := CheckPodReady(oc, namespace, podName)
 		if err1 != nil {
 			e2e.Logf("the err:%v, wait for pod %v to become ready.", err1, podName)
@@ -860,7 +860,7 @@ func InstallSctpModule(oc *exutil.CLI, configFile string) {
 func CheckSctpModule(oc *exutil.CLI, nodeName, namespace string) {
 	defer RecoverNamespaceRestricted(oc, namespace)
 	SetNamespacePrivileged(oc, namespace)
-	err := wait.Poll(30*time.Second, 15*time.Minute, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 30*time.Second, 15*time.Minute, true, func(ctx context.Context) (bool, error) {
 		// Check nodes status to make sure all nodes are up after rebooting caused by load-sctp-module
 		nodesStatus, err := oc.AsAdmin().Run("get").Args("node").Output()
 		o.Expect(err).NotTo(o.HaveOccurred())
@@ -904,7 +904,7 @@ func CreateResourceFromFile(oc *exutil.CLI, ns, file string) {
 }
 
 func WaitForPodWithLabelReady(oc *exutil.CLI, ns, label string) error {
-	return wait.Poll(5*time.Second, 5*time.Minute, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 		status, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("pod", "-n", ns, "-l", label, "-ojsonpath={.items[*].status.conditions[?(@.type==\"Ready\")].status}").Output()
 		e2e.Logf("the Ready status of pod is %v", status)
 		if err != nil || status == "" {
@@ -920,7 +920,7 @@ func WaitForPodWithLabelReady(oc *exutil.CLI, ns, label string) error {
 }
 
 func WaitForPodWithLabelGone(oc *exutil.CLI, ns, label string) error {
-	errWait := wait.Poll(5*time.Second, 10*time.Minute, func() (bool, error) {
+	errWait := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
 		podsOutput, _ := oc.AsAdmin().WithoutNamespace().Run("get").Args("pod", "-n", ns, "-l", label).Output()
 		if strings.Contains(podsOutput, "NotFound") || strings.Contains(podsOutput, "No resources found") {
 			e2e.Logf("the resource is deleted already")
@@ -969,7 +969,7 @@ func GetSvcIPdualstack(oc *exutil.CLI, namespace string, svcName string) (string
 
 // check if a configmap is created in specific namespace [usage: CheckConfigMap(oc, namesapce, configmapName)]
 func CheckConfigMap(oc *exutil.CLI, ns, configmapName string) error {
-	return wait.Poll(5*time.Second, 3*time.Minute, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 3*time.Minute, true, func(ctx context.Context) (bool, error) {
 		searchOutput, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("cm", "-n", ns).Output()
 		if err != nil {
 			e2e.Logf("failed to get configmap: %v", err)
@@ -1006,7 +1006,7 @@ func PatchResourceAsAdmin(oc *exutil.CLI, resource, patch string, nameSpace ...s
 
 // Check network operator status in intervals until timeout
 func CheckNetworkOperatorState(oc *exutil.CLI, interval int, timeout int) {
-	errCheck := wait.Poll(time.Duration(interval)*time.Second, time.Duration(timeout)*time.Second, func() (bool, error) {
+	errCheck := wait.PollUntilContextTimeout(context.Background(), time.Duration(interval)*time.Second, time.Duration(timeout)*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("co", "network").Output()
 		if err != nil {
 			e2e.Logf("Fail to get clusteroperator network, error:%s. Trying again", err)
@@ -1091,7 +1091,7 @@ func CheckSDNMetrics(oc *exutil.CLI, url string, metrics string) {
 	olmToken, err := GetSAToken(oc)
 	o.Expect(err).NotTo(o.HaveOccurred())
 	o.Expect(olmToken).NotTo(o.BeEmpty())
-	metricsErr := wait.Poll(5*time.Second, 10*time.Second, func() (bool, error) {
+	metricsErr := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 10*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-monitoring", "-c", "prometheus", "prometheus-k8s-0", "--", "curl", "-k", "-H", fmt.Sprintf("Authorization: Bearer %v", olmToken), fmt.Sprintf("%s", url)).OutputToFile("metrics.txt")
 		if err != nil {
 			e2e.Logf("Can't get metrics and try again, the error is:%s", err)
@@ -1133,7 +1133,7 @@ func GetEgressIPByKind(oc *exutil.CLI, kind string, kindName string, expectedNum
 	isIPListEmpty := (iplist == "" || iplist == "[]")
 	if expectedNum == 0 {
 		// Add waiting time for egressIP removed
-		egressIPEmptyErr := wait.Poll(30*time.Second, 5*time.Minute, func() (bool, error) {
+		egressIPEmptyErr := wait.PollUntilContextTimeout(context.Background(), 30*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 			iplist, err = oc.AsAdmin().WithoutNamespace().Run("get").Args(kind, kindName, "-o=jsonpath={.egressIPs}").Output()
 			if iplist == "" || iplist == "[]" {
 				e2e.Logf("EgressIP list is empty")
@@ -1148,7 +1148,7 @@ func GetEgressIPByKind(oc *exutil.CLI, kind string, kindName string, expectedNum
 		ip = strings.Split(iplist[2:len(iplist)-2], "\",\"")
 	}
 	if isIPListEmpty || len(ip) < expectedNum || err != nil {
-		err = wait.Poll(30*time.Second, 5*time.Minute, func() (bool, error) {
+		err = wait.PollUntilContextTimeout(context.Background(), 30*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 			iplist, err = oc.AsAdmin().WithoutNamespace().Run("get").Args(kind, kindName, "-o=jsonpath={.egressIPs}").Output()
 			if len(iplist) > 0 && iplist != "[]" {
 				ip = strings.Split(iplist[2:len(iplist)-2], "\",\"")
@@ -1200,7 +1200,7 @@ func FindTwoNodesWithSameSubnet(oc *exutil.CLI, nodeList *v1.NodeList) (bool, [2
 
 func GetSDNMetrics(oc *exutil.CLI, podName string) string {
 	var metricsLog string
-	metricsErr := wait.Poll(5*time.Second, 10*time.Second, func() (bool, error) {
+	metricsErr := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 10*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-sdn", fmt.Sprintf("%s", podName), "--", "curl", "localhost:29100/metrics").OutputToFile("metrics.txt")
 		if err != nil {
 			e2e.Logf("Can't get metrics and try again, the error is:%s", err)
@@ -1218,7 +1218,7 @@ func GetOVNMetrics(oc *exutil.CLI, url string) string {
 	olmToken, err := GetSAToken(oc)
 	o.Expect(err).NotTo(o.HaveOccurred())
 	o.Expect(olmToken).NotTo(o.BeEmpty())
-	metricsErr := wait.Poll(5*time.Second, 10*time.Second, func() (bool, error) {
+	metricsErr := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 10*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-monitoring", "-c", "prometheus", "prometheus-k8s-0", "--", "env", "-u", "HTTPS_PROXY", "-u", "https_proxy", "curl", "-k", "-H", fmt.Sprintf("Authorization: Bearer %v", olmToken), fmt.Sprintf("%s", url)).OutputToFile("metrics.txt")
 		if err != nil {
 			e2e.Logf("Can't get metrics and try again, the error is:%s", err)
@@ -1246,7 +1246,7 @@ func CheckIPsec(oc *exutil.CLI) string {
 func GetAssignedEIPInEIPObject(oc *exutil.CLI, egressIPObject string) []map[string]string {
 	timeout := EstimateTimeoutForEgressIP(oc)
 	var egressIPs string
-	egressipErr := wait.Poll(10*time.Second, timeout, func() (bool, error) {
+	egressipErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		egressIPStatus, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("egressip", egressIPObject, "-ojsonpath={.status.items}").Output()
 		if err != nil {
 			e2e.Logf("Wait to get EgressIP object applied,try next round. %v", err)
@@ -1284,7 +1284,7 @@ func CheckNodeStatus(oc *exutil.CLI, nodeName string, expectedStatus string) {
 		err1 := fmt.Errorf("TBD supported node status")
 		o.Expect(err1).NotTo(o.HaveOccurred())
 	}
-	err := wait.Poll(5*time.Second, 15*time.Minute, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 15*time.Minute, true, func(ctx context.Context) (bool, error) {
 		statusOutput, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("nodes", nodeName, "-ojsonpath={.status.conditions[-1].status}").Output()
 		if err != nil {
 			e2e.Logf("\nGet node status with error : %v", err)
@@ -1301,7 +1301,7 @@ func CheckNodeStatus(oc *exutil.CLI, nodeName string, expectedStatus string) {
 
 func UpdateEgressIPObject(oc *exutil.CLI, egressIPObjectName string, egressIP string) {
 	PatchResourceAsAdmin(oc, "egressip/"+egressIPObjectName, "{\"spec\":{\"egressIPs\":[\""+egressIP+"\"]}}")
-	egressipErr := wait.Poll(10*time.Second, 180*time.Second, func() (bool, error) {
+	egressipErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 180*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.WithoutNamespace().AsAdmin().Run("get").Args("egressip", egressIPObjectName, "-o=jsonpath={.status.items[*]}").Output()
 		if err != nil {
 			e2e.Logf("Wait to get EgressIP object applied,try next round. %v", err)
@@ -1419,7 +1419,7 @@ func GetSvcIP(oc *exutil.CLI, namespace string, svcName string) (string, string)
 			jsonString = "-o=jsonpath={.status.loadBalancer.ingress[0].ip}"
 		}
 
-		err := wait.Poll(30*time.Second, 300*time.Second, func() (bool, error) {
+		err := wait.PollUntilContextTimeout(context.Background(), 30*time.Second, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 			svcIP, er := oc.AsAdmin().WithoutNamespace().Run("get").Args("service", "-n", namespace, svcName, jsonString).Output()
 			o.Expect(er).NotTo(o.HaveOccurred())
 			if svcIP == "" {
@@ -1608,7 +1608,7 @@ func SDNHostwEgressIP(oc *exutil.CLI, node []string, egressip string) string {
 			ip = strings.Split(iplist[2:len(iplist)-2], "\",\"")
 		}
 		if iplist == "" || iplist == "[]" || err != nil {
-			err = wait.Poll(30*time.Second, 3*time.Minute, func() (bool, error) {
+			err = wait.PollUntilContextTimeout(context.Background(), 30*time.Second, 3*time.Minute, true, func(ctx context.Context) (bool, error) {
 				iplist, err = oc.AsAdmin().WithoutNamespace().Run("get").Args("hostsubnet", node[i], "-o=jsonpath={.egressIPs}").Output()
 				if iplist != "" && iplist != "[]" {
 					e2e.Logf("Found egressIP list for node %v is: %v", node, iplist)
@@ -1641,7 +1641,7 @@ func IsValueInList(value string, list []string) bool {
 
 // check if an ip address is added to node's NIC, or removed from node's NIC
 func CheckPrimaryNIC(oc *exutil.CLI, nodeName string, ip string, flag bool) {
-	checkErr := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := DebugNodeWithChroot(oc, nodeName, "bash", "-c", "/usr/sbin/ip -4 -brief address show")
 		if err != nil {
 			e2e.Logf("Cannot get primary NIC interface, errors: %v, try again", err)
@@ -1661,7 +1661,7 @@ func CheckPrimaryNIC(oc *exutil.CLI, nodeName string, ip string, flag bool) {
 }
 
 func CheckEgressIPonSDNHost(oc *exutil.CLI, node string, expectedEgressIP []string) {
-	checkErr := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		ip, err := GetEgressIPByKind(oc, "hostsubnet", node, len(expectedEgressIP))
 		if err != nil {
 			e2e.Logf("\n got the error: %v\n, try again", err)
@@ -1693,7 +1693,7 @@ func CheckovnkubeMasterNetworkProgrammingetrics(oc *exutil.CLI, url string, metr
 	olmToken, err := GetSAToken(oc)
 	o.Expect(err).NotTo(o.HaveOccurred())
 	o.Expect(olmToken).NotTo(o.BeEmpty())
-	metricsErr := wait.Poll(5*time.Second, 10*time.Second, func() (bool, error) {
+	metricsErr := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 10*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-monitoring", "-c", "prometheus", "prometheus-k8s-0", "--", "curl", "-k", "-H", fmt.Sprintf("Authorization: Bearer %v", olmToken), fmt.Sprintf("%s", url)).OutputToFile("metrics.txt")
 		if err != nil {
 			e2e.Logf("Can't get metrics and try again, the error is:%s", err)
@@ -1744,7 +1744,7 @@ func FindUnUsedIPsOnNodeOrFail(oc *exutil.CLI, nodeName, cidr string, expectedNu
 }
 
 func (pod *ExternalIPPod) CreateExternalIPPod(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplate(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -1861,7 +1861,7 @@ func CheckEnvInConfigMap(oc *exutil.CLI, ns, configmapName string, envString str
 	err := CheckConfigMap(oc, ns, configmapName)
 	o.Expect(err).NotTo(o.HaveOccurred(), fmt.Sprintf("cm %v is not found in namespace %v", configmapName, ns))
 
-	checkErr := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("configmap", "-n", ns, configmapName, "-oyaml").Output()
 		if err != nil {
 			e2e.Logf("Failed to get configmap %v, error: %s. Trying again", configmapName, err)
@@ -1880,7 +1880,7 @@ func CheckEnvInConfigMap(oc *exutil.CLI, ns, configmapName string, envString str
 func CheckLogMessageInPod(oc *exutil.CLI, namespace string, containerName string, podName string, filter string) (string, error) {
 	var podLogs string
 	var err, checkErr error
-	checkErr = wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr = wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		podLogs, err = GetSpecificPodLogsCombinedOrNot(oc, namespace, containerName, podName, filter, true)
 		if len(podLogs) == 0 || err != nil {
 			e2e.Logf("did not get expected podLogs: %v, or have err:%v, try again", podLogs, err)
@@ -1898,7 +1898,7 @@ func CheckLogMessageInPod(oc *exutil.CLI, namespace string, containerName string
 func GetOVNK8sNodeMgmtIPv4(oc *exutil.CLI, nodeName string) string {
 	var output string
 	var err error
-	checkErr := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err = DebugNodeWithChroot(oc, nodeName, "bash", "-c", "/usr/sbin/ip -4 -brief address show | grep ovn-k8s-mp0")
 		if output == "" || err != nil {
 			e2e.Logf("Did not get node's management interface, errors: %v, try again", err)
@@ -1945,7 +1945,7 @@ func SearchOVNDBForSpecCmd(oc *exutil.CLI, cmd, searchKeyword string, times int)
 	ovnPod := GetOVNKMasterOVNkubeNode(oc)
 	o.Expect(ovnPod).ShouldNot(o.Equal(""))
 	var cmdOutput string
-	checkOVNDbErr := wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		output, cmdErr := RemoteShPodWithBash(oc, "openshift-ovn-kubernetes", ovnPod, cmd)
 		if cmdErr != nil {
 			e2e.Logf("%v,Waiting for expected result to be synced, try next ...,", cmdErr)
@@ -1965,7 +1965,7 @@ func SearchOVNDBForSpecCmd(oc *exutil.CLI, cmd, searchKeyword string, times int)
 
 // WaitEgressFirewallApplied Wait egressfirewall applied
 func WaitEgressFirewallApplied(oc *exutil.CLI, efName, ns string) error {
-	checkErr := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, efErr := oc.AsAdmin().WithoutNamespace().Run("get").Args("egressfirewall", "-n", ns, efName).Output()
 		if efErr != nil {
 			e2e.Logf("Failed to get egressfirewall %v, error: %s. Trying again", efName, efErr)
@@ -2043,7 +2043,7 @@ func GetRouterID(oc *exutil.CLI, nodeName string) (string, error) {
 	var cmdErr error
 	routerName = "GR_" + nodeName
 	cmd := "ovn-nbctl show | grep " + routerName + " | grep 'router '|awk '{print $2}'"
-	checkOVNDbErr := wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		cmdOutput, cmdErr = RemoteShPodWithBash(oc, "openshift-ovn-kubernetes", ovnKubePod, cmd)
 		if cmdErr != nil {
 			e2e.Logf("%v,Waiting for expected result to be synced, try again ...,", cmdErr)
@@ -2076,7 +2076,7 @@ func GetSNATofEgressIP(oc *exutil.CLI, nodeName, egressIP string) ([]string, err
 	var snatIP []string
 
 	cmd := "ovn-nbctl --no-headings --column logical_ip --format=table find nat external_ip=" + egressIP
-	checkOVNDbErr := wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		cmdOutput, cmdErr = RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKubePod, "northd", cmd)
 		if cmdErr != nil {
 			e2e.Logf("%v,Waiting for expected result to be synced, try again ...,", cmdErr)
@@ -2244,7 +2244,7 @@ func GetOVNKCtrlPlanePodOnHostedCluster(oc *exutil.CLI, namespace, cmName, hyper
 }
 
 func WaitForPodWithLabelReadyOnHostedCluster(oc *exutil.CLI, ns, label string) error {
-	return wait.Poll(15*time.Second, 10*time.Minute, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 15*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
 		status, err := oc.AsAdmin().AsGuestKubeconf().WithoutNamespace().Run("get").Args("pod", "-n", ns, "-l", label, "-ojsonpath={.items[*].status.conditions[?(@.type==\"Ready\")].status}").Output()
 		e2e.Logf("the Ready status of pod is %v", status)
 		if err != nil || status == "" {
@@ -2275,7 +2275,7 @@ func GetReadySchedulableNodesOnHostedCluster(oc *exutil.CLI) ([]string, error) {
 	var nodesOnHostedCluster, schedulableNodes []string
 	nodesOnHostedCluster = strings.Split(output, " ")
 	for _, nodeName := range nodesOnHostedCluster {
-		err := wait.Poll(10*time.Second, 15*time.Minute, func() (bool, error) {
+		err := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 15*time.Minute, true, func(ctx context.Context) (bool, error) {
 			statusOutput, err := oc.AsAdmin().AsGuestKubeconf().Run("get").Args("nodes", nodeName, "-ojsonpath={.status.conditions[-1].status}").Output()
 			if err != nil {
 				e2e.Logf("\nGet node status with error : %v", err)
@@ -2296,7 +2296,7 @@ func GetReadySchedulableNodesOnHostedCluster(oc *exutil.CLI) ([]string, error) {
 func CheckLogMessageInPodOnHostedCluster(oc *exutil.CLI, namespace string, containerName string, podName string, filter string) (string, error) {
 	var podLogs string
 	var err, checkErr error
-	checkErr = wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr = wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		podLogs, err = GetSpecificPodLogs(oc.AsAdmin().AsGuestKubeconf(), namespace, containerName, podName, filter)
 		if len(podLogs) == 0 || err != nil {
 			e2e.Logf("did not get expected podLog: %v, or have err:%v, try again", podLogs, err)
@@ -2315,7 +2315,7 @@ func GetOVNK8sNodeMgmtIPv4OnHostedCluster(oc *exutil.CLI, nodeName string) strin
 	var outputErr error
 	defer RecoverNamespaceRestricted(oc.AsGuestKubeconf(), "default")
 	SetNamespacePrivileged(oc.AsGuestKubeconf(), "default")
-	checkErr := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, outputErr = oc.AsGuestKubeconf().WithoutNamespace().Run("debug").Args("-n", "default", "node/"+nodeName, "--", "chroot", "/host", "bash", "-c", "/usr/sbin/ip -4 -brief address show | grep ovn-k8s-mp0").Output()
 		if output == "" || outputErr != nil {
 			e2e.Logf("Did not get node's management interface on hosted cluster, errors: %v, try again", outputErr)
@@ -2474,7 +2474,7 @@ func GetOVNConstructs(oc *exutil.CLI, constructType string, nodeNames []string) 
 	getCmd := "ovn-nbctl --no-leader-only " + constructType
 	ovnPod := GetOVNKMasterOVNkubeNode(oc)
 	o.Expect(ovnPod).ShouldNot(o.Equal(""))
-	checkOVNDbErr := wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		cmdOutput, cmdErr := RemoteShPodWithBash(oc, "openshift-ovn-kubernetes", ovnPod, getCmd)
 		if cmdErr != nil {
 			e2e.Logf("%v,Waiting for expected result to be synced, try again ...,", cmdErr)
@@ -2508,7 +2508,7 @@ func (SvcEndpontDetails *SvcEndpontDetails) GetOVNConstruct(oc *exutil.CLI, cons
 	var ovnConstruct string
 	var matchStr string
 	getCmd := "ovn-nbctl " + constructType
-	checkOVNDbErr := wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		cmdOutput, cmdErr := RemoteShPodWithBash(oc, "openshift-ovn-kubernetes", SvcEndpontDetails.OvnKubeNodePod, getCmd)
 		if cmdErr != nil {
 			e2e.Logf("%v,Waiting for expected result to be synced, try again ...,", cmdErr)
@@ -2546,7 +2546,7 @@ func GetOVNLBContructs(oc *exutil.CLI, constructType string, endPoint string, ov
 	//only if the count for any of output is less than three the success will be false
 	result = true
 	for _, construct := range ovnConstruct {
-		checkOVNDbErr := wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+		checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 			getCmd := "ovn-nbctl --no-leader-only " + constructType + " " + construct + " | grep " + endPoint
 			cmdOutput, cmdErr := RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnPod, "northd", getCmd)
 			if cmdErr != nil {
@@ -2577,7 +2577,7 @@ func (SvcEndpontDetails *SvcEndpontDetails) GetOVNLBContruct(oc *exutil.CLI, con
 	var result bool
 	//only if the count for any of output is less than three the success will be false
 	result = true
-	checkOVNDbErr := wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		getCmd := "ovn-nbctl " + constructType + " " + construct + " | grep " + SvcEndpontDetails.PodIP
 		cmdOutput, cmdErr := RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", SvcEndpontDetails.OvnKubeNodePod, "northd", getCmd)
 		if cmdErr != nil {
@@ -2613,7 +2613,7 @@ func GetServiceEndpoints(oc *exutil.CLI, serviceName string, serviceNamespace st
 
 func GetOVNMetricsInSpecificContainer(oc *exutil.CLI, containerName string, podName string, url string, metricName string) string {
 	var metricValue string
-	metricsErr := wait.Poll(5*time.Second, 10*time.Second, func() (bool, error) {
+	metricsErr := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 10*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("exec").Args("-n", "openshift-ovn-kubernetes", "-c", containerName, podName, "--", "curl", url).OutputToFile("metrics.txt")
 		if err != nil {
 			e2e.Logf("Can't get metrics and try again, the error is:%s", err)
@@ -2842,7 +2842,7 @@ func ConfigIPSecAtRuntime(oc *exutil.CLI, targetStatus string) (err error) {
 // check IPSec configuration in northd, targetConfig should be "true" or "false"
 func CheckIPSecInDB(oc *exutil.CLI, targetConfig string) error {
 	ovnLeaderpod := GetOVNKMasterOVNkubeNode(oc)
-	return wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		getIPSec, getErr := ExecCommandInSpecificPod(oc, "openshift-ovn-kubernetes", ovnLeaderpod, "ovn-nbctl --no-leader-only get nb_global . ipsec")
 		o.Expect(getErr).NotTo(o.HaveOccurred())
 		if strings.Contains(getIPSec, targetConfig) {
@@ -2902,7 +2902,7 @@ func WaitForNetworkOperatorState(oc *exutil.CLI, interval int, timeout int, expe
 }
 
 func WaitForClusterOperatorState(oc *exutil.CLI, co string, interval int, timeout int, expectedStatus string) {
-	errCheck := wait.Poll(time.Duration(interval)*time.Second, time.Duration(timeout)*time.Minute, func() (bool, error) {
+	errCheck := wait.PollUntilContextTimeout(context.Background(), time.Duration(interval)*time.Second, time.Duration(timeout)*time.Minute, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("co", co).Output()
 		if err != nil {
 			e2e.Logf("Fail to get clusteroperator network, error:%s. Trying again", err)
@@ -2959,7 +2959,7 @@ func NbContructToMap(nbConstruct string) map[string]string {
 
 // Create live migration job on Kubevirt cluster
 func (migrationjob *MigrationDetails) CreateMigrationJob(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", migrationjob.Template, "-p", "NAME="+migrationjob.Name, "NAMESPACE="+migrationjob.Namespace, "VMI="+migrationjob.Virtualmachinesintance)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -2986,7 +2986,7 @@ func CheckAllClusterOperatorsState(oc *exutil.CLI, interval int, timeout int) {
 	}
 
 	for _, clusterOperator := range clusterOperators {
-		errCheck := wait.Poll(time.Duration(interval)*time.Second, time.Duration(timeout)*time.Minute, func() (bool, error) {
+		errCheck := wait.PollUntilContextTimeout(context.Background(), time.Duration(interval)*time.Second, time.Duration(timeout)*time.Minute, true, func(ctx context.Context) (bool, error) {
 			output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("co", clusterOperator).Output()
 			if err != nil {
 				e2e.Logf("Fail to get state for operator %s, error:%s. Trying again", clusterOperator, err)
@@ -3010,7 +3010,7 @@ func CheckOVNKState(oc *exutil.CLI) error {
 		WaitForPodWithLabelReady(oc, "openshift-ovn-kubernetes", "app=ovnkube-control-plane")
 	}
 	// check ovnkube-node ds rollout status and confirm if rollout has triggered
-	return wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		status, err := oc.AsAdmin().WithoutNamespace().Run("rollout").Args("status", "-n", "openshift-ovn-kubernetes", "ds", "ovnkube-node", "--timeout", "5m").Output()
 		o.Expect(err).NotTo(o.HaveOccurred())
 		if strings.Contains(status, "rollout to finish") && strings.Contains(status, "successfully rolled out") {
@@ -3059,7 +3059,7 @@ func RemoveDummyInterface(oc *exutil.CLI, nodeName, nicName string) {
 }
 
 func (kkPod *KubeletKillerPod) CreateKubeletKillerPodOnNode(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", kkPod.Template, "-p", "NAME="+kkPod.Name, "NAMESPACE="+kkPod.Namespace, "NODENAME="+kkPod.Nodename)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -3120,7 +3120,7 @@ func GetMachineNamesFromMachinePoolOnROSA(oc *exutil.CLI, machineSetName string,
 
 // Wait for machine on a classic ROSA to be ready - this function only appliable to classic ROSA, as there is no "machine" resource on ROSA hosted cluster
 func WaitMachineOnROSAReady(oc *exutil.CLI, machineName string, namespace string) error {
-	return wait.Poll(15*time.Second, 10*time.Minute, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 15*time.Second, 10*time.Minute, true, func(ctx context.Context) (bool, error) {
 		status, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("machine", machineName, "-n", namespace, "-o=jsonpath={.status.phase}").Output()
 		e2e.Logf("Machine %v status is %v", machineName, status)
 		if err != nil || status == "" {
@@ -3162,7 +3162,7 @@ func (sgwpr *ApbStaticExternalRoute) DeleteAPBExternalRoute(oc *exutil.CLI) {
 }
 
 func (sgwpr *ApbStaticExternalRoute) CreateAPBExternalRoute(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", sgwpr.Template, "-p", "NAME="+sgwpr.Name, "LABELKEY="+sgwpr.Labelkey, "LABELVALUE="+sgwpr.Labelvalue, "IP1="+sgwpr.Ip1, "IP2="+sgwpr.Ip2, "BFD="+strconv.FormatBool(sgwpr.Bfd))
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -3174,7 +3174,7 @@ func (sgwpr *ApbStaticExternalRoute) CreateAPBExternalRoute(oc *exutil.CLI) {
 }
 
 func (sgwpr *ApbDynamicExternalRoute) CreateAPBDynamicExternalRoute(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", sgwpr.Template, "-p", "NAME="+sgwpr.Name, "LABELKEY="+sgwpr.LabelKey, "LABELVALUE="+sgwpr.LabelValue,
 			"PODLABELKEY="+sgwpr.PodLabelKey, "PODLABELVALUE="+sgwpr.PodLabelValue,
 			"NSLABELKEY="+sgwpr.NamespaceLabelKey, "NSLABELVALUE="+sgwpr.NamespaceLabelValue,
@@ -3189,7 +3189,7 @@ func (sgwpr *ApbDynamicExternalRoute) CreateAPBDynamicExternalRoute(oc *exutil.C
 }
 
 func CheckAPBExternalRouteStatus(oc *exutil.CLI, gwName string, expectedStatus string) error {
-	checkErr := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, gwErr := oc.AsAdmin().WithoutNamespace().Run("get").Args("apbexternalroute", gwName).Output()
 		if gwErr != nil {
 			e2e.Logf("Failed to get apbexternalroute %v, error: %s. Trying again", gwName, gwErr)
@@ -3205,7 +3205,7 @@ func CheckAPBExternalRouteStatus(oc *exutil.CLI, gwName string, expectedStatus s
 }
 
 func CheckEgressFWStatus(oc *exutil.CLI, fwName string, ns string, expectedStatus string) error {
-	checkErr := wait.Poll(10*time.Second, 60*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 60*time.Second, true, func(ctx context.Context) (bool, error) {
 		output, fwErr := oc.AsAdmin().WithoutNamespace().Run("get").Args("egressfirewall", "-n", ns, fwName).Output()
 		if fwErr != nil {
 			e2e.Logf("Failed to get egressfirewall %v, error: %s. Trying again", fwName, fwErr)
@@ -3250,7 +3250,7 @@ func GetlrPolicyList(oc *exutil.CLI, nodeName, tableID string, expected bool) ([
 	var lrPolicyList []string
 
 	lspCmd := "ovn-nbctl lr-policy-list ovn_cluster_router | grep '" + tableID + " '"
-	checkLspErr := wait.Poll(10*time.Second, 2*time.Minute, func() (bool, error) {
+	checkLspErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		lspOutput, lspErr = RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKubeNodePod, "northd", lspCmd)
 		if lspErr == nil && lspOutput != "" && expected {
 			cmdOutputLines := strings.Split(lspOutput, "\n")
@@ -3354,7 +3354,7 @@ func GetLBListEndpointsbySVCIPPortinNBDB(oc *exutil.CLI, nodeName, svcPort strin
 	var endpoints []string
 
 	lbCmd := "ovn-nbctl lb-list | grep  \"" + svcPort + "\"  | awk '{print $NF}'"
-	checkOVNDbErr := wait.Poll(2*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		cmdOutput, cmdErr = RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKubePod, "northd", lbCmd)
 		if cmdErr != nil {
 			e2e.Logf("%v,Waiting for expected result to be synced, try again ...,", cmdErr)
@@ -3398,7 +3398,7 @@ func GetAllPodsWithLabelAndCertainState(oc *exutil.CLI, namespace string, label 
 func GetOVNK8sNodeMgmtIPv6(oc *exutil.CLI, nodeName string) string {
 	var cmdOutput string
 	var err error
-	checkErr := wait.Poll(2*time.Second, 10*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 2*time.Second, 10*time.Second, true, func(ctx context.Context) (bool, error) {
 		cmdOutput, err = DebugNodeWithChroot(oc, nodeName, "bash", "-c", "/usr/sbin/ip -o -6 addr show dev ovn-k8s-mp0 | awk '$3 == \"inet6\" && $6 == \"global\" {print $4}' | cut -d'/' -f1")
 		if cmdOutput == "" || err != nil {
 			e2e.Logf("Did not get node's IPv6 management interface, errors: %v, try again", err)
@@ -3422,7 +3422,7 @@ func GetJoinSwitchIPofNode(oc *exutil.CLI, nodeName string) ([]string, []string)
 	var joinSwitchIPv4s, joinSwitchIPv6s []string
 	var cmdErr error
 	cmd := "ovn-nbctl get logical_router_port rtoj-GR_" + nodeName + " networks"
-	checkOVNDbErr := wait.Poll(3*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 3*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		cmdOutput, cmdErr = RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKubePod, "northd", cmd)
 		if cmdOutput == "" || cmdErr != nil {
 			e2e.Logf("%v,Waiting for expected result to be synced, try again ...,", cmdErr)
@@ -3459,7 +3459,7 @@ func GetHostNetworkIPsinNBDB(oc *exutil.CLI, nodeName string, externalID string)
 	var hostNetworkIPs []string
 	var cmdErr error
 	cmd := "ovn-nbctl --column address find address_set " + externalID
-	checkOVNDbErr := wait.Poll(3*time.Second, 2*time.Minute, func() (bool, error) {
+	checkOVNDbErr := wait.PollUntilContextTimeout(context.Background(), 3*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		cmdOutput, cmdErr = RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKubePod, "northd", cmd)
 		if cmdOutput == "" || cmdErr != nil {
 			e2e.Logf("%v,Waiting for expected result to be synced, try again ...,", cmdErr)
@@ -3700,7 +3700,7 @@ func GetLBSVCHostname(oc *exutil.CLI, namespace, svc string) string {
 	}
 
 	e2e.Logf("Getting the Load Balancer service hostname ...")
-	getLBSVCHostnameErr := wait.Poll(5*time.Second, 2*time.Minute, func() (bool, error) {
+	getLBSVCHostnameErr := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		LBSVCHostname, cmdErr = oc.AsAdmin().WithoutNamespace().Run("get").Args("svc", svc, "-n", namespace, "-o=jsonpath={.status.loadBalancer.ingress[0].hostname}").Output()
 		if cmdErr != nil || LBSVCHostname == "pending" || LBSVCHostname == "" {
 			e2e.Logf("%v,Waiting for expected result to be synced, try again ...,", cmdErr)
@@ -3717,7 +3717,7 @@ func GetLBSVCHostname(oc *exutil.CLI, namespace, svc string) string {
 func GetLBSVCIP(oc *exutil.CLI, namespace string, svcName string) string {
 	var svcExternalIP string
 	var cmdErr error
-	checkErr := wait.Poll(5*time.Second, 300*time.Second, func() (bool, error) {
+	checkErr := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 300*time.Second, true, func(ctx context.Context) (bool, error) {
 		svcExternalIP, cmdErr = oc.AsAdmin().WithoutNamespace().Run("get").Args("service", "-n", namespace, svcName, "-o=jsonpath={.status.loadBalancer.ingress[0].ip}").Output()
 		if svcExternalIP == "" || cmdErr != nil {
 			e2e.Logf("Waiting for lb service IP assignment. Trying again...")
@@ -3812,7 +3812,7 @@ func GetAPIVIPOnCluster(oc *exutil.CLI) string {
 }
 
 func (pod *HttpserverPodResourceNode) CreateHttpservePodNodeByAdmin(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace, "CONTAINERPORT="+strconv.Itoa(int(pod.Containerport)), "HOSTPORT="+strconv.Itoa(int(pod.Hostport)), "NODENAME="+pod.Nodename)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
@@ -3917,7 +3917,7 @@ type CustomResponsePodResource struct {
 }
 
 func (pod *CustomResponsePodResource) CreateCustomResponsePod(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplate(oc, "--ignore-unknown-parameters=true", "-f", pod.Template, "-p", "NAME="+pod.Name, "NAMESPACE="+pod.Namespace,
 			"LABELKEY="+pod.LabelKey, "LABELVAL="+pod.LabelVal,
 			"RESPONSESTR="+pod.ResponseStr)
@@ -3941,7 +3941,7 @@ type SessionAffinityServiceResource struct {
 }
 
 func (svc *SessionAffinityServiceResource) CreateSessionAffiniltyService(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplate(oc, "--ignore-unknown-parameters=true", "-f", svc.Template, "-p", "NAME="+svc.Name, "NAMESPACE="+svc.Namespace,
 			"IPFAMILYPOLICY="+svc.IpFamilyPolicy, "SELLABELKEY="+svc.SelLabelKey, "SELLABELVAL="+svc.SelLabelVal)
 		if err1 != nil {
@@ -3987,7 +3987,7 @@ func SkipIfNoFeatureGate(oc *exutil.CLI, featuregate string) {
 
 // Create VF policy through NMstate
 func (vrf *VRFResource) CreateVRF(oc *exutil.CLI) error {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", vrf.Template, "-p", "NAME="+vrf.Name, "INTFNAME="+vrf.Intfname, "NODENAME="+vrf.Nodename, "TABLEID="+strconv.Itoa(int(vrf.Tableid)))
 		if err1 != nil {
 			e2e.Logf("Creating VRF on the node failed :%v, and try next round", err1)
@@ -4003,7 +4003,7 @@ func (vrf *VRFResource) CreateVRF(oc *exutil.CLI) error {
 
 func (namedPortPod *NamedPortPodResource) CreateNamedPortPod(oc *exutil.CLI) {
 	g.By("Creating named port pod from template")
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", namedPortPod.Template, "-p", "NAME="+namedPortPod.Name,
 			"NAMESPACE="+namedPortPod.Namespace, "PODLABELKEY="+namedPortPod.PodLabelKey, "PODLABELVAL="+namedPortPod.PodLabelVal,
 			"PORTNAME="+namedPortPod.Portname, "CONTAINERPORT="+strconv.Itoa(int(namedPortPod.Containerport)))
@@ -4094,7 +4094,7 @@ func VerifyPodConnCrossNodes(oc *exutil.CLI) bool {
 }
 
 func WaitForPodsCount(oc *exutil.CLI, namespace, labelSelector string, expectedCount int, interval, timeout time.Duration) error {
-	return wait.Poll(interval, timeout, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), interval, timeout, true, func(ctx context.Context) (bool, error) {
 		allPods, getPodErr := GetAllPodsWithLabel(oc, namespace, labelSelector)
 		if getPodErr != nil {
 			e2e.Logf("Error fetching pods: %v, retrying...", getPodErr)
@@ -4286,7 +4286,7 @@ func GetNodeMTU(oc *exutil.CLI, nodeName string) int {
 
 // get mcp status as per nodeType
 func GetmcpStatus(oc *exutil.CLI, nodeRole string) error {
-	return wait.Poll(60*time.Second, 15*time.Minute, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 60*time.Second, 15*time.Minute, true, func(ctx context.Context) (bool, error) {
 		status, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("mcp", nodeRole, "-ojsonpath={.status.conditions[?(@.type=='Updating')].status}").Output()
 		o.Expect(err).NotTo(o.HaveOccurred())
 		e2e.Logf("\nCurrent mcp UPDATING Status is %s\n", status)
@@ -4425,7 +4425,7 @@ func CreateImageDigestMirrorSet(oc *exutil.CLI, imagedigestmirrorsetname string,
 	if err != nil {
 		return fmt.Errorf("Error applying image digest mirror set: %w", err)
 	}
-	return wait.Poll(pollInterval, waitTimeout, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), pollInterval, waitTimeout, true, func(ctx context.Context) (bool, error) {
 		err := oc.AsAdmin().WithoutNamespace().
 			Run("get").Args("imagedigestmirrorset", imagedigestmirrorsetname).Execute()
 		return err == nil, nil
@@ -4447,7 +4447,7 @@ func CreateCatalogSource(oc *exutil.CLI, operatorName string, catalogSourceName 
 	}
 
 	// Wait for CatalogSource to exist and be ready
-	return wait.Poll(pollInterval, waitTimeout, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), pollInterval, waitTimeout, true, func(ctx context.Context) (bool, error) {
 		// Check if CatalogSource exists
 		err := oc.AsAdmin().WithoutNamespace().Run("get").Args("catalogsource", catalogSourceName, "-n", catalogNamespace).Execute()
 		if err != nil {
@@ -4737,7 +4737,7 @@ func IsHypershiftHostedCluster(oc *exutil.CLI) bool {
 }
 
 func AssertOrCheckMCP(oc *exutil.CLI, pool string, interval time.Duration, timeout time.Duration, assert bool) error {
-	return wait.Poll(interval, timeout, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), interval, timeout, true, func(ctx context.Context) (bool, error) {
 		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("mcp", pool, "-o=jsonpath={.status.conditions[?(@.type==\"Updated\")].status}").Output()
 		if err != nil {
 			e2e.Logf("Failed to get MCP status: %v", err)
@@ -4813,7 +4813,7 @@ type NetworkPolicyResource struct {
 }
 
 func (np *NetworkPolicyResource) CreateNetworkPolicy(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", np.Template, "-p",
 			"NAME="+np.Name, "NAMESPACE="+np.Namespace, "POLICY="+np.Policy, "POLICYTYPE="+np.PolicyType,
 			"DIRECTION1="+np.Direction1, "NAMESPACESEL1="+np.NamespaceSel1,

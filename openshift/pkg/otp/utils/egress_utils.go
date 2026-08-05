@@ -74,13 +74,13 @@ func FindFreeIPs(oc *exutil.CLI, nodeName string, number int) []string {
 		preFix, err := strconv.Atoi(tempSlice[1])
 		o.Expect(err).NotTo(o.HaveOccurred())
 		if preFix > 29 {
-			g.Skip("There might be no enough free IPs in current subnet, skip the test!!")
+			g.Skip("There might be not enough free IPs in current subnet, skip the test!!")
 		}
 		freeIPs = FindUnUsedIPsOnNode(oc, nodeName, ipv4Sub, number)
 	} else {
 		sub1 := GetIfaddrFromNode(nodeName, oc)
 		if len(sub1) == 0 && strings.Contains(platform, "gcp") {
-			g.Skip("Skip the tests as no egressIP annoatation on this platform nodes!!")
+			g.Skip("Skip the tests as no egressIP annotation on this platform nodes!!")
 		}
 		o.Expect(len(sub1) == 0).NotTo(o.BeTrue())
 		freeIPs = FindUnUsedIPsOnNode(oc, nodeName, sub1, number)
@@ -108,7 +108,7 @@ func CreateNamespaceUDN(oc *exutil.CLI, baseName string) string {
 // ApplyNsResourceFromTemplate processes an OCP template and applies the result in a specific namespace
 func ApplyNsResourceFromTemplate(oc *exutil.CLI, namespace string, parameters ...string) {
 	var configFile string
-	err := wait.Poll(3*time.Second, 15*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 3*time.Second, 15*time.Second, true, func(ctx context.Context) (bool, error) {
 		args := append([]string{"-n", namespace}, parameters...)
 		output, oerr := oc.AsAdmin().Run("process").Args(args...).OutputToFile(GetRandomString() + "config.json")
 		if oerr != nil {
@@ -142,19 +142,6 @@ type EgressQosResource struct {
 	Namespace string
 	Tempfile  string
 	Kind      string
-}
-
-type NetworkingRes struct {
-	Name      string
-	Namespace string
-	Tempfile  string
-	Kind      string
-}
-
-func (rs *NetworkingRes) Create(oc *exutil.CLI, parameters ...string) {
-	paras := []string{"-f", rs.Tempfile, "--ignore-unknown-parameters=true", "-p"}
-	paras = append(paras, parameters...)
-	ApplyNsResourceFromTemplate(oc, rs.Namespace, paras...)
 }
 
 func (rs *EgressQosResource) Create(oc *exutil.CLI, parameters ...string) {
@@ -219,7 +206,7 @@ type SingleRuleBANPPolicyResource struct {
 }
 
 func (banp *SingleRuleBANPPolicyResource) CreateSingleRuleBANP(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", banp.Template, "-p", "NAME="+banp.Name,
 			"SUBJECTKEY="+banp.SubjectKey, "SUBJECTVAL="+banp.SubjectVal,
 			"POLICYTYPE="+banp.PolicyType, "DIRECTION="+banp.Direction,
@@ -244,7 +231,7 @@ type SingleRuleCIDRBANPPolicyResource struct {
 }
 
 func (banp *SingleRuleCIDRBANPPolicyResource) CreateSingleRuleCIDRBANP(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", banp.Template, "-p", "NAME="+banp.Name,
 			"SUBJECTKEY="+banp.SubjectKey, "SUBJECTVAL="+banp.SubjectVal,
 			"RULENAME="+banp.RuleName, "RULEACTION="+banp.RuleAction, "CIDR="+banp.Cidr)
@@ -269,7 +256,7 @@ type SingleRuleCIDRANPPolicyResource struct {
 }
 
 func (anp *SingleRuleCIDRANPPolicyResource) CreateSingleRuleCIDRANP(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", anp.Template, "-p", "NAME="+anp.Name,
 			"SUBJECTKEY="+anp.SubjectKey, "SUBJECTVAL="+anp.SubjectVal,
 			"PRIORITY="+strconv.Itoa(int(anp.Priority)), "RULENAME="+anp.RuleName, "RULEACTION="+anp.RuleAction, "CIDR="+anp.Cidr)
@@ -297,7 +284,7 @@ type SingleRuleANPPolicyResource struct {
 }
 
 func (anp *SingleRuleANPPolicyResource) CreateSingleRuleANP(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", anp.Template, "-p", "NAME="+anp.Name,
 			"SUBJECTKEY="+anp.SubjectKey, "SUBJECTVAL="+anp.SubjectVal,
 			"PRIORITY="+strconv.Itoa(int(anp.Priority)),
@@ -331,7 +318,7 @@ type SinglePodRuleANPPolicyResource struct {
 }
 
 func (anp *SinglePodRuleANPPolicyResource) CreateSinglePodRuleANP(oc *exutil.CLI) {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", anp.Template, "-p", "NAME="+anp.Name, "PRIORITY="+strconv.Itoa(int(anp.Priority)),
 			"SUBJECTKEY="+anp.SubjectKey, "SUBJECTVAL="+anp.SubjectVal, "SUBJECTPODKEY="+anp.SubjectPodKey, "SUBJECTPODVAL="+anp.SubjectPodVal,
 			"POLICYTYPE="+anp.PolicyType, "DIRECTION="+anp.Direction, "RULENAME="+anp.RuleName, "RULEACTION="+anp.RuleAction,
@@ -367,7 +354,7 @@ type TcpdumpDaemonSet struct {
 }
 
 func (ds *TcpdumpDaemonSet) CreateTcpdumpDS(oc *exutil.CLI) error {
-	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
+	err := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 20*time.Second, true, func(ctx context.Context) (bool, error) {
 		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ds.Template, "-p", "NAME="+ds.Name, "NAMESPACE="+ds.Namespace, "NODELABEL="+ds.NodeLabel, "LABELKEY="+ds.LabelKey, "INF="+ds.PhyInterface, "DSTPORT="+strconv.Itoa(ds.DstPort), "HOST="+ds.DstHost)
 		if err1 != nil {
 			e2e.Logf("Tcpdump daemonset created failed :%v, and try next round", err1)
@@ -394,7 +381,7 @@ func WaitDaemonSetReady(oc *exutil.CLI, ns, dsName string) error {
 	desiredNum, convertErr := strconv.Atoi(desiredNumStr)
 	o.Expect(convertErr).NotTo(o.HaveOccurred())
 
-	dsErr := wait.Poll(10*time.Second, 5*time.Minute, func() (bool, error) {
+	dsErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 5*time.Minute, true, func(ctx context.Context) (bool, error) {
 		readyNumStr, readyErr := oc.AsAdmin().WithoutNamespace().Run("get").Args("ds", dsName, "-n", ns, "-ojsonpath={.status.numberReady}").Output()
 		o.Expect(readyErr).NotTo(o.HaveOccurred())
 		readyNum, convertErr := strconv.Atoi(readyNumStr)
@@ -435,10 +422,6 @@ func CreateSnifferDaemonset(oc *exutil.CLI, ns, dsName, nodeLabel, labelKey, dst
 		return &tcpdumpDS, dsErr
 	}
 
-	platform := CheckPlatform(oc)
-	if platform == "openstack" {
-		time.Sleep(30 * time.Second)
-	}
 	dsReadyErr := WaitDaemonSetReady(oc, ns, tcpdumpDS.Name)
 	if dsReadyErr != nil {
 		return &tcpdumpDS, dsReadyErr
@@ -484,7 +467,7 @@ func GetSnifferLogs(oc *exutil.CLI, ns, dsName, searchString string) (map[string
 
 func CheckMatchedIPs(oc *exutil.CLI, ns, dsName string, searchString, expectedIP string, match bool) error {
 	e2e.Logf("Expected egressIP hit egress node logs : %v", match)
-	matchErr := wait.Poll(10*time.Second, 30*time.Second, func() (bool, error) {
+	matchErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 30*time.Second, true, func(ctx context.Context) (bool, error) {
 		foundIPs, searchErr := GetSnifferLogs(oc, ns, dsName, searchString)
 		o.Expect(searchErr).NotTo(o.HaveOccurred())
 
@@ -533,7 +516,7 @@ func GetSnifPhyInf(oc *exutil.CLI, nodeName string) (string, error) {
 }
 
 func VerifyEgressIPInTCPDump(oc *exutil.CLI, pod, podNS, expectedEgressIP, dstHost, tcpdumpNS, tcpdumpName string, expectedOrNot bool) error {
-	egressipErr := wait.Poll(10*time.Second, 100*time.Second, func() (bool, error) {
+	egressipErr := wait.PollUntilContextTimeout(context.Background(), 10*time.Second, 100*time.Second, true, func(ctx context.Context) (bool, error) {
 		randomStr, url := GetRequestURL(dstHost)
 		_, err := e2eoutput.RunHostCmd(podNS, pod, url)
 		if CheckMatchedIPs(oc, tcpdumpNS, tcpdumpName, randomStr, expectedEgressIP, expectedOrNot) != nil || err != nil {
@@ -547,7 +530,7 @@ func VerifyEgressIPInTCPDump(oc *exutil.CLI, pod, podNS, expectedEgressIP, dstHo
 
 func VerifyExpectedEIPNumInEIPObject(oc *exutil.CLI, egressIPObject string, expectedNumber int) {
 	timeout := EstimateTimeoutForEgressIP(oc)
-	egressErr := wait.Poll(5*time.Second, timeout, func() (bool, error) {
+	egressErr := wait.PollUntilContextTimeout(context.Background(), 5*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		egressIPMaps1 := GetAssignedEIPInEIPObject(oc, egressIPObject)
 		if len(egressIPMaps1) != expectedNumber {
 			e2e.Logf("Current EgressIP object length is %v,but expected is %v \n", len(egressIPMaps1), expectedNumber)
