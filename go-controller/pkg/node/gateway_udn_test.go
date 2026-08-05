@@ -1474,7 +1474,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		Expect(fexec.CalledMatchesExpected()).To(BeTrue(), fexec.ErrorDesc)
 	})
 
-	It("should sync node port watcher successfully if a namespaces network is invalid", func() {
+	ovntest.OnSupportedPlatformsIt("should sync node port watcher successfully if a namespaces network is invalid", func() {
 		// create new gateway, add ns with primary UDN, pod, expose pod via Node port service, delete pod, delete udn, ensure sync should succeeds
 		namespace := util.NewNamespace("udn")
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
@@ -1504,6 +1504,9 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 })
 
 func TestConstructUDNVRFIPRules(t *testing.T) {
+	if ovntest.NoRoot() {
+		t.Skip("Test requires root privileges")
+	}
 	type testRule struct {
 		priority int
 		family   int
@@ -1694,6 +1697,9 @@ func TestConstructUDNVRFIPRules(t *testing.T) {
 }
 
 func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToDefaultVRF(t *testing.T) {
+	if ovntest.NoRoot() {
+		t.Skip("Test requires root privileges")
+	}
 	type testRule struct {
 		priority int
 		family   int
@@ -1877,6 +1883,9 @@ func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToDefaultVRF(t *testing.T) {
 }
 
 func TestConstructUDNVRFIPRulesPodNetworkAdvertisedToNonDefaultVRF(t *testing.T) {
+	if ovntest.NoRoot() {
+		t.Skip("Test requires root privileges")
+	}
 	type testRule struct {
 		priority int
 		family   int
