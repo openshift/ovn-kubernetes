@@ -20,8 +20,6 @@ import (
 )
 
 var _ = g.Describe("[sig-network][Feature:IPsec][Suite:openshift/network/ipsec] SDN IPsec", func() {
-	defer g.GinkgoRecover()
-
 	var oc = exutil.NewCLI("networking-ipsec")
 
 	g.It("[JIRA:Networking][OTP] 80232-After node rebooting IPSec pod2pod connection should work", g.Label("Disruptive"), func() {
@@ -128,6 +126,9 @@ var _ = g.Describe("[sig-network][Feature:IPsec][Suite:openshift/network/ipsec] 
 		phyInf, nicError := otputils.GetSnifPhyInf(oc, rightNode)
 		o.Expect(nicError).NotTo(o.HaveOccurred())
 		otputils.SetNamespacePrivileged(oc, oc.Namespace())
+		g.DeferCleanup(func() {
+			otputils.RecoverNamespaceRestricted(oc, oc.Namespace())
+		})
 		tcpdumpCmd := fmt.Sprintf("timeout 60s tcpdump -c 4 -nni %s esp and dst %s", phyInf, leftIP)
 		cmdTcpdump, cmdOutput, _, err := oc.AsAdmin().WithoutNamespace().Run("debug").Args("-n", "default", "node/"+rightNode, "--", "bash", "-c", tcpdumpCmd).Background()
 		o.Expect(err).NotTo(o.HaveOccurred())
@@ -169,6 +170,9 @@ var _ = g.Describe("[sig-network][Feature:IPsec][Suite:openshift/network/ipsec] 
 		phyInf, nicError := otputils.GetSnifPhyInf(oc, rightNode2)
 		o.Expect(nicError).NotTo(o.HaveOccurred())
 		otputils.SetNamespacePrivileged(oc, oc.Namespace())
+		g.DeferCleanup(func() {
+			otputils.RecoverNamespaceRestricted(oc, oc.Namespace())
+		})
 		tcpdumpCmd := fmt.Sprintf("timeout 60s tcpdump -c 4 -nni %s esp and dst %s", phyInf, leftIP)
 		cmdTcpdump, cmdOutput, _, err := oc.AsAdmin().WithoutNamespace().Run("debug").Args("-n", "default", "node/"+rightNode2, "--", "bash", "-c", tcpdumpCmd).Background()
 		o.Expect(err).NotTo(o.HaveOccurred())

@@ -361,17 +361,24 @@ func DeleteNNCP(oc *exutil.CLI, name string) {
 
 func VerifyIPSecTunnelUp(oc *exutil.CLI, nodeName, src, dst, mode string) {
 	srcCIDR, dstCIDR := IpsecHostCIDR(src), IpsecHostCIDR(dst)
-	cmd := fmt.Sprintf("ip xfrm policy get src %s dst %s dir out ; ip xfrm policy get src %s dst %s dir in", srcCIDR, dstCIDR, dstCIDR, srcCIDR)
-	ipXfrmPolicy, err := DebugNodeWithChroot(oc, nodeName, "/bin/bash", "-c", cmd)
-	o.Expect(err).NotTo(o.HaveOccurred())
-	o.Expect(ipXfrmPolicy).Should(o.ContainSubstring(mode))
+	cmdOut := fmt.Sprintf("ip xfrm policy get src %s dst %s dir out", srcCIDR, dstCIDR)
+	outPolicy, err := DebugNodeWithChroot(oc, nodeName, "/bin/bash", "-c", cmdOut)
+	o.Expect(err).NotTo(o.HaveOccurred(), "missing out XFRM policy %s -> %s", src, dst)
+	o.Expect(outPolicy).Should(o.ContainSubstring(mode))
+	cmdIn := fmt.Sprintf("ip xfrm policy get src %s dst %s dir in", dstCIDR, srcCIDR)
+	inPolicy, err := DebugNodeWithChroot(oc, nodeName, "/bin/bash", "-c", cmdIn)
+	o.Expect(err).NotTo(o.HaveOccurred(), "missing in XFRM policy %s -> %s", dst, src)
+	o.Expect(inPolicy).Should(o.ContainSubstring(mode))
 }
 
 func VerifyIPSecTunnelDown(oc *exutil.CLI, nodeName, src, dst, mode string) {
 	srcCIDR, dstCIDR := IpsecHostCIDR(src), IpsecHostCIDR(dst)
-	cmd := fmt.Sprintf("ip xfrm policy get src %s dst %s dir out ; ip xfrm policy get src %s dst %s dir in", srcCIDR, dstCIDR, dstCIDR, srcCIDR)
-	_, err := DebugNodeWithChroot(oc, nodeName, "/bin/bash", "-c", cmd)
-	o.Expect(err).To(o.HaveOccurred())
+	cmdOut := fmt.Sprintf("ip xfrm policy get src %s dst %s dir out", srcCIDR, dstCIDR)
+	_, err := DebugNodeWithChroot(oc, nodeName, "/bin/bash", "-c", cmdOut)
+	o.Expect(err).To(o.HaveOccurred(), "XFRM policy still present for out %s -> %s", src, dst)
+	cmdIn := fmt.Sprintf("ip xfrm policy get src %s dst %s dir in", dstCIDR, srcCIDR)
+	_, err = DebugNodeWithChroot(oc, nodeName, "/bin/bash", "-c", cmdIn)
+	o.Expect(err).To(o.HaveOccurred(), "XFRM policy still present for in %s -> %s", dst, src)
 }
 
 func GetSnifPhyInf(oc *exutil.CLI, nodeName string) (string, error) {
