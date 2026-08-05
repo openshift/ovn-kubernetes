@@ -704,7 +704,11 @@ func GetDefaultInterface(oc *exutil.CLI) (string, error) {
 		e2e.Logf("Cannot get default interface, errors: %v", err)
 		return "", err
 	}
-	defInterface := strings.Split(int1, " ")[4]
+	fields := strings.Split(int1, " ")
+	if len(fields) < 5 {
+		return "", fmt.Errorf("unexpected output for default interface: %q", int1)
+	}
+	defInterface := fields[4]
 	e2e.Logf("Get the default inteface: %s", defInterface)
 	return defInterface, nil
 }
@@ -713,11 +717,15 @@ func GetDefaultSubnet(oc *exutil.CLI) (string, error) {
 	int1, _ := GetDefaultInterface(oc)
 	getDefaultSubnetCmd := "/usr/sbin/ip -4 -brief a show " + int1
 	subnet1, err := ExecCommandInNetworkingPod(oc, getDefaultSubnetCmd)
-	defSubnet := strings.Fields(subnet1)[2]
 	if err != nil {
 		e2e.Logf("Cannot get default subnet, errors: %v", err)
 		return "", err
 	}
+	fields := strings.Fields(subnet1)
+	if len(fields) < 3 {
+		return "", fmt.Errorf("unexpected output for default subnet: %q", subnet1)
+	}
+	defSubnet := fields[2]
 	e2e.Logf("Get the default subnet: %s", defSubnet)
 	return defSubnet, nil
 }
@@ -1023,14 +1031,13 @@ func CheckNetworkOperatorState(oc *exutil.CLI, interval int, timeout int) {
 func GetNodeIPv4(oc *exutil.CLI, namespace, nodeName string) string {
 	output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("-n", oc.Namespace(), "node", nodeName, "-o=jsonpath={.status.addresses[?(@.type==\"InternalIP\")].address}").Output()
 	o.Expect(err).NotTo(o.HaveOccurred())
-	if err != nil {
-		e2e.Logf("Cannot get node default interface ipv4 address, errors: %v", err)
-	}
 
 	// when egressIP is applied to a node, it would be listed as internal IP for the node, thus, there could be more than one IPs shown as internal IP
 	// use RE to match out to first internal IP
 	re := regexp.MustCompile(`(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}`)
-	nodeipv4 := re.FindAllString(output, -1)[0]
+	matches := re.FindAllString(output, -1)
+	o.Expect(matches).NotTo(o.BeEmpty(), fmt.Sprintf("no IPv4 InternalIP found for node %s in %q", nodeName, output))
+	nodeipv4 := matches[0]
 	e2e.Logf("The IPv4 of node's default interface is %q", nodeipv4)
 	return nodeipv4
 }
@@ -1046,16 +1053,20 @@ func GetNodeIP(oc *exutil.CLI, nodeName string) (string, string) {
 		return "", InternalIP
 	}
 	e2e.Logf("Its a Dual Stack Cluster")
-	InternalIP1, err := oc.AsAdmin().Run("get").Args("node", nodeName, "-o=jsonpath={.status.addresses[0].address}").Output()
+	addresses, err := oc.AsAdmin().Run("get").Args("node", nodeName, "-o=jsonpath={.status.addresses[?(@.type==\"InternalIP\")].address}").Output()
 	o.Expect(err).NotTo(o.HaveOccurred())
-	e2e.Logf("The node's 1st Internal IP is %q", InternalIP1)
-	InternalIP2, err := oc.AsAdmin().Run("get").Args("node", nodeName, "-o=jsonpath={.status.addresses[1].address}").Output()
-	o.Expect(err).NotTo(o.HaveOccurred())
-	e2e.Logf("The node's 2nd Internal IP is %q", InternalIP2)
-	if netutils.IsIPv6String(InternalIP1) {
-		return InternalIP1, InternalIP2
+	internalIPs := strings.Fields(addresses)
+	o.Expect(len(internalIPs)).To(o.BeNumerically(">=", 2), fmt.Sprintf("expected two InternalIPs on dual-stack node %s, got %q", nodeName, addresses))
+	var v4, v6 string
+	for _, ip := range internalIPs {
+		if netutils.IsIPv6String(ip) && v6 == "" {
+			v6 = ip
+		} else if !netutils.IsIPv6String(ip) && v4 == "" {
+			v4 = ip
+		}
 	}
-	return InternalIP2, InternalIP1
+	e2e.Logf("The node's InternalIPs are v6=%q v4=%q", v6, v4)
+	return v6, v4
 }
 
 // get CLuster Manager's leader info
@@ -1173,6 +1184,7 @@ func GetPodName(oc *exutil.CLI, namespace string, label string) []string {
 	var podName []string
 	podNameAll, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("-n", namespace, "pod", "-l", label, "-ojsonpath={.items[*].metadata.name}").Output()
 	o.Expect(err).NotTo(o.HaveOccurred())
+	o.Expect(podNameAll).NotTo(o.BeEmpty(), fmt.Sprintf("no pod found in namespace %s with label %s", namespace, label))
 	podName = strings.Split(podNameAll, " ")
 	o.Expect(len(podName)).NotTo(o.BeEquivalentTo(0))
 	e2e.Logf("The pod(s) are  %v ", podName)
@@ -2230,7 +2242,7 @@ func CheckClusterStatus(oc *exutil.CLI, expectedStatus string) {
 	o.Expect(workerNodes).NotTo(o.BeEmpty())
 
 	// check worker nodes status, expect Ready status for them
-	for _, workerNode := range masterNodes {
+	for _, workerNode := range workerNodes {
 		CheckNodeStatus(oc, workerNode, "Ready")
 	}
 }
@@ -2722,8 +2734,8 @@ func GetFileContentforSCTP(baseDir string, name string) (fileContent string) {
 	if err != nil {
 		e2e.Failf("Failed to open file: %s", filePath)
 	}
-	fileRead, _ := io.ReadAll(fileOpen)
-	if err != nil {
+	fileRead, readErr := io.ReadAll(fileOpen)
+	if readErr != nil {
 		e2e.Failf("Failed to read file: %s", filePath)
 	}
 	return string(fileRead)
@@ -2807,6 +2819,8 @@ func ConfigIPSecAtRuntime(oc *exutil.CLI, targetStatus string) (err error) {
 		e2e.Logf("Wait ipsec host pods running in openshift-ovn-kubernetes")
 		err = WaitForPodWithLabelReady(oc, "openshift-ovn-kubernetes", "app=ovn-ipsec")
 		o.Expect(err).NotTo(o.HaveOccurred())
+	} else if targetStatus == "external" {
+		return fmt.Errorf("unsupported target IPSec status %q; supported values are full and disabled", targetStatus)
 	} else if targetStatus == "disabled" {
 		targetConfig = "false"
 		_, err = oc.AsAdmin().WithoutNamespace().Run("patch").Args("networks.operator.openshift.io", "cluster", "-p", "{\"spec\":{\"defaultNetwork\":{\"ovnKubernetesConfig\":{\"ipsecConfig\":{\"mode\":\"Disabled\"}}}}}", "--type=merge").Output()
@@ -2948,7 +2962,13 @@ func NbContructToMap(nbConstruct string) map[string]string {
 	var tempMap map[string]string
 	tempMap = make(map[string]string)
 	for _, keyValPair := range listKeyValues {
+		if strings.TrimSpace(keyValPair) == "" {
+			continue
+		}
 		keyValItem := strings.SplitN(keyValPair, ":", 2)
+		if len(keyValItem) < 2 {
+			continue
+		}
 		key := strings.Trim(keyValItem[0], " ")
 		val := strings.TrimLeft(keyValItem[1], " ")
 		tempMap[key] = val
