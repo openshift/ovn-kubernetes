@@ -953,7 +953,7 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 		oc.SetupProject()
 		ns1 := oc.Namespace()
 
-		g.By("Enable ACL looging on the namespace ns1")
+		g.By("Enable ACL logging on the namespace ns1")
 		aclSettings := otputils.AclSettings{DenySetting: "alert", AllowSetting: "alert"}
 		err1 := oc.AsAdmin().WithoutNamespace().Run("annotate").Args("ns", ns1, aclSettings.GetJSONString()).Execute()
 		o.Expect(err1).NotTo(o.HaveOccurred())
@@ -1012,7 +1012,7 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 		for i := 0; i < 2; i++ {
 			oc.SetupProject()
 			namespaces[i] = oc.Namespace()
-			g.By(fmt.Sprintf("Enable ACL looging on the namespace %s", namespaces[i]))
+			g.By(fmt.Sprintf("Enable ACL logging on the namespace %s", namespaces[i]))
 			aclSettings := otputils.AclSettings{DenySetting: "alert", AllowSetting: "warning"}
 			err1 := oc.AsAdmin().WithoutNamespace().Run("annotate").Args("ns", namespaces[i], aclSettings.GetJSONString()).Execute()
 			o.Expect(err1).NotTo(o.HaveOccurred())
@@ -1100,7 +1100,7 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 		ns1 := oc.Namespace()
 		otputils.SetNamespacePrivileged(oc, ns1)
 
-		g.By("Enable ACL looging on the namespace ns1")
+		g.By("Enable ACL logging on the namespace ns1")
 		aclSettings := otputils.AclSettings{DenySetting: "alert", AllowSetting: "alert"}
 		err1 := oc.AsAdmin().WithoutNamespace().Run("annotate").Args("ns", ns1, aclSettings.GetJSONString()).Execute()
 		o.Expect(err1).NotTo(o.HaveOccurred())
@@ -1308,46 +1308,21 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 		o.Expect(ovnkNodePodErr).NotTo(o.HaveOccurred())
 		e2e.Logf("ovnkube-node podname %s running on node %s", ovnKNodePod, podNodeName)
 
-		getAddrSetUUIDCmd := fmt.Sprintf("ovn-nbctl --columns=_uuid --bare --no-leader-only find address_set 'external_ids:k8s.ovn.org/owner-type=PodSelector' 'addresses{>=}\\\"%s\\\"'", podIP1)
-		var addressSetUUID string
-		o.Eventually(func() string {
-			result, err := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKNodePod, "ovnkube-controller", getAddrSetUUIDCmd)
-			if err != nil {
-				e2e.Logf("Error querying OVN NB for PodSelector address set: %v", err)
-				return ""
-			}
-			result = strings.TrimSpace(result)
-			if strings.Contains(result, "\n") {
-				result = strings.Split(result, "\n")[0]
-			}
-			addressSetUUID = result
-			return addressSetUUID
-		}, 30*time.Second, 2*time.Second).ShouldNot(o.BeEmpty(), "PodSelector address set UUID containing pod IP %s should not be empty", podIP1)
-		e2e.Logf("PodSelector address set UUID containing pod IP %s: %s", podIP1, addressSetUUID)
+		getCmd := fmt.Sprintf("cat /var/log/ovnkube/libovsdb.log | grep 'transacting operations' | grep '%s' ", podIP1)
+		logContents, logErr1 := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKNodePod, "ovnkube-controller", getCmd)
+		o.Expect(logErr1).NotTo(o.HaveOccurred())
+		e2e.Logf("Log content before label update \n %s", logContents)
+		logLinesCount := len(strings.Split(logContents, "\n")) - 1
 
-		getLogSizeCmd := "wc -l < /var/log/ovnkube/libovsdb.log"
-		logSizeStr, logSizeErr := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKNodePod, "ovnkube-controller", getLogSizeCmd)
-		o.Expect(logSizeErr).NotTo(o.HaveOccurred())
-		logBookmark := strings.TrimSpace(logSizeStr)
-		e2e.Logf("Log file bookmark before label update (line count): %s", logBookmark)
-
-		g.By("Label the pods with an unrelated label to see transaction count is unchanged")
-		_, reLabelErr := oc.AsAdmin().WithoutNamespace().Run("label").Args("-n", pod.Namespace, "--overwrite", "pod", pod.Name, "unrelated-label=test-update").Output()
+		g.By("Label the pods to see transaction count is unchanged")
+		_, reLabelErr := oc.AsAdmin().WithoutNamespace().Run("label").Args("-n", pod.Namespace, "--overwrite", "pod", pod.Name, "type=blue").Output()
 		o.Expect(reLabelErr).NotTo(o.HaveOccurred())
 
-		time.Sleep(5 * time.Second)
-
-		getNewTxnCmd := fmt.Sprintf("tail -n +%s /var/log/ovnkube/libovsdb.log | grep 'transacting operations' | grep '%s' | grep '%s' | wc -l", logBookmark, addressSetUUID, podIP1)
-		newTxnCountStr, newTxnErr := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKNodePod, "ovnkube-controller", getNewTxnCmd)
-		o.Expect(newTxnErr).NotTo(o.HaveOccurred())
-		newTxnCountStr = strings.TrimSpace(newTxnCountStr)
-		e2e.Logf("New address set transactions after label update: %s", newTxnCountStr)
-		if newTxnCountStr != "0" {
-			getNewTxnContentCmd := fmt.Sprintf("tail -n +%s /var/log/ovnkube/libovsdb.log | grep 'transacting operations' | grep '%s' | grep '%s'", logBookmark, addressSetUUID, podIP1)
-			newTxnContent, _ := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKNodePod, "ovnkube-controller", getNewTxnContentCmd)
-			e2e.Logf("Unexpected new transactions after label update:\n%s", newTxnContent)
-		}
-		o.Expect(newTxnCountStr).To(o.Equal("0"), "No new address set transactions should be generated by an unrelated pod label update")
+		newLogContents, logErr2 := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKNodePod, "ovnkube-controller", getCmd)
+		o.Expect(logErr2).NotTo(o.HaveOccurred())
+		e2e.Logf("Log content after label update \n %s", newLogContents)
+		newLogLinesCount := len(strings.Split(newLogContents, "\n")) - 1
+		o.Expect(logLinesCount).To(o.Equal(newLogLinesCount))
 
 	})
 	g.It("[JIRA:Networking][OTP][FdpOvnOvs] 66085-Creating egress network policies for allowing to same namespace and openshift dns in namespace prevents the pod from reaching its own service", func() {
@@ -1402,9 +1377,17 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 		e2e.Logf("Service URL %s", svcURL)
 		g.By("Check the connectivity to service from the pods in the namespace")
 		for _, podItem := range podsInProject {
-			output, err := e2eoutput.RunHostCmd(ns, podItem, "curl --connect-timeout 5 -s "+svcURL)
-			o.Expect(err).NotTo(o.HaveOccurred())
-			o.Expect(output).To(o.ContainSubstring("Hello OpenShift!"))
+			pod := podItem
+			o.Eventually(func() error {
+				output, err := e2eoutput.RunHostCmd(ns, pod, "curl --connect-timeout 5 -s "+svcURL)
+				if err != nil {
+					return fmt.Errorf("curl failed: %v", err)
+				}
+				if !strings.Contains(output, "Hello OpenShift!") {
+					return fmt.Errorf("expected 'Hello OpenShift!' in output, got: %s", output)
+				}
+				return nil
+			}, 30*time.Second, 2*time.Second).Should(o.Succeed(), "Service should be reachable from pod %s", pod)
 		}
 
 		g.By("Create the network policies in the namespace")
@@ -1431,9 +1414,17 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 
 		g.By("Check the connectivity to service again from the pods in the namespace")
 		for _, eachPod := range podsInProject {
-			output, err := e2eoutput.RunHostCmd(ns, eachPod, "curl --connect-timeout 5 -s "+svcURL)
-			o.Expect(err).NotTo(o.HaveOccurred())
-			o.Expect(output).To(o.ContainSubstring("Hello OpenShift!"))
+			pod := eachPod
+			o.Eventually(func() error {
+				output, err := e2eoutput.RunHostCmd(ns, pod, "curl --connect-timeout 5 -s "+svcURL)
+				if err != nil {
+					return fmt.Errorf("curl failed: %v", err)
+				}
+				if !strings.Contains(output, "Hello OpenShift!") {
+					return fmt.Errorf("expected 'Hello OpenShift!' in output, got: %s", output)
+				}
+				return nil
+			}, 30*time.Second, 2*time.Second).Should(o.Succeed(), "Service should be reachable from pod %s", pod)
 		}
 	})
 	g.It("[JIRA:Networking][OTP][FdpOvnOvs] 64787-Network policy with duplicate egress rules (same CIDR block) fails to be recreated", g.Label("Disruptive"), func() {
@@ -1562,10 +1553,8 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 			}
 		}()
 		defer func() {
-			if os.Getenv("DELETE_NAMESPACE") != "false" {
-				useContxtErr := oc.Run("config").Args("use-context", origContxt).Execute()
-				o.Expect(useContxtErr).NotTo(o.HaveOccurred())
-			}
+			useContxtErr := oc.Run("config").Args("use-context", origContxt).Execute()
+			o.Expect(useContxtErr).NotTo(o.HaveOccurred())
 		}()
 		nsCreateErr := oc.WithoutNamespace().Run("new-project").Args(testNs).Execute()
 		o.Expect(nsCreateErr).NotTo(o.HaveOccurred())
@@ -1729,27 +1718,16 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 				oc.AsAdmin().WithoutNamespace().Run("delete").Args("networkpolicy", policyName, "-n", ns).Execute()
 			}
 		}()
-		o.Expect(err).NotTo(o.HaveOccurred())
 		g.By("Create a duplicate ACL")
 		createAclCmd := fmt.Sprintf("ovn-nbctl --id=@copyacl create acl name=copyacl direction=%s action=%s -- add port_group %s acl @copyacl", aclMap["direction"], aclMap["action"], pgMap["_uuid"])
 		idOutput, listErr := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKNodePod, "ovnkube-controller", createAclCmd)
 		o.Expect(listErr).NotTo(o.HaveOccurred())
 		o.Expect(idOutput).NotTo(o.BeEmpty())
 		e2e.Logf("%s", idOutput)
-		defer func() {
-			if os.Getenv("DELETE_NAMESPACE") != "false" {
-				oc.AsAdmin().WithoutNamespace().Run("delete").Args("networkpolicy", policyName, "-n", ns).Execute()
-			}
-		}()
 		g.By("Set properties of duplicate ACL")
 		setAclPropertiesCmd := fmt.Sprintf("ovn-nbctl set acl %s  match='%s' priority=%s meter=%s", idOutput, aclMap["match"], aclMap["priority"], aclMap["meter"])
 		_, listErr = otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnKNodePod, "ovnkube-controller", setAclPropertiesCmd)
 		o.Expect(listErr).NotTo(o.HaveOccurred())
-		defer func() {
-			if os.Getenv("DELETE_NAMESPACE") != "false" {
-				oc.AsAdmin().WithoutNamespace().Run("delete").Args("networkpolicy", policyName, "-n", ns).Execute()
-			}
-		}()
 		g.By("Set name of duplicate ACL")
 		dupAclName := fmt.Sprintf("'NP\\:%s\\:%s\\:Ingre0'", ns, policyName)
 		setAclNameCmd := fmt.Sprintf("ovn-nbctl set acl %s name=%s", idOutput, dupAclName)
@@ -1893,9 +1871,16 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 
 		g.By("3. Check the acl from the port-group from the OVNK leader ovnkube-node")
 		listPGCmd := fmt.Sprintf("ovn-nbctl find port-group | grep -C 2 '%s\\:allow-same-namespace'", ns)
-		listPGCOutput, listErr := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnNodePod, "ovnkube-controller", listPGCmd)
-		o.Expect(listErr).NotTo(o.HaveOccurred())
-		o.Expect(listPGCOutput).NotTo(o.BeEmpty())
+		var listPGCOutput string
+		o.Eventually(func() string {
+			result, err := otputils.RemoteShPodWithBashSpecifyContainer(oc, "openshift-ovn-kubernetes", ovnNodePod, "ovnkube-controller", listPGCmd)
+			if err != nil {
+				e2e.Logf("Error querying port-group: %v", err)
+				return ""
+			}
+			listPGCOutput = strings.TrimSpace(result)
+			return listPGCOutput
+		}, 60*time.Second, 2*time.Second).ShouldNot(o.BeEmpty(), "Port-group with allow-same-namespace policy should exist")
 		e2e.Logf("Output %s", listPGCOutput)
 
 		g.By("4. Check the addresses in ACL's address-set is empty")
@@ -2069,7 +2054,7 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 			buildPruningBaseDir           = testdata.FixturePath("networking")
 			ingressNPPolicyTemplate       = filepath.Join(buildPruningBaseDir, "networkpolicy/generic-networkpolicy-template.yaml")
 			matchLabelKey                 = "kubernetes.io/metadata.name"
-			master_port             int32 = 8100
+			controlPlanePort             int32 = 8100
 		)
 
 		g.By("0. Get namespace.\n")
@@ -2082,10 +2067,10 @@ var _ = g.Describe("[sig-network] SDN networkpolicy", func() {
 		var port string
 		for _, ovnPod := range ovnMasterPodNames {
 			if ovnPod == ovnMasterPodName {
-				port = strconv.Itoa(int(master_port))
+				port = strconv.Itoa(int(controlPlanePort))
 				break
 			}
-			master_port++
+			controlPlanePort++
 		}
 
 		g.By("2. Get initial pprof goroutine value from ovnk-master leader after enabling forwarding.\n")

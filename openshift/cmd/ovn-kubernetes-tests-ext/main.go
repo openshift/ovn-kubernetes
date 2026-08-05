@@ -38,6 +38,26 @@ import (
 
 var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 
+var otpBlockingTests = []string{
+	"service domain can be resolved when egress type is enabled",
+	"Networkpolicy egress rule should work for statefulset pods",
+	"Check ACL audit logs can be extracted",
+	"Check networkpolicy ACL audit message is logged with correct policy name",
+	"OVN address_set referenced in acl should not miss when networkpolicy name includes dot",
+	"Duplicate transactions should not be executed for network policy for every pod update",
+	"Creating egress network policies for allowing to same namespace and openshift dns in namespace prevents the pod from reaching its own service",
+	"Pod IP is missing from OVN DB AddressSet when using allow-namespace-only network policy",
+}
+
+func isOTPBlocking(name string) bool {
+	for _, title := range otpBlockingTests {
+		if strings.Contains(name, title) {
+			return true
+		}
+	}
+	return false
+}
+
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
@@ -175,6 +195,8 @@ func main() {
 		}
 
 		switch {
+		case isOTP && isOTPBlocking(spec.Name):
+			spec.Lifecycle = extensiontests.LifecycleBlocking
 		case isOTP:
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
