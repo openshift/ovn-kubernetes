@@ -115,10 +115,7 @@ func (h *Layer3UserDefinedNetworkControllerEventHandler) AddResource(obj interfa
 // Given an old and a new object; The inRetryCache boolean argument is to indicate if the given resource
 // is in the retryCache or not.
 func (h *Layer3UserDefinedNetworkControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
-	switch h.objType {
-	default:
-		return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
-	}
+	return h.oc.UpdateUserDefinedNetworkResourceCommon(h.objType, oldObj, newObj, inRetryCache)
 }
 
 // DeleteResource deletes the object from the cluster according to the delete logic of its resource type.
@@ -548,7 +545,6 @@ func (oc *Layer3UserDefinedNetworkController) run() error {
 			return fmt.Errorf("failed to add network %s to the route import manager: %v", oc.GetNetworkName(), err)
 		}
 	}
-
 	// start NetworkQoS controller if feature is enabled
 	if config.OVNKubernetesFeature.EnableNetworkQoS {
 		err := oc.newNetworkQoSController()
@@ -603,6 +599,12 @@ func (oc *Layer3UserDefinedNetworkController) Reconcile(netInfo util.NetInfo) er
 
 func (oc *Layer3UserDefinedNetworkController) RegisterNodeHandler() error {
 	return oc.nodeReconciler.RegisterNetworkController(oc)
+}
+
+// MarkGatewaySyncNeeded marks gateway state dirty so the next node
+// reconciliation syncs it even when node annotations did not change.
+func (oc *Layer3UserDefinedNetworkController) MarkGatewaySyncNeeded(nodeName string) {
+	oc.gatewaysFailed.Store(nodeName, true)
 }
 
 // ReconcileNode reconciles a node for a layer3 UDN controller.
@@ -972,7 +974,7 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateRemoteNodeEvent(node *cor
 // keeps the destination address-set checks in NAT.match, for example:
 // "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/24"
 func (oc *Layer3UserDefinedNetworkController) addOrUpdateUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node, isUDNAdvertised bool) error {
-	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
+	outputPort := oc.GetNetworkScopedRouterToSwitchPortName(node.Name)
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, isUDNAdvertised)
 	if err != nil {
 		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
@@ -1151,9 +1153,20 @@ func (oc *Layer3UserDefinedNetworkController) gatherJoinSwitchIPs() error {
 }
 
 func (oc *Layer3UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
-	l3GatewayConfig, err := util.ParseNodeL3GatewayAnnotation(node)
+	l3GatewayConfig, hasUplink, err := oc.uplinkGatewayConfig(node)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
+		return nil, fmt.Errorf(
+			"failed to get node %s network %s Uplink gateway config: %v",
+			node.Name,
+			oc.GetNetworkName(),
+			err,
+		)
+	}
+	if !hasUplink {
+		l3GatewayConfig, err = util.ParseNodeL3GatewayAnnotation(node)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node %s network %s L3 gateway config: %v", node.Name, oc.GetNetworkName(), err)
+		}
 	}
 
 	networkName := oc.GetNetworkName()

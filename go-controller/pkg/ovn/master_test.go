@@ -590,7 +590,7 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 		nbClient, sbClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-		f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient)
+		f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		err = f.Start()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -800,6 +800,9 @@ var _ = ginkgo.Describe("Default network controller operations", func() {
 				err = condition(oc)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				if oc.isPodNetworkAdvertisedAtNode(node1.Name) {
+					gomega.Expect(ConfigureAdvertisedNetworkIsolation(nbClient)).To(gomega.Succeed())
+				}
 				startDefaultNodeController(oc)
 				gomega.Eventually(func() error {
 					_, err := libovsdbops.GetLogicalRouter(nbClient, &nbdb.LogicalRouter{
@@ -1656,7 +1659,7 @@ func TestController_syncNodes(t *testing.T) {
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
-			f, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+			f, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
@@ -1763,7 +1766,7 @@ func TestController_deleteStaleNodeChassis(t *testing.T) {
 				EgressIPClient:       egressIPFakeClient,
 				EgressFirewallClient: egressFirewallFakeClient,
 			}
-			f, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+			f, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 			if err != nil {
 				t.Fatalf("%s: Error creating master watch factory: %v", tt.name, err)
 			}
