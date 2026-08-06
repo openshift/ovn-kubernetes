@@ -261,6 +261,35 @@ func TestUplinkControllerReportsOverlappingSelectors(t *testing.T) {
 	g.Expect(states.Items).To(gomega.BeEmpty())
 }
 
+func TestUplinkControllerReportsInvalidSpec(t *testing.T) {
+	g := gomega.NewWithT(t)
+	uplink := newUplink("br-blue", "role", "blue", "br-blue")
+	// A LabelSelector can pass CRD schema validation yet fail to parse:
+	// Exists takes no values (LabelSelectorOpIn would be the right operator
+	// for matching against values).
+	uplink.Spec.NodeConfigs[0].NodeSelector = metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      "role",
+			Operator: metav1.LabelSelectorOpExists,
+			Values:   []string{"blue"},
+		}},
+	}
+	controller, client := newTestController(t,
+		newNode("node-a", map[string]string{"role": "blue"}),
+		uplink,
+	)
+
+	// A rejected spec is reported but not retried: the cluster admin must
+	// fix the Uplink CR, and that update triggers a new reconcile.
+	g.Expect(controller.reconcileUplink("br-blue")).To(gomega.Succeed())
+
+	cond := getUplinkCondition(g, client, "br-blue", uplinkv1alpha1.UplinkConditionReady)
+	g.Expect(cond).To(gomega.And(
+		gomega.HaveField("Status", metav1.ConditionFalse),
+		gomega.HaveField("Reason", reasonInvalidSpec),
+	))
+}
+
 func TestUplinkControllerEnsuresFinalizerFromCUDNReference(t *testing.T) {
 	g := gomega.NewWithT(t)
 	setSharedGatewayMode(t)
