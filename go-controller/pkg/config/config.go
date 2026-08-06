@@ -526,6 +526,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableNetworkSegmentation       bool `gcfg:"enable-network-segmentation"`
 	EnableNetworkConnect            bool `gcfg:"enable-network-connect"`
+	EnableUplink                    bool `gcfg:"enable-uplink"`
 	EnablePreconfiguredUDNAddresses bool `gcfg:"enable-preconfigured-udn-addresses"`
 	EnableRouteAdvertisements       bool `gcfg:"enable-route-advertisements"`
 	EnableEVPN                      bool `gcfg:"enable-evpn"`
@@ -1275,6 +1276,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use network connect feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkConnect,
 		Value:       OVNKubernetesFeature.EnableNetworkConnect,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-uplink",
+		Usage:       "Configure to use the Uplink feature with ovn-kubernetes. Requires network segmentation.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableUplink,
+		Value:       OVNKubernetesFeature.EnableUplink,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-preconfigured-udn-addresses",
@@ -2311,6 +2318,9 @@ func buildOVNKubernetesFeatureConfig(cli, file *config) error {
 	}
 	if OVNKubernetesFeature.EnableDynamicUDNAllocation && !OVNKubernetesFeature.EnableNetworkSegmentation {
 		return fmt.Errorf("the Dynamic UDN Allocation feature cannot be enabled without also enabling Network Segmentation")
+	}
+	if OVNKubernetesFeature.EnableUplink && !OVNKubernetesFeature.EnableNetworkSegmentation {
+		return fmt.Errorf("the Uplink feature cannot be enabled without also enabling Network Segmentation")
 	}
 	return nil
 }
