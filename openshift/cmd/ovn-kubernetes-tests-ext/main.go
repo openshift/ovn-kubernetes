@@ -93,7 +93,8 @@ func main() {
 		Parents: []string{
 			"openshift/conformance/parallel",
 		},
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Parallelism: 1,
+		Qualifiers:  []string{`!labels.exists(l, l == "Serial")`},
 	})
 
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
