@@ -426,9 +426,9 @@ func getPolicyData(params *netpolDataParams) []libovsdbtest.TestData {
 	pg := getPolicyPortGroup(params, acls)
 
 	data := []libovsdbtest.TestData{}
-	for _, addrSet := range addrSets {
-		data = append(data, addrSet)
-	}
+	// for _, addrSet := range addrSets {
+	// 	data = append(data, addrSet)
+	// }
 	for _, acl := range acls {
 		data = append(data, acl)
 	}

@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	current "github.com/containernetworking/cni/pkg/types/100"
@@ -720,6 +721,16 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter 
 		return nil, err
 	}
 
+	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
+	var wg sync.WaitGroup
+	var iptErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		iptErr = setupIPTablesBlocks(netns)
+	}()
+	// END OCP HACK
+
 	if !ifInfo.IsDPUHostMode {
 		err = ConfigureOVS(pr.ctx, pr.PodNamespace, pr.PodName, pr.IfName, hostIface.Name, ifInfo, pr.SandboxID, pr.CNIConf.DeviceID, pr.IsVFIO, getter)
 		if err != nil {
@@ -727,6 +738,13 @@ func (*defaultPodRequestInterfaceOps) ConfigureInterface(pr *PodRequest, getter 
 			return nil, err
 		}
 	}
+
+	// OCP HACK: block access to MCS/metadata; https://github.com/openshift/ovn-kubernetes/pull/19
+	wg.Wait()
+	if iptErr != nil {
+		return nil, iptErr
+	}
+	// END OCP HACK
 
 	// Only configure IPv6 specific stuff and wait for addresses to become usable
 	// if there are any IPv6 addresses to assign. v4 doesn't have the concept
