@@ -438,10 +438,13 @@ func (ncc *networkClusterController) init() error {
 			}
 		}
 		// With transit router, no node tunnel IDs are allocated, but we must
-		// still reserve ID 1 so pod IDs don't collide with tunnel key on the switch-to-transit-router LSP.
+		// still reserve IDs so pod IDs don't collide with tunnel keys used by
+		// infrastructure ports on the transit switch (e.g. the switch-to-router LSP).
 		if config.Layer2UsesTransitRouter {
-			if err := ncc.tunnelIDAllocator.ReserveID("reserved-transit-switch-key", transitRouterToSwitchTunnelKey); err != nil {
-				return err
+			for i := 1; i <= 3; i++ {
+				if err := ncc.tunnelIDAllocator.ReserveID(fmt.Sprintf("reserved-transit-switch-key-%d", i), i); err != nil {
+					return err
+				}
 			}
 		}
 	}
