@@ -111,8 +111,8 @@ spec:
                 minProperties: 1
                 properties:
                   dynamic:
-                    description: DynamicHops defines a slices of DynamicHop. This
-                      field is optional.
+                    description: DynamicHops defines a slice of DynamicHop. This field
+                      is optional.
                     items:
                       description: |-
                         DynamicHop defines the configuration for a dynamic external gateway interface.

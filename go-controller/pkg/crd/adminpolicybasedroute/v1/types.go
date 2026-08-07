@@ -63,7 +63,7 @@ type ExternalNextHops struct {
 	// StaticHops defines a slice of StaticHop. This field is optional.
 	// +listType=atomic
 	StaticHops []*StaticHop `json:"static,omitempty"`
-	//DynamicHops defines a slices of DynamicHop. This field is optional.
+	// DynamicHops defines a slice of DynamicHop. This field is optional.
 	// +listType=atomic
 	DynamicHops []*DynamicHop `json:"dynamic,omitempty"`
 }

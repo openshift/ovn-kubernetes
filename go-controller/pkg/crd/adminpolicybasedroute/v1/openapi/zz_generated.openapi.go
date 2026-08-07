@@ -402,7 +402,7 @@ func schema_pkg_crd_adminpolicybasedroute_v1_ExternalNextHops(ref common.Referen
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "DynamicHops defines a slices of DynamicHop. This field is optional.",
+							Description: "DynamicHops defines a slice of DynamicHop. This field is optional.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
