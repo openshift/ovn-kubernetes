@@ -14,6 +14,7 @@ import (
 	"github.com/gaissmai/cidrtree"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 
@@ -21,6 +22,15 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
+
+// IsNodeAnnotationPatchRetryable returns true for errors that should trigger a
+// relist-and-retry when patching node annotations via JSON Patch.
+//
+// JSON Patch "test" failures from the apiserver are surfaced as Invalid rather
+// than Conflict, so this retry path needs to handle both.
+func IsNodeAnnotationPatchRetryable(err error) bool {
+	return apierrors.IsConflict(err) || apierrors.IsInvalid(err)
+}
 
 // This handles the annotations used by the node to pass information about its local
 // network configuration to the ovnkube controller:
@@ -884,6 +894,14 @@ func SetNodeHostCIDRs(nodeAnnotator kube.Annotator, cidrs sets.Set[string]) erro
 
 func NodeHostCIDRsAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OVNNodeHostCIDRs] != newNode.Annotations[OVNNodeHostCIDRs]
+}
+
+// CloudEgressIPConfigAnnotationChanged returns true if the cloud egress IP
+// configuration annotation changed between oldNode and newNode. This annotation
+// is managed by cloud-network-config-controller and carries the IPv4/IPv6
+// subnets and capacity for egress IP assignment on cloud platforms.
+func CloudEgressIPConfigAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[cloudEgressIPConfigAnnotationKey] != newNode.Annotations[cloudEgressIPConfigAnnotationKey]
 }
 
 // ParseNodeHostCIDRs returns the parsed host CIDRS living on a node

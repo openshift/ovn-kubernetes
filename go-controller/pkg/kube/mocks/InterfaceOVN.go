@@ -242,36 +242,6 @@ func (_m *InterfaceOVN) GetNodesForWindows() ([]*apicorev1.Node, error) {
 	return r0, r1
 }
 
-// GetPod provides a mock function with given fields: namespace, name
-func (_m *InterfaceOVN) GetPod(namespace string, name string) (*apicorev1.Pod, error) {
-	ret := _m.Called(namespace, name)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPod")
-	}
-
-	var r0 *apicorev1.Pod
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*apicorev1.Pod, error)); ok {
-		return rf(namespace, name)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) *apicorev1.Pod); ok {
-		r0 = rf(namespace, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.Pod)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // PatchEgressIP provides a mock function with given fields: name, patchData
 func (_m *InterfaceOVN) PatchEgressIP(name string, patchData []byte) error {
 	ret := _m.Called(name, patchData)
@@ -301,6 +271,42 @@ func (_m *InterfaceOVN) PatchNode(old *apicorev1.Node, new *apicorev1.Node) erro
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*apicorev1.Node, *apicorev1.Node) error); ok {
 		r0 = rf(old, new)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// PatchNodeStatus provides a mock function with given fields: old, new
+func (_m *InterfaceOVN) PatchNodeStatus(old *apicorev1.Node, new *apicorev1.Node) error {
+	ret := _m.Called(old, new)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PatchNodeStatus")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*apicorev1.Node, *apicorev1.Node) error); ok {
+		r0 = rf(old, new)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// PatchNodeStatusAnnotations provides a mock function with given fields: oldNode, newNode
+func (_m *InterfaceOVN) PatchNodeStatusAnnotations(oldNode *apicorev1.Node, newNode *apicorev1.Node) error {
+	ret := _m.Called(oldNode, newNode)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PatchNodeStatusAnnotations")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*apicorev1.Node, *apicorev1.Node) error); ok {
+		r0 = rf(oldNode, newNode)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -529,24 +535,6 @@ func (_m *InterfaceOVN) UpdateIPAMClaimIPs(updatedIPAMClaim *v1alpha1.IPAMClaim)
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*v1alpha1.IPAMClaim) error); ok {
 		r0 = rf(updatedIPAMClaim)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// UpdateNodeStatus provides a mock function with given fields: node
-func (_m *InterfaceOVN) UpdateNodeStatus(node *apicorev1.Node) error {
-	ret := _m.Called(node)
-
-	if len(ret) == 0 {
-		panic("no return value specified for UpdateNodeStatus")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(*apicorev1.Node) error); ok {
-		r0 = rf(node)
 	} else {
 		r0 = ret.Error(0)
 	}

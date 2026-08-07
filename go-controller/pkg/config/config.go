@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "github.com/openshift/api/config/v1"
 	"github.com/urfave/cli/v2"
 	gcfg "gopkg.in/gcfg.v1"
@@ -374,6 +375,13 @@ type DefaultConfig struct {
 	// Accepts: "" (empty, uses OVN default overlay) or "no-overlay".
 	// Defaults to "" (empty).
 	Transport string `gcfg:"transport"`
+
+	// ClusterDefaultNADName is the namespace/name of the default cluster network
+	// NAD. When empty, it resolves to OVNConfigNamespace/default.
+	ClusterDefaultNADName string `gcfg:"cluster-default-nad"`
+	// ClusterDefaultNetworkNAD is the parsed form of ClusterDefaultNADName,
+	// populated in completeDefaultConfig.
+	ClusterDefaultNetworkNAD *nettypes.NetworkSelectionElement
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -789,6 +797,14 @@ var (
 )
 
 func init() {
+	// ClusterDefaultNetworkNAD is normally resolved in completeDefaultConfig, but
+	// unit tests rely on PrepareTestConfig instead of the full init flow. Seed a
+	// valid default here, before savedDefault is captured below, so it is never
+	// nil and PrepareTestConfig restores a usable value for those tests.
+	// ClusterDefaultNADName is deliberately left empty so that savedDefault
+	// records it as unset and CLI/file overrides are still detected.
+	Default.ClusterDefaultNetworkNAD, _ = parseClusterDefaultNAD(defaultClusterDefaultNADName())
+
 	// Cache original default config values
 	savedDefault = Default
 	savedLogging = Logging
@@ -1077,6 +1093,13 @@ var CommonFlags = []cli.Flag{
 		Value:       Default.Transport,
 		Usage:       "Transport technology for the default network. When unset, the OVN default overlay transport is used. (no-overlay)",
 		Destination: &cliConfig.Default.Transport,
+	},
+	&cli.StringFlag{
+		Name:  "cluster-default-nad",
+		Value: Default.ClusterDefaultNADName,
+		Usage: "Namespace/name of the default cluster network NAD. " +
+			"When unset, defaults to <ovn-config-namespace>/" + types.DefaultNetworkName + ".",
+		Destination: &cliConfig.Default.ClusterDefaultNADName,
 	},
 	&cli.BoolFlag{
 		Name:        "unprivileged-mode",
@@ -2633,7 +2656,45 @@ func completeDefaultConfig(allSubnets *ConfigSubnets) error {
 	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
 	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
 	Default.ReassemblyConntrackZone = Default.ConntrackZone + 4
+
+	// Resolve here rather than at package init so that the fallback picks up
+	// --ovn-config-namespace, which is only merged into Kubernetes by
+	// buildKubernetesConfig earlier in InitConfig.
+	if Default.ClusterDefaultNADName == "" {
+		Default.ClusterDefaultNADName = defaultClusterDefaultNADName()
+	}
+	Default.ClusterDefaultNetworkNAD, err = parseClusterDefaultNAD(Default.ClusterDefaultNADName)
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+// defaultClusterDefaultNADName returns the location of the default cluster
+// network NAD when cluster-default-nad is not configured: the default network
+// NAD in the namespace ovn-kubernetes itself runs in.
+func defaultClusterDefaultNADName() string {
+	return Kubernetes.OVNConfigNamespace + "/" + types.DefaultNetworkName
+}
+
+// parseClusterDefaultNAD parses a "namespace/name" cluster-default-nad value
+// into a NetworkSelectionElement, returning an error if it is malformed. The
+// namespace and NAD name are validated as Kubernetes resource names.
+func parseClusterDefaultNAD(name string) (*nettypes.NetworkSelectionElement, error) {
+	nsAndName := strings.Split(name, "/")
+	if len(nsAndName) != 2 || nsAndName[0] == "" || nsAndName[1] == "" {
+		return nil, fmt.Errorf("cluster-default-nad %q must be in the format of \"namespace/name\"", name)
+	}
+	if errs := validation.ValidateNamespaceName(nsAndName[0], false); len(errs) != 0 {
+		return nil, fmt.Errorf("cluster-default-nad %q has an invalid namespace: %s", name, strings.Join(errs, ", "))
+	}
+	if errs := validation.NameIsDNSSubdomain(nsAndName[1], false); len(errs) != 0 {
+		return nil, fmt.Errorf("cluster-default-nad %q has an invalid name: %s", name, strings.Join(errs, ", "))
+	}
+	return &nettypes.NetworkSelectionElement{
+		Namespace: nsAndName[0],
+		Name:      nsAndName[1],
+	}, nil
 }
 
 // parseServicesNamespacedNames splits the input string by `,` and returns a slice
