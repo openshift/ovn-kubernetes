@@ -146,6 +146,7 @@ spec:
                     rule: isIP(self)
                 maxItems: 2
                 type: array
+                x-kubernetes-list-type: atomic
               hostInterfaceName:
                 description: |-
                   HostInterfaceName is the host-visible Linux interface selected by
@@ -165,6 +166,7 @@ spec:
                     rule: isCIDR(self)
                 maxItems: 2
                 type: array
+                x-kubernetes-list-type: atomic
               macAddress:
                 description: MACAddress is the MAC address used for the OVN gateway
                   interface.

@@ -90,6 +90,7 @@ type UplinkSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	// +required
+	// +listType=atomic
 	NodeConfigs []UplinkNodeConfig `json:"nodeConfigs"`
 }
 
@@ -201,12 +202,14 @@ type UplinkStateStatus struct {
 	// IPAddresses are host-side shared gateway IP addresses.
 	// +kubebuilder:validation:MaxItems=2
 	// +optional
+	// +listType=atomic
 	IPAddresses []IPAddressCIDR `json:"ipAddresses,omitempty"`
 
 	// DefaultGateways are default route next-hop IPs discovered for the
 	// selected host interface.
 	// +kubebuilder:validation:MaxItems=2
 	// +optional
+	// +listType=atomic
 	DefaultGateways []IPAddress `json:"defaultGateways,omitempty"`
 
 	// Conditions reports node-local discovery and gateway programming state for

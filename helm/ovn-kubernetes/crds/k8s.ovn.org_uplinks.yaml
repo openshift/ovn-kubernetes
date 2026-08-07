@@ -128,6 +128,7 @@ spec:
                 maxItems: 64
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: atomic
             required:
             - nodeConfigs
             type: object

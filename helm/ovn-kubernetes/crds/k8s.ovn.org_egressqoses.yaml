@@ -122,6 +122,7 @@ spec:
                   - dscp
                   type: object
                 type: array
+                x-kubernetes-list-type: atomic
             required:
             - egress
             type: object
