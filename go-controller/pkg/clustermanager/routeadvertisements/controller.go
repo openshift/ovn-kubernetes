@@ -27,7 +27,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
-	metaapply "k8s.io/client-go/applyconfigurations/meta/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -296,7 +295,7 @@ func (c *Controller) ReconcileNetwork(_ string, old, new util.NetInfo) {
 		// if the namespaces served by a network changed, it is possible that
 		// those namespaces are served or no longer served by the default
 		// network, so reconcile it as well
-		c.nadController.Reconcile(config.Kubernetes.OVNConfigNamespace + "/" + types.DefaultNetworkName)
+		c.nadController.Reconcile(config.Default.ClusterDefaultNADName)
 	}
 }
 
@@ -461,6 +460,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	if len(nads) == 0 {
 		return nil, nil, fmt.Errorf("%w: no networks selected", errPending)
 	}
+	// ordered, so that processing and error messages are deterministic across
+	// reconciles regardless of lister iteration order
+	slices.SortFunc(nads, func(a, b *nadtypes.NetworkAttachmentDefinition) int {
+		return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name)
+	})
 
 	// validate and gather information about the networks
 	networkSet := sets.New[string]()
@@ -577,6 +581,9 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	if len(nodes) == 0 {
 		return nil, nil, fmt.Errorf("%w: no nodes selected", errPending)
 	}
+	// ordered, so that processing and error messages are deterministic across
+	// reconciles regardless of lister iteration order
+	slices.SortFunc(nodes, func(a, b *corev1.Node) int { return strings.Compare(a.Name, b.Name) })
 	// prepare a map of selected nodes to the FRRConfigurations that apply to
 	// them
 	nodeToFRRConfig := map[string][]*frrtypes.FRRConfiguration{}
@@ -596,6 +603,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	if len(frrConfigs) == 0 {
 		return nil, nil, fmt.Errorf("%w: no FRRConfigurations selected", errPending)
 	}
+	// ordered, so that processing and error messages are deterministic across
+	// reconciles regardless of lister iteration order
+	slices.SortFunc(frrConfigs, func(a, b *frrtypes.FRRConfiguration) int {
+		return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name)
+	})
 
 	frrRouterVRFs := sets.New[string]()
 	for _, frrConfig := range frrConfigs {
@@ -770,7 +782,11 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 	}
 
 	generated := []*frrtypes.FRRConfiguration{}
-	for nodeName, frrConfigs := range nodeToFRRConfig {
+	// iterate nodes in their sorted order rather than ranging over the map, so
+	// that processing and error messages are deterministic across reconciles
+	for _, node := range nodes {
+		nodeName := node.Name
+		frrConfigs := nodeToFRRConfig[nodeName]
 		// reset node specific information
 		selectedNetworks.hostNetworkSubnets = map[string][]string{}
 		selectedNetworks.hostSubnets = []string{}
@@ -787,13 +803,13 @@ func (c *Controller) generateFRRConfigurations(ra *ratypes.RouteAdvertisements) 
 				continue
 			}
 			if config.OVNKubernetesFeature.EnableDynamicUDNAllocation &&
+				!config.Layer2UsesTransitRouter &&
 				selectedNetworks.networkTopology[network] == types.Layer2Topology &&
 				!c.nodeHasLayer2Allocation(nodeName, network) {
-				// without its tunnel ID allocated, the node cannot have
-				// rendered the layer2 network yet, so don't advertise it:
-				// unlike layer3, there are no per-node prefixes to otherwise
-				// wait for. The allocation is a node annotation update that
-				// triggers the advertising reconcile.
+				// Legacy layer2 topology uses the tunnel ID allocation as a
+				// signal that the network is rendered on the node. Transit-router
+				// topology intentionally has no such allocation, so NodeHasNetwork
+				// above is the available signal there.
 				// TODO: replace with a per-node network status once
 				// available, to know when the network is actually rendered.
 				continue
@@ -1618,26 +1634,6 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		cstatus = metav1.ConditionFalse
 	}
 
-	var updateStatus bool
-	condition := meta.FindStatusCondition(ra.Status.Conditions, conditionTypeAccepted)
-	switch {
-	case condition == nil:
-		fallthrough
-	case condition.ObservedGeneration != ra.Generation:
-		fallthrough
-	case (err == nil) != (condition.Status == metav1.ConditionTrue):
-		fallthrough
-	case hadUpdates:
-		updateStatus = true
-	}
-	if !updateStatus {
-		// Record the metric from the existing API-confirmed condition so it is
-		// populated after controller restarts, where the informer fires synthetic
-		// creates for all RAs but the condition hasn't changed.
-		metrics.RecordRouteAdvertisementCondition(ra.Name, conditionTypeAccepted, cstatus)
-		return nil
-	}
-
 	status := "Accepted"
 	reason := "Accepted"
 	msg := "ovn-kubernetes cluster-manager validated the resource and requested the necessary configuration changes"
@@ -1654,17 +1650,41 @@ func (c *Controller) updateRAStatus(ra *ratypes.RouteAdvertisements, hadUpdates 
 		}
 	}
 
+	// MergeStatusCondition reports whether the condition differs from the
+	// existing one (in status, reason, message or observed generation),
+	// preserves the last transition time when the condition status is
+	// unchanged and trims the message to the maximum length allowed for
+	// conditions
+	condition, changed := util.MergeStatusCondition(ra.Status.Conditions, metav1.Condition{
+		Type:               conditionTypeAccepted,
+		Status:             cstatus,
+		Reason:             reason,
+		Message:            msg,
+		ObservedGeneration: ra.Generation,
+	})
+	updateStatus := changed || hadUpdates
+	if !updateStatus {
+		// Record the metric from the existing API-confirmed condition so it is
+		// populated after controller restarts, where the informer fires synthetic
+		// creates for all RAs but the condition hasn't changed.
+		metrics.RecordRouteAdvertisementCondition(ra.Name, conditionTypeAccepted, cstatus)
+		return nil
+	}
+
+	if changed && err != nil {
+		// errConfig/errPending are not retried, so make them visible in the
+		// logs and not just in the status; log only when the condition changes
+		// to avoid repeating the same warning on every reconcile of a steady
+		// error state, which can otherwise still update the status through
+		// hadUpdates
+		klog.Warningf("Reconciling RouteAdvertisements %q failed: %v", ra.Name, err)
+	}
+
 	_, err = c.raClient.K8sV1().RouteAdvertisements().ApplyStatus(
 		context.Background(),
 		raapply.RouteAdvertisements(ra.Name).WithStatus(
 			raapply.RouteAdvertisementsStatus().WithStatus(status).WithConditions(
-				metaapply.Condition().
-					WithType(conditionTypeAccepted).
-					WithStatus(cstatus).
-					WithLastTransitionTime(metav1.NewTime(time.Now())).
-					WithReason(reason).
-					WithMessage(msg).
-					WithObservedGeneration(ra.Generation),
+				util.ConditionToApply(condition),
 			),
 		),
 		metav1.ApplyOptions{
@@ -1688,7 +1708,7 @@ func (c *Controller) getSelectedNADs(networkSelectors apitypes.NetworkSelectors)
 			// make sure a NAD exists for it
 			nad, err := util.EnsureDefaultNetworkNAD(c.nadLister, c.nadClient)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get/create default network NAD: %w", err)
+				return nil, fmt.Errorf("failed to ensure default network NAD: %w", err)
 			}
 			selected = append(selected, nad)
 		case apitypes.ClusterUserDefinedNetworks:

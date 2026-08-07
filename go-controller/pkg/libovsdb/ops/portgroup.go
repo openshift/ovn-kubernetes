@@ -55,13 +55,18 @@ func CreateOrUpdatePortGroups(nbClient libovsdbclient.Client, pgs ...*nbdb.PortG
 	return err
 }
 
-// CreatePortGroupOps returns ops to create the provided port group if it doesn't exist
-func CreatePortGroupOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, portGroup *nbdb.PortGroup) ([]ovsdb.Operation, error) {
+// CreateOrAddPortsToPortGroupOps creates or mutates a port group to include ports.
+// A nil group or empty Ports set is a no-op.
+func CreateOrAddPortsToPortGroupOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, pg *nbdb.PortGroup) ([]ovsdb.Operation, error) {
+	if pg == nil || len(pg.Ports) == 0 {
+		return ops, nil
+	}
+
 	opModel := operationModel{
-		Model:          portGroup,
-		OnModelUpdates: onModelUpdatesNone(),
-		ErrNotFound:    false,
-		BulkOp:         false,
+		Model:            pg,
+		OnModelMutations: []interface{}{&pg.Ports},
+		ErrNotFound:      false,
+		BulkOp:           false,
 	}
 
 	m := newModelClient(nbClient)
@@ -70,7 +75,7 @@ func CreatePortGroupOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, p
 
 // CreatePortGroup creates the provided port group if it doesn't exist
 func CreatePortGroup(nbClient libovsdbclient.Client, portGroup *nbdb.PortGroup) error {
-	ops, err := CreatePortGroupOps(nbClient, nil, portGroup)
+	ops, err := CreateOrAddPortsToPortGroupOps(nbClient, nil, portGroup)
 	if err != nil {
 		return err
 	}

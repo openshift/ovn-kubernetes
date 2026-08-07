@@ -38,6 +38,7 @@ import (
 	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	eiptypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	rafake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
@@ -558,6 +559,7 @@ func TestController_reconcile(t *testing.T) {
 		transport            string
 		gatewayMode          config.GatewayMode
 		dynamicUDN           bool
+		layer2TransitRouter  bool
 		ipv6                 bool
 		wantErr              bool
 		expectAcceptedStatus metav1.ConditionStatus
@@ -2741,6 +2743,46 @@ exit
 			expectNADAnnotations: map[string]map[string]string{"green": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
+			name:                "with dynamic UDN allocation and transit router, advertises an active layer2 network without a tunnel ID allocation",
+			dynamicUDN:          true,
+			layer2TransitRouter: true,
+			ra:                  &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "green", Namespace: "green", Network: util.GenerateCUDNNetworkName("green"), Topology: "layer2", Subnet: "1.4.0.0/16", Labels: map[string]string{"selected": "true"}},
+			},
+			namespaces: []*testNamespace{{Name: "green"}},
+			pods:       []*testPod{{Name: "pod", Namespace: "green", Node: "node"}},
+			nodes: []*testNode{
+				{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"},
+			},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.4.0.0/16"}, Imports: []string{"green"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.4.0.0/16"}},
+						}},
+						{ASN: 1, VRF: "green", Imports: []string{"default"}},
+					}},
+			},
+			expectNADAnnotations: map[string]map[string]string{"green": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
 			name:       "with dynamic UDN allocation, does not advertise a layer2 network from an active node until its tunnel ID is allocated",
 			dynamicUDN: true,
 			ra:         &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
@@ -2832,6 +2874,9 @@ exit
 			gMaxLength := format.MaxLength
 			format.MaxLength = 0
 			defer func() { format.MaxLength = gMaxLength }()
+			previousLayer2TransitRouter := config.Layer2UsesTransitRouter
+			config.Layer2UsesTransitRouter = tt.layer2TransitRouter
+			t.Cleanup(func() { config.Layer2UsesTransitRouter = previousLayer2TransitRouter })
 
 			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{
 				{
@@ -2874,11 +2919,12 @@ exit
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 			}
 
+			defaultNADName := config.Default.ClusterDefaultNetworkNAD
 			var defaultNAD *nadtypes.NetworkAttachmentDefinition
 			for _, nad := range tt.nads {
 				n, err := fakeClientset.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Create(context.Background(), nad.NAD(), metav1.CreateOptions{})
 				g.Expect(err).ToNot(gomega.HaveOccurred())
-				if nad.Name == types.DefaultNetworkName && nad.Namespace == config.Kubernetes.OVNConfigNamespace {
+				if nad.Name == defaultNADName.Name && nad.Namespace == defaultNADName.Namespace {
 					defaultNAD = n
 				}
 			}
@@ -2919,7 +2965,7 @@ exit
 			// prime the default network NAD namespace
 			namespace := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: config.Kubernetes.OVNConfigNamespace,
+					Name: config.Default.ClusterDefaultNetworkNAD.Namespace,
 				},
 			}
 			_, err = fakeClientset.KubeClient.CoreV1().Namespaces().Create(context.Background(), namespace, metav1.CreateOptions{})
@@ -3089,7 +3135,7 @@ func TestController_reconcileOnNetworkActivity(t *testing.T) {
 	_, err = fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node.Node(), metav1.CreateOptions{})
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
-	for _, namespace := range []string{"blue", config.Kubernetes.OVNConfigNamespace} {
+	for _, namespace := range []string{"blue", config.Default.ClusterDefaultNetworkNAD.Namespace} {
 		_, err = fakeClientset.KubeClient.CoreV1().Namespaces().Create(context.Background(),
 			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
 		g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -3538,4 +3584,101 @@ func TestUpdates(t *testing.T) {
 func getRAConditionMetricValue(nameLabel, conditionLabel, statusLabel string) (float64, bool) {
 	metricName := prometheus.BuildFQName(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemClusterManager, "route_advertisement_condition")
 	return ovntest.GetConditionMetricValue(metricName, nameLabel, conditionLabel, statusLabel)
+}
+
+// TestController_updateRAStatus verifies that the 'Accepted' condition is
+// refreshed when consecutive reconciles fail for different reasons, so that
+// the status message never gets stale.
+func TestController_updateRAStatus(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	fakeClientset := util.GetOVNClientset().GetClusterManagerClientset()
+	c := &Controller{raClient: fakeClientset.RouteAdvertisementsClient}
+
+	raName := "ra"
+	tra := &testRA{Name: raName}
+	_, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), tra.RouteAdvertisements(), metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	t.Cleanup(func() { metrics.DeleteRouteAdvertisementCondition(raName) })
+
+	getRA := func() *ratypes.RouteAdvertisements {
+		ra, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(context.Background(), raName, metav1.GetOptions{})
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+		return ra
+	}
+
+	// first reconcile fails with error A
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error A", errConfig))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "first reconcile with error A should update the status")
+	accepted := meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should be set after the first reconcile")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should be false after error A")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationError"), "errConfig should be reported as ConfigurationError")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error A"), "the message should report error A")
+
+	// rewind the condition transition time one hour into the past, so we can
+	// tell whether subsequent refreshes preserve or bump it: condition
+	// timestamps have one-second resolution and the whole test runs within a
+	// single second, so against a "now" timestamp an unchanged and a wrongly
+	// re-stamped transition time would look identical
+	rewound := metav1.NewTime(time.Now().Add(-time.Hour).Truncate(time.Second))
+	ra := getRA()
+	meta.FindStatusCondition(ra.Status.Conditions, "Accepted").LastTransitionTime = rewound
+	_, err = fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().UpdateStatus(context.Background(), ra, metav1.UpdateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "rewinding the condition transition time should succeed")
+
+	// second reconcile fails with error B for the same reason: the message
+	// must be refreshed
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error B", errConfig))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "second reconcile with error B should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after error B")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should stay false after error B")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationError"), "errConfig should still be reported as ConfigurationError")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error B"), "the message should be refreshed to error B")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a message-only refresh should preserve the transition time")
+
+	// third reconcile fails with a different reason: reason and message must
+	// be refreshed
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "third reconcile with error C should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after error C")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should stay false after error C")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationPending"), "errPending should be reported as ConfigurationPending")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error C"), "the message should be refreshed to error C")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a reason/message refresh should preserve the transition time")
+
+	// fourth reconcile fails with the same error: the status must not be
+	// applied again
+	countStatusPatches := func() int {
+		patches := 0
+		for _, action := range fakeClientset.RouteAdvertisementsClient.(*rafake.Clientset).Actions() {
+			if action.GetVerb() == "patch" {
+				patches++
+			}
+		}
+		return patches
+	}
+	patches := countStatusPatches()
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a reconcile with an unchanged error should succeed")
+	g.Expect(countStatusPatches()).To(gomega.Equal(patches), "an unchanged status must not be re-applied")
+
+	// fifth reconcile fails with the same error but had FRRConfig/NAD updates:
+	// the status must be applied even though the condition is unchanged
+	err = c.updateRAStatus(getRA(), true, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a reconcile with updates should update the status")
+	g.Expect(countStatusPatches()).To(gomega.Equal(patches+1), "hadUpdates should apply the status even when the condition is unchanged")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a hadUpdates apply should preserve the transition time of an unchanged condition")
+
+	// sixth reconcile succeeds: the condition status flips and the transition
+	// time must be bumped
+	err = c.updateRAStatus(getRA(), false, nil)
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a successful reconcile should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after a successful reconcile")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionTrue), "the Accepted condition should be true after a successful reconcile")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally(">", rewound.Time), "a status flip should bump the transition time")
 }

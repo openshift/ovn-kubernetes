@@ -330,7 +330,7 @@ func ConfigureAdvertisedNetworkIsolation(nbClient libovsdbclient.Client) error {
 
 	pg.ACLs = []string{dropACL.UUID}
 
-	ops, err = libovsdbops.CreatePortGroupOps(nbClient, ops, pg)
+	ops, err = libovsdbops.CreateOrAddPortsToPortGroupOps(nbClient, ops, pg)
 	if err != nil {
 		return fmt.Errorf("failed to create advertised network isolation port group: %w", err)
 	}
