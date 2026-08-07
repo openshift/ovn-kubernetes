@@ -1488,6 +1488,70 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+
+	Describe("parseClusterDefaultNAD", func() {
+		It("parses a namespace/name value", func() {
+			nad, err := parseClusterDefaultNAD("custom-namespace/custom-nad")
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(nad.Namespace).To(gomega.Equal("custom-namespace"))
+			gomega.Expect(nad.Name).To(gomega.Equal("custom-nad"))
+		})
+
+		DescribeTable("rejects malformed values",
+			func(value string) {
+				nad, err := parseClusterDefaultNAD(value)
+
+				gomega.Expect(err).To(gomega.MatchError(
+					fmt.Sprintf(`cluster-default-nad %q must be in the format of "namespace/name"`, value),
+				))
+				gomega.Expect(nad).To(gomega.BeNil())
+			},
+			Entry("empty value", ""),
+			Entry("missing namespace", "/name"),
+			Entry("missing name", "namespace/"),
+			Entry("missing separator", "name"),
+			Entry("too many separators", "namespace/name/extra"),
+			Entry("empty component between separators", "namespace//name"),
+			Entry("leading and trailing separators", "/namespace/name/"),
+			Entry("only separators", "//"),
+		)
+
+		It("rejects an invalid namespace", func() {
+			nad, err := parseClusterDefaultNAD("BadNS/default")
+
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+				`cluster-default-nad "BadNS/default" has an invalid namespace`,
+			)))
+			gomega.Expect(nad).To(gomega.BeNil())
+		})
+
+		DescribeTable("rejects a name that is not a DNS-1123 subdomain",
+			func(value string) {
+				nad, err := parseClusterDefaultNAD(value)
+
+				gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+					fmt.Sprintf(`cluster-default-nad %q has an invalid name`, value),
+				)))
+				gomega.Expect(nad).To(gomega.BeNil())
+			},
+			Entry("underscore", "namespace/invalid_name"),
+			Entry("uppercase", "namespace/UpperCase"),
+			Entry("dot", "namespace/."),
+			Entry("dot dot", "namespace/.."),
+			Entry("percent", "namespace/a%b"),
+			Entry("leading dash", "namespace/-name"),
+		)
+
+		It("accepts a dotted name", func() {
+			nad, err := parseClusterDefaultNAD("namespace/my.nad")
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(nad.Namespace).To(gomega.Equal("namespace"))
+			gomega.Expect(nad.Name).To(gomega.Equal("my.nad"))
+		})
+	})
+
 	Describe("OvnDBAuth operations", func() {
 		It("configures client southbound DB auth to unix socket via external_ids", func() {
 			fexec := ovntest.NewFakeExec()
