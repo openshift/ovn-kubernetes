@@ -267,6 +267,16 @@ ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 #OVN_ENABLE_PERSISTENT_IPS - enable IPAM for virtualization workloads (KubeVirt persistent IPs)
 ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS:-false}
+# OVNKUBE_CLUSTER_DEFAULT_NAD - namespace/name of the default cluster wide net-attach-def.
+# When unset, ovnkube defaults to <ovn-config-namespace>/default.
+ovnkube_cluster_default_nad=${OVNKUBE_CLUSTER_DEFAULT_NAD:-}
+
+# only pass the flag when the env variable is set, otherwise let ovnkube
+# resolve the default
+ovnkube_cluster_default_nad_flag=
+if [[ -n "${ovnkube_cluster_default_nad}" ]]; then
+  ovnkube_cluster_default_nad_flag="--cluster-default-nad=${ovnkube_cluster_default_nad}"
+fi
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -1299,6 +1309,7 @@ ovnkube-controller() {
     ${ovn_enable_dnsnameresolver_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -1827,6 +1838,7 @@ ovnkube-controller-with-node() {
     ${sflow_targets} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_disable_requestedchassis_flag} \
@@ -2128,6 +2140,7 @@ ovn-cluster-manager() {
     ${network_qos_enabled_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -2539,6 +2552,7 @@ ovn-node() {
         ${sflow_targets} \
         ${dynamic_udn_allocation_flag} \
         ${dynamic_udn_grace_period} \
+        ${ovnkube_cluster_default_nad_flag} \
         ${network_qos_enabled_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --export-ovs-metrics \
