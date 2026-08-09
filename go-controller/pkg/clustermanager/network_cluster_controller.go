@@ -42,12 +42,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
-const (
-	// reserve tunnel key = 1 for transitRouterToSwitch port
-	// matches same variable in transit_router.go
-	transitRouterToSwitchTunnelKey = 1
-)
-
 type NetworkStatusReporter func(networkName string, fieldManager string, condition *metav1.Condition, events ...*util.EventDetails) error
 
 // networkClusterController is the cluster controller for the networks. An
@@ -435,13 +429,6 @@ func (ncc *networkClusterController) init() error {
 						return fmt.Errorf("unable to reserve id for network %s, node %s: %w", ncc.GetNetworkName(), node.Name, err)
 					}
 				}
-			}
-		}
-		// With transit router, no node tunnel IDs are allocated, but we must
-		// still reserve ID 1 so pod IDs don't collide with tunnel key on the switch-to-transit-router LSP.
-		if config.Layer2UsesTransitRouter {
-			if err := ncc.tunnelIDAllocator.ReserveID("reserved-transit-switch-key", transitRouterToSwitchTunnelKey); err != nil {
-				return err
 			}
 		}
 	}
