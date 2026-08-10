@@ -68,6 +68,7 @@ type Layer3Config struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=400
 	// +required
+	// +listType=atomic
 	Subnets []Layer3Subnet `json:"subnets,omitempty"`
 
 	// JoinSubnets are used inside the OVN network topology.
@@ -156,6 +157,7 @@ type Layer2Config struct {
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=25
+	// +listType=atomic
 	ReservedSubnets []CIDR `json:"reservedSubnets,omitempty"`
 
 	// infrastructureSubnets specifies a list of internal CIDR ranges that OVN-Kubernetes will reserve for internal network infrastructure.
@@ -171,6 +173,7 @@ type Layer2Config struct {
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=4
+	// +listType=atomic
 	InfrastructureSubnets []CIDR `json:"infrastructureSubnets,omitempty"`
 
 	// defaultGatewayIPs specifies the default gateway IP used in the internal OVN topology.

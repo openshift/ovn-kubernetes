@@ -23,7 +23,6 @@ import (
 	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
 
 // validationErrorType represents different types of validation failures
@@ -297,8 +296,8 @@ func (c *Controller) emitEvent(eventType, reason, message string) {
 	c.recorder.Eventf(
 		&corev1.ObjectReference{
 			Kind:      "NetworkAttachmentDefinition",
-			Name:      types.DefaultNetworkName,
-			Namespace: config.Kubernetes.OVNConfigNamespace,
+			Name:      config.Default.ClusterDefaultNetworkNAD.Name,
+			Namespace: config.Default.ClusterDefaultNetworkNAD.Namespace,
 		},
 		eventType,
 		reason,

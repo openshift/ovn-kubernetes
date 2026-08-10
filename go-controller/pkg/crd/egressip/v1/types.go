@@ -35,6 +35,7 @@ type EgressIP struct {
 
 type EgressIPStatus struct {
 	// The list of assigned egress IPs and their corresponding node assignment.
+	// +listType=atomic
 	Items []EgressIPStatusItem `json:"items"`
 }
 
@@ -50,6 +51,7 @@ type EgressIPStatusItem struct {
 type EgressIPSpec struct {
 	// EgressIPs is the list of egress IP addresses requested. Can be IPv4 and/or IPv6.
 	// This field is mandatory.
+	// +listType=atomic
 	EgressIPs []string `json:"egressIPs"`
 	// NamespaceSelector applies the egress IP only to the namespace(s) whose label
 	// matches this definition. This field is mandatory.

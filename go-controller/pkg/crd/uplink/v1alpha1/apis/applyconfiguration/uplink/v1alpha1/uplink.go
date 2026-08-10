@@ -6,8 +6,11 @@
 package v1alpha1
 
 import (
+	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -31,6 +34,46 @@ func Uplink(name string) *UplinkApplyConfiguration {
 	b.WithKind("Uplink")
 	b.WithAPIVersion("k8s.ovn.org/v1alpha1")
 	return b
+}
+
+// ExtractUplinkFrom extracts the applied configuration owned by fieldManager from
+// uplink for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// uplink must be a unmodified Uplink API object that was retrieved from the Kubernetes API.
+// ExtractUplinkFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractUplinkFrom(uplink *uplinkv1alpha1.Uplink, fieldManager string, subresource string) (*UplinkApplyConfiguration, error) {
+	b := &UplinkApplyConfiguration{}
+	err := managedfields.ExtractInto(uplink, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.uplink.v1alpha1.Uplink"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(uplink.Name)
+
+	b.WithKind("Uplink")
+	b.WithAPIVersion("k8s.ovn.org/v1alpha1")
+	return b, nil
+}
+
+// ExtractUplink extracts the applied configuration owned by fieldManager from
+// uplink. If no managedFields are found in uplink for fieldManager, a
+// UplinkApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// uplink must be a unmodified Uplink API object that was retrieved from the Kubernetes API.
+// ExtractUplink provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractUplink(uplink *uplinkv1alpha1.Uplink, fieldManager string) (*UplinkApplyConfiguration, error) {
+	return ExtractUplinkFrom(uplink, fieldManager, "")
+}
+
+// ExtractUplinkStatus extracts the applied configuration owned by fieldManager from
+// uplink for the status subresource.
+func ExtractUplinkStatus(uplink *uplinkv1alpha1.Uplink, fieldManager string) (*UplinkApplyConfiguration, error) {
+	return ExtractUplinkFrom(uplink, fieldManager, "status")
 }
 
 func (b UplinkApplyConfiguration) IsApplyConfiguration() {}
