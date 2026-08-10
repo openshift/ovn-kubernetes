@@ -809,16 +809,26 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 
 	if ofPortPhys != "" {
 		// table 0, we check to see if this dest mac is the shared mac, if so flood to all ports
-		actions := ""
-		for _, netConfig := range b.patchedNetConfigs() {
-			actions += "output:" + netConfig.OfPortPatch + ","
+		if config.OVNKubernetesFeature.EnableUDNARPProxy != config.UDNARPProxyDisabled || config.OVNKubernetesFeature.EnableUDNNDPProxy {
+			defaultNetConfig, found := b.netConfig[types.DefaultNetworkName]
+			if found && defaultNetConfig.OfPortPatch != "" {
+				actions := "output:" + defaultNetConfig.OfPortPatch + ","
+				actions += "NORMAL"
+				dftFlows = append(dftFlows,
+					fmt.Sprintf("cookie=%s, priority=10, table=0, %s dl_dst=%s, actions=%s",
+						nodetypes.DefaultOpenFlowCookie, matchVLAN, bridgeMacAddress, actions))
+			}
+		} else {
+			actions := ""
+			for _, netConfig := range b.patchedNetConfigs() {
+				actions += "output:" + netConfig.OfPortPatch + ","
+			}
+			actions += "NORMAL"
+			dftFlows = append(dftFlows,
+				fmt.Sprintf("cookie=%s, priority=10, table=0, %s dl_dst=%s, actions=%s",
+					nodetypes.DefaultOpenFlowCookie, matchVLAN, bridgeMacAddress, actions))
+
 		}
-
-		actions += "NORMAL"
-		dftFlows = append(dftFlows,
-			fmt.Sprintf("cookie=%s, priority=10, table=0, %s dl_dst=%s, actions=%s",
-				nodetypes.DefaultOpenFlowCookie, matchVLAN, bridgeMacAddress, actions))
-
 		if util.IsNetworkSegmentationSupportEnabled() {
 			dftFlows = append(dftFlows, b.arpFanoutFilterFlows(ofPortPhys, matchVLAN)...)
 		}
@@ -1334,6 +1344,20 @@ func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN string)
 
 	var flows []string
 
+	if config.OVNKubernetesFeature.EnableUDNARPProxy != config.UDNARPProxyDisabled || config.OVNKubernetesFeature.EnableUDNNDPProxy {
+		// Priority-45: external broadcast ARP (including GARPs) arriving on the
+		// physical port → explicitly forward to all default GR and NORMAL
+		defaultPatchActions := "output:" + defaultNetConfig.OfPortPatch + ","
+		if ofPortPhys != "" && b.hasCUDNPatchPorts() {
+			if config.IPv4Mode {
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s, priority=45, table=0, in_port=%s, %s arp, "+
+						"actions=%sNORMAL,LOCAL",
+						nodetypes.DefaultOpenFlowCookie, ofPortPhys, matchVLAN, defaultPatchActions))
+			}
+		}
+	}
+
 	// Priority-12: ARP/NS for node IP → only default patch + NORMAL.
 	// NORMAL learns the external source MAC in the FDB and delivers to
 	// LOCAL (static FDB entry). No-flood on CUDN ports prevents them from
@@ -1370,6 +1394,9 @@ func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN string)
 	// Only generated when CUDN patches exist (without them, NORMAL already
 	// floods to the default patch which is not no-flood).
 	allPatchActions := b.patchOutputActions(false)
+	if config.OVNKubernetesFeature.EnableUDNARPProxy != config.UDNARPProxyDisabled || config.OVNKubernetesFeature.EnableUDNNDPProxy {
+		allPatchActions = "output:" + b.netConfig[types.DefaultNetworkName].OfPortPatch + ","
+	}
 	if ofPortPhys != "" && b.hasCUDNPatchPorts() {
 		if config.IPv4Mode {
 			flows = append(flows,

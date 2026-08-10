@@ -9,9 +9,7 @@ import (
 	net "net"
 
 	mock "github.com/stretchr/testify/mock"
-
 	netlink "github.com/vishvananda/netlink"
-
 	nl "github.com/vishvananda/netlink/nl"
 )
 
@@ -910,6 +908,24 @@ func (_m *NetLinkOps) NeighSet(neigh *netlink.Neigh) error {
 	var r0 error
 	if rf, ok := ret.Get(0).(func(*netlink.Neigh) error); ok {
 		r0 = rf(neigh)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// NeighSubscribeWithOptions provides a mock function with given fields: ch, done, options
+func (_m *NetLinkOps) NeighSubscribeWithOptions(ch chan<- netlink.NeighUpdate, done <-chan struct{}, options netlink.NeighSubscribeOptions) error {
+	ret := _m.Called(ch, done, options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NeighSubscribeWithOptions")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(chan<- netlink.NeighUpdate, <-chan struct{}, netlink.NeighSubscribeOptions) error); ok {
+		r0 = rf(ch, done, options)
 	} else {
 		r0 = ret.Error(0)
 	}
