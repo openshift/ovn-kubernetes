@@ -14,7 +14,7 @@ PKGS ?=
 GOPATH ?= $(shell go env GOPATH)
 TEST_REPORT_DIR?=$(CURDIR)/_artifacts
 export TEST_REPORT_DIR
-GO_VERSION ?= 1.25
+GO_VERSION ?= 1.26
 GO_DOCKER_IMG = quay.io/projectquay/golang:${GO_VERSION}
 # CONTAINER_RUNNABLE determines if the tests can be run inside a container. It checks to see if
 # podman/docker is installed on the system.
@@ -73,6 +73,10 @@ modelgen: pkg/nbdb/ovn-nb.ovsschema pkg/sbdb/ovn-sb.ovsschema pkg/vswitchd/vswit
 
 codegen:
 	hack/update-codegen.sh
+
+.PHONY: verify-codegen
+verify-codegen:
+	@GOPATH=${GOPATH} ./hack/verify-codegen.sh || { echo "codegen verification failed! Run 'make codegen mocksgen' and commit the result"; exit 1; }
 
 .PHONY: mocksgen
 mocksgen: ${MOCKERY}

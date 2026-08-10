@@ -218,7 +218,7 @@ func TestSetAdvertisements(t *testing.T) {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			config.OVNKubernetesFeature.EnableRouteAdvertisements = true
 			fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			tcm := &testControllerManager{
@@ -249,8 +249,6 @@ func TestSetAdvertisements(t *testing.T) {
 			err = wf.Start()
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			defer wf.Shutdown()
-			g.Expect(nm.Start()).To(gomega.Succeed())
-			defer nm.Stop()
 
 			netInfo, err := util.NewNetInfo(tt.network)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -278,6 +276,8 @@ func TestSetAdvertisements(t *testing.T) {
 			}
 
 			nm.EnsureNetwork(mutableNetInfo)
+			g.Expect(nm.Start()).To(gomega.Succeed())
+			defer nm.Stop()
 
 			meetsExpectations := func(g gomega.Gomega) {
 				tcm.Lock()
@@ -522,7 +522,7 @@ func TestNetworkController_ConcurrentReconciliation(t *testing.T) {
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 	config.OVNKubernetesFeature.EnableMultiNetwork = true
 	fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	tcm := &testControllerManager{
@@ -607,7 +607,7 @@ func TestNetworkController_ConcurrentReconciliationMixed(t *testing.T) {
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 	config.OVNKubernetesFeature.EnableMultiNetwork = true
 	fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	tcm := &testControllerManager{

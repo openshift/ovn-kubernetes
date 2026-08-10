@@ -1616,12 +1616,22 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 							return fmt.Errorf("transit switch ips for node %s not allocated", n.Name)
 						}
 
+						// Wait for the other initial node annotation writer before testing reallocation.
+						hostSubnets, err := util.ParseNodeHostSubnetAnnotation(updatedNode, ovntypes.DefaultNetworkName)
+						if err != nil {
+							return fmt.Errorf("error parsing host subnet annotation for node %s: %v", n.Name, err)
+						}
+						if len(hostSubnets) < 1 {
+							return fmt.Errorf("host subnet for node %s not allocated", n.Name)
+						}
+
 						return nil
 					}).ShouldNot(gomega.HaveOccurred())
 				}
 
 				// Clear the transit switch port ip annotation from node 1.
-				node1, _ := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+				node1, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node1", metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				nodeAnnotations := node1.Annotations
 				nodeAnnotator := kube.NewNodeAnnotator(&kube.Kube{KClient: kubeFakeClient}, "node1")
 				for k, v := range nodeAnnotations {
@@ -1651,7 +1661,10 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 					if len(transitSwitchIps) < 1 {
 						return fmt.Errorf("transit switch ips for node node1 not allocated")
 					}
-					gomega.Expect(node1TransitSwitchIps).To(gomega.Equal(updatedNode1TransitSwitchIps))
+					if node1TransitSwitchIps != updatedNode1TransitSwitchIps {
+						return fmt.Errorf("expected transit switch ips %q for node node1, got %q",
+							node1TransitSwitchIps, updatedNode1TransitSwitchIps)
+					}
 					return nil
 				}).ShouldNot(gomega.HaveOccurred())
 
@@ -1750,6 +1763,109 @@ var _ = ginkgo.Describe("Cluster Manager", func() {
 				gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 			})
 		})
+	})
+
+	ginkgo.Context("Layer2 topology type detection", func() {
+		type topoTestEntry struct {
+			nodeAnnotations []map[string]string
+			expectedTransit bool
+		}
+
+		ginkgo.DescribeTable("sets Layer2UsesTransitRouter on Start",
+			func(entry topoTestEntry) {
+				app.Action = func(ctx *cli.Context) error {
+					var nodes []corev1.Node
+					for i, ann := range entry.nodeAnnotations {
+						nodes = append(nodes, corev1.Node{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:        fmt.Sprintf("node%d", i+1),
+								Annotations: ann,
+							},
+						})
+					}
+
+					kubeFakeClient := fake.NewSimpleClientset(&corev1.NodeList{Items: nodes})
+					fakeClient := &util.OVNClusterManagerClientset{
+						KubeClient: kubeFakeClient,
+					}
+
+					_, err := config.InitConfig(ctx, nil, nil)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					config.Layer2UsesTransitRouter = false
+
+					f, err = factory.NewClusterManagerWatchFactory(fakeClient)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+					c, cancel := context.WithCancel(ctx.Context)
+					defer cancel()
+					clusterManager, err := NewClusterManager(fakeClient, f, "identity", nil)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					err = clusterManager.Start(c)
+					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					defer clusterManager.Stop()
+
+					gomega.Expect(config.Layer2UsesTransitRouter).To(
+						gomega.Equal(entry.expectedTransit),
+						"Layer2UsesTransitRouter mismatch",
+					)
+
+					return nil
+				}
+				gomega.Expect(app.Run([]string{
+					app.Name,
+					"-cluster-subnets=" + clusterCIDR,
+				})).To(gomega.Succeed())
+			},
+			ginkgo.Entry("all nodes use transit router",
+				topoTestEntry{
+					nodeAnnotations: []map[string]string{
+						{util.Layer2TopologyVersion: util.TransitRouterTopoVersion},
+						{util.Layer2TopologyVersion: util.TransitRouterTopoVersion},
+					},
+					expectedTransit: true,
+				},
+			),
+			ginkgo.Entry("no nodes use transit router",
+				topoTestEntry{
+					nodeAnnotations: []map[string]string{
+						{},
+						{},
+					},
+					expectedTransit: false,
+				},
+			),
+			ginkgo.Entry("mixed: one node uses transit router, one does not",
+				topoTestEntry{
+					nodeAnnotations: []map[string]string{
+						{util.Layer2TopologyVersion: util.TransitRouterTopoVersion},
+						{},
+					},
+					expectedTransit: false,
+				},
+			),
+			ginkgo.Entry("single node uses transit router",
+				topoTestEntry{
+					nodeAnnotations: []map[string]string{
+						{util.Layer2TopologyVersion: util.TransitRouterTopoVersion},
+					},
+					expectedTransit: true,
+				},
+			),
+			ginkgo.Entry("single node without transit router",
+				topoTestEntry{
+					nodeAnnotations: []map[string]string{
+						{},
+					},
+					expectedTransit: false,
+				},
+			),
+			ginkgo.Entry("no nodes in cluster",
+				topoTestEntry{
+					nodeAnnotations: []map[string]string{},
+					expectedTransit: true,
+				},
+			),
+		)
 	})
 
 	ginkgo.Context("EVPN VTEP and UDN integration", func() {

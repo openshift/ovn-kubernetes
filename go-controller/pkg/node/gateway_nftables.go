@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -217,6 +218,21 @@ func getUDNNFTRules(service *corev1.Service, netConfig *bridgeconfig.BridgeUDNCo
 		rules = append(rules, getUDNExternalIPsMarkNFTRules(svcPort, util.GetExternalAndLBIPs(service), netConfig)...)
 	}
 	return rules
+}
+
+func shouldAddUDNServiceMarkRules(netInfo util.NetInfo, nodeName string) bool {
+	if !netInfo.IsPrimaryNetwork() {
+		return false
+	}
+	advertisedVRFs := netInfo.GetPodNetworkAdvertisedOnNodeVRFs(nodeName)
+	if len(advertisedVRFs) == 0 {
+		return true
+	}
+	// The default network name represents the default VRF target here, not the
+	// default pod network. Only install host service mark rules when the UDN is
+	// reachable through the default VRF path; VRF-lite Uplink targets must not
+	// be reachable from the default gateway interface.
+	return slices.Contains(advertisedVRFs, types.DefaultNetworkName)
 }
 
 // getUDNNFTMaps returns the names of all of the maps used by getUDNNFTRules.
@@ -450,6 +466,9 @@ func initLocalGatewayNFTNATRules(cidrs ...*net.IPNet) error {
 	tx := nft.NewTransaction()
 
 	// Create main local gateway masquerade chain
+	// TODO: now that EgressIP uses nftables maps instead of iptables, this
+	// priority bump to 101 may no longer be necessary. Investigate using
+	// the standard SNATPriority (100) instead.
 	// Use priority 101 instead of defaultknftables.SNATPriority (100) to ensure
 	// iptables egress IP rules in OVN-KUBE-EGRESS-IP-MULTI-NIC chain run first
 	// this also ensure for egress-services, the
