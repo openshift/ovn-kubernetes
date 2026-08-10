@@ -81,6 +81,7 @@ type ClusterNetworkConnectSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="connectSubnets is immutable"
 	// +kubebuilder:validation:XValidation:rule="size(self) != 2 || !isCIDR(self[0].cidr) || !isCIDR(self[1].cidr) || cidr(self[0].cidr).ip().family() != cidr(self[1].cidr).ip().family()", message="When 2 CIDRs are set, they must be from different IP families"
 	// +kubebuilder:validation:XValidation:rule="size(self) != 2 || !isCIDR(self[0].cidr) || !isCIDR(self[1].cidr) || cidr(self[0].cidr).ip().family() == cidr(self[1].cidr).ip().family() || (cidr(self[0].cidr).ip().family() == 4 ? (32 - self[0].networkPrefix) == (128 - self[1].networkPrefix) : (128 - self[0].networkPrefix) == (32 - self[1].networkPrefix))", message="For dual-stack, networkPrefix must have matching host bits: (32 - ipv4NetworkPrefix) must equal (128 - ipv6NetworkPrefix)"
+	// +listType=atomic
 	ConnectSubnets []ConnectSubnet `json:"connectSubnets"`
 
 	// connectivity specifies which connectivity types should be enabled for the connected networks.
@@ -89,6 +90,7 @@ type ClusterNetworkConnectSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))",message="connectivity cannot contain duplicate values"
+	// +listType=atomic
 	Connectivity []ConnectivityType `json:"connectivity"`
 }
 

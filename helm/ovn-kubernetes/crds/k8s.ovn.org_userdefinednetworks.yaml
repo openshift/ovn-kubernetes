@@ -86,6 +86,7 @@ spec:
                     maxItems: 4
                     minItems: 1
                     type: array
+                    x-kubernetes-list-type: atomic
                   ipam:
                     description: IPAM section contains IPAM-related configuration
                       for the network.
@@ -170,6 +171,7 @@ spec:
                     maxItems: 25
                     minItems: 1
                     type: array
+                    x-kubernetes-list-type: atomic
                   role:
                     description: |-
                       Role describes the network role in the pod.
@@ -360,6 +362,7 @@ spec:
                     maxItems: 400
                     minItems: 1
                     type: array
+                    x-kubernetes-list-type: atomic
                 required:
                 - role
                 - subnets
