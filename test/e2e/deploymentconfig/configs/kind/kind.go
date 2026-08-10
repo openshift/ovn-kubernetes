@@ -62,6 +62,10 @@ func (k kind) IsConfigurationEnabled(config api.Config) bool {
 	}
 }
 
+func (k kind) NBDBContainerName() string {
+	return "nb-ovsdb"
+}
+
 func (k *kind) GetNodeMachineNetworks() (map[string][]string, error) {
 	if k.kubeConfig == nil {
 		return make(map[string][]string), nil
