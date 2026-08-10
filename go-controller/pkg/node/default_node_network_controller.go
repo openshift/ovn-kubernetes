@@ -287,6 +287,11 @@ func (oc *DefaultNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 	return nil
 }
 
+func (oc *DefaultNodeNetworkController) GetOpenflowManager() *openflowManager {
+	gw := oc.Gateway.(*gateway)
+	return gw.openflowManager
+}
+
 func clearOVSFlowTargets() error {
 	_, _, err := util.RunOVSVsctl(
 		"--",

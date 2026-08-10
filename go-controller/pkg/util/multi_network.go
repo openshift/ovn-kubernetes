@@ -2001,6 +2001,10 @@ func IsEVPNEnabled() bool {
 	return IsRouteAdvertisementsEnabled() && config.Gateway.Mode == config.GatewayModeLocal && config.OVNKubernetesFeature.EnableEVPN
 }
 
+func IsUDNProxyEnabled() bool {
+	return IsNetworkSegmentationSupportEnabled() && (config.OVNKubernetesFeature.EnableUDNNDPProxy != "" || config.OVNKubernetesFeature.EnableUDNARPProxy != "")
+}
+
 // IsPreconfiguredUDNAddressesEnabled indicates if user defined IPs / MAC
 // addresses can be set in primary UDNs
 func IsPreconfiguredUDNAddressesEnabled() bool {
