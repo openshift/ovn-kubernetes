@@ -524,6 +524,24 @@ func (_m *NetLinkOps) NeighList(linkIndex int, family int) ([]netlink.Neigh, err
 	return r0, r1
 }
 
+// NeighSet provides a mock function with given fields: neigh
+func (_m *NetLinkOps) NeighSet(neigh *netlink.Neigh) error {
+	ret := _m.Called(neigh)
+
+	if len(ret) == 0 {
+		panic("no return value specified for NeighSet")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*netlink.Neigh) error); ok {
+		r0 = rf(neigh)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // RouteAdd provides a mock function with given fields: route
 func (_m *NetLinkOps) RouteAdd(route *netlink.Route) error {
 	ret := _m.Called(route)
