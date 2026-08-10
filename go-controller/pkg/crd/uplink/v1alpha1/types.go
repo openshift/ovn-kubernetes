@@ -15,14 +15,20 @@ const (
 	UplinkConditionReady = "Ready"
 )
 
+// Each UplinkState condition has a single writer per node: in split DPU mode
+// the DPU-host owns HostDataReady, the DPU owns Resolved, and the DPU-side
+// gateway coordinator owns GatewayReady. In full mode the discovery
+// reconciler owns Resolved and HostDataReady is not published.
 const (
-	UplinkStateConditionResolved     = "Resolved"
-	UplinkStateConditionGatewayReady = "GatewayReady"
+	UplinkStateConditionResolved      = "Resolved"
+	UplinkStateConditionGatewayReady  = "GatewayReady"
+	UplinkStateConditionHostDataReady = "HostDataReady"
 )
 
 const (
 	UplinkStateReasonResolved                        = "Resolved"
 	UplinkStateReasonGatewayConfigured               = "GatewayConfigured"
+	UplinkStateReasonHostDataDiscovered              = "HostDataDiscovered"
 	UplinkStateReasonHostInterfaceNotFound           = "HostInterfaceNotFound"
 	UplinkStateReasonBridgeNotFound                  = "BridgeNotFound"
 	UplinkStateReasonBridgeUplinkNotFound            = "BridgeUplinkNotFound"
@@ -30,7 +36,6 @@ const (
 	UplinkStateReasonDefaultGatewayBridgeUnsupported = "DefaultGatewayBridgeUnsupported"
 	UplinkStateReasonInvalidHostInterface            = "InvalidHostInterface"
 	UplinkStateReasonGatewayInfoUnavailable          = "GatewayInfoUnavailable"
-	UplinkStateReasonWaitingForDPU                   = "WaitingForDPU"
 	UplinkStateReasonWaitingForDPUHost               = "WaitingForDPUHost"
 	UplinkStateReasonNodeSelectorOverlap             = "NodeSelectorOverlap"
 	UplinkStateReasonGatewayConfigurationPending     = "GatewayConfigurationPending"
@@ -90,6 +95,7 @@ type UplinkSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	// +required
+	// +listType=atomic
 	NodeConfigs []UplinkNodeConfig `json:"nodeConfigs"`
 }
 
@@ -151,6 +157,7 @@ type UplinkList struct {
 // +kubebuilder:printcolumn:name="Uplink",type=string,JSONPath=".spec.uplinkName"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Resolved",type=string,JSONPath=`.status.conditions[?(@.type=="Resolved")].status`
+// +kubebuilder:printcolumn:name="HostDataReady",type=string,priority=1,JSONPath=`.status.conditions[?(@.type=="HostDataReady")].status`
 type UplinkState struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -201,12 +208,14 @@ type UplinkStateStatus struct {
 	// IPAddresses are host-side shared gateway IP addresses.
 	// +kubebuilder:validation:MaxItems=2
 	// +optional
+	// +listType=atomic
 	IPAddresses []IPAddressCIDR `json:"ipAddresses,omitempty"`
 
 	// DefaultGateways are default route next-hop IPs discovered for the
 	// selected host interface.
 	// +kubebuilder:validation:MaxItems=2
 	// +optional
+	// +listType=atomic
 	DefaultGateways []IPAddress `json:"defaultGateways,omitempty"`
 
 	// Conditions reports node-local discovery and gateway programming state for

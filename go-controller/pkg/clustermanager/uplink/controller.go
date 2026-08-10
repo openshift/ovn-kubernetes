@@ -134,6 +134,7 @@ func NewController(
 
 	uplinkCfg := &controllerutil.ControllerConfig[uplinkv1alpha1.Uplink]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+		MaxAttempts:    controllerutil.InfiniteAttempts,
 		Informer:       wf.UplinkInformer().Informer(),
 		Lister:         c.uplinkLister.List,
 		Reconcile:      c.reconcileUplink,
@@ -147,6 +148,7 @@ func NewController(
 
 	uplinkStateCfg := &controllerutil.ControllerConfig[uplinkv1alpha1.UplinkState]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+		MaxAttempts:    controllerutil.InfiniteAttempts,
 		Informer:       wf.UplinkStateInformer().Informer(),
 		Lister:         c.uplinkStateLister.List,
 		Reconcile:      c.reconcileUplinkState,
@@ -160,6 +162,7 @@ func NewController(
 
 	cudnCfg := &controllerutil.ControllerConfig[udnv1.ClusterUserDefinedNetwork]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+		MaxAttempts:    controllerutil.InfiniteAttempts,
 		Informer:       wf.ClusterUserDefinedNetworkInformer().Informer(),
 		Lister:         c.cudnLister.List,
 		Reconcile:      c.reconcileCUDN,
@@ -173,6 +176,7 @@ func NewController(
 
 	nodeCfg := &controllerutil.ControllerConfig[corev1.Node]{
 		RateLimiter:    workqueue.DefaultTypedControllerRateLimiter[string](),
+		MaxAttempts:    controllerutil.InfiniteAttempts,
 		Informer:       wf.NodeCoreInformer().Informer(),
 		Lister:         c.nodeLister.List,
 		Reconcile:      c.reconcileNode,
@@ -186,6 +190,7 @@ func NewController(
 
 	networkRefCfg := &controllerutil.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
+		MaxAttempts: controllerutil.InfiniteAttempts,
 		Reconcile:   c.reconcileNetworkRef,
 		Threadiness: 1,
 	}
@@ -301,12 +306,15 @@ func (c *Controller) reconcileUplink(key string) error {
 
 	selected, conflicts, validationErr := c.resolveSelectedNodeConfigs(uplink)
 	if validationErr != nil {
-		if err := c.updateStatus(uplink,
+		err := c.updateStatus(uplink,
 			metav1.ConditionFalse, reasonInvalidSpec,
-			"Uplink is not ready because its spec is not accepted"); err != nil {
-			return err
-		}
+			"Uplink is not ready because its spec is not accepted")
 		c.reconcileCUDNNames(referencingCUDNs)
+		if err != nil {
+			return errors.Join(validationErr, err)
+		}
+		// A rejected spec is not retryable: the cluster admin must fix the
+		// Uplink CR, and that update triggers a new reconcile.
 		return nil
 	}
 
@@ -320,6 +328,8 @@ func (c *Controller) reconcileUplink(key string) error {
 		return err
 	}
 	c.reconcileCUDNNames(referencingCUDNs)
+	// A not-ready Uplink needs no retry: readiness is recomputed whenever
+	// an UplinkState, node or CUDN changes.
 	return nil
 }
 
@@ -752,9 +762,12 @@ func uplinkStateNotResolvedReason(
 		uplinkv1alpha1.UplinkStateConditionResolved,
 	)
 	if cond == nil {
-		return "ResolvedConditionMissing"
+		return hostDataFailureReason(state, "ResolvedConditionMissing")
 	}
 	if cond.Status != metav1.ConditionTrue {
+		if cond.Reason == uplinkv1alpha1.UplinkStateReasonWaitingForDPUHost {
+			return hostDataFailureReason(state, cond.Reason)
+		}
 		if cond.Reason != "" {
 			return cond.Reason
 		}
@@ -764,6 +777,20 @@ func uplinkStateNotResolvedReason(
 		return "NodeConfigMismatch"
 	}
 	return ""
+}
+
+// hostDataFailureReason surfaces the DPU-host-side root cause when the DPU
+// side is blocked on host data: the aggregate message samples only reasons,
+// and WaitingForDPUHost alone would hide why the host has not published.
+func hostDataFailureReason(state *uplinkv1alpha1.UplinkState, fallback string) string {
+	cond := meta.FindStatusCondition(
+		state.Status.Conditions,
+		uplinkv1alpha1.UplinkStateConditionHostDataReady,
+	)
+	if cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason != "" {
+		return cond.Reason
+	}
+	return fallback
 }
 
 func uplinkStateResolved(state *uplinkv1alpha1.UplinkState, nodeConfig uplinkv1alpha1.UplinkNodeConfig) bool {

@@ -306,7 +306,8 @@ func (b *BridgeConfiguration) setDPUHostGatewayConfiguration(nodeName string) er
 // and moving gateway IPs/MACs onto the selected host interface.
 func NewUnmanagedBridgeConfiguration(ovsClient libovsdbclient.Client, bridgeName, hostInterfaceName, nodeName,
 	physicalNetworkName string, gwIPs []*net.IPNet, macAddress net.HardwareAddr) (*BridgeConfiguration, error) {
-	if _, err := ovsops.GetBridge(ovsClient, bridgeName); err != nil {
+	bridge, err := ovsops.GetBridge(ovsClient, bridgeName)
+	if err != nil {
 		return nil, fmt.Errorf("failed to find OVS bridge %s: %w", bridgeName, err)
 	}
 	if len(gwIPs) == 0 {
@@ -329,7 +330,10 @@ func NewUnmanagedBridgeConfiguration(ovsClient libovsdbclient.Client, bridgeName
 	if gwIface == "" || config.IsModeDPU() {
 		gwIface = bridgeName
 		if config.IsModeDPU() {
-			gwIfaceRep, err = util.GetDPUOps().GetDPUHostRepInterface(ovsClient, bridgeName)
+			// Uplink host interfaces may be backed by a VF or SF, not just a
+			// PF, so select the representor by its host peer MAC rather than
+			// assuming the bridge holds a single PF representor.
+			gwIfaceRep, err = util.GetDPUOps().FindHostRepresentorByPeerMAC(ovsClient, bridge, macAddress, nodeName)
 			if err != nil {
 				return nil, err
 			}
@@ -609,7 +613,61 @@ func (b *BridgeConfiguration) SetNetworkOfPatchPort(netName string) error {
 	if !found {
 		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, b.bridgeName)
 	}
-	return netConfig.setOfPatchPort()
+	if err := netConfig.setOfPatchPort(); err != nil {
+		return err
+	}
+
+	// Only set no-flood on bridges that also carry the default network.
+	// The ARP storm occurs because CUDNs share the node IP with the
+	// default GR on the same bridge.
+	if netName != types.DefaultNetworkName && util.IsNetworkSegmentationSupportEnabled() {
+		if _, isSharedBridge := b.netConfig[types.DefaultNetworkName]; isSharedBridge {
+			if err := util.SetPortNoFlood(b.bridgeName, netConfig.OfPortPatch); err != nil {
+				return fmt.Errorf("failed to set no-flood on port %s of bridge %s: %w",
+					netConfig.PatchPort, b.bridgeName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// SyncNoFlood ensures OFPPC_NO_FLOOD is set on every non-default patch port
+// that shares the bridge with the default network. The flag is OpenFlow
+// port config (not OVSDB-persisted), so it must be reapplied after
+// ovs-vswitchd restarts or ports are re-created.
+//
+// To avoid running mod-port for every CUDN patch port on every sync
+// cycle, we first query dump-ports-desc once to learn which ports
+// already carry the flag and only touch ports that are missing it.
+func (b *BridgeConfiguration) SyncNoFlood() error {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return nil
+	}
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	if _, hasDefault := b.netConfig[types.DefaultNetworkName]; !hasDefault {
+		return nil
+	}
+
+	alreadyNoFlood, err := util.GetNoFloodPorts(b.bridgeName)
+	if err != nil {
+		return fmt.Errorf("failed to check no-flood state on bridge %s: %w", b.bridgeName, err)
+	}
+
+	for netName, netConfig := range b.netConfig {
+		if netName == types.DefaultNetworkName || netConfig.PatchPort == "" || netConfig.OfPortPatch == "" {
+			continue
+		}
+		if alreadyNoFlood[netConfig.OfPortPatch] {
+			continue
+		}
+		if err := util.SetPortNoFlood(b.bridgeName, netConfig.OfPortPatch); err != nil {
+			return fmt.Errorf("failed to set no-flood on port %s of bridge %s: %w",
+				netConfig.PatchPort, b.bridgeName, err)
+		}
+	}
+	return nil
 }
 
 func (b *BridgeConfiguration) GetInterfaceID() string {
@@ -650,6 +708,10 @@ func gatewayReady(patchPort string) bool {
 	return true
 }
 
+// getIntfName returns the physical uplink interface of the gateway OVS bridge
+// gatewayIntf, as derived by util.GetNicName (external-ids:bridge-uplink,
+// single system-type port, or the "br<nic>" name convention), and verifies
+// that the result is plugged into OVS (has an ofport).
 func getIntfName(ovsClient libovsdbclient.Client, gatewayIntf string) (string, error) {
 	// The given (or autodetected) interface is an OVS bridge and this could be
 	// created by us using util.NicToBridge() or it was pre-created by the user.

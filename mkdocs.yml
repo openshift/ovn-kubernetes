@@ -3,6 +3,12 @@ site_url: https://www.ovn.org/ovn-kubernetes/
 repo_url: https://github.com/ovn-kubernetes/ovn-kubernetes
 repo_name: ovn-kubernetes/ovn-kubernetes
 edit_uri: edit/master/docs
+extra:
+  version:
+    provider: mike
+    default:
+      - latest
+      - master
 extra_css:
   - stylesheets/extra.css
 site_dir: site
@@ -85,6 +91,8 @@ nav:
     - Host To NodePort Hairpin: design/host-to-node-port-hairpin-trafficflow.md
     - ExternalIPs/LoadBalancerIngress: design/external-ip-and-loadbalancer-ingress.md
     - Internal Subnets: design/ovn-kubernetes-subnets.md
+    - External Bridge (breth0) Flows: design/bridge-flows.md
+    - Masquerade IPs: design/masquerade-ips.md
     - Kubevirt VM Live Migration: features/live-migration.md
   - Getting Started:
     - Launching OVN-Kubernetes sandbox env: installation/launching-ovn-kubernetes-on-kind.md

@@ -43,6 +43,7 @@ type ClusterUserDefinedNetworkSpec struct {
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="uplinks is immutable"
 	// +optional
+	// +listType=atomic
 	Uplinks []string `json:"uplinks,omitempty"`
 
 	// Network is the user-defined-network spec
@@ -192,6 +193,7 @@ type LocalnetConfig struct {
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=25
+	// +listType=atomic
 	ExcludeSubnets []CIDR `json:"excludeSubnets,omitempty"`
 
 	// ipam configurations for the network.

@@ -31,6 +31,13 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
+const (
+	// First tunnel key available for pods. Keys 1-9 are reserved for platform
+	// ports (e.g. transit router to switch port). Matches
+	// transitRouterPortFirstTunnelKey in transit_router.go.
+	transitRouterFirstPodTunnelKey = 10
+)
+
 // PodAllocator acts on pods events handed off by the cluster network controller
 // and allocates or releases resources (IPs and tunnel IDs at the time of this
 // writing) to pods on behalf of cluster manager.
@@ -172,6 +179,17 @@ func (a *PodAllocator) Sync(objs []interface{}) error {
 		err := a.reconcile(nil, pod, releaseFromAllocator)
 		if err != nil {
 			klog.Errorf("Failed to sync pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		}
+	}
+
+	// Reserve tunnel IDs used by OVN platform ports so that they are not
+	// allocated to pods. Done after syncing existing pods: on upgrade, pods
+	// may already hold these IDs; those are skipped and reclaimed on delete.
+	if a.idAllocator != nil && config.Layer2UsesTransitRouter {
+		for i := 1; i < transitRouterFirstPodTunnelKey; i++ {
+			if err := a.idAllocator.ReserveID(fmt.Sprintf("reserved-platform-port-%d", i), i); err != nil {
+				klog.Infof("Platform port tunnel key %d already in use: %v", i, err)
+			}
 		}
 	}
 
