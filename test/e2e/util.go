@@ -1271,6 +1271,20 @@ func isLocalGWModeEnabled() bool {
 	return present && val == "local"
 }
 
+func isUDNProxyEnabled() bool {
+	valARP, presentARP := os.LookupEnv("ENABLE_UDN_ARP_PROXY")
+	valNDP, presentNDP := os.LookupEnv("ENABLE_UDN_NDP_PROXY")
+	udnARPEnabled := false
+	udnNDPEnabled := false
+	if presentARP && valARP != "" {
+		udnARPEnabled = true
+	}
+	if presentNDP && valNDP != "" {
+		udnNDPEnabled = true
+	}
+	return udnARPEnabled || udnNDPEnabled
+}
+
 func isPreConfiguredUdnAddressesEnabled() bool {
 	ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 	val := getTemplateContainerEnv(ovnKubeNamespace, "daemonset/ovnkube-node", getNodeContainerName(), "OVN_PRE_CONF_UDN_ADDR_ENABLE")
