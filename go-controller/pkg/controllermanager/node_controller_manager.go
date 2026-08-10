@@ -31,6 +31,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/evpn"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/macbinding"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/netlinkdevicemanager"
@@ -52,6 +53,9 @@ type NodeControllerManager struct {
 	stopChan      chan struct{}
 	wg            *sync.WaitGroup
 	recorder      record.EventRecorder
+
+	// libovsdb southbound client interface
+	sbClient client.Client
 
 	// management port device manager
 	mpdm *managementport.MgmtPortDeviceManager
@@ -80,6 +84,8 @@ type NodeControllerManager struct {
 	uplinkController *nodeuplink.Controller
 	// coordinates aggregate gateway programming for CUDNs using each Uplink
 	uplinkGatewayController *node.UplinkGatewayController
+	// mac binding controller for UDN ARP/NDP proxies
+	macBindingController *macbinding.MACBindingController
 }
 
 // NewNetworkController create node user-defined network controllers for the given NetInfo
@@ -268,7 +274,7 @@ func isNetworkManagerRequiredForNode() bool {
 }
 
 // NewNodeControllerManager creates a new OVN controller manager to manage all the controller for all networks
-func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, name string,
+func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatchFactory, libovsdbOvnSBClient client.Client, name string,
 	wg *sync.WaitGroup, eventRecorder record.EventRecorder, routeManager *routemanager.Controller, ovsClient client.Client) (*NodeControllerManager, error) {
 	ncm := &NodeControllerManager{
 		name: name,
@@ -279,6 +285,7 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 		},
 		Kube:         &kube.Kube{KClient: ovnClient.KubeClient},
 		watchFactory: wf,
+		sbClient:     libovsdbOvnSBClient,
 		stopChan:     make(chan struct{}),
 		wg:           wg,
 		recorder:     eventRecorder,
@@ -333,6 +340,81 @@ func NewNodeControllerManager(ovnClient *util.OVNClientset, wf factory.NodeWatch
 	}
 
 	return ncm, nil
+}
+
+type udnProxyFlags struct {
+	ipv4Enabled     bool
+	ipv4UseARPFlows bool
+	ipv6Enabled     bool
+	useHostAsSource bool
+	useCache        bool
+}
+
+// parseUDNProxyFlags parse input flags into udnProxyFlags to be used by NewMACBindingController
+// expected input strings `host|cdn,flows|macbindings,cache|nocache`
+// host|cdn: specify if the flag useHostAsSource is true when host is defined
+// flows|macbindings: specify if the flag ipv4UseARPFlows is set when flows is defined.
+// cache|nocache: speficy if the flag useCache is set when cache is defined.
+func parseUDNProxyFlags(udnARPProxy, udnNDPProxy string) *udnProxyFlags {
+	upfs := &udnProxyFlags{}
+
+	// The ARP proxy governs the IPv4 address family and the NDP proxy the
+	// IPv6 one, so each is only enabled when its address family is enabled
+	// on the cluster and the corresponding flag is set.
+	upfs.ipv4Enabled = udnARPProxy != "" && config.IPv4Mode
+	upfs.ipv6Enabled = udnNDPProxy != "" && config.IPv6Mode
+
+	// parse applies the option tokens from a single proxy flag string.
+	// host/cdn (useHostAsSource) and cache/nocache (useCache) are
+	// controller-wide, while flows/macbindings (ipv4UseARPFlows) only
+	// applies to the IPv4 ARP proxy since ARP responder flows are not
+	// supported for the IPv6 address family.
+	parse := func(flags string, isARP bool) {
+		for token := range strings.SplitSeq(flags, ",") {
+			switch strings.TrimSpace(token) {
+			case "host":
+				upfs.useHostAsSource = true
+			case "flows":
+				if isARP {
+					upfs.ipv4UseARPFlows = true
+				}
+			case "cache":
+				upfs.useCache = true
+			}
+		}
+	}
+
+	if upfs.ipv4Enabled {
+		parse(udnARPProxy, true)
+	}
+	if upfs.ipv6Enabled {
+		parse(udnNDPProxy, false)
+	}
+
+	return upfs
+}
+
+// initNodeMacBindingController creates the controller for default network
+// must be instantiated after initDefaultNodeNetworkController
+func (ncm *NodeControllerManager) initNodeMacBindingController() error {
+	if util.IsUDNProxyEnabled() {
+		upfs := parseUDNProxyFlags(config.OVNKubernetesFeature.EnableUDNARPProxy, config.OVNKubernetesFeature.EnableUDNNDPProxy)
+		ofManager := ncm.defaultNodeNetworkController.GetOpenflowManager()
+		bridgeName := ofManager.GetDefaultBridgeName()
+		ncm.macBindingController = macbinding.NewMACBindingController(
+			ncm.sbClient,
+			ncm.networkManager.Interface(),
+			ofManager,
+			ncm.name,
+			bridgeName,
+			upfs.ipv4Enabled,
+			upfs.ipv4UseARPFlows,
+			upfs.ipv6Enabled,
+			upfs.useHostAsSource,
+			upfs.useCache,
+		)
+	}
+	return nil
 }
 
 // initDefaultNodeNetworkController creates the controller for default network
@@ -424,6 +506,11 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 		return fmt.Errorf("failed to init default node network controller: %v", err)
 	}
 
+	err = ncm.initNodeMacBindingController()
+	if err != nil {
+		return fmt.Errorf("failed to init node mac binding controller: %v", err)
+	}
+
 	if ncm.networkManager != nil {
 		err = ncm.networkManager.Start()
 		if err != nil {
@@ -440,6 +527,16 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 	err = ncm.defaultNodeNetworkController.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to start default node network controller: %v", err)
+	}
+
+	if ncm.macBindingController != nil {
+		ncm.wg.Add(1)
+		go func() {
+			defer ncm.wg.Done()
+			if err := ncm.macBindingController.Run(ncm.stopChan); err != nil {
+				klog.Errorf("MAC binding controller run failed: %v", err)
+			}
+		}()
 	}
 
 	if ncm.vrfManager != nil {
@@ -643,7 +740,7 @@ func checkForStaleOVSInternalPorts() {
 	}
 }
 
-func (ncm *NodeControllerManager) Reconcile(_ string, current, network util.NetInfo) error {
+func (ncm *NodeControllerManager) Reconcile(name string, current, network util.NetInfo) error {
 	if ncm.uplinkGatewayController == nil || current != nil || network == nil || network.Uplink() == "" {
 		return nil
 	}

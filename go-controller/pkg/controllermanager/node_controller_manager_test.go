@@ -187,7 +187,7 @@ var _ = Describe("Healthcheck tests", func() {
 			var ovsClient libovsdbclient.Client
 			ovsClient, ovsCleanup = newTestOVSClient(ovsData)
 
-			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, ovsClient)
+			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nil, nodeName, &sync.WaitGroup{}, nil, routeManager, ovsClient)
 			Expect(err).NotTo(HaveOccurred())
 		}
 
@@ -323,7 +323,7 @@ var _ = Describe("Healthcheck tests", func() {
 			}
 			expectUplinkInformers(&factoryMock)
 
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, "worker1",
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nil, "worker1",
 				&sync.WaitGroup{}, nil, routemanager.NewController(), nil)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(ncm.vrfManager).NotTo(BeNil())
@@ -399,7 +399,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 			expectUplinkInformers(&factoryMock)
 
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nil, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {
@@ -477,7 +477,7 @@ var _ = Describe("Healthcheck tests", func() {
 			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
 			expectUplinkInformers(&factoryMock)
 			Expect(err).NotTo(HaveOccurred())
-			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
+			ncm, err := NewNodeControllerManager(fakeClient, &factoryMock, nil, nodeName, &sync.WaitGroup{}, nil, routeManager, nil)
 			Expect(err).NotTo(HaveOccurred())
 
 			err = testNS.Do(func(ns.NetNS) error {
@@ -509,4 +509,89 @@ var _ = Describe("Healthcheck tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
+})
+
+var _ = Describe("parseUDNProxyFlags", func() {
+	BeforeEach(func() {
+		// Restore global default values before each testcase
+		Expect(config.PrepareTestConfig()).To(Succeed())
+	})
+
+	DescribeTable("parses ARP/NDP proxy flag strings into udnProxyFlags",
+		func(ipv4Mode, ipv6Mode bool, udnARPProxy, udnNDPProxy string, expected udnProxyFlags) {
+			config.IPv4Mode = ipv4Mode
+			config.IPv6Mode = ipv6Mode
+
+			upfs := parseUDNProxyFlags(udnARPProxy, udnNDPProxy)
+			Expect(upfs).NotTo(BeNil())
+			Expect(*upfs).To(Equal(expected))
+		},
+		// IPv4 (ARP) address family gating
+		Entry("enables ipv4 when ARP proxy set and IPv4 mode on",
+			true, false, "macbindings", "",
+			udnProxyFlags{ipv4Enabled: true}),
+		Entry("disables ipv4 when ARP proxy set but IPv4 mode off",
+			false, true, "macbindings", "",
+			udnProxyFlags{}),
+		Entry("disables ipv4 when ARP proxy unset even if IPv4 mode on",
+			true, false, "", "",
+			udnProxyFlags{}),
+
+		// IPv6 (NDP) address family gating
+		Entry("enables ipv6 when NDP proxy set and IPv6 mode on",
+			false, true, "", "macbindings",
+			udnProxyFlags{ipv6Enabled: true}),
+		Entry("disables ipv6 when NDP proxy set but IPv6 mode off",
+			true, false, "", "macbindings",
+			udnProxyFlags{}),
+		Entry("disables ipv6 when NDP proxy unset even if IPv6 mode on",
+			false, true, "", "",
+			udnProxyFlags{}),
+
+		// flows|macbindings: ipv4UseARPFlows only set when "flows" is defined on the ARP string
+		Entry("sets ipv4UseARPFlows when ARP proxy is flows",
+			true, false, "flows", "",
+			udnProxyFlags{ipv4Enabled: true, ipv4UseARPFlows: true}),
+		Entry("does not set ipv4UseARPFlows when ARP proxy is macbindings",
+			true, false, "macbindings", "",
+			udnProxyFlags{ipv4Enabled: true}),
+		Entry("ignores flows token on the NDP string",
+			false, true, "", "flows",
+			udnProxyFlags{ipv6Enabled: true}),
+
+		// host|cdn: useHostAsSource set when "host" is defined
+		Entry("sets useHostAsSource when host defined on ARP string",
+			true, false, "flows,host", "",
+			udnProxyFlags{ipv4Enabled: true, ipv4UseARPFlows: true, useHostAsSource: true}),
+		Entry("does not set useHostAsSource when cdn defined",
+			true, false, "flows,cdn", "",
+			udnProxyFlags{ipv4Enabled: true, ipv4UseARPFlows: true}),
+		Entry("sets useHostAsSource when host defined on NDP string",
+			false, true, "", "macbindings,host",
+			udnProxyFlags{ipv6Enabled: true, useHostAsSource: true}),
+
+		// cache|nocache: useCache set when "cache" is defined
+		Entry("sets useCache when cache defined",
+			true, false, "macbindings,cache", "",
+			udnProxyFlags{ipv4Enabled: true, useCache: true}),
+		Entry("does not set useCache when nocache defined",
+			true, false, "macbindings,nocache", "",
+			udnProxyFlags{ipv4Enabled: true}),
+
+		// dual-stack: both address families enabled with all tokens combined
+		Entry("parses all tokens on dual-stack",
+			true, true, "flows,host,cache", "macbindings,host,cache",
+			udnProxyFlags{
+				ipv4Enabled:     true,
+				ipv4UseARPFlows: true,
+				ipv6Enabled:     true,
+				useHostAsSource: true,
+				useCache:        true,
+			}),
+
+		// tokens on a disabled address family's string are ignored
+		Entry("ignores tokens from ARP string when IPv4 mode off",
+			false, true, "flows,host,cache", "macbindings",
+			udnProxyFlags{ipv6Enabled: true}),
+	)
 })
