@@ -10,11 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/k8snetworkplumbingwg/sriovnet"
 	"github.com/onsi/gomega"
 	"github.com/vishvananda/netlink"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -103,6 +105,51 @@ func TestNodeNeedsUpdate(t *testing.T) {
 	updatedRemoteNode := remoteNode.DeepCopy()
 	updatedRemoteNode.Labels = map[string]string{"example.com/uplink": "blue"}
 	g.Expect(controller.nodeNeedsUpdate(remoteNode, updatedRemoteNode)).To(gomega.BeFalse())
+}
+
+func TestNetlinkHostInterfaceDiscovererRejectsUnusableMAC(t *testing.T) {
+	tests := []struct {
+		name   string
+		hwAddr net.HardwareAddr
+	}{
+		{
+			name: "no MAC",
+		},
+		{
+			name:   "all-zero MAC",
+			hwAddr: net.HardwareAddr{0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		},
+		{
+			name:   "multicast MAC",
+			hwAddr: net.HardwareAddr{0x01, 0x00, 0x5e, 0x00, 0x00, 0x01},
+		},
+		{
+			name: "non-Ethernet hardware address",
+			hwAddr: net.HardwareAddr{
+				0x80, 0x00, 0x02, 0x08, 0xfe, 0x80, 0x00, 0x00, 0x00, 0x00,
+				0x00, 0x00, 0x00, 0x02, 0xc9, 0x03, 0x00, 0x0a, 0x5f, 0x21,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			netlinkOps := utilmocks.NewNetLinkOps(t)
+			util.SetNetLinkOpMockInst(netlinkOps)
+			t.Cleanup(util.ResetNetLinkOpMockInst)
+			netlinkOps.On("LinkByName", "breth0").
+				Return(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{
+					Name:         "breth0",
+					HardwareAddr: test.hwAddr,
+				}}, nil)
+
+			_, err := netlinkHostInterfaceDiscoverer{}.Discover("breth0")
+			g.Expect(err).To(gomega.MatchError(
+				gomega.ContainSubstring("host interface breth0 has no usable MAC address")))
+			g.Expect(discoveryReason(err)).To(gomega.Equal(uplinkv1alpha1.UplinkStateReasonInvalidHostInterface))
+		})
+	}
 }
 
 func TestDefaultOVSBridgeResolverUsesOVSDB(t *testing.T) {
@@ -200,6 +247,257 @@ func TestDefaultOVSBridgeResolverResolvesSmartNICRepresentor(t *testing.T) {
 	g.Expect(bridgeName).To(gomega.Equal("ovsbr1"))
 }
 
+// newDPUBridgeResolverHarness models a BlueField style DPU: br-host carries the
+// host PF representor that backs the default gateway bridge, br-vm carries host
+// VF representors, and br-int is the OVN integration bridge.
+func newDPUBridgeResolverHarness(t *testing.T) defaultOVSBridgeResolver {
+	t.Helper()
+	g := gomega.NewWithT(t)
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+
+	ovsData := []libovsdbtest.TestData{
+		&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-int-uuid", "br-host-uuid", "br-vm-uuid"}},
+		&vswitchd.Bridge{UUID: "br-int-uuid", Name: "br-int", Ports: []string{"mp0-port-uuid"}},
+		&vswitchd.Port{UUID: "mp0-port-uuid", Name: "ovn-k8s-mp0", Interfaces: []string{"mp0-iface-uuid"}},
+		&vswitchd.Interface{UUID: "mp0-iface-uuid", Name: "ovn-k8s-mp0"},
+
+		&vswitchd.Bridge{UUID: "br-host-uuid", Name: "br-host", Ports: []string{"p0-port-uuid", "pf0hpf-port-uuid"}},
+		&vswitchd.Port{UUID: "p0-port-uuid", Name: "p0", Interfaces: []string{"p0-iface-uuid"}},
+		&vswitchd.Interface{UUID: "p0-iface-uuid", Name: "p0", Type: "system"},
+		&vswitchd.Port{UUID: "pf0hpf-port-uuid", Name: "pf0hpf", Interfaces: []string{"pf0hpf-iface-uuid"}},
+		&vswitchd.Interface{UUID: "pf0hpf-iface-uuid", Name: "pf0hpf", Type: "system"},
+
+		&vswitchd.Bridge{UUID: "br-vm-uuid", Name: "br-vm", Ports: []string{"p1-port-uuid", "pf0vf0-port-uuid", "pf0vf7-port-uuid"}},
+		&vswitchd.Port{UUID: "p1-port-uuid", Name: "p1", Interfaces: []string{"p1-iface-uuid"}},
+		&vswitchd.Interface{UUID: "p1-iface-uuid", Name: "p1", Type: "system"},
+		&vswitchd.Port{UUID: "pf0vf0-port-uuid", Name: "pf0vf0", Interfaces: []string{"pf0vf0-iface-uuid"}},
+		&vswitchd.Interface{UUID: "pf0vf0-iface-uuid", Name: "pf0vf0", Type: "system"},
+		&vswitchd.Port{UUID: "pf0vf7-port-uuid", Name: "pf0vf7", Interfaces: []string{"pf0vf7-iface-uuid"}},
+		&vswitchd.Interface{UUID: "pf0vf7-iface-uuid", Name: "pf0vf7", Type: "system"},
+	}
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: ovsData})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(testCtx.Cleanup)
+
+	sriovOps := utilmocks.NewSriovnetOps(t)
+	origSriovOps := util.GetSriovnetOps()
+	util.SetSriovnetOpsInst(sriovOps)
+	t.Cleanup(func() {
+		util.SetSriovnetOpsInst(origSriovOps)
+	})
+
+	// The physical uplinks are not representors at all.
+	for _, uplink := range []string{"p0", "p1", "ovn-k8s-mp0"} {
+		sriovOps.On("GetRepresentorPortFlavour", uplink).
+			Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_UNKNOWN),
+				fmt.Errorf("not a representor")).Maybe()
+	}
+	sriovOps.On("GetRepresentorPortFlavour", "pf0hpf").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_PF), nil).Maybe()
+	sriovOps.On("GetDevlinkPortFunctionMacAddress", "pf0hpf").
+		Return(ovntest.MustParseMAC(dpuHostPFMAC), nil).Maybe()
+	for rep, mac := range map[string]string{"pf0vf0": dpuHostVF0MAC, "pf0vf7": dpuHostVF7MAC} {
+		sriovOps.On("GetRepresentorPortFlavour", rep).
+			Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_VF), nil).Maybe()
+		sriovOps.On("GetDevlinkPortFunctionMacAddress", rep).
+			Return(ovntest.MustParseMAC(mac), nil).Maybe()
+	}
+
+	return defaultOVSBridgeResolver{ovsClient: ovsClient}
+}
+
+const (
+	dpuHostPFMAC  = "00:73:58:6d:a1:b3"
+	dpuHostVF0MAC = "00:07:3d:f2:76:4a"
+	dpuHostVF7MAC = "00:07:3d:f2:76:51"
+)
+
+func TestResolveByHostMACSucceeds(t *testing.T) {
+	tests := []struct {
+		name           string
+		hostMAC        string
+		expectedBridge string
+		description    string
+	}{
+		{
+			// The Uplink selects host VF enp4s0f0v0, whose DPU representor
+			// pf0vf0 sits on br-vm. Matching only PF representors used to
+			// miss this entirely.
+			name:           "VF representor",
+			hostMAC:        dpuHostVF0MAC,
+			expectedBridge: "br-vm",
+			description:    "the VF0 representor pf0vf0 is attached to br-vm",
+		},
+		{
+			name:           "correct VF on a shared bridge",
+			hostMAC:        dpuHostVF7MAC,
+			expectedBridge: "br-vm",
+			description:    "pf0vf7 shares br-vm with pf0vf0 and the physical port p1",
+		},
+		{
+			name:           "PF representor",
+			hostMAC:        dpuHostPFMAC,
+			expectedBridge: "br-host",
+			description:    "the PF representor pf0hpf is attached to br-host",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+			resolver := newDPUBridgeResolverHarness(t)
+
+			bridgeName, err := resolver.ResolveByHostMAC(ovntest.MustParseMAC(tt.hostMAC), "node-a")
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "resolving the host MAC of the %s must succeed", tt.name)
+			g.Expect(bridgeName).To(gomega.Equal(tt.expectedBridge), tt.description)
+		})
+	}
+}
+
+func TestResolveByHostMACFallsBackToSriovnetForPF(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	const (
+		bridgeUUID    = "br-host-uuid"
+		portUUID      = "pf0hpf-port-uuid"
+		interfaceUUID = "pf0hpf-iface-uuid"
+	)
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{bridgeUUID}},
+			&vswitchd.Bridge{UUID: bridgeUUID, Name: "br-host", Ports: []string{portUUID}},
+			&vswitchd.Port{UUID: portUUID, Name: "pf0hpf", Interfaces: []string{interfaceUUID}},
+			&vswitchd.Interface{UUID: interfaceUUID, Name: "pf0hpf", Type: "system"},
+		},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(testCtx.Cleanup)
+
+	sriovOps := utilmocks.NewSriovnetOps(t)
+	origSriovOps := util.GetSriovnetOps()
+	util.SetSriovnetOpsInst(sriovOps)
+	t.Cleanup(func() {
+		util.SetSriovnetOpsInst(origSriovOps)
+	})
+	sriovOps.On("GetRepresentorPortFlavour", "pf0hpf").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_PF), nil)
+	// Older kernels do not report devlink port function attributes; the PF path
+	// must still resolve through the sysfs aware sriovnet helper.
+	sriovOps.On("GetDevlinkPortFunctionMacAddress", "pf0hpf").
+		Return(nil, fmt.Errorf("devlink port has no function attributes"))
+	sriovOps.On("GetRepresentorPeerMacAddress", "pf0hpf").
+		Return(ovntest.MustParseMAC(dpuHostPFMAC), nil)
+
+	bridgeName, err := (defaultOVSBridgeResolver{ovsClient: ovsClient}).
+		ResolveByHostMAC(ovntest.MustParseMAC(dpuHostPFMAC), "node-a")
+	g.Expect(err).NotTo(gomega.HaveOccurred(),
+		"PF resolution must fall back to sriovnet when devlink reports no function attributes")
+	g.Expect(bridgeName).To(gomega.Equal("br-host"), "the PF representor resolved via the fallback is attached to br-host")
+}
+
+func TestResolveByHostMACReportsBridgeNotFound(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	resolver := newDPUBridgeResolverHarness(t)
+
+	_, err := resolver.ResolveByHostMAC(ovntest.MustParseMAC("02:00:00:00:00:99"), "node-a")
+	g.Expect(err).To(gomega.HaveOccurred(), "a host MAC no representor peers with must not resolve to a bridge")
+	g.Expect(discoveryReason(err)).To(gomega.Equal(uplinkv1alpha1.UplinkStateReasonBridgeNotFound),
+		"the total miss must surface as BridgeNotFound")
+}
+
+func TestBridgeUplinkIgnoresHostRepresentorsOnDPU(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	resolver := newDPUBridgeResolverHarness(t)
+
+	// br-vm holds the physical port p1 plus two VF representors, all
+	// system-type in OVS. Without filtering out the representors the uplink
+	// would be ambiguous and fall back to the useless "br"-prefix heuristic.
+	uplinkName, err := resolver.BridgeUplink("br-vm")
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "deriving br-vm's uplink must succeed once VF representors are ignored")
+	g.Expect(uplinkName).To(gomega.Equal("p1"), "br-vm's only non-representor system port is p1")
+
+	uplinkName, err = resolver.BridgeUplink("br-host")
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "deriving br-host's uplink must succeed once the PF representor is ignored")
+	g.Expect(uplinkName).To(gomega.Equal("p0"), "br-host's only non-representor system port is p0")
+}
+
+func TestBridgeUplinkRejectsRepresentorOnlyBridgeOnDPU(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-hostvf0-uuid"}},
+			&vswitchd.Bridge{UUID: "br-hostvf0-uuid", Name: "br-hostvf0", Ports: []string{"pf0vf7-port-uuid"}},
+			&vswitchd.Port{UUID: "pf0vf7-port-uuid", Name: "pf0vf7", Interfaces: []string{"pf0vf7-iface-uuid"}},
+			&vswitchd.Interface{UUID: "pf0vf7-iface-uuid", Name: "pf0vf7", Type: "system"},
+		},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	t.Cleanup(testCtx.Cleanup)
+
+	sriovOps := utilmocks.NewSriovnetOps(t)
+	origSriovOps := util.GetSriovnetOps()
+	util.SetSriovnetOpsInst(sriovOps)
+	t.Cleanup(func() {
+		util.SetSriovnetOpsInst(origSriovOps)
+	})
+	sriovOps.On("GetRepresentorPortFlavour", "pf0vf7").
+		Return(sriovnet.PortFlavour(sriovnet.PORT_FLAVOUR_PCI_VF), nil)
+
+	// A bridge whose only system-type port is a VF representor has no physical
+	// uplink; it must not silently pass validation with the representor itself
+	// selected as the uplink.
+	_, err = (defaultOVSBridgeResolver{ovsClient: ovsClient}).BridgeUplink("br-hostvf0")
+	g.Expect(err).To(gomega.HaveOccurred(), "a representor-only bridge must not resolve an uplink")
+	g.Expect(discoveryReason(err)).To(gomega.Equal(uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound),
+		"the failure must surface as BridgeUplinkNotFound")
+}
+
+func TestBridgeUplinkFallsBackToExternalIDForBondPort(t *testing.T) {
+	g := gomega.NewWithT(t)
+	ovsClient, testCtx, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"br-bond-uuid"}},
+			&vswitchd.Bridge{
+				UUID: "br-bond-uuid", Name: "br-bond", Ports: []string{"bond0-port-uuid"},
+				ExternalIDs: map[string]string{"bridge-uplink": "eth0"},
+			},
+			&vswitchd.Port{UUID: "bond0-port-uuid", Name: "bond0", Interfaces: []string{"eth0-iface-uuid", "eth1-iface-uuid"}},
+			&vswitchd.Interface{UUID: "eth0-iface-uuid", Name: "eth0", Type: "system"},
+			&vswitchd.Interface{UUID: "eth1-iface-uuid", Name: "eth1", Type: "system"},
+		},
+	})
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "failed to build the OVS test harness for the bond bridge")
+	t.Cleanup(testCtx.Cleanup)
+
+	// bond0 is the bridge's only system-type port, but it has no same-named
+	// Interface row, so it cannot be the uplink itself; the resolver must
+	// fall back to the bridge-uplink external-id.
+	uplinkName, err := (defaultOVSBridgeResolver{ovsClient: ovsClient}).BridgeUplink("br-bond")
+	g.Expect(err).NotTo(gomega.HaveOccurred(), "a bond bridge with bridge-uplink set must resolve")
+	g.Expect(uplinkName).To(gomega.Equal("eth0"), "the bridge-uplink external-id must be used for a bond port")
+}
+
 func TestNodeUplinkControllerPublishesResolvedState(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
@@ -244,12 +542,10 @@ func TestNodeUplinkControllerRejectsDefaultGatewayBridge(t *testing.T) {
 			mode: ovntypes.NodeModeFull,
 		},
 		{
+			// The DPU-host does not validate the bridge: the DPU side owns
+			// bridge validation and the Resolved condition.
 			name: "DPU",
 			mode: ovntypes.NodeModeDPU,
-		},
-		{
-			name: "DPU host",
-			mode: ovntypes.NodeModeDPUHost,
 		},
 	}
 
@@ -260,11 +556,8 @@ func TestNodeUplinkControllerRejectsDefaultGatewayBridge(t *testing.T) {
 			config.OvnKubeNode.Mode = test.mode
 
 			state := newUplinkState("br-blue.node-a", "br-blue", "node-a")
-			if test.mode == ovntypes.NodeModeDPU || test.mode == ovntypes.NodeModeDPUHost {
+			if test.mode == ovntypes.NodeModeDPU {
 				state = newHostResolvedUplinkState("br-blue.node-a", "br-blue", "node-a", "uplink0")
-			}
-			if test.mode == ovntypes.NodeModeDPUHost {
-				state.Status.OVSBridge = &uplinkv1alpha1.OVSBridgeStatus{Name: "br-default"}
 			}
 
 			controller, client := newTestController(t,
@@ -275,7 +568,8 @@ func TestNodeUplinkControllerRejectsDefaultGatewayBridge(t *testing.T) {
 				state,
 			)
 
-			g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+			g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+				gomega.MatchError(gomega.ContainSubstring("default shared gateway bridge br-default")))
 
 			state = getUplinkState(g, client, "br-blue.node-a")
 			g.Expect(state.Status.OVSBridge).NotTo(gomega.BeNil())
@@ -292,27 +586,35 @@ func TestNodeUplinkControllerRejectsDefaultGatewayBridge(t *testing.T) {
 
 func TestNodeUplinkControllerSkipsUnchangedStatus(t *testing.T) {
 	tests := []struct {
-		name       string
-		mode       string
-		bridgeName string
-		message    string
+		name          string
+		mode          string
+		bridgeName    string
+		conditionType string
+		reason        string
+		message       string
 	}{
 		{
-			name:       "Full",
-			mode:       ovntypes.NodeModeFull,
-			bridgeName: "br-blue",
-			message:    "Uplink discovery succeeded",
+			name:          "Full",
+			mode:          ovntypes.NodeModeFull,
+			bridgeName:    "br-blue",
+			conditionType: uplinkv1alpha1.UplinkStateConditionResolved,
+			reason:        uplinkv1alpha1.UplinkStateReasonResolved,
+			message:       "Uplink discovery succeeded",
 		},
 		{
-			name:    "DPU host preserves DPU bridge",
-			mode:    ovntypes.NodeModeDPUHost,
-			message: "Uplink DPU bridge discovery succeeded",
+			name:          "DPU host preserves DPU bridge",
+			mode:          ovntypes.NodeModeDPUHost,
+			conditionType: uplinkv1alpha1.UplinkStateConditionHostDataReady,
+			reason:        uplinkv1alpha1.UplinkStateReasonHostDataDiscovered,
+			message:       "Uplink host interface data discovered",
 		},
 		{
-			name:       "DPU preserves host gateway data",
-			mode:       ovntypes.NodeModeDPU,
-			bridgeName: "br-blue",
-			message:    "Uplink DPU bridge discovery succeeded",
+			name:          "DPU preserves host gateway data",
+			mode:          ovntypes.NodeModeDPU,
+			bridgeName:    "br-blue",
+			conditionType: uplinkv1alpha1.UplinkStateConditionResolved,
+			reason:        uplinkv1alpha1.UplinkStateReasonResolved,
+			message:       "Uplink DPU bridge discovery succeeded",
 		},
 	}
 
@@ -321,7 +623,7 @@ func TestNodeUplinkControllerSkipsUnchangedStatus(t *testing.T) {
 			g := gomega.NewWithT(t)
 			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 			config.OvnKubeNode.Mode = test.mode
-			state := newResolvedStatusTestUplinkState(test.message)
+			state := newResolvedStatusTestUplinkState(test.conditionType, test.reason, test.message)
 			controller, client := newTestController(t, fakeHostDiscoverer{}, fakeBridgeResolver{}, state)
 
 			g.Expect(controller.updateUplinkStateStatus(
@@ -330,7 +632,7 @@ func TestNodeUplinkControllerSkipsUnchangedStatus(t *testing.T) {
 				newStatusTestHostState(),
 				test.bridgeName,
 				metav1.ConditionTrue,
-				uplinkv1alpha1.UplinkStateReasonResolved,
+				test.reason,
 				test.message,
 			)).To(gomega.Succeed())
 			g.Expect(client.UplinkClient.(*uplinkfake.Clientset).Actions()).To(gomega.BeEmpty())
@@ -340,27 +642,35 @@ func TestNodeUplinkControllerSkipsUnchangedStatus(t *testing.T) {
 
 func TestNodeUplinkControllerAppliesOwnedStatusClears(t *testing.T) {
 	tests := []struct {
-		name       string
-		mode       string
-		hostState  *hostInterfaceState
-		bridgeName string
-		message    string
+		name          string
+		mode          string
+		hostState     *hostInterfaceState
+		bridgeName    string
+		conditionType string
+		reason        string
+		message       string
 	}{
 		{
-			name:    "Full",
-			mode:    ovntypes.NodeModeFull,
-			message: "Uplink discovery succeeded",
+			name:          "Full",
+			mode:          ovntypes.NodeModeFull,
+			conditionType: uplinkv1alpha1.UplinkStateConditionResolved,
+			reason:        uplinkv1alpha1.UplinkStateReasonResolved,
+			message:       "Uplink discovery succeeded",
 		},
 		{
-			name:    "DPU host clears host gateway data",
-			mode:    ovntypes.NodeModeDPUHost,
-			message: "Uplink DPU bridge discovery succeeded",
+			name:          "DPU host clears host gateway data",
+			mode:          ovntypes.NodeModeDPUHost,
+			conditionType: uplinkv1alpha1.UplinkStateConditionHostDataReady,
+			reason:        uplinkv1alpha1.UplinkStateReasonHostDataDiscovered,
+			message:       "Uplink host interface data discovered",
 		},
 		{
-			name:      "DPU clears bridge data",
-			mode:      ovntypes.NodeModeDPU,
-			hostState: newStatusTestHostState(),
-			message:   "Uplink DPU bridge discovery succeeded",
+			name:          "DPU clears bridge data",
+			mode:          ovntypes.NodeModeDPU,
+			hostState:     newStatusTestHostState(),
+			conditionType: uplinkv1alpha1.UplinkStateConditionResolved,
+			reason:        uplinkv1alpha1.UplinkStateReasonResolved,
+			message:       "Uplink DPU bridge discovery succeeded",
 		},
 	}
 
@@ -369,7 +679,7 @@ func TestNodeUplinkControllerAppliesOwnedStatusClears(t *testing.T) {
 			g := gomega.NewWithT(t)
 			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 			config.OvnKubeNode.Mode = test.mode
-			state := newResolvedStatusTestUplinkState(test.message)
+			state := newResolvedStatusTestUplinkState(test.conditionType, test.reason, test.message)
 			controller, client := newTestController(t, fakeHostDiscoverer{}, fakeBridgeResolver{}, state)
 
 			g.Expect(controller.updateUplinkStateStatus(
@@ -378,7 +688,7 @@ func TestNodeUplinkControllerAppliesOwnedStatusClears(t *testing.T) {
 				test.hostState,
 				test.bridgeName,
 				metav1.ConditionTrue,
-				uplinkv1alpha1.UplinkStateReasonResolved,
+				test.reason,
 				test.message,
 			)).To(gomega.Succeed())
 			actions := client.UplinkClient.(*uplinkfake.Clientset).Actions()
@@ -444,20 +754,21 @@ func TestNodeUplinkControllerPreservesGatewayReadyCondition(t *testing.T) {
 func TestNodeUplinkControllerReportsHostInterfaceFailure(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+
+	discoveryErr := newDiscoveryError(
+		uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound,
+		fmt.Errorf("host interface missing"),
+	)
 	controller, client := newTestController(t,
-		fakeHostDiscoverer{
-			err: newDiscoveryError(
-				uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound,
-				fmt.Errorf("host interface missing"),
-			),
-		},
+		fakeHostDiscoverer{err: discoveryErr},
 		fakeBridgeResolver{},
 		newNode("node-a", map[string]string{"role": "blue"}),
 		newUplink("br-blue", "role", "blue", "breth0"),
 		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+		gomega.MatchError(discoveryErr))
 
 	state := getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
@@ -469,24 +780,27 @@ func TestNodeUplinkControllerReportsHostInterfaceFailure(t *testing.T) {
 func TestNodeUplinkControllerReportsBridgeUplinkFailure(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+
+	bridgeUplinkErr := newDiscoveryError(
+		uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound,
+		fmt.Errorf("missing bridge uplink"),
+	)
 	controller, client := newTestController(t,
 		fakeHostDiscoverer{state: &hostInterfaceState{
 			macAddress:  net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x02},
 			ipAddresses: []*net.IPNet{ovntest.MustParseIPNet("192.0.2.10/24")},
 		}},
 		fakeBridgeResolver{
-			bridgeName: "br-blue",
-			bridgeUplinkErr: newDiscoveryError(
-				uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound,
-				fmt.Errorf("missing bridge uplink"),
-			),
+			bridgeName:      "br-blue",
+			bridgeUplinkErr: bridgeUplinkErr,
 		},
 		newNode("node-a", map[string]string{"role": "blue"}),
 		newUplink("br-blue", "role", "blue", "breth0"),
 		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+		gomega.MatchError(bridgeUplinkErr))
 
 	state := getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.OVSBridge.Name).To(gomega.Equal("br-blue"))
@@ -510,7 +824,8 @@ func TestNodeUplinkControllerRejectsBridgeUplinkAsHostInterface(t *testing.T) {
 		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
 	)
 
-	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+		gomega.MatchError(gomega.ContainSubstring("physical uplink port for OVS bridge br-blue")))
 
 	state := getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.HostInterfaceName).To(gomega.Equal(uplinkv1alpha1.InterfaceName("eth1")))
@@ -521,6 +836,45 @@ func TestNodeUplinkControllerRejectsBridgeUplinkAsHostInterface(t *testing.T) {
 	)))
 }
 
+func TestNodeUplinkControllerRetriesWhileUnresolved(t *testing.T) {
+	// Unresolved discovery returns an error so the controller keeps
+	// retrying with backoff: netlink and OVS changes generate no watch
+	// events, so the retries are what re-poll them.
+	t.Run("unresolved returns an error", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.OvnKubeNode.Mode = ovntypes.NodeModeFull
+
+		discoveryErr := newDiscoveryError(
+			uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound,
+			fmt.Errorf("host interface missing"),
+		)
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{err: discoveryErr},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
+		)
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+			gomega.MatchError(discoveryErr))
+	})
+
+	t.Run("resolved returns nil", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.OvnKubeNode.Mode = ovntypes.NodeModeFull
+
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{state: newStatusTestHostState()},
+			fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "eth0"},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
+		)
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	})
+}
 func TestNodeUplinkControllerCreatesSelectedNodeState(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
@@ -555,7 +909,8 @@ func TestNodeUplinkControllerCreatesOverlappingNodeStateWithInitialStatus(t *tes
 		uplink,
 	)
 
-	g.Expect(controller.reconcileUplink("br-blue")).To(gomega.Succeed())
+	g.Expect(controller.reconcileUplink("br-blue")).To(
+		gomega.MatchError(gomega.ContainSubstring("multiple Uplink \"br-blue\" nodeConfigs select node \"node-a\"")))
 
 	state := getUplinkState(g, client, uplinkutil.StateName("br-blue", "node-a"))
 	g.Expect(state.Spec.UplinkName).To(gomega.Equal("br-blue"))
@@ -634,30 +989,112 @@ func TestNodeUplinkControllerIgnoresMismatchedStateIdentity(t *testing.T) {
 	g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(gomega.BeEmpty())
 }
 
-func TestNodeUplinkControllerDPUHostWaitsForDPU(t *testing.T) {
+func TestNodeUplinkControllerDPUHostPublishesHostData(t *testing.T) {
+	tests := []struct {
+		name                string
+		ipAddresses         []*net.IPNet
+		expectedIPAddresses []uplinkv1alpha1.IPAddressCIDR
+	}{
+		{
+			name:                "single stack",
+			ipAddresses:         []*net.IPNet{ovntest.MustParseIPNet("192.0.2.11/24")},
+			expectedIPAddresses: []uplinkv1alpha1.IPAddressCIDR{"192.0.2.11/24"},
+		},
+		{
+			name: "dual stack",
+			ipAddresses: []*net.IPNet{
+				ovntest.MustParseIPNet("192.0.2.11/24"),
+				ovntest.MustParseIPNet("2001:db8::11/64"),
+			},
+			expectedIPAddresses: []uplinkv1alpha1.IPAddressCIDR{"192.0.2.11/24", "2001:db8::11/64"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			config.OvnKubeNode.Mode = ovntypes.NodeModeDPUHost
+
+			controller, client := newTestController(t,
+				fakeHostDiscoverer{state: &hostInterfaceState{
+					macAddress:  net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x03},
+					ipAddresses: test.ipAddresses,
+				}},
+				failingBridgeResolver{t: t},
+				newNode("node-a", map[string]string{"role": "blue"}),
+				newUplink("br-blue", "role", "blue", "breth0"),
+				newUplinkState("br-blue.node-a", "br-blue", "node-a"),
+			)
+
+			g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+
+			state := getUplinkState(g, client, "br-blue.node-a")
+			g.Expect(state.Status.OVSBridge).To(gomega.BeNil())
+			g.Expect(state.Status.MACAddress).To(gomega.Equal(uplinkv1alpha1.MACAddress("02:42:ac:12:00:03")))
+			g.Expect(state.Status.IPAddresses).To(gomega.Equal(test.expectedIPAddresses))
+			g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+				gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionHostDataReady),
+				gomega.HaveField("Status", metav1.ConditionTrue),
+				gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonHostDataDiscovered),
+			)))
+			// The DPU side is the only writer of the Resolved condition.
+			g.Expect(meta.FindStatusCondition(
+				state.Status.Conditions,
+				uplinkv1alpha1.UplinkStateConditionResolved,
+			)).To(gomega.BeNil())
+		})
+	}
+}
+
+func TestNodeUplinkControllerDPUHostLeavesResolvedToDPU(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 	config.OvnKubeNode.Mode = ovntypes.NodeModeDPUHost
 
-	controller, client := newTestController(t,
-		fakeHostDiscoverer{state: &hostInterfaceState{
-			macAddress:  net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x03},
-			ipAddresses: []*net.IPNet{ovntest.MustParseIPNet("192.0.2.11/24")},
-		}},
-		fakeBridgeResolver{bridgeName: "br-blue"},
-		newNode("node-a", map[string]string{"role": "blue"}),
-		newUplink("br-blue", "role", "blue", "breth0"),
-		newUplinkState("br-blue.node-a", "br-blue", "node-a"),
-	)
+	// A DPU-authored bridge discovery failure is already recorded: the
+	// DPU-host publishes its data and HostDataReady without touching it.
+	state := newUplinkState("br-blue.node-a", "br-blue", "node-a")
+	state.Status.Type = uplinkv1alpha1.UplinkTypeOVSBridge
+	state.Status.HostInterfaceName = "breth0"
+	state.Status.OVSBridge = &uplinkv1alpha1.OVSBridgeStatus{Name: "br-blue"}
+	state.Status.Conditions = []metav1.Condition{
+		{
+			Type:               uplinkv1alpha1.UplinkStateConditionResolved,
+			Status:             metav1.ConditionFalse,
+			Reason:             uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound,
+			Message:            "failed to resolve physical uplink for OVS bridge br-blue",
+			LastTransitionTime: metav1.NewTime(time.Unix(1, 0)),
+		},
+	}
+
+	hostDiscoverer := fakeHostDiscoverer{state: &hostInterfaceState{
+		macAddress:  net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x03},
+		ipAddresses: []*net.IPNet{ovntest.MustParseIPNet("192.0.2.11/24")},
+	}}
+	node := newNode("node-a", map[string]string{"role": "blue"})
+	uplink := newUplink("br-blue", "role", "blue", "breth0")
+	controller, client := newTestController(t, hostDiscoverer, failingBridgeResolver{t: t}, node, uplink, state)
 
 	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
 
-	state := getUplinkState(g, client, "br-blue.node-a")
-	g.Expect(state.Status.OVSBridge).To(gomega.BeNil())
+	state = getUplinkState(g, client, "br-blue.node-a")
+	g.Expect(state.Status.MACAddress).To(gomega.Equal(uplinkv1alpha1.MACAddress("02:42:ac:12:00:03")))
 	g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+		gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionResolved),
 		gomega.HaveField("Status", metav1.ConditionFalse),
-		gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonWaitingForDPU),
+		gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonBridgeUplinkNotFound),
+		gomega.HaveField("Message", "failed to resolve physical uplink for OVS bridge br-blue"),
 	)))
+	g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+		gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionHostDataReady),
+		gomega.HaveField("Status", metav1.ConditionTrue),
+	)))
+
+	// A reconcile of the published status must not write again.
+	controller, client = newTestController(t, hostDiscoverer, failingBridgeResolver{t: t}, node, uplink, state)
+	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+	g.Expect(client.UplinkClient.(*uplinkfake.Clientset).Actions()).To(gomega.BeEmpty())
 }
 
 func TestNodeUplinkControllerDPUHostIgnoresStaleDPUBridge(t *testing.T) {
@@ -673,7 +1110,7 @@ func TestNodeUplinkControllerDPUHostIgnoresStaleDPUBridge(t *testing.T) {
 			macAddress:  net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x05},
 			ipAddresses: []*net.IPNet{ovntest.MustParseIPNet("192.0.2.13/24")},
 		}},
-		fakeBridgeResolver{},
+		failingBridgeResolver{t: t},
 		newNode("node-a", map[string]string{"role": "blue"}),
 		newUplink("br-blue", "role", "blue", "breth1"),
 		state,
@@ -683,10 +1120,97 @@ func TestNodeUplinkControllerDPUHostIgnoresStaleDPUBridge(t *testing.T) {
 
 	state = getUplinkState(g, client, "br-blue.node-a")
 	g.Expect(state.Status.HostInterfaceName).To(gomega.Equal(uplinkv1alpha1.InterfaceName("breth1")))
+	// The stale DPU-owned bridge is left for the DPU side to refresh.
+	g.Expect(state.Status.OVSBridge).NotTo(gomega.BeNil())
 	g.Expect(state.Status.OVSBridge.Name).To(gomega.Equal("br-old"))
 	g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+		gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionHostDataReady),
+		gomega.HaveField("Status", metav1.ConditionTrue),
+		gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonHostDataDiscovered),
+	)))
+}
+
+func TestNodeUplinkControllerDPUDoesNotAdoptStaleHostState(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	// The Uplink spec changed breth0->breth1 but the DPU-host has not
+	// republished yet: status still carries breth0 and its MAC. The DPU must
+	// not bump status.hostInterfaceName itself, or the next reconcile would
+	// validate the stale MAC as belonging to breth1 and resolve the old
+	// bridge.
+	node := newNode("node-a", map[string]string{"role": "blue"})
+	uplink := newUplink("br-blue", "role", "blue", "breth1")
+	state := newHostResolvedUplinkState("br-blue.node-a", "br-blue", "node-a", "breth0")
+	hostDiscoverer := fakeHostDiscoverer{err: fmt.Errorf("must not inspect host interface")}
+	bridgeResolver := fakeBridgeResolver{bridgeName: "br-old", bridgeUplink: "p0"}
+
+	controller, client := newTestController(t, hostDiscoverer, bridgeResolver, node, uplink, state)
+
+	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+		gomega.MatchError(gomega.ContainSubstring("waiting for DPU-host state for interface breth1")))
+
+	state = getUplinkState(g, client, "br-blue.node-a")
+	g.Expect(state.Status.HostInterfaceName).To(gomega.Equal(uplinkv1alpha1.InterfaceName("breth0")))
+	g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+		gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionResolved),
 		gomega.HaveField("Status", metav1.ConditionFalse),
-		gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonWaitingForDPU),
+		gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonWaitingForDPUHost),
+		gomega.HaveField("Message", gomega.ContainSubstring("waiting for DPU-host state for interface breth1")),
+	)))
+
+	// A second reconcile on the published state must be a no-op, not a
+	// resolve of br-old against the stale breth0 MAC.
+	controller, client = newTestController(t, hostDiscoverer, bridgeResolver, node, uplink, state)
+	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+		gomega.MatchError(gomega.ContainSubstring("waiting for DPU-host state for interface breth1")))
+	g.Expect(client.UplinkClient.(*uplinkfake.Clientset).Actions()).To(gomega.BeEmpty())
+}
+
+func TestNodeUplinkControllerDPULeavesHostDataReadyToDPUHost(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+	// Host discovery failed on the DPU-host: the root cause lives in the
+	// host-owned HostDataReady condition, and the blocked DPU reports its
+	// own state on Resolved without touching it.
+	state := newUplinkState("br-blue.node-a", "br-blue", "node-a")
+	state.Status.Type = uplinkv1alpha1.UplinkTypeOVSBridge
+	state.Status.HostInterfaceName = "breth0"
+	state.Status.Conditions = []metav1.Condition{
+		{
+			Type:               uplinkv1alpha1.UplinkStateConditionHostDataReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound,
+			Message:            "host interface breth0 was not found: link not found",
+			LastTransitionTime: metav1.NewTime(time.Unix(1, 0)),
+		},
+	}
+
+	controller, client := newTestController(t,
+		fakeHostDiscoverer{err: fmt.Errorf("must not inspect host interface")},
+		fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "p0"},
+		newNode("node-a", map[string]string{"role": "blue"}),
+		newUplink("br-blue", "role", "blue", "breth0"),
+		state,
+	)
+
+	g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(
+		gomega.MatchError(gomega.ContainSubstring("waiting for DPU-host MAC address for interface breth0")))
+
+	state = getUplinkState(g, client, "br-blue.node-a")
+	g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+		gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionHostDataReady),
+		gomega.HaveField("Status", metav1.ConditionFalse),
+		gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound),
+		gomega.HaveField("Message", "host interface breth0 was not found: link not found"),
+	)))
+	g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+		gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionResolved),
+		gomega.HaveField("Status", metav1.ConditionFalse),
+		gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonWaitingForDPUHost),
 	)))
 }
 
@@ -818,22 +1342,24 @@ func newHostResolvedUplinkState(name, uplinkName, nodeName, hostInterfaceName st
 	state.Status.DefaultGateways = []uplinkv1alpha1.IPAddress{"192.0.2.1"}
 	state.Status.Conditions = []metav1.Condition{
 		{
-			Type:   uplinkv1alpha1.UplinkStateConditionResolved,
-			Status: metav1.ConditionFalse,
-			Reason: uplinkv1alpha1.UplinkStateReasonWaitingForDPU,
+			Type:               uplinkv1alpha1.UplinkStateConditionHostDataReady,
+			Status:             metav1.ConditionTrue,
+			Reason:             uplinkv1alpha1.UplinkStateReasonHostDataDiscovered,
+			Message:            "Uplink host interface data discovered",
+			LastTransitionTime: metav1.NewTime(time.Unix(1, 0)),
 		},
 	}
 	return state
 }
 
-func newResolvedStatusTestUplinkState(message string) *uplinkv1alpha1.UplinkState {
+func newResolvedStatusTestUplinkState(conditionType, reason, message string) *uplinkv1alpha1.UplinkState {
 	state := newHostResolvedUplinkState("br-blue.node-a", "br-blue", "node-a", "breth0")
 	state.Status.OVSBridge = &uplinkv1alpha1.OVSBridgeStatus{Name: "br-blue"}
 	state.Status.Conditions = []metav1.Condition{
 		{
-			Type:               uplinkv1alpha1.UplinkStateConditionResolved,
+			Type:               conditionType,
 			Status:             metav1.ConditionTrue,
-			Reason:             uplinkv1alpha1.UplinkStateReasonResolved,
+			Reason:             reason,
 			Message:            message,
 			LastTransitionTime: metav1.NewTime(time.Unix(1, 0)),
 		},
@@ -866,6 +1392,31 @@ type fakeHostDiscoverer struct {
 
 func (d fakeHostDiscoverer) Discover(_ string) (*hostInterfaceState, error) {
 	return d.state, d.err
+}
+
+// failingBridgeResolver pins the invariant that the DPU-host side never
+// queries local OVS: it runs no OVS, the bridge is resolved on the DPU.
+type failingBridgeResolver struct {
+	t *testing.T
+}
+
+func (r failingBridgeResolver) fail() error {
+	r.t.Helper()
+	err := fmt.Errorf("DPU-host must not query local OVS")
+	r.t.Error(err)
+	return err
+}
+
+func (r failingBridgeResolver) Resolve(string) (string, error) {
+	return "", r.fail()
+}
+
+func (r failingBridgeResolver) ResolveByHostMAC(net.HardwareAddr, string) (string, error) {
+	return "", r.fail()
+}
+
+func (r failingBridgeResolver) BridgeUplink(string) (string, error) {
+	return "", r.fail()
 }
 
 type fakeBridgeResolver struct {

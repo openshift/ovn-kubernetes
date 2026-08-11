@@ -16,7 +16,7 @@ import (
 type ExternalNextHopsApplyConfiguration struct {
 	// StaticHops defines a slice of StaticHop. This field is optional.
 	StaticHops []*adminpolicybasedroutev1.StaticHop `json:"static,omitempty"`
-	// DynamicHops defines a slices of DynamicHop. This field is optional.
+	// DynamicHops defines a slice of DynamicHop. This field is optional.
 	DynamicHops []*adminpolicybasedroutev1.DynamicHop `json:"dynamic,omitempty"`
 }
 
