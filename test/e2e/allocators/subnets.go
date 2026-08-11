@@ -13,11 +13,6 @@ package allocators
 
 var (
 	// avoiding:
-	// - 10.88.0.0/16		(podman default network, transit subnet)
-	// - 10.96.0.0/16  		(Kubernetes services)
-	// - 10.128.0.0/14 		(cluster default network)
-	// - 10.243.0.0/16 		(cluster default network)
-	// - 10.244.0.0/16 		(cluster default network)
 	// - 100.64.0.0/16 		(default join subnet)
 	// - 100.65.0.0/16 		(UDN primary join subnet)
 	// - 172.18.0.0/16 		(KIND primary network)
@@ -33,7 +28,7 @@ var (
 	// - fd97::/64		    (transit subnet)
 
 	// UDN subnets, 1024 available
-	udnSubnets  = "10.0.0.0/10/20"
+	udnSubnets  = "20.0.0.0/10/20"
 	udnSubnets6 = "fd10::/42/52"
 
 	// BGP peering, 1024 available each
