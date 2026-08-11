@@ -2,9 +2,12 @@ package main
 
 import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/annotate"
-	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/otp"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 )
 
 func main() {
+	deploymentconfig.Set(ocpdeploymentconfig.New())
 	annotate.Run(annotate.LabelToTestNameMatchMaps, annotate.LabelToLabelMaps, func(name string) bool { return false })
 }
