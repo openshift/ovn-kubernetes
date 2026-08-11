@@ -1027,7 +1027,7 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect ClusterManagerController when networks exist before CNC creation single network: has both subnet and tunnel ID annotations L3 P-UDN": "[Disabled:Unimplemented]",
 
-	"ClusterNetworkConnect OVN-Kubernetes Controller Dynamic UDN allocation should connect cross-node L3 and L2 UDN pods through CNC when dynamic UDN allocation is enabled": "[Disabled:Unimplemented]",
+	"ClusterNetworkConnect OVN-Kubernetes Controller Dynamic UDN allocation should connect cross-node UDN pods and retain terminating node state": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect OVN-Kubernetes Controller Multiple CNCs with overlapping network selection should maintain non-transitive connectivity when a network is selected by multiple CNCs": "[Disabled:Unimplemented]",
 
