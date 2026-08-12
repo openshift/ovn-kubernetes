@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -39,6 +40,7 @@ const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+	featureLabelEgressIP            = "Feature:EgressIP"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -86,13 +88,16 @@ func main() {
 	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
 	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name:       "ovn-kubernetes/conformance/serial",
-		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
+		Name:        "ovn-kubernetes/conformance/serial",
+		Parallelism: 1,
+		Qualifiers: []string{fmt.Sprintf(`labels.exists(l, l == "Serial") || labels.exists(l, l == "%s")`,
+			featureLabelEgressIP)},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Name: "ovn-kubernetes/conformance/parallel",
+		Qualifiers: []string{fmt.Sprintf(`!labels.exists(l, l == "Serial") && !labels.exists(l, l == "%s")`,
+			featureLabelEgressIP)},
 	})
 
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
