@@ -242,36 +242,6 @@ func (_m *InterfaceOVN) GetNodesForWindows() ([]*apicorev1.Node, error) {
 	return r0, r1
 }
 
-// GetPod provides a mock function with given fields: namespace, name
-func (_m *InterfaceOVN) GetPod(namespace string, name string) (*apicorev1.Pod, error) {
-	ret := _m.Called(namespace, name)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetPod")
-	}
-
-	var r0 *apicorev1.Pod
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*apicorev1.Pod, error)); ok {
-		return rf(namespace, name)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) *apicorev1.Pod); ok {
-		r0 = rf(namespace, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*apicorev1.Pod)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(namespace, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // PatchEgressIP provides a mock function with given fields: name, patchData
 func (_m *InterfaceOVN) PatchEgressIP(name string, patchData []byte) error {
 	ret := _m.Called(name, patchData)

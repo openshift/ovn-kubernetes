@@ -6,8 +6,11 @@
 package v1
 
 import (
+	routeadvertisementsv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -30,6 +33,46 @@ func RouteAdvertisements(name string) *RouteAdvertisementsApplyConfiguration {
 	b.WithKind("RouteAdvertisements")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractRouteAdvertisementsFrom extracts the applied configuration owned by fieldManager from
+// routeAdvertisements for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// routeAdvertisements must be a unmodified RouteAdvertisements API object that was retrieved from the Kubernetes API.
+// ExtractRouteAdvertisementsFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractRouteAdvertisementsFrom(routeAdvertisements *routeadvertisementsv1.RouteAdvertisements, fieldManager string, subresource string) (*RouteAdvertisementsApplyConfiguration, error) {
+	b := &RouteAdvertisementsApplyConfiguration{}
+	err := managedfields.ExtractInto(routeAdvertisements, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.routeadvertisements.v1.RouteAdvertisements"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(routeAdvertisements.Name)
+
+	b.WithKind("RouteAdvertisements")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractRouteAdvertisements extracts the applied configuration owned by fieldManager from
+// routeAdvertisements. If no managedFields are found in routeAdvertisements for fieldManager, a
+// RouteAdvertisementsApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// routeAdvertisements must be a unmodified RouteAdvertisements API object that was retrieved from the Kubernetes API.
+// ExtractRouteAdvertisements provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractRouteAdvertisements(routeAdvertisements *routeadvertisementsv1.RouteAdvertisements, fieldManager string) (*RouteAdvertisementsApplyConfiguration, error) {
+	return ExtractRouteAdvertisementsFrom(routeAdvertisements, fieldManager, "")
+}
+
+// ExtractRouteAdvertisementsStatus extracts the applied configuration owned by fieldManager from
+// routeAdvertisements for the status subresource.
+func ExtractRouteAdvertisementsStatus(routeAdvertisements *routeadvertisementsv1.RouteAdvertisements, fieldManager string) (*RouteAdvertisementsApplyConfiguration, error) {
+	return ExtractRouteAdvertisementsFrom(routeAdvertisements, fieldManager, "status")
 }
 
 func (b RouteAdvertisementsApplyConfiguration) IsApplyConfiguration() {}
