@@ -48,7 +48,9 @@ func TestRenameLink(t *testing.T) {
 	mockNetLinkOps := new(util_mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
+	origNetLinkOps := util.GetNetLinkOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
+	t.Cleanup(func() { util.SetNetLinkOpMockInst(origNetLinkOps) })
 
 	tests := []struct {
 		desc                 string
@@ -131,7 +133,9 @@ func TestMoveIfToNetns(t *testing.T) {
 	mockNetNS := new(cni_ns_mocks.NetNS)
 	mockLink := new(netlink_mocks.Link)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
+	origNetLinkOps := util.GetNetLinkOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
+	t.Cleanup(func() { util.SetNetLinkOpMockInst(origNetLinkOps) })
 
 	tests := []struct {
 		desc                 string
@@ -199,7 +203,9 @@ func TestSafeMoveIfToNetns(t *testing.T) {
 	mockNetNS := new(cni_ns_mocks.NetNS)
 	mockLink := new(netlink_mocks.Link)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
+	origNetLinkOps := util.GetNetLinkOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
+	t.Cleanup(func() { util.SetNetLinkOpMockInst(origNetLinkOps) })
 
 	tests := []struct {
 		desc                 string
@@ -279,7 +285,9 @@ func TestSetupNetwork(t *testing.T) {
 	mockNetLinkOps := new(util_mocks.NetLinkOps)
 	mockLink := new(netlink_mocks.Link)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
+	origNetLinkOps := util.GetNetLinkOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
+	t.Cleanup(func() { util.SetNetLinkOpMockInst(origNetLinkOps) })
 
 	tests := []struct {
 		desc                 string
@@ -453,7 +461,9 @@ func TestSetupInterface(t *testing.T) {
 	mockNetLinkOps := new(util_mocks.NetLinkOps)
 	mockNS := new(cni_ns_mocks.NetNS)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
+	origNetLinkOps := util.GetNetLinkOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
+	t.Cleanup(func() { util.SetNetLinkOpMockInst(origNetLinkOps) })
 
 	/* Need the below to test the Do() function that requires root and needs to be figured out
 	testOSNameSpace, err := ns.GetCurrentNS()
@@ -532,9 +542,15 @@ func TestSetupSriovInterface(t *testing.T) {
 	mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
 	mockCmd := new(mock_k8s_io_utils_exec.Cmd)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
+	origNetLinkOps := util.GetNetLinkOps()
+	origSriovnetOps := util.GetSriovnetOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
 	// set `sriovnetOps` in util/sriovnet_linux.go to a mock instance for unit tests execution
 	util.SetSriovnetOpsInst(mockSriovnetOps)
+	t.Cleanup(func() {
+		util.SetNetLinkOpMockInst(origNetLinkOps)
+		util.SetSriovnetOpsInst(origSriovnetOps)
+	})
 
 	res, err := sriovnet.GetUplinkRepresentor("0000:01:00.0")
 	t.Log(res, err)
@@ -1225,7 +1241,9 @@ func TestPodRequest_deletePodConntrack(t *testing.T) {
 	mockTypeResult := new(cni_type_mocks.Result)
 	mockNetLinkOps := new(util_mocks.NetLinkOps)
 	// below sets the `netLinkOps` in util/net_linux.go to a mock instance for purpose of unit tests execution
+	origNetLinkOps := util.GetNetLinkOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
+	t.Cleanup(func() { util.SetNetLinkOpMockInst(origNetLinkOps) })
 	tests := []struct {
 		desc                 string
 		inpPodRequest        PodRequest
@@ -1627,8 +1645,14 @@ func TestConfigureOVS(t *testing.T) {
 	mockNetLinkOps := new(util_mocks.NetLinkOps)
 	mockSriovnetOps := new(util_mocks.SriovnetOps)
 
+	origNetLinkOps := util.GetNetLinkOps()
+	origSriovnetOps := util.GetSriovnetOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
 	util.SetSriovnetOpsInst(mockSriovnetOps)
+	t.Cleanup(func() {
+		util.SetNetLinkOpMockInst(origNetLinkOps)
+		util.SetSriovnetOpsInst(origSriovnetOps)
+	})
 
 	vfPciAddress := "0000:c5:03.1"
 	fakeIP := "192.168.1.1/24"
@@ -1951,8 +1975,14 @@ func TestConfigureOVS_getPfEncapIpWithError(t *testing.T) {
 	mockNetLinkOps := new(util_mocks.NetLinkOps)
 	mockSriovnetOps := new(util_mocks.SriovnetOps)
 
+	origNetLinkOps := util.GetNetLinkOps()
+	origSriovnetOps := util.GetSriovnetOps()
 	util.SetNetLinkOpMockInst(mockNetLinkOps)
 	util.SetSriovnetOpsInst(mockSriovnetOps)
+	t.Cleanup(func() {
+		util.SetNetLinkOpMockInst(origNetLinkOps)
+		util.SetSriovnetOpsInst(origSriovnetOps)
+	})
 
 	vfPciAddress := "0000:c5:03.1"
 	fakeIP := "192.168.1.1/24"
