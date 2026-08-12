@@ -4,6 +4,7 @@
 package node
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -14,26 +15,56 @@ import (
 
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	nodetypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 type openflowManager struct {
-	defaultBridge         *bridgeconfig.BridgeConfiguration
-	externalGatewayBridge *bridgeconfig.BridgeConfiguration
+	defaultBridge         *openflowBridge
+	externalGatewayBridge *openflowBridge
+	uplinkBridgesMu       sync.Mutex
+	uplinkBridges         map[string]*openflowBridge
+	// channel to indicate we need to update flows immediately
+	flowChan  chan struct{}
+	ovsClient libovsdbclient.Client
+}
+
+type openflowBridge struct {
+	*bridgeconfig.BridgeConfiguration
 	// flow cache, use map instead of array for readability when debugging
 	flowCache       map[string][]string
 	flowMutex       sync.Mutex
 	groupCache      map[string][]string
 	groupMutex      sync.Mutex
 	installedGroups map[string]struct{}
-	exGWFlowCache   map[string][]string
-	exGWFlowMutex   sync.Mutex
-	// channel to indicate we need to update flows immediately
-	flowChan chan struct{}
+	syncMutex       sync.Mutex
+}
+
+// defaultOpenFlowBridgeSetName is an internal target name, not an OVS bridge.
+// It means the default bridge and, when configured, the external gateway bridge.
+// Its length prevents it from colliding with a Linux interface name.
+const defaultOpenFlowBridgeSetName = "<default-bridge-set>"
+
+func openflowBridgeTargetDisplayName(targetName string) string {
+	if targetName == defaultOpenFlowBridgeSetName {
+		return "default bridge set"
+	}
+	return targetName
+}
+
+func newOpenflowBridge(bridge *bridgeconfig.BridgeConfiguration) *openflowBridge {
+	return &openflowBridge{
+		BridgeConfiguration: bridge,
+		flowCache:           make(map[string][]string),
+		groupCache:          make(map[string][]string),
+		installedGroups:     make(map[string]struct{}),
+	}
 }
 
 var openFlowGroupIDRegexp = regexp.MustCompile(`(?:^|,)group_id=([^,]+)`)
@@ -48,7 +79,56 @@ func (c *openflowManager) getExGwBridgePortConfigurations() ([]*bridgeconfig.Bri
 	return c.externalGatewayBridge.GetPortConfigurations()
 }
 
-func (c *openflowManager) addNetwork(nInfo util.NetInfo, nodeSubnets, mgmtIPs []*net.IPNet, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
+type bridgePortConfigurations struct {
+	netConfigs []*bridgeconfig.BridgeUDNConfiguration
+	physIntf   string
+	ofPortPhys string
+}
+
+func (c *openflowManager) forEachUplinkBridge(fn func(bridgeName string, bridge *openflowBridge) error) error {
+	for bridgeName, bridge := range c.uplinkBridgeSnapshot() {
+		if err := fn(bridgeName, bridge); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *openflowManager) uplinkBridgeSnapshot() map[string]*openflowBridge {
+	c.uplinkBridgesMu.Lock()
+	defer c.uplinkBridgesMu.Unlock()
+
+	bridges := make(map[string]*openflowBridge, len(c.uplinkBridges))
+	for bridgeName, bridge := range c.uplinkBridges {
+		bridges[bridgeName] = bridge
+	}
+	return bridges
+}
+
+func (c *openflowManager) getUplinkBridgePortConfigurations() map[string]bridgePortConfigurations {
+	configs := make(map[string]bridgePortConfigurations)
+	_ = c.forEachUplinkBridge(func(bridgeName string, bridge *openflowBridge) error {
+		netConfigs, physIntf, ofPortPhys := bridge.GetPortConfigurations()
+		configs[bridgeName] = bridgePortConfigurations{
+			netConfigs: netConfigs,
+			physIntf:   physIntf,
+			ofPortPhys: ofPortPhys,
+		}
+		return nil
+	})
+	return configs
+}
+
+func (c *openflowManager) addNetwork(bridgeName string, bridge *bridgeconfig.BridgeConfiguration, nInfo util.NetInfo,
+	nodeSubnets, mgmtIPs []*net.IPNet, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
+	if bridge != nil {
+		return c.addNetworkToUplinkBridge(bridgeName, bridge, nInfo, nodeSubnets, mgmtIPs, masqCTMark, pktMark,
+			v6MasqIPs, v4MasqIPs)
+	}
+	return c.addNetworkToDefaultBridgeSet(nInfo, nodeSubnets, mgmtIPs, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs)
+}
+
+func (c *openflowManager) addNetworkToDefaultBridgeSet(nInfo util.NetInfo, nodeSubnets, mgmtIPs []*net.IPNet, masqCTMark, pktMark uint, v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
 	if err := c.defaultBridge.AddNetworkConfig(nInfo, nodeSubnets, mgmtIPs, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs); err != nil {
 		return err
 	}
@@ -60,15 +140,149 @@ func (c *openflowManager) addNetwork(nInfo util.NetInfo, nodeSubnets, mgmtIPs []
 	return nil
 }
 
-func (c *openflowManager) delNetwork(nInfo util.NetInfo) {
+func (c *openflowManager) addNetworkToUplinkBridge(bridgeName string, bridge *bridgeconfig.BridgeConfiguration,
+	nInfo util.NetInfo, nodeSubnets, mgmtIPs []*net.IPNet, masqCTMark, pktMark uint,
+	v6MasqIPs, v4MasqIPs *udn.MasqueradeIPs) error {
+	c.uplinkBridgesMu.Lock()
+	defer c.uplinkBridgesMu.Unlock()
+
+	uplinkBridge, found := c.uplinkBridges[bridgeName]
+	if !found {
+		uplinkBridge = newOpenflowBridge(bridge)
+		c.uplinkBridges[bridgeName] = uplinkBridge
+	}
+	return uplinkBridge.AddNetworkConfig(nInfo, nodeSubnets, mgmtIPs, masqCTMark, pktMark, v6MasqIPs, v4MasqIPs)
+}
+
+func (c *openflowManager) delNetwork(nInfo util.NetInfo, targetName string) error {
+	if targetName != defaultOpenFlowBridgeSetName {
+		return c.delNetworkFromUplinkBridge(nInfo, targetName)
+	}
+	c.delNetworkFromDefaultBridgeSet(nInfo)
+	return nil
+}
+
+func (c *openflowManager) delNetworkFromDefaultBridgeSet(nInfo util.NetInfo) {
 	c.defaultBridge.DelNetworkConfig(nInfo)
 	if c.externalGatewayBridge != nil {
 		c.externalGatewayBridge.DelNetworkConfig(nInfo)
 	}
 }
 
+func (c *openflowManager) delNetworkFromUplinkBridge(nInfo util.NetInfo, bridgeName string) error {
+	c.uplinkBridgesMu.Lock()
+	defer c.uplinkBridgesMu.Unlock()
+
+	bridge, found := c.uplinkBridges[bridgeName]
+	if !found {
+		return nil
+	}
+	bridge.DelNetworkConfig(nInfo)
+	if bridge.HasNetworkConfigs() {
+		return nil
+	}
+
+	bridge.resetFlowCacheToNormal()
+	if err := bridge.syncFlows(); err != nil {
+		return fmt.Errorf("failed to clean up unused uplink bridge %s flows: %w", bridgeName, err)
+	}
+	delete(c.uplinkBridges, bridgeName)
+	return nil
+}
+
+func (c *openflowManager) setNetworkOfPatchPort(targetName, networkName string) error {
+	if targetName == defaultOpenFlowBridgeSetName {
+		if err := c.defaultBridge.SetNetworkOfPatchPort(networkName); err != nil {
+			return fmt.Errorf("failed to set default bridge patch port: %w", err)
+		}
+		if c.externalGatewayBridge != nil {
+			if err := c.externalGatewayBridge.SetNetworkOfPatchPort(networkName); err != nil {
+				return fmt.Errorf("failed to set external gateway bridge patch port: %w", err)
+			}
+		}
+		return nil
+	}
+
+	bridge, found := c.getUplinkBridge(targetName)
+	if !found {
+		return fmt.Errorf("uplink bridge %s not found", targetName)
+	}
+	if err := bridge.SetNetworkOfPatchPort(networkName); err != nil {
+		return fmt.Errorf("failed to set uplink bridge %s patch port: %w", targetName, err)
+	}
+	return nil
+}
+
+func (c *openflowManager) getUplinkBridge(bridgeName string) (*openflowBridge, bool) {
+	c.uplinkBridgesMu.Lock()
+	defer c.uplinkBridgesMu.Unlock()
+	bridge, found := c.uplinkBridges[bridgeName]
+	return bridge, found
+}
+
+func (c *openflowManager) syncUplinkBridgeFlows(bridgeName string) (bool, error) {
+	c.uplinkBridgesMu.Lock()
+	defer c.uplinkBridgesMu.Unlock()
+
+	bridge, found := c.uplinkBridges[bridgeName]
+	if !found {
+		return false, nil
+	}
+	if err := bridge.syncFlows(); err != nil {
+		return true, fmt.Errorf("failed to sync flows for uplink bridge %s: %w", bridgeName, err)
+	}
+	return true, nil
+}
+
+func (c *openflowManager) doWithUplinkBridgeForNetwork(nInfo util.NetInfo, fn func(*openflowBridge) error) (bool, error) {
+	foundBridge := false
+	err := c.forEachUplinkBridge(func(_ string, bridge *openflowBridge) error {
+		if foundBridge {
+			return nil
+		}
+		if bridge.GetNetworkConfig(nInfo.GetNetworkName()) != nil {
+			foundBridge = true
+			return fn(bridge)
+		}
+		return nil
+	})
+	return foundBridge, err
+}
+
+func (c *openflowManager) getNetworkConfig(nInfo util.NetInfo) *bridgeconfig.BridgeUDNConfiguration {
+	if netConfig := c.defaultBridge.GetNetworkConfig(nInfo.GetNetworkName()); netConfig != nil {
+		return netConfig
+	}
+	var netConfig *bridgeconfig.BridgeUDNConfiguration
+	_, _ = c.doWithUplinkBridgeForNetwork(nInfo, func(bridge *openflowBridge) error {
+		netConfig = bridge.GetNetworkConfig(nInfo.GetNetworkName())
+		return nil
+	})
+	return netConfig
+}
+
+func (c *openflowManager) getBridgeForNetwork(nInfo util.NetInfo) *bridgeconfig.BridgeConfiguration {
+	var bridgeConfig *bridgeconfig.BridgeConfiguration
+	bridgeFound, _ := c.doWithUplinkBridgeForNetwork(nInfo, func(bridge *openflowBridge) error {
+		bridgeConfig = bridge.BridgeConfiguration
+		return nil
+	})
+	if bridgeFound {
+		return bridgeConfig
+	}
+	return c.defaultBridge.BridgeConfiguration
+}
+
 func (c *openflowManager) getActiveNetwork(nInfo util.NetInfo) *bridgeconfig.BridgeUDNConfiguration {
-	return c.defaultBridge.GetActiveNetworkBridgeConfigCopy(nInfo.GetNetworkName())
+	if netConfig := c.defaultBridge.GetActiveNetworkBridgeConfigCopy(nInfo.GetNetworkName()); netConfig != nil {
+		return netConfig
+	}
+	var netConfig *bridgeconfig.BridgeUDNConfiguration
+	_, _ = c.doWithUplinkBridgeForNetwork(nInfo, func(bridge *openflowBridge) error {
+		netConfig = bridge.GetActiveNetworkBridgeConfigCopy(nInfo.GetNetworkName())
+		return nil
+	})
+	return netConfig
 }
 
 // END UDN UTILs
@@ -91,57 +305,123 @@ func (c *openflowManager) setDefaultBridgeGARPDrop(isDropped bool) {
 	c.defaultBridge.SetDropGARP(isDropped)
 }
 
-func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
-	c.flowMutex.Lock()
-	defer c.flowMutex.Unlock()
-	if c.flowCache == nil {
-		c.flowCache = make(map[string][]string)
+func (b *openflowBridge) updateFlowCacheEntry(key string, flows []string) {
+	b.flowMutex.Lock()
+	defer b.flowMutex.Unlock()
+	if b.flowCache == nil {
+		b.flowCache = make(map[string][]string)
 	}
-	c.flowCache[key] = flows
+	b.flowCache[key] = flows
+}
+
+func (b *openflowBridge) deleteFlowsByKey(key string) {
+	b.flowMutex.Lock()
+	delete(b.flowCache, key)
+	b.flowMutex.Unlock()
+	b.deleteGroupsByKey(key)
+}
+
+func (b *openflowBridge) getFlowsByKey(key string) []string {
+	b.flowMutex.Lock()
+	defer b.flowMutex.Unlock()
+	return b.flowCache[key]
+}
+
+func (b *openflowBridge) updateGroupCacheEntry(key string, groups []string) {
+	b.groupMutex.Lock()
+	defer b.groupMutex.Unlock()
+	if len(groups) == 0 {
+		delete(b.groupCache, key)
+		return
+	}
+	if b.groupCache == nil {
+		b.groupCache = make(map[string][]string)
+	}
+	b.groupCache[key] = groups
+}
+
+func (b *openflowBridge) deleteGroupsByKey(key string) {
+	b.groupMutex.Lock()
+	defer b.groupMutex.Unlock()
+	delete(b.groupCache, key)
+}
+
+func (b *openflowBridge) getGroupsByKey(key string) []string {
+	b.groupMutex.Lock()
+	defer b.groupMutex.Unlock()
+	return b.groupCache[key]
+}
+
+func (b *openflowBridge) resetFlowCacheToNormal() {
+	b.flowMutex.Lock()
+	b.flowCache = map[string][]string{
+		"NORMAL": {fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)},
+	}
+	b.flowMutex.Unlock()
+
+	b.groupMutex.Lock()
+	b.groupCache = map[string][]string{}
+	b.groupMutex.Unlock()
+}
+
+func (b *openflowBridge) flows() []string {
+	b.flowMutex.Lock()
+	defer b.flowMutex.Unlock()
+	return flattenFlowCacheEntries(b.flowCache)
+}
+
+func (c *openflowManager) updateFlowCacheEntry(key string, flows []string) {
+	c.defaultBridge.updateFlowCacheEntry(key, flows)
 }
 
 func (c *openflowManager) deleteFlowsByKey(key string) {
-	c.flowMutex.Lock()
-	delete(c.flowCache, key)
-	c.flowMutex.Unlock()
-	c.deleteGroupsByKey(key)
+	c.defaultBridge.deleteFlowsByKey(key)
 }
 
 func (c *openflowManager) getFlowsByKey(key string) []string {
-	c.flowMutex.Lock()
-	defer c.flowMutex.Unlock()
-	return c.flowCache[key]
+	return c.defaultBridge.getFlowsByKey(key)
 }
 
 func (c *openflowManager) updateGroupCacheEntry(key string, groups []string) {
-	c.groupMutex.Lock()
-	defer c.groupMutex.Unlock()
-	if len(groups) == 0 {
-		delete(c.groupCache, key)
-		return
-	}
-	if c.groupCache == nil {
-		c.groupCache = make(map[string][]string)
-	}
-	c.groupCache[key] = groups
-}
-
-func (c *openflowManager) deleteGroupsByKey(key string) {
-	c.groupMutex.Lock()
-	defer c.groupMutex.Unlock()
-	delete(c.groupCache, key)
+	c.defaultBridge.updateGroupCacheEntry(key, groups)
 }
 
 func (c *openflowManager) getGroupsByKey(key string) []string {
-	c.groupMutex.Lock()
-	defer c.groupMutex.Unlock()
-	return c.groupCache[key]
+	return c.defaultBridge.getGroupsByKey(key)
 }
 
 func (c *openflowManager) updateExBridgeFlowCacheEntry(key string, flows []string) {
-	c.exGWFlowMutex.Lock()
-	defer c.exGWFlowMutex.Unlock()
-	c.exGWFlowCache[key] = flows
+	c.externalGatewayBridge.updateFlowCacheEntry(key, flows)
+}
+
+func (c *openflowManager) updateNetworkFlowCacheEntry(nInfo util.NetInfo, key string, flows []string) {
+	updated, _ := c.doWithUplinkBridgeForNetwork(nInfo, func(bridge *openflowBridge) error {
+		bridge.updateFlowCacheEntry(key, flows)
+		return nil
+	})
+	if updated {
+		return
+	}
+	c.updateFlowCacheEntry(key, flows)
+}
+
+func (c *openflowManager) updateNetworkGroupCacheEntry(nInfo util.NetInfo, key string, groups []string) {
+	updated, _ := c.doWithUplinkBridgeForNetwork(nInfo, func(bridge *openflowBridge) error {
+		bridge.updateGroupCacheEntry(key, groups)
+		return nil
+	})
+	if updated {
+		return
+	}
+	c.updateGroupCacheEntry(key, groups)
+}
+
+func (c *openflowManager) deleteNetworkFlowsByKey(key string) {
+	c.deleteFlowsByKey(key)
+	_ = c.forEachUplinkBridge(func(_ string, bridge *openflowBridge) error {
+		bridge.deleteFlowsByKey(key)
+		return nil
+	})
 }
 
 func (c *openflowManager) requestFlowSync() {
@@ -154,48 +434,67 @@ func (c *openflowManager) requestFlowSync() {
 }
 
 func (c *openflowManager) syncFlows() {
-	groupsSynced := c.syncGroups()
-	if !groupsSynced {
-		klog.Errorf("Skipping flow sync for bridge %s because OpenFlow group sync failed", c.defaultBridge.GetBridgeName())
-	} else {
-		c.flowMutex.Lock()
-		flows := flattenFlowCacheEntries(c.flowCache)
-		c.flowMutex.Unlock()
+	c.syncFlowsSkippingUplinkBridges(nil)
+}
 
-		_, stderr, err := util.ReplaceOFFlows(c.defaultBridge.GetBridgeName(), flows)
-		if err != nil {
-			klog.Errorf("Failed to add flows for bridge %s, error: %v, stderr, %s, flow count: %d",
-				c.defaultBridge.GetBridgeName(), err, stderr, len(flows))
-		} else {
-			c.deleteStaleGroups()
-		}
+func (c *openflowManager) syncFlowsSkippingUplinkBridges(skippedUplinkBridges map[string]struct{}) {
+	if err := c.defaultBridge.syncFlows(); err != nil {
+		klog.Errorf("Failed to sync flows for bridge %s: %v",
+			c.defaultBridge.GetBridgeName(), err)
 	}
 
 	if c.externalGatewayBridge != nil {
-		c.exGWFlowMutex.Lock()
-		exGWFlows := flattenFlowCacheEntries(c.exGWFlowCache)
-		c.exGWFlowMutex.Unlock()
-
-		_, stderr, err := util.ReplaceOFFlows(c.externalGatewayBridge.GetBridgeName(), exGWFlows)
-		if err != nil {
-			klog.Errorf("Failed to add flows for bridge %s, error: %v, stderr, %s, flow count: %d",
-				c.externalGatewayBridge.GetBridgeName(), err, stderr, len(exGWFlows))
+		if err := c.externalGatewayBridge.syncFlows(); err != nil {
+			klog.Errorf("Failed to sync flows for bridge %s: %v",
+				c.externalGatewayBridge.GetBridgeName(), err)
 		}
 	}
+
+	_ = c.forEachUplinkBridge(func(bridgeName string, bridge *openflowBridge) error {
+		if _, skip := skippedUplinkBridges[bridgeName]; skip {
+			klog.Errorf("Skipping flow sync for bridge %s because port check failed", bridgeName)
+			return nil
+		}
+		if err := bridge.syncFlows(); err != nil {
+			klog.Errorf("Failed to sync flows for bridge %s: %v",
+				bridge.GetBridgeName(), err)
+		}
+		return nil
+	})
 }
 
-func (c *openflowManager) syncGroups() bool {
-	c.groupMutex.Lock()
-	groups := flattenFlowCacheEntries(c.groupCache)
-	c.groupMutex.Unlock()
+func (b *openflowBridge) syncFlows() error {
+	b.syncMutex.Lock()
+	defer b.syncMutex.Unlock()
+
+	if !b.syncGroups() {
+		return fmt.Errorf("openflow group sync failed")
+	}
+	flows := b.flows()
+	_, stderr, err := util.ReplaceOFFlows(b.GetBridgeName(), flows)
+	if err != nil {
+		return fmt.Errorf("failed to replace OpenFlow flows, stderr: %s, flow count: %d: %w",
+			stderr, len(flows), err)
+	}
+	b.deleteStaleGroups()
+	if err := b.SyncNoFlood(); err != nil {
+		return fmt.Errorf("failed to sync no-flood port config: %w", err)
+	}
+	return nil
+}
+
+func (b *openflowBridge) syncGroups() bool {
+	b.groupMutex.Lock()
+	groups := flattenFlowCacheEntries(b.groupCache)
+	b.groupMutex.Unlock()
 
 	success := true
 	successfulGroupIDs := make([]string, 0, len(groups))
 	for _, group := range groups {
-		_, stderr, err := util.AddOrModOFGroup(c.defaultBridge.GetBridgeName(), group)
+		_, stderr, err := util.AddOrModOFGroup(b.GetBridgeName(), group)
 		if err != nil {
 			klog.Errorf("Failed to add or modify OpenFlow group for bridge %s, error: %v, stderr: %s, group: %s",
-				c.defaultBridge.GetBridgeName(), err, stderr, group)
+				b.GetBridgeName(), err, stderr, group)
 			success = false
 			continue
 		}
@@ -204,54 +503,54 @@ func (c *openflowManager) syncGroups() bool {
 		}
 	}
 	if len(successfulGroupIDs) > 0 {
-		c.groupMutex.Lock()
-		if c.installedGroups == nil {
-			c.installedGroups = make(map[string]struct{})
+		b.groupMutex.Lock()
+		if b.installedGroups == nil {
+			b.installedGroups = make(map[string]struct{})
 		}
 		for _, groupID := range successfulGroupIDs {
-			c.installedGroups[groupID] = struct{}{}
+			b.installedGroups[groupID] = struct{}{}
 		}
-		c.groupMutex.Unlock()
+		b.groupMutex.Unlock()
 	}
 	return success
 }
 
-func (c *openflowManager) deleteStaleGroups() {
-	c.groupMutex.Lock()
-	groups := flattenFlowCacheEntries(c.groupCache)
+func (b *openflowBridge) deleteStaleGroups() {
+	b.groupMutex.Lock()
+	groups := flattenFlowCacheEntries(b.groupCache)
 	desiredGroupIDs := make(map[string]struct{}, len(groups))
 	for _, group := range groups {
 		if groupID, ok := parseOpenFlowGroupID(group); ok {
 			desiredGroupIDs[groupID] = struct{}{}
 		}
 	}
-	if c.installedGroups == nil {
-		c.installedGroups = make(map[string]struct{})
+	if b.installedGroups == nil {
+		b.installedGroups = make(map[string]struct{})
 	}
-	staleGroupIDs := make([]string, 0, len(c.installedGroups))
-	for groupID := range c.installedGroups {
+	staleGroupIDs := make([]string, 0, len(b.installedGroups))
+	for groupID := range b.installedGroups {
 		if _, ok := desiredGroupIDs[groupID]; !ok {
 			staleGroupIDs = append(staleGroupIDs, groupID)
 		}
 	}
-	c.groupMutex.Unlock()
+	b.groupMutex.Unlock()
 
 	failedGroupIDs := make([]string, 0)
 	for _, groupID := range staleGroupIDs {
-		_, stderr, err := util.DeleteOFGroup(c.defaultBridge.GetBridgeName(), groupID)
+		_, stderr, err := util.DeleteOFGroup(b.GetBridgeName(), groupID)
 		if err != nil {
 			klog.Errorf("Failed to delete stale OpenFlow group %s for bridge %s, error: %v, stderr: %s",
-				groupID, c.defaultBridge.GetBridgeName(), err, stderr)
+				groupID, b.GetBridgeName(), err, stderr)
 			failedGroupIDs = append(failedGroupIDs, groupID)
 		}
 	}
 
-	c.groupMutex.Lock()
-	c.installedGroups = desiredGroupIDs
+	b.groupMutex.Lock()
+	b.installedGroups = desiredGroupIDs
 	for _, groupID := range failedGroupIDs {
-		c.installedGroups[groupID] = struct{}{}
+		b.installedGroups[groupID] = struct{}{}
 	}
-	c.groupMutex.Unlock()
+	b.groupMutex.Unlock()
 }
 
 func parseOpenFlowGroupID(group string) (string, bool) {
@@ -282,19 +581,19 @@ func flattenFlowCacheEntries(flowCache map[string][]string) []string {
 //
 // -- to handle host -> service access, via masquerading from the host to OVN GR
 // -- to handle external -> service(ExternalTrafficPolicy: Local) -> host access without SNAT
-func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeconfig.BridgeConfiguration) (*openflowManager, error) {
+func newGatewayOpenFlowManager(gwBridge, exGWBridge *bridgeconfig.BridgeConfiguration, ovsClient libovsdbclient.Client) (*openflowManager, error) {
+	if ovsClient == nil {
+		return nil, fmt.Errorf("newGatewayOpenFlowManager: ovsClient must not be nil")
+	}
 	// add health check function to check default OpenFlow flows are on the shared gateway bridge
 	ofm := &openflowManager{
-		defaultBridge:         gwBridge,
-		externalGatewayBridge: exGWBridge,
-		flowCache:             make(map[string][]string),
-		flowMutex:             sync.Mutex{},
-		groupCache:            make(map[string][]string),
-		groupMutex:            sync.Mutex{},
-		installedGroups:       make(map[string]struct{}),
-		exGWFlowCache:         make(map[string][]string),
-		exGWFlowMutex:         sync.Mutex{},
-		flowChan:              make(chan struct{}, 1),
+		defaultBridge: newOpenflowBridge(gwBridge),
+		uplinkBridges: map[string]*openflowBridge{},
+		flowChan:      make(chan struct{}, 1),
+		ovsClient:     ovsClient,
+	}
+	if exGWBridge != nil {
+		ofm.externalGatewayBridge = newOpenflowBridge(exGWBridge)
 	}
 
 	// defer flowSync until syncService() to prevent the existing service OpenFlows being deleted
@@ -313,18 +612,28 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 			select {
 			case <-timer.C:
 
-				if err := checkPorts(c.getDefaultBridgePortConfigurations()); err != nil {
+				netConfigs, physIntf, ofPortPhys := c.getDefaultBridgePortConfigurations()
+				if err := checkPorts(c.ovsClient, netConfigs, physIntf, ofPortPhys); err != nil {
 					klog.Errorf("Checkports failed %v", err)
 					continue
 				}
 
 				if c.externalGatewayBridge != nil {
-					if err := checkPorts(c.getExGwBridgePortConfigurations()); err != nil {
+					netConfigs, physIntf, ofPortPhys = c.getExGwBridgePortConfigurations()
+					if err := checkPorts(c.ovsClient, netConfigs, physIntf, ofPortPhys); err != nil {
 						klog.Errorf("Checkports failed %v", err)
 						continue
 					}
 				}
-				c.syncFlows()
+				failedUplinkBridgeChecks := map[string]struct{}{}
+				for bridgeName, config := range c.getUplinkBridgePortConfigurations() {
+					if err := checkPorts(c.ovsClient, config.netConfigs, config.physIntf, config.ofPortPhys); err != nil {
+						klog.Errorf("Checkports failed for bridge %s: %v", bridgeName, err)
+						failedUplinkBridgeChecks[bridgeName] = struct{}{}
+						continue
+					}
+				}
+				c.syncFlowsSkippingUplinkBridges(failedUplinkBridgeChecks)
 			case <-c.flowChan:
 				c.syncFlows()
 				timer.Reset(syncPeriod)
@@ -345,6 +654,10 @@ func (c *openflowManager) updateBridgePMTUDFlowCache(key string, ipAddrs []strin
 		exGWBridgeDftFlows := c.externalGatewayBridge.PMTUDDropFlows(ipAddrs)
 		c.updateExBridgeFlowCacheEntry(key, exGWBridgeDftFlows)
 	}
+	_ = c.forEachUplinkBridge(func(_ string, bridge *openflowBridge) error {
+		bridge.updateFlowCacheEntry(key, bridge.PMTUDDropFlows(ipAddrs))
+		return nil
+	})
 }
 
 // updateBridgeFlowCache generates the "static" per-bridge flows
@@ -371,20 +684,44 @@ func (c *openflowManager) updateBridgeFlowCache(hostIPs []net.IP, hostSubnets []
 		c.updateExBridgeFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
 		c.updateExBridgeFlowCacheEntry("DEFAULT", exGWBridgeDftFlows)
 	}
-	return nil
+	return c.forEachUplinkBridge(func(_ string, bridge *openflowBridge) error {
+		uplinkBridgeDftFlows, err := bridge.UplinkBridgeFlows(hostSubnets)
+		if err != nil {
+			return err
+		}
+		bridge.updateFlowCacheEntry("NORMAL", []string{fmt.Sprintf("table=0,priority=0,actions=%s\n", util.NormalAction)})
+		bridge.updateFlowCacheEntry("DEFAULT", uplinkBridgeDftFlows)
+		return nil
+	})
 }
 
-func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys string) error {
+// getOfport returns the current ofport of the given OVS interface as a string,
+// or "" if the interface does not exist. It errors if the interface exists but
+// has no valid ofport assigned (unset or -1).
+func getOfport(ovsClient libovsdbclient.Client, name string) (string, error) {
+	iface, err := ovsops.GetOVSInterface(ovsClient, name)
+	if err != nil {
+		if errors.Is(err, libovsdbclient.ErrNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get ofport of %s: %w", name, err)
+	}
+	if iface.Ofport == nil || *iface.Ofport == -1 {
+		return "", fmt.Errorf("interface %s has invalid ofport", name)
+	}
+	return fmt.Sprintf("%d", *iface.Ofport), nil
+}
+
+func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofPortPhys string) error {
 	// it could be that the ovn-controller recreated the patch between the host OVS bridge and
 	// the integration bridge, as a result the ofport number changed for that patch interface
 	for _, netConfig := range netConfigs {
 		if netConfig.OfPortPatch == "" {
 			continue
 		}
-		curOfportPatch, stderr, err := util.GetOVSOfPort("--if-exists", "get", "Interface", netConfig.PatchPort, "ofport")
+		curOfportPatch, err := getOfport(ovsClient, netConfig.PatchPort)
 		if err != nil {
-			return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", netConfig.PatchPort, stderr, err)
-
+			return err
 		}
 		if netConfig.OfPortPatch != curOfportPatch {
 			if netConfig.IsDefaultNetwork() {
@@ -399,9 +736,9 @@ func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofP
 
 	// it could be that someone removed the physical interface and added it back on the OVS host
 	// bridge, as a result the ofport number changed for that physical interface
-	curOfportPhys, stderr, err := util.GetOVSOfPort("--if-exists", "get", "interface", physIntf, "ofport")
+	curOfportPhys, err := getOfport(ovsClient, physIntf)
 	if err != nil {
-		return fmt.Errorf("failed to get ofport of %s, stderr: %q: %w", physIntf, stderr, err)
+		return err
 	}
 	if ofPortPhys != curOfportPhys {
 		klog.Errorf("Fatal error: phys port %s ofport changed from %s to %s",
@@ -413,7 +750,7 @@ func checkPorts(netConfigs []*bridgeconfig.BridgeUDNConfiguration, physIntf, ofP
 
 // bootstrapOVSFlows handles ensuring basic, required flows are in place. This is done before OpenFlow manager has
 // been created/started, and only done when there is just a NORMAL flow programmed and OVN/OVS is already setup
-func bootstrapOVSFlows(nodeName string) error {
+func bootstrapOVSFlows(ovsClient libovsdbclient.Client, nodeName string) error {
 	// see if patch port exists already
 	var portsOutput string
 	var stderr string
@@ -454,7 +791,7 @@ func bootstrapOVSFlows(nodeName string) error {
 
 	var bridgeMACAddress net.HardwareAddr
 	if config.IsModeDPU() {
-		bridgeMACAddress, err = util.GetDPUOps().GetHostGatewayMACAddress(bridge, nodeName)
+		bridgeMACAddress, err = util.GetDPUOps().GetHostGatewayMACAddress(ovsClient, bridge, nodeName)
 		if err != nil {
 			return err
 		}

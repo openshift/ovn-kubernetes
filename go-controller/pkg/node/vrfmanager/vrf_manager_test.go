@@ -4,6 +4,7 @@
 package vrfmanager
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	netlink_mocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
@@ -95,6 +97,7 @@ var _ = ginkgo.Describe("VRF manager", func() {
 	}
 
 	ginkgo.BeforeEach(func() {
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 		c = NewController(routemanager.NewController())
 
 		nlMock = &mocks.NetLinkOps{}
@@ -129,6 +132,64 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("adds another slave interface to an existing VRF", func() {
+			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: getLinkIndex(vrfLinkName1), Index: getLinkIndex(enslaveLinkName1)}, nil)
+			enslaveLinkMock2.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName2, MasterIndex: 0, Index: getLinkIndex(enslaveLinkName2)}, nil)
+			nlMock.On("LinkSetMaster", enslaveLinkMock2, buildVRF(vrfLinkName1)).Return(nil)
+
+			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), nil)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			err = c.AddVRFSlave(vrfLinkName1, enslaveLinkName2)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "LinkSetMaster", enslaveLinkMock2, buildVRF(vrfLinkName1))
+		})
+
+		ginkgo.It("rejects assigning a slave interface to two VRFs", func() {
+			c.vrfs[getLinkIndex(vrfLinkName1)] = newVRF(vrfLinkName1, getVRFTable(vrfLinkName1), enslaveLinkName1, nil)
+			c.vrfs[getLinkIndex(vrfLinkName2)] = newVRF(vrfLinkName2, getVRFTable(vrfLinkName2), "", nil)
+
+			err := c.AddVRFSlave(vrfLinkName2, enslaveLinkName1)
+			var conflict *VRFSlaveConflictError
+			gomega.Expect(errors.As(err, &conflict)).To(gomega.BeTrue())
+			gomega.Expect(conflict).To(gomega.Equal(&VRFSlaveConflictError{
+				Interface:    enslaveLinkName1,
+				RequestedVRF: vrfLinkName2,
+				ExistingVRF:  vrfLinkName1,
+			}))
+		})
+
+		ginkgo.It("rejects assigning a slave interface already attached to another VRF", func() {
+			c.vrfs[getLinkIndex(vrfLinkName2)] = newVRF(vrfLinkName2, getVRFTable(vrfLinkName2), "", nil)
+			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{
+				Name:        enslaveLinkName1,
+				MasterIndex: getLinkIndex(vrfLinkName1),
+				Index:       getLinkIndex(enslaveLinkName1),
+			}, nil)
+			nlMock.On("LinkByIndex", getLinkIndex(vrfLinkName1)).Return(buildVRF(vrfLinkName1), nil)
+
+			err := c.AddVRFSlave(vrfLinkName2, enslaveLinkName1)
+			var conflict *VRFSlaveConflictError
+			gomega.Expect(errors.As(err, &conflict)).To(gomega.BeTrue())
+			gomega.Expect(conflict).To(gomega.Equal(&VRFSlaveConflictError{
+				Interface:    enslaveLinkName1,
+				RequestedVRF: vrfLinkName2,
+				ExistingVRF:  vrfLinkName1,
+			}))
+		})
+
+		ginkgo.It("removes a slave interface from an existing VRF", func() {
+			enslaveLinkMock1.On("Attrs").Return(&netlink.LinkAttrs{Name: enslaveLinkName1, MasterIndex: getLinkIndex(vrfLinkName1), Index: getLinkIndex(enslaveLinkName1)}, nil)
+			nlMock.On("LinkSetNoMaster", enslaveLinkMock1).Return(nil)
+
+			err := c.AddVRF(vrfLinkName1, enslaveLinkName1, getVRFTable(vrfLinkName1), nil)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+			err = c.DeleteVRFSlave(vrfLinkName1, enslaveLinkName1)
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "LinkSetNoMaster", enslaveLinkMock1)
+		})
+
 		ginkgo.It("fails if we add a VRF with a long name", func() {
 			err := c.AddVRF("this.name.is.too.long", "other", 0, nil)
 			gomega.Expect(err).Should(gomega.HaveOccurred())
@@ -143,6 +204,24 @@ var _ = ginkgo.Describe("VRF manager", func() {
 			nlMock.On("LinkList").Return([]netlink.Link{buildVRF(vrfLinkName3)}, nil)
 			err := c.AddVRF(vrfLinkName3, "other", 3000, nil)
 			gomega.Expect(err).Should(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("uses configured routing table ID start for ownership checks", func() {
+			config.OvnKubeNode.RoutingTableIDStart = 2000
+
+			err := c.AddVRF("this.name.is.ok", "other", 1999, nil)
+			gomega.Expect(err).Should(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("lower than 2000"))
+
+			err = c.AddVRF(vrfLinkName1, "", 2000, nil)
+			gomega.Expect(err).Should(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("not managed by ovn-kubernetes"))
+
+			nlMock.On("LinkList").Return([]netlink.Link{buildVRF(vrfLinkName1), buildVRF(vrfLinkName2)}, nil)
+			err = c.Repair(sets.New[string]())
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+			nlMock.AssertNotCalled(ginkgo.GinkgoT(), "LinkDelete", buildVRF(vrfLinkName1))
+			nlMock.AssertCalled(ginkgo.GinkgoT(), "LinkDelete", buildVRF(vrfLinkName2))
 		})
 
 		ginkgo.It("delete VRF", func() {
@@ -189,6 +268,7 @@ var _ = ginkgo.Describe("VRF manager tests with a network namespace", func() {
 		wg     *sync.WaitGroup
 	)
 	ginkgo.BeforeEach(func() {
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 		var err error
 		testNS, err = testutils.NewNS()
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

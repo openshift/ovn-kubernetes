@@ -42,6 +42,8 @@ import (
 	egressqosfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/clientset/versioned/fake"
 	egressservice "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
 	egressservicefake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/clientset/versioned/fake"
+	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
+	uplinkfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned/fake"
 	udnclientfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	vtepfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -85,10 +87,20 @@ type testNetInfo struct {
 	outboundSNAT string
 	subnets      []config.CIDRNetworkEntry
 	transport    string
+	// ipMode, when set, overrides IPMode() as {IPv4, IPv6}; otherwise the
+	// embedded NetInfo's IPMode() is used.
+	ipMode *[2]bool
 }
 
 func (ni *testNetInfo) TopologyType() string {
 	return ni.topology
+}
+
+func (ni *testNetInfo) IPMode() (bool, bool) {
+	if ni.ipMode != nil {
+		return ni.ipMode[0], ni.ipMode[1]
+	}
+	return ni.NetInfo.IPMode()
 }
 
 func (ni *testNetInfo) Subnets() []config.CIDRNetworkEntry {
@@ -165,6 +177,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 	apbExternalRouteObjects := []runtime.Object{}
 	anpObjects := []runtime.Object{}
 	ipamClaimObjects := []runtime.Object{}
+	uplinkObjects := []runtime.Object{}
 	v1Objects := []runtime.Object{}
 	nads := []nettypes.NetworkAttachmentDefinition{}
 	nadClient := fakenadclient.NewSimpleClientset()
@@ -198,6 +211,14 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 			anpObjects = append(anpObjects, object)
 		case *ipamclaimsapi.IPAMClaimList:
 			ipamClaimObjects = append(ipamClaimObjects, object)
+		case *uplinkv1alpha1.UplinkList:
+			for i := range o.Items {
+				uplinkObjects = append(uplinkObjects, &o.Items[i])
+			}
+		case *uplinkv1alpha1.UplinkStateList:
+			for i := range o.Items {
+				uplinkObjects = append(uplinkObjects, &o.Items[i])
+			}
 		default:
 			v1Objects = append(v1Objects, object)
 		}
@@ -215,6 +236,7 @@ func (o *FakeOVN) start(objects ...runtime.Object) {
 		IPAMClaimsClient:         fakeipamclaimclient.NewSimpleClientset(ipamClaimObjects...),
 		NetworkAttchDefClient:    nadClient,
 		UserDefinedNetworkClient: udnclientfake.NewSimpleClientset(),
+		UplinkClient:             uplinkfake.NewSimpleClientset(uplinkObjects...),
 		VTEPClient:               vtepfake.NewSimpleClientset(),
 	}
 	o.init(nads)
@@ -260,7 +282,7 @@ func (o *FakeOVN) init(nadList []nettypes.NetworkAttachmentDefinition) {
 	// (e.g., on GitHub).
 	factory.SetEventQueueSize(10)
 
-	o.watcher, err = factory.NewOVNKubeControllerWatchFactory(o.fakeClient)
+	o.watcher, err = factory.NewOVNKubeControllerWatchFactory(o.fakeClient, "test-node")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	o.nbClient, o.sbClient, o.nbsbCleanup, err = libovsdbtest.NewNBSBTestHarness(o.dbSetup)

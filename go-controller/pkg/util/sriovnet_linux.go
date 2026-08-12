@@ -15,6 +15,7 @@ import (
 	"github.com/k8snetworkplumbingwg/govdpa/pkg/kvdpa"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/k8snetworkplumbingwg/sriovnet"
+	"github.com/k8snetworkplumbingwg/sriovnet/pkg/utils/netlinkops"
 
 	"k8s.io/klog/v2"
 )
@@ -40,6 +41,7 @@ type SriovnetOps interface {
 	GetVfRepresentorDPU(pfID, vfIndex string) (string, error)
 	IsVfPciVfioBound(pciAddr string) bool
 	GetRepresentorPeerMacAddress(netdev string) (net.HardwareAddr, error)
+	GetDevlinkPortFunctionMacAddress(netdev string) (net.HardwareAddr, error)
 	GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error)
 	GetPCIFromDeviceName(netdevName string) (string, error)
 	GetPortIndexFromRepresentor(name string) (int, error)
@@ -117,6 +119,28 @@ func (defaultSriovnetOps) GetRepresentorPeerMacAddress(netdev string) (net.Hardw
 	return sriovnet.GetRepresentorPeerMacAddress(netdev)
 }
 
+// GetDevlinkPortFunctionMacAddress returns the hardware address reported by the
+// devlink port function backing netdev. On a DPU this is the MAC of the host
+// side function that peers with the given representor. Unlike
+// sriovnet.GetRepresentorPeerMacAddress, which only accepts PF representors,
+// this works for PF, VF and SF representors, so it is the only way to resolve
+// the host MAC of a VF or SF backed uplink. It requires devlink port function
+// attributes, available since kernel 5.9.
+func (defaultSriovnetOps) GetDevlinkPortFunctionMacAddress(netdev string) (net.HardwareAddr, error) {
+	port, err := netlinkops.GetNetlinkOps().DevLinkGetPortByNetdevName(netdev)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get devlink port for netdev %s: %w", netdev, err)
+	}
+	if port.Fn == nil {
+		return nil, fmt.Errorf("devlink port for netdev %s does not report function attributes", netdev)
+	}
+	// Drivers may report an unset function MAC as 00:00:00:00:00:00.
+	if !IsUsableEthernetMAC(port.Fn.HwAddr) {
+		return nil, fmt.Errorf("devlink port function for netdev %s does not report a usable hardware address", netdev)
+	}
+	return port.Fn.HwAddr, nil
+}
+
 func (defaultSriovnetOps) GetRepresentorPortFlavour(netdev string) (sriovnet.PortFlavour, error) {
 	return sriovnet.GetRepresentorPortFlavour(netdev)
 }
@@ -159,6 +183,16 @@ func GetFunctionRepresentorName(deviceID string) (string, error) {
 		return "", err
 	}
 	return rep, nil
+}
+
+// GetNetdeviceRepresentorName returns the VF/SF representor name for a host
+// netdevice.
+func GetNetdeviceRepresentorName(netdev string) (string, error) {
+	deviceID, err := GetDeviceIDFromNetdevice(netdev)
+	if err != nil {
+		return "", err
+	}
+	return GetFunctionRepresentorName(deviceID)
 }
 
 // GetNetdevNameFromDeviceId returns the netdevice name from the passed device ID.

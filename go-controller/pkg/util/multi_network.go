@@ -68,6 +68,7 @@ type NetInfo interface {
 	EVPNIPVRFVNI() int32
 	EVPNIPVRFRouteTarget() string
 	EVPNIPVRFVID() int
+	Uplink() string
 	GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet
 	GetNodeManagementIP(hostSubnet *net.IPNet) *net.IPNet
 
@@ -104,6 +105,7 @@ type NetInfo interface {
 	GetNetworkScopedLoadBalancerName(lbName string) string
 	GetNetworkScopedLoadBalancerGroupName(lbGroupName string) string
 	GetNetworkScopedRouterToSwitchPortName(nodeName string) string
+	GetNetworkScopedSwitchToRouterPortName(nodeName string) string
 
 	// GetNetInfo is an identity method used to get the specific NetInfo
 	// implementation
@@ -568,6 +570,10 @@ func (nInfo *DefaultNetInfo) GetNetworkScopedRouterToSwitchPortName(nodeName str
 	return types.RouterToSwitchPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
 }
 
+func (nInfo *DefaultNetInfo) GetNetworkScopedSwitchToRouterPortName(nodeName string) string {
+	return types.SwitchToRouterPrefix + nInfo.GetNetworkScopedSwitchName(nodeName)
+}
+
 func (nInfo *DefaultNetInfo) canReconcile(netInfo NetInfo) bool {
 	_, ok := netInfo.(*DefaultNetInfo)
 	return ok
@@ -716,6 +722,11 @@ func (nInfo *DefaultNetInfo) EVPNIPVRFVID() int {
 	return 0
 }
 
+// Uplink returns empty as Uplink is not supported on the default network.
+func (nInfo *DefaultNetInfo) Uplink() string {
+	return ""
+}
+
 func (nInfo *DefaultNetInfo) GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet {
 	return GetNodeGatewayIfAddr(hostSubnet)
 }
@@ -751,6 +762,7 @@ type userDefinedNetInfo struct {
 	transport    string
 	evpn         *ovncnitypes.EVPNConfig
 	outboundSNAT string
+	uplink       string
 }
 
 func (nInfo *userDefinedNetInfo) GetNetInfo() NetInfo {
@@ -840,15 +852,31 @@ func (nInfo *userDefinedNetInfo) GetNetworkScopedLoadBalancerGroupName(lbGroupNa
 }
 
 // GetNetworkScopedRouterToSwitchPortName returns the port name from router to switch.
-// For Layer2 topology, this is the transit router to switch port (trtos-).
-// For Layer3 topology, this is the router to switch port (rtos-).
+// For Layer3 and pre-transit router Layer2 topologies, this is the cluster
+// router to switch port (rtos-).
+// For Layer2 topology using transit router, this is the transit router to
+// switch port (trtos-).
 // Not Applicable for Localnet topology.
 func (nInfo *userDefinedNetInfo) GetNetworkScopedRouterToSwitchPortName(nodeName string) string {
 	switchName := nInfo.GetNetworkScopedSwitchName(nodeName)
-	if nInfo.TopologyType() == types.Layer2Topology {
+	if nInfo.TopologyType() == types.Layer2Topology && config.Layer2UsesTransitRouter {
 		return types.TransitRouterToSwitchPrefix + switchName
 	}
 	return types.RouterToSwitchPrefix + switchName
+}
+
+// GetNetworkScopedSwitchToRouterPortName returns the port name from switch to router.
+// For Layer3 and pre-transit router Layer2 topologies, this is the switch port
+// to cluster router (stor-).
+// For Layer2 topology using transit router, this is the switch port to transit
+// router (stotr-).
+// Not Applicable for Localnet topology.
+func (nInfo *userDefinedNetInfo) GetNetworkScopedSwitchToRouterPortName(nodeName string) string {
+	switchName := nInfo.GetNetworkScopedSwitchName(nodeName)
+	if nInfo.TopologyType() == types.Layer2Topology && config.Layer2UsesTransitRouter {
+		return types.SwitchToTransitRouterPrefix + switchName
+	}
+	return types.SwitchToRouterPrefix + switchName
 }
 
 // getPrefix returns if the logical entities prefix for this network
@@ -945,6 +973,15 @@ func (nInfo *userDefinedNetInfo) EVPNIPVRFVID() int {
 		return 0
 	}
 	return nInfo.evpn.IPVRF.VID
+}
+
+// Uplink returns the Uplink resource selected by this network, or "" when the
+// Uplink feature is disabled so that uplink-specific handling is skipped.
+func (nInfo *userDefinedNetInfo) Uplink() string {
+	if !IsUplinkEnabled() {
+		return ""
+	}
+	return nInfo.uplink
 }
 
 func (nInfo *userDefinedNetInfo) GetNodeGatewayIP(hostSubnet *net.IPNet) *net.IPNet {
@@ -1069,6 +1106,9 @@ func (nInfo *userDefinedNetInfo) canReconcile(other NetInfo) bool {
 	if nInfo.Transport() != other.Transport() {
 		return false
 	}
+	if nInfo.Uplink() != other.Uplink() {
+		return false
+	}
 	if nInfo.EVPNVTEPName() != other.EVPNVTEPName() {
 		return false
 	}
@@ -1135,6 +1175,7 @@ func (nInfo *userDefinedNetInfo) copy() *userDefinedNetInfo {
 		transport:             nInfo.transport,
 		evpn:                  nInfo.evpn,
 		outboundSNAT:          nInfo.outboundSNAT,
+		uplink:                nInfo.uplink,
 	}
 	// copy mutables
 	c.mutableNetInfo.copyFrom(&nInfo.mutableNetInfo)
@@ -1160,6 +1201,7 @@ func newLayer3NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		transport:      netconf.Transport,
 		evpn:           netconf.EVPN,
 		outboundSNAT:   netconf.OutboundSNAT,
+		uplink:         netconf.Uplink,
 		mutableNetInfo: mutableNetInfo{
 			id:      types.InvalidID,
 			nads:    sets.Set[string]{},
@@ -1237,6 +1279,7 @@ func newLayer2NetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error) 
 		managementIPs:         managementIPs,
 		transport:             netconf.Transport,
 		evpn:                  netconf.EVPN,
+		uplink:                netconf.Uplink,
 		mutableNetInfo: mutableNetInfo{
 			id:      types.InvalidID,
 			nads:    sets.Set[string]{},
@@ -1270,6 +1313,7 @@ func newLocalnetNetConfInfo(netconf *ovncnitypes.NetConf) (MutableNetInfo, error
 		vlan:                uint(netconf.VLANID),
 		allowPersistentIPs:  netconf.AllowPersistentIPs,
 		physicalNetworkName: netconf.PhysicalNetworkName,
+		uplink:              netconf.Uplink,
 		mutableNetInfo: mutableNetInfo{
 			id:      types.InvalidID,
 			nads:    sets.Set[string]{},
@@ -1477,7 +1521,7 @@ func GetAnnotatedNetworkName(netattachdef *nettypes.NetworkAttachmentDefinition)
 	if netattachdef == nil {
 		return ""
 	}
-	if netattachdef.Name == types.DefaultNetworkName && netattachdef.Namespace == config.Kubernetes.OVNConfigNamespace {
+	if netattachdef.Name == config.Default.ClusterDefaultNetworkNAD.Name && netattachdef.Namespace == config.Default.ClusterDefaultNetworkNAD.Namespace {
 		return types.DefaultNetworkName
 	}
 	return netattachdef.Annotations[types.OvnNetworkNameAnnotation]
@@ -1588,6 +1632,9 @@ func ValidateNetConf(nadName string, netconf *ovncnitypes.NetConf) error {
 				types.NoOverlaySNATDisabled,
 			})
 		}
+	}
+	if netconf.Uplink != "" && config.Gateway.Mode != config.GatewayModeShared {
+		return fmt.Errorf("uplink %q is supported only in shared gateway mode", netconf.Uplink)
 	}
 
 	if netconf.JoinSubnet != "" && netconf.Topology == types.LocalnetTopology {
@@ -1799,15 +1846,24 @@ func getPodNADToNetworkMappingWithPredicate(
 
 // overrideActiveNSEWithDefaultNSE overrides the provided active NetworkSelectionElement with the IP and MAC requests from
 // the default NetworkSelectionElement after validating its namespace and name.
-func overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE *nettypes.NetworkSelectionElement) error {
-	if defaultNSE.Namespace != config.Kubernetes.OVNConfigNamespace {
-		return fmt.Errorf("unexpected default NSE namespace %q, expected %q", defaultNSE.Namespace, config.Kubernetes.OVNConfigNamespace)
+func overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE *nettypes.NetworkSelectionElement, topologyType string) error {
+	expected := config.Default.ClusterDefaultNetworkNAD
+	if defaultNSE.Namespace != expected.Namespace {
+		return fmt.Errorf("unexpected default NSE namespace %q, expected %q", defaultNSE.Namespace, expected.Namespace)
 	}
-	if defaultNSE.Name != types.DefaultNetworkName {
-		return fmt.Errorf("unexpected default NSE name %q, expected %q", defaultNSE.Name, types.DefaultNetworkName)
+	if defaultNSE.Name != expected.Name {
+		return fmt.Errorf("unexpected default NSE name %q, expected %q", defaultNSE.Name, expected.Name)
 	}
-	activeNSE.IPRequest = defaultNSE.IPRequest
-	activeNSE.MacRequest = defaultNSE.MacRequest
+	// Layer2 accepts requested IPs and MACs. Layer3 accepts only a MAC to retain node-local IPAM.
+	switch topologyType {
+	case types.Layer2Topology:
+		// Limit the static ip and mac requests to the layer2 primary UDN
+		activeNSE.IPRequest = defaultNSE.IPRequest
+		activeNSE.MacRequest = defaultNSE.MacRequest
+	case types.Layer3Topology:
+		// Limit mac requests to the layer3 primary UDN
+		activeNSE.MacRequest = defaultNSE.MacRequest
+	}
 	return nil
 }
 
@@ -1886,18 +1942,11 @@ func GetPodNADToNetworkMappingWithActiveNetwork(
 		}
 	}
 
-	// Feature gate integration: EnablePreconfiguredUDNAddresses controls default network IP/MAC transfer to active network
-	if IsPreconfiguredUDNAddressesEnabled() {
-		// Limit the static ip and mac requests to the layer2 primary UDN when EnablePreconfiguredUDNAddresses is enabled, we
-		// don't need to explicitly check this is primary UDN since
-		// the "active network" concept is exactly that.
-		if activeNetwork.TopologyType() == types.Layer2Topology {
-			// If there are static IPs and MACs at the default NSE, override the active NSE with them
-			if defaultNSE != nil {
-				if err := overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE); err != nil {
-					return false, nil, err
-				}
-			}
+	// Feature gate integration: EnablePreconfiguredUDNAddresses controls default network IP/MAC transfer to active network,
+	// we don't need to explicitly check this is primary UDN since the "active network" concept is exactly that.
+	if IsPreconfiguredUDNAddressesEnabled() && defaultNSE != nil {
+		if err := overrideActiveNSEWithDefaultNSE(defaultNSE, activeNSE, activeNetwork.TopologyType()); err != nil {
+			return false, nil, err
 		}
 	}
 
@@ -1915,6 +1964,10 @@ func IsNetworkSegmentationSupportEnabled() bool {
 
 func IsNetworkConnectEnabled() bool {
 	return IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableNetworkConnect
+}
+
+func IsUplinkEnabled() bool {
+	return IsNetworkSegmentationSupportEnabled() && config.OVNKubernetesFeature.EnableUplink
 }
 
 func IsRouteAdvertisementsEnabled() bool {
@@ -2018,25 +2071,6 @@ func ParseNetworkIDFromVRFName(vrf string) int {
 		return types.InvalidID
 	}
 	return id
-}
-
-// CanServeNamespace determines whether the given network can serve a specific namespace.
-//
-// For default and secondary networks it always returns true.
-// For primary networks, it checks if the namespace is explicitly listed in the network's
-// associated namespaces.
-func CanServeNamespace(network NetInfo, namespace string) bool {
-	// Default network handles all namespaces
-	// Secondary networks can handle pods from different namespaces
-	if !network.IsPrimaryNetwork() {
-		return true
-	}
-	for _, ns := range network.GetNADNamespaces() {
-		if ns == namespace {
-			return true
-		}
-	}
-	return false
 }
 
 // GetNetworkRole returns the role of this controller's
@@ -2388,4 +2422,13 @@ func CheckSubnetOverlapWithClusterSubnets(subnets []*net.IPNet, subnetsName stri
 			subnetsName, subnets)
 	}
 	return nil
+}
+
+// GetNetworkScopedSwitchToRouterPortNameFromSwitchName returns the
+// switch-to-router port name for the given switch name.
+func GetNetworkScopedSwitchToRouterPortNameFromSwitchName(switchName string) string {
+	if strings.HasSuffix(switchName, types.OVNLayer2Switch) && config.Layer2UsesTransitRouter {
+		return types.SwitchToTransitRouterPrefix + switchName
+	}
+	return types.SwitchToRouterPrefix + switchName
 }

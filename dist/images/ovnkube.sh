@@ -238,6 +238,8 @@ ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
 #OVN_NETWORK_CONNECT_ENABLE - enable network connect for ovn-kubernetes
 ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE:=false}
+#OVN_UPLINK_ENABLE - enable uplink for ovn-kubernetes
+ovn_uplink_enable=${OVN_UPLINK_ENABLE:=false}
 #OVN_PRE_CONF_UDN_ADDR_ENABLE - enable connecting workloads with custom network configuration to UDNs
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
 #OVN_ROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
@@ -265,6 +267,16 @@ ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 #OVN_ENABLE_PERSISTENT_IPS - enable IPAM for virtualization workloads (KubeVirt persistent IPs)
 ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS:-false}
+# OVNKUBE_CLUSTER_DEFAULT_NAD - namespace/name of the default cluster wide net-attach-def.
+# When unset, ovnkube defaults to <ovn-config-namespace>/default.
+ovnkube_cluster_default_nad=${OVNKUBE_CLUSTER_DEFAULT_NAD:-}
+
+# only pass the flag when the env variable is set, otherwise let ovnkube
+# resolve the default
+ovnkube_cluster_default_nad_flag=
+if [[ -n "${ovnkube_cluster_default_nad}" ]]; then
+  ovnkube_cluster_default_nad_flag="--cluster-default-nad=${ovnkube_cluster_default_nad}"
+fi
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -575,30 +587,59 @@ check_health() {
   return 1
 }
 
-get_dpu_gw_options() {
-  # If ovn_gateway_opts or ovn_gateway_router_subnet is not set as environment variable, gather them from ovs settings
-  if [[ ${ovn_gateway_opts} == "" ]]; then
-    # get the gateway interface
-    gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
-    if [[ ${gw_iface} == "" ]]; then
-      echo "Couldn't get OVN Gateway Interface from ovs external_ids setting"
-    else
-      ovn_gateway_opts="--gateway-interface=${gw_iface} "
-    fi
+get_gw_options() {
+  # Build a map from the existing gateway options and overlay any ovn-gw-*
+  # values from OVS external_ids. This preserves global options while allowing
+  # node-local OVS settings to override/add gateway parameters.
+  local opt
+  local key
+  local value
+  declare -A gw_opts_map=()
 
-    # get the gateway nexthop
-    gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
-    if [[ ${gw_nexthop} == "" ]]; then
-      echo "Couldn't get OVN Gateway NextHop from ovs external_ids setting"
+  for opt in ${ovn_gateway_opts}; do
+    if [[ ${opt} == --*=* ]]; then
+      gw_opts_map["${opt%%=*}"]="${opt#*=}"
+    elif [[ ${opt} == --* ]]; then
+      gw_opts_map["${opt}"]=""
+    fi
+  done
+
+  # get the gateway interface
+  value=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
+  if [[ -n ${value} ]]; then
+    gw_opts_map["--gateway-interface"]="${value}"
+  fi
+
+  # get the gateway nexthop
+  value=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
+  if [[ -n ${value} ]]; then
+    gw_opts_map["--gateway-nexthop"]="${value}"
+  fi
+
+  # get the gateway vlanid
+  value=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
+  if [[ -n ${value} ]]; then
+    gw_opts_map["--gateway-vlanid"]="${value}"
+  fi
+
+  ovn_gateway_opts=""
+  for key in "${!gw_opts_map[@]}"; do
+    value="${gw_opts_map["${key}"]}"
+    if [[ ${value} == "" ]]; then
+      ovn_gateway_opts+="${key} "
     else
-      ovn_gateway_opts+="--gateway-nexthop=${gw_nexthop} "
+      ovn_gateway_opts+="${key}=${value} "
+    fi
+  done
+
+  # Get gateway options for DPUs
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+    # this is only required if the DPU and DPU Host are in different subnets
+    if [[ ${ovn_gateway_router_subnet} == "" ]]; then
+      ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
     fi
   fi
 
-  # this is only required if the DPU and DPU Host are in different subnets
-  if [[ ${ovn_gateway_router_subnet} == "" ]]; then
-    ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
-  fi
 }
 
 display_file() {
@@ -1093,6 +1134,12 @@ ovnkube-controller() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -1239,6 +1286,7 @@ ovnkube-controller() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -1261,6 +1309,7 @@ ovnkube-controller() {
     ${ovn_enable_dnsnameresolver_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -1434,6 +1483,12 @@ ovnkube-controller-with-node() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -1548,17 +1603,9 @@ ovnkube-controller-with-node() {
     fi
   fi
 
-  # Get gateway options for DPUs
-  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-      get_dpu_gw_options
-  fi
-
-  if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
-      # get the gateway vlanid
-      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
-      if [[ -n ${gw_vlanid} ]]; then
-        ovn_gateway_opts+="--gateway-vlanid=${gw_vlanid}"
-      fi
+  # Get gateway options from OVS for full and dpu modes.
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+      get_gw_options
   fi
 
   ovnkube_node_mgmt_port_netdev_flag=
@@ -1759,6 +1806,7 @@ ovnkube-controller-with-node() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -1790,6 +1838,7 @@ ovnkube-controller-with-node() {
     ${sflow_targets} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_disable_requestedchassis_flag} \
@@ -1941,6 +1990,12 @@ ovn-cluster-manager() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -2065,6 +2120,7 @@ ovn-cluster-manager() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -2084,6 +2140,7 @@ ovn-cluster-manager() {
     ${network_qos_enabled_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -2232,6 +2289,12 @@ ovn-node() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -2354,17 +2417,9 @@ ovn-node() {
     ovn_dpu_host_gateway_representor_interface_flag="--dpu-host-gateway-representor-interface=${ovn_dpu_host_gateway_representor_interface}"
   fi
 
-  # Get gateway options for DPUs
-  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-      get_dpu_gw_options
-  fi
-
-  if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
-      # get the gateway vlanid
-      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
-      if [[ -n ${gw_vlanid} ]]; then
-        ovn_gateway_opts+="--gateway-vlanid=${gw_vlanid}"
-      fi
+  # Get gateway options from OVS for full and dpu modes.
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+      get_gw_options
   fi
 
   ovn_unprivileged_flag="--unprivileged-mode"
@@ -2471,6 +2526,7 @@ ovn-node() {
         ${multi_network_enabled_flag} \
         ${network_segmentation_enabled_flag} \
         ${network_connect_enabled_flag} \
+        ${uplink_enabled_flag} \
         ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
         ${evpn_enabled_flag} \
@@ -2496,6 +2552,7 @@ ovn-node() {
         ${sflow_targets} \
         ${dynamic_udn_allocation_flag} \
         ${dynamic_udn_grace_period} \
+        ${ovnkube_cluster_default_nad_flag} \
         ${network_qos_enabled_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --export-ovs-metrics \

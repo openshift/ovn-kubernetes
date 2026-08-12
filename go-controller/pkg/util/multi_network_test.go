@@ -1453,7 +1453,7 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 		},
 
 		{
-			desc: "default-network ips and mac is is ignored for Layer3 topology",
+			desc: "default-network MAC is applied and IPs are ignored for Layer3 topology",
 			inputNetConf: &ovncnitypes.NetConf{
 				NetConf:  cnitypes.NetConf{Name: networkName},
 				Topology: ovntypes.Layer3Topology,
@@ -1476,7 +1476,59 @@ func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 					Name:       "attachment1",
 					Namespace:  "ns1",
 					IPRequest:  nil,
-					MacRequest: "",
+					MacRequest: "aa:bb:cc:dd:ee:ff",
+				},
+			},
+			enablePreconfiguredUDNAddresses: true,
+		},
+		{
+			desc: "default-network IPs and MAC are ignored for Layer3 topology when the feature is disabled",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+				Role:     ovntypes.NetworkRolePrimary,
+			},
+			inputPrimaryUDNConfig: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+				Role:     ovntypes.NetworkRolePrimary,
+			},
+			inputPodAnnotations: map[string]string{
+				nadv1.NetworkAttachmentAnnot: GetNADName(namespaceName, "another-network"),
+				DefNetworkAnnotation:         `[{"namespace": "ovn-kubernetes", "name": "default", "ips": ["192.168.0.3/24", "fda6::3/48"], "mac": "aa:bb:cc:dd:ee:ff"}]`,
+			},
+			expectedIsAttachmentRequested: true,
+			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
+				"ns1/attachment1": {
+					Name:      "attachment1",
+					Namespace: "ns1",
+				},
+			},
+		},
+		{
+			desc: "default-network NAD without a MAC is ignored for Layer3 topology",
+			inputNetConf: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+				Role:     ovntypes.NetworkRolePrimary,
+			},
+			inputPrimaryUDNConfig: &ovncnitypes.NetConf{
+				NetConf:  cnitypes.NetConf{Name: networkName},
+				Topology: ovntypes.Layer3Topology,
+				NADName:  GetNADName(namespaceName, attachmentName),
+				Role:     ovntypes.NetworkRolePrimary,
+			},
+			inputPodAnnotations: map[string]string{
+				DefNetworkAnnotation: `[{"namespace": "ovn-kubernetes", "name": "default"}]`,
+			},
+			expectedIsAttachmentRequested: true,
+			expectedNetworkSelectionElements: map[string]*nadv1.NetworkSelectionElement{
+				"ns1/attachment1": {
+					Name:      "attachment1",
+					Namespace: "ns1",
 				},
 			},
 			enablePreconfiguredUDNAddresses: true,
@@ -1815,6 +1867,56 @@ func TestValidateNetConfOutboundSNAT(t *testing.T) {
 				Topology:     ovntypes.Layer3Topology,
 				Transport:    test.transport,
 				OutboundSNAT: test.outboundSNAT,
+			}
+
+			err := ValidateNetConf(nadName, netconf)
+			if test.expectedError != "" {
+				g.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(test.expectedError)))
+			} else {
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestValidateNetConfUplinkGatewayMode(t *testing.T) {
+	tests := []struct {
+		name          string
+		gatewayMode   config.GatewayMode
+		uplink        string
+		expectedError string
+	}{
+		{
+			name:        "uplink is accepted in shared gateway mode",
+			gatewayMode: config.GatewayModeShared,
+			uplink:      "blue-uplink",
+		},
+		{
+			name:          "uplink is rejected in local gateway mode",
+			gatewayMode:   config.GatewayModeLocal,
+			uplink:        "blue-uplink",
+			expectedError: `uplink "blue-uplink" is supported only in shared gateway mode`,
+		},
+		{
+			name:        "local gateway mode is accepted without uplink",
+			gatewayMode: config.GatewayModeLocal,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+			config.Gateway.Mode = test.gatewayMode
+
+			nadName := "namespace/network"
+			netconf := &ovncnitypes.NetConf{
+				NetConf: cnitypes.NetConf{
+					Name: "network",
+				},
+				NADName:  nadName,
+				Topology: ovntypes.Layer3Topology,
+				Uplink:   test.uplink,
 			}
 
 			err := ValidateNetConf(nadName, netconf)

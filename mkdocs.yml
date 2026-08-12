@@ -3,6 +3,12 @@ site_url: https://www.ovn.org/ovn-kubernetes/
 repo_url: https://github.com/ovn-kubernetes/ovn-kubernetes
 repo_name: ovn-kubernetes/ovn-kubernetes
 edit_uri: edit/master/docs
+extra:
+  version:
+    provider: mike
+    default:
+      - latest
+      - master
 extra_css:
   - stylesheets/extra.css
 site_dir: site
@@ -84,8 +90,9 @@ nav:
     - Service Traffic Policy: design/service-traffic-policy.md
     - Host To NodePort Hairpin: design/host-to-node-port-hairpin-trafficflow.md
     - ExternalIPs/LoadBalancerIngress: design/external-ip-and-loadbalancer-ingress.md
-    - DPU Host No-Overlay Routing: design/dpu-host-no-overlay-routing.md
     - Internal Subnets: design/ovn-kubernetes-subnets.md
+    - External Bridge (breth0) Flows: design/bridge-flows.md
+    - Masquerade IPs: design/masquerade-ips.md
     - Kubevirt VM Live Migration: features/live-migration.md
   - Getting Started:
     - Launching OVN-Kubernetes sandbox env: installation/launching-ovn-kubernetes-on-kind.md
@@ -124,6 +131,7 @@ nav:
   - Features:
     - Universal Connectivity:
       - UserDefinedNetwork: features/user-defined-networks/user-defined-networks.md
+      - Uplinks for UserDefinedNetworks: features/user-defined-networks/uplinks.md
       - Connecting UserDefinedNetworks: features/user-defined-networks/cluster-network-connect.md
       - Dynamic UDN Node Allocation: features/user-defined-networks/dynamic-udn.md
     - NetworkSecurityControls:
@@ -179,5 +187,6 @@ nav:
     - DPU Healthcheck: okeps/okep-5674-dpu-healthcheck.md
     - Extend Primary UDN/CUDN to Support Multiple Cluster Subnets in Layer3 Topology: okeps/okep-5377-extend-udn-to-support-multiple-cluster-subnets-in-layer3-topology.md
     - VRF-Lite Shared Gateway Mode with Uplinks: okeps/okep-6019-vrf-lite-shared-gateway-external-bridges.md
+    - Disable Port Security: okeps/okep-3926-disable-port-security.md
   - Blog:
     - blog/index.md

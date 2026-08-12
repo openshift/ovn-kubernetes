@@ -21,7 +21,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kubevirt"
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
+	ovs "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
@@ -193,6 +193,10 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, ovsCli
 
 	response := &Response{KubeAuth: kubeAuth}
 	if !config.UnprivilegedMode {
+		if ovsClient == nil && !config.IsModeDPUHost() {
+			return nil, fmt.Errorf("OVS client is required in privileged mode")
+		}
+
 		netName := pr.netName
 		if pr.CNIConf.PhysicalNetworkName != "" {
 			netName = pr.CNIConf.PhysicalNetworkName
@@ -205,7 +209,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, ovsCli
 			}
 		}
 
-		response.Result, err = getCNIResult(pr, clientset, podInterfaceInfo)
+		response.Result, err = getCNIResult(pr, ovsClient, clientset, podInterfaceInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -246,48 +250,55 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 	netdevName := ""
 	if pr.CNIConf.DeviceID != "" {
 		if config.IsModeDPUHost() {
+			var dpuCD *util.DPUConnectionDetails
 			if pod == nil {
 				// no need to update DPU connection-details annotation if pod is already removed
 				klog.Warningf("Failed to get pod %s/%s: %v", pr.PodNamespace, pr.PodName, err)
-				return response, nil
+			} else {
+				dpuCD, err = util.UnmarshalPodDPUConnDetails(pod.Annotations, pr.nadKey)
+				if err != nil {
+					klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s NAD key %s: %v", pr.PodNamespace,
+						pr.PodName, pr.nadKey, err)
+				}
 			}
-			dpuCD, err := util.UnmarshalPodDPUConnDetails(pod.Annotations, pr.nadKey)
-			if err != nil {
-				klog.Warningf("Failed to get DPU connection details annotation for pod %s/%s NAD key %s: %v", pr.PodNamespace,
-					pr.PodName, pr.nadKey, err)
-				return response, nil
-			}
-
-			// check if this cmdDel is meant for the current sandbox, if not, directly return
-			if dpuCD.SandboxId != pr.SandboxID {
-				klog.Infof("The cmdDel request for sandbox %s is not meant for the currently configured "+
-					"pod %s/%s on NAD key %s with sandbox %s. Ignoring this request.",
-					pr.SandboxID, namespace, podName, pr.nadKey, dpuCD.SandboxId)
-				return response, nil
-			}
-
-			netdevName = dpuCD.VfNetdevName
-			if pr.netName == types.DefaultNetworkName {
-				// if this is the default network name, remove the whole DPU connection-details annotation,
-				// including the primary UDN connection-details if any
-				updatePodAnnotationNoRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
-					delete(pod.Annotations, util.DPUConnectionDetailsAnnot)
-					return pod, nil, nil
+			if dpuCD == nil {
+				if !util.IsSimulatedDPU() {
+					return response, nil
+				}
+				// A simulated device is a veth and is destroyed with the pod namespace unless it is moved back first.
+				netdevName = pr.CNIConf.DeviceID
+			} else {
+				// check if this cmdDel is meant for the current sandbox, if not, directly return
+				if dpuCD.SandboxId != pr.SandboxID {
+					klog.Infof("The cmdDel request for sandbox %s is not meant for the currently configured "+
+						"pod %s/%s on NAD key %s with sandbox %s. Ignoring this request.",
+						pr.SandboxID, namespace, podName, pr.nadKey, dpuCD.SandboxId)
+					return response, nil
 				}
 
-				err = util.UpdatePodWithRetryOrRollback(
-					clientset.podLister,
-					&kube.Kube{KClient: clientset.kclient},
-					pod,
-					updatePodAnnotationNoRollback,
-				)
-			} else {
-				// Delete the DPU connection-details annotation for this NAD
-				err = pr.updatePodDPUConnDetailsWithRetry(&kube.Kube{KClient: clientset.kclient}, clientset.podLister, nil)
-			}
-			// not an error if pod has already been deleted
-			if err != nil && !apierrors.IsNotFound(err) {
-				return nil, fmt.Errorf("failed to cleanup the DPU connection details annotation for NAD key %s: %v", pr.nadKey, err)
+				netdevName = dpuCD.VfNetdevName
+				if pr.netName == types.DefaultNetworkName {
+					// if this is the default network name, remove the whole DPU connection-details annotation,
+					// including the primary UDN connection-details if any
+					updatePodAnnotationNoRollback := func(pod *corev1.Pod) (*corev1.Pod, func(), error) {
+						delete(pod.Annotations, util.DPUConnectionDetailsAnnot)
+						return pod, nil, nil
+					}
+
+					err = util.UpdatePodWithRetryOrRollback(
+						clientset.podLister,
+						&kube.Kube{KClient: clientset.kclient},
+						pod,
+						updatePodAnnotationNoRollback,
+					)
+				} else {
+					// Delete the DPU connection-details annotation for this NAD
+					err = pr.updatePodDPUConnDetailsWithRetry(&kube.Kube{KClient: clientset.kclient}, clientset.podLister, nil)
+				}
+				// not an error if pod has already been deleted
+				if err != nil && !apierrors.IsNotFound(err) {
+					return nil, fmt.Errorf("failed to cleanup the DPU connection details annotation for NAD key %s: %v", pr.nadKey, err)
+				}
 			}
 		} else {
 			// Find the hostInterface name
@@ -342,8 +353,8 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 // PodInfoGetter is used to check if sandbox is still valid for the current
 // instance of the pod in the apiserver, see checkCancelSandbox for more info.
 // If kube api is not available from the CNI, pass nil to skip this check.
-func getCNIResult(pr *PodRequest, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
-	interfacesArray, err := podRequestInterfaceOps.ConfigureInterface(pr, getter, podInterfaceInfo)
+func getCNIResult(pr *PodRequest, ovsClient client.Client, getter PodInfoGetter, podInterfaceInfo *PodInterfaceInfo) (*current.Result, error) {
+	interfacesArray, err := podRequestInterfaceOps.ConfigureInterface(pr, ovsClient, getter, podInterfaceInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure pod interface: %v", err)
 	}

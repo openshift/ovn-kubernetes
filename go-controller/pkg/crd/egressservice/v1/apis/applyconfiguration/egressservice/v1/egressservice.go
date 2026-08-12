@@ -6,8 +6,11 @@
 package v1
 
 import (
+	egressservicev1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressservice/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -36,6 +39,47 @@ func EgressService(name, namespace string) *EgressServiceApplyConfiguration {
 	b.WithKind("EgressService")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractEgressServiceFrom extracts the applied configuration owned by fieldManager from
+// egressService for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// egressService must be a unmodified EgressService API object that was retrieved from the Kubernetes API.
+// ExtractEgressServiceFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEgressServiceFrom(egressService *egressservicev1.EgressService, fieldManager string, subresource string) (*EgressServiceApplyConfiguration, error) {
+	b := &EgressServiceApplyConfiguration{}
+	err := managedfields.ExtractInto(egressService, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.egressservice.v1.EgressService"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(egressService.Name)
+	b.WithNamespace(egressService.Namespace)
+
+	b.WithKind("EgressService")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractEgressService extracts the applied configuration owned by fieldManager from
+// egressService. If no managedFields are found in egressService for fieldManager, a
+// EgressServiceApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// egressService must be a unmodified EgressService API object that was retrieved from the Kubernetes API.
+// ExtractEgressService provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEgressService(egressService *egressservicev1.EgressService, fieldManager string) (*EgressServiceApplyConfiguration, error) {
+	return ExtractEgressServiceFrom(egressService, fieldManager, "")
+}
+
+// ExtractEgressServiceStatus extracts the applied configuration owned by fieldManager from
+// egressService for the status subresource.
+func ExtractEgressServiceStatus(egressService *egressservicev1.EgressService, fieldManager string) (*EgressServiceApplyConfiguration, error) {
+	return ExtractEgressServiceFrom(egressService, fieldManager, "status")
 }
 
 func (b EgressServiceApplyConfiguration) IsApplyConfiguration() {}

@@ -406,7 +406,7 @@ func (ncc *networkClusterController) init() error {
 		if err = ncc.tunnelIDAllocator.ReserveID("zero", types.NoTunnelID); err != nil {
 			return err
 		}
-		if util.IsNetworkSegmentationSupportEnabled() && ncc.IsPrimaryNetwork() {
+		if util.IsNetworkSegmentationSupportEnabled() && ncc.IsPrimaryNetwork() && !config.Layer2UsesTransitRouter {
 			// if the network is a primary L2 UDN network, then we need to reserve
 			// the IDs used by each node in this network's pod allocator
 			nodes, err := ncc.watchFactory.GetNodes()
@@ -700,7 +700,8 @@ func (ncc *networkClusterController) shouldReconcileNode(
 	return ncc.relevantNodeAnnotationsChanged(oldState, newState)
 }
 
-func (ncc *networkClusterController) relevantNodeAnnotationsChanged(oldState, newState *sharednode.NodeAnnotationState) bool {
+func (ncc *networkClusterController) relevantNodeAnnotationsChanged(
+	oldState, newState *sharednode.NodeAnnotationState) bool {
 	if ncc.nodeAllocator.HasNodeSubnetAllocation() &&
 		sharednode.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, ncc.GetNetworkName()) {
 		return true

@@ -11,7 +11,7 @@ set -o pipefail
 GOPATH=${GOPATH:-$(go env GOPATH)}
 export PATH="${GOPATH}/bin:${PATH}"
 
-crds=$(ls pkg/crd 2> /dev/null)
+crds=$(find pkg/crd -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
 if [ -z "${crds}" ]; then
   exit
 fi
@@ -21,6 +21,8 @@ olddir="${PWD}"
 builddir="$(mktemp -d)"
 cd "${builddir}"
 GO111MODULE=on go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
+kube_openapi_version=$(go -C "${olddir}" list -m -f '{{.Version}}' k8s.io/kube-openapi)
+GO111MODULE=on go install k8s.io/kube-openapi/cmd/openapi-gen@"${kube_openapi_version}"
 BINS=(
     deepcopy-gen
     applyconfiguration-gen
@@ -28,7 +30,7 @@ BINS=(
     informer-gen
     lister-gen
 )
-GO111MODULE=on go install $(printf "k8s.io/code-generator/cmd/%s@v0.35.1 " "${BINS[@]}")
+GO111MODULE=on go install $(printf "k8s.io/code-generator/cmd/%s@v0.36.2 " "${BINS[@]}")
 cd "${olddir}"
 if [[ "${builddir}" == /tmp/* ]]; then #paranoia
     rm -rf "${builddir}"
@@ -37,6 +39,9 @@ fi
 # Helper function to get API version for a given CRD
 get_crd_version() {
   case "$1" in
+    uplink)
+      echo "v1alpha1"
+      ;;
     networkqos)
       echo "v1alpha1"
       ;;
@@ -50,8 +55,9 @@ get_crd_version() {
 deepcopy-gen \
   --go-header-file hack/boilerplate.go.txt \
   --output-file zz_generated.deepcopy.go \
-  --bounding-dirs github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types \
   github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types
+
+mkdir -p _output/crds
 
 for crd in ${crds}; do
 
@@ -68,12 +74,44 @@ for crd in ${crds}; do
   deepcopy-gen \
     --go-header-file hack/boilerplate.go.txt \
     --output-file zz_generated.deepcopy.go \
-    --bounding-dirs github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd \
     github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
     "$@"
 
+  echo "Generating openapi for $crd ($api_version)"
+  # this can be moved to apis/ folder when the cmd becomes auto-generated
+  api_violations_report="$(mktemp -t "$(basename "$0").api_violations.XXXXXX")"
+  openapi-gen \
+    --output-file zz_generated.openapi.go \
+    --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/${api_version}/openapi \
+    --output-pkg  github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/openapi \
+    --go-header-file hack/boilerplate.go.txt \
+    --output-model-name-file="zz_generated.model_name.go" \
+    --report-filename "${api_violations_report}" \
+    --readonly-pkg k8s.io/apimachinery/pkg/apis/meta/v1 \
+    --readonly-pkg k8s.io/apimachinery/pkg/runtime \
+    --readonly-pkg k8s.io/apimachinery/pkg/version \
+    --readonly-pkg k8s.io/apimachinery/pkg/api/resource \
+    --readonly-pkg k8s.io/api/networking/v1 \
+    k8s.io/apimachinery/pkg/apis/meta/v1 \
+    k8s.io/apimachinery/pkg/runtime \
+    k8s.io/apimachinery/pkg/version \
+    k8s.io/apimachinery/pkg/api/resource \
+    k8s.io/api/networking/v1 \
+    github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types \
+    github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
+    "$@"
+
+  # Show the API-linter report, but fail if it contains any violation other than
+  # the expected apimachinery (and sometimes our own) names_match ones.
+  if grep -vE '^API rule violation: names_match,' "${api_violations_report}" | grep -q '[^[:space:]]'; then
+    echo "ERROR: openapi-gen reported unexpected API rule violations for ${crd} (only names_match is allowed):" >&2
+    grep -vE '^API rule violation: names_match,' "${api_violations_report}" >&2
+    exit 1
+  fi
+
   echo "Generating apply configuration for $crd ($api_version)"
   applyconfiguration-gen \
+    --openapi-schema <(go run github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/openapi/cmd/models-schema) \
     --go-header-file hack/boilerplate.go.txt \
     --output-dir "${SCRIPT_ROOT}"/pkg/crd/$crd/${api_version}/apis/applyconfiguration \
     --output-pkg github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version}/apis/applyconfiguration \
@@ -112,11 +150,10 @@ for crd in ${crds}; do
     github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/$crd/${api_version} \
     "$@"
 
+  echo "Generating CRDs for $crd ($api_version)"
+  controller-gen crd:crdVersions="v1"  paths=./pkg/crd/$crd/${api_version} output:crd:dir=_output/crds
 done
 
-echo "Generating CRDs"
-mkdir -p _output/crds
-controller-gen crd:crdVersions="v1"  paths=./pkg/crd/... output:crd:dir=_output/crds
 echo "Editing egressFirewall CRD"
 ## We desire that only egressFirewalls with the name "default" are accepted by the apiserver. The only
 ## way that we can put a pattern for validation on the name of the object which is embedded in
@@ -152,3 +189,7 @@ echo "Copying clusterNetworkConnect CRD"
 cp _output/crds/k8s.ovn.org_clusternetworkconnects.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_clusternetworkconnects.yaml
 echo "Copying vtep CRD"
 cp _output/crds/k8s.ovn.org_vteps.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_vteps.yaml
+echo "Copying uplink CRD"
+cp _output/crds/k8s.ovn.org_uplinks.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_uplinks.yaml
+echo "Copying uplinkstate CRD"
+cp _output/crds/k8s.ovn.org_uplinkstates.yaml ../helm/ovn-kubernetes/crds/k8s.ovn.org_uplinkstates.yaml

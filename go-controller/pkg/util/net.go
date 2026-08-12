@@ -4,6 +4,7 @@
 package util
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -18,10 +19,8 @@ import (
 	"github.com/vishvananda/netlink"
 
 	utilnet "k8s.io/utils/net"
-)
 
-const (
-	RoutingTableIDStart = 1000
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 )
 
 var ErrorNoIP = errors.New("no IP available")
@@ -374,6 +373,13 @@ func ParseIPNets[T ~string](strs []T) ([]*net.IPNet, error) {
 	return ipnets, nil
 }
 
+// IsUsableEthernetMAC reports whether mac can serve as a unicast interface
+// MAC, mirroring the kernel's is_valid_ether_addr: a 6-byte Ethernet address
+// that is neither all-zero nor multicast.
+func IsUsableEthernetMAC(mac net.HardwareAddr) bool {
+	return len(mac) == 6 && mac[0]&1 == 0 && !bytes.Equal(mac, make(net.HardwareAddr, 6))
+}
+
 // GenerateRandMAC generates a random unicast and locally administered MAC address.
 // LOOTED FROM https://github.com/cilium/cilium/blob/v1.12.6/pkg/mac/mac.go#L106
 func GenerateRandMAC() (net.HardwareAddr, error) {
@@ -479,7 +485,7 @@ func IPNetsToIPs(ipNets []*net.IPNet) []net.IP {
 // CalculateRouteTableID will calculate route table ID based on the network
 // interface index
 func CalculateRouteTableID(ifIndex int) int {
-	return ifIndex + RoutingTableIDStart
+	return ifIndex + config.OvnKubeNode.RoutingTableIDStart
 }
 
 // RouteEqual compare two routes

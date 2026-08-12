@@ -18,6 +18,36 @@ type SriovnetOps struct {
 	mock.Mock
 }
 
+// GetDevlinkPortFunctionMacAddress provides a mock function with given fields: netdev
+func (_m *SriovnetOps) GetDevlinkPortFunctionMacAddress(netdev string) (net.HardwareAddr, error) {
+	ret := _m.Called(netdev)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDevlinkPortFunctionMacAddress")
+	}
+
+	var r0 net.HardwareAddr
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (net.HardwareAddr, error)); ok {
+		return rf(netdev)
+	}
+	if rf, ok := ret.Get(0).(func(string) net.HardwareAddr); ok {
+		r0 = rf(netdev)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(net.HardwareAddr)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(netdev)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetNetDevicesFromAux provides a mock function with given fields: auxDev
 func (_m *SriovnetOps) GetNetDevicesFromAux(auxDev string) ([]string, error) {
 	ret := _m.Called(auxDev)

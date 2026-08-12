@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	v1 "github.com/openshift/api/config/v1"
 	"github.com/urfave/cli/v2"
 	gcfg "gopkg.in/gcfg.v1"
@@ -68,6 +69,15 @@ const DefaultDBTxnTimeout = time.Second * 100
 
 // DefaultEphemeralPortRange is used for unit testing only
 const DefaultEphemeralPortRange = "32768-60999"
+
+// MinimumRoutingTableIDStart is the lowest allowed start of OVN-managed Linux route table IDs.
+const MinimumRoutingTableIDStart = 1000
+
+// MaximumRoutingTableIDStart is capped so adding any Linux interface index still fits in a uint32 route table ID.
+const MaximumRoutingTableIDStart = 1<<31 - 1
+
+// DefaultRoutingTableIDStart is the default start of OVN-managed Linux route table IDs.
+const DefaultRoutingTableIDStart = MinimumRoutingTableIDStart
 
 // The following are global config parameters that other modules may access directly
 var (
@@ -239,6 +249,7 @@ var (
 		Mode:                      types.NodeModeFull,
 		DPUNodeLeaseRenewInterval: 10,
 		DPUNodeLeaseDuration:      40,
+		RoutingTableIDStart:       DefaultRoutingTableIDStart,
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -364,6 +375,13 @@ type DefaultConfig struct {
 	// Accepts: "" (empty, uses OVN default overlay) or "no-overlay".
 	// Defaults to "" (empty).
 	Transport string `gcfg:"transport"`
+
+	// ClusterDefaultNADName is the namespace/name of the default cluster network
+	// NAD. When empty, it resolves to OVNConfigNamespace/default.
+	ClusterDefaultNADName string `gcfg:"cluster-default-nad"`
+	// ClusterDefaultNetworkNAD is the parsed form of ClusterDefaultNADName,
+	// populated in completeDefaultConfig.
+	ClusterDefaultNetworkNAD *nettypes.NetworkSelectionElement
 }
 
 // LoggingConfig holds logging-related parsed config file parameters and command-line overrides
@@ -516,6 +534,7 @@ type OVNKubernetesFeatureConfig struct {
 	EnableMultiNetwork              bool `gcfg:"enable-multi-network"`
 	EnableNetworkSegmentation       bool `gcfg:"enable-network-segmentation"`
 	EnableNetworkConnect            bool `gcfg:"enable-network-connect"`
+	EnableUplink                    bool `gcfg:"enable-uplink"`
 	EnablePreconfiguredUDNAddresses bool `gcfg:"enable-preconfigured-udn-addresses"`
 	EnableRouteAdvertisements       bool `gcfg:"enable-route-advertisements"`
 	EnableEVPN                      bool `gcfg:"enable-evpn"`
@@ -605,7 +624,7 @@ type GatewayConfig struct {
 	RouterSubnet string `gcfg:"router-subnet"`
 	// SingeNode indicates the cluster has only one node
 	SingleNode bool `gcfg:"single-node"`
-	// DisableForwarding (enabled by default) controls if forwarding is allowed on OVNK controlled interfaces
+	// DisableForwarding controls if IPv6 forwarding is blocked on non-OVNK controlled interfaces when using older kernels
 	DisableForwarding bool `gcfg:"disable-forwarding"`
 	// AllowNoUplink (disabled by default) controls if the external gateway bridge without an uplink port is allowed in local gateway mode.
 	AllowNoUplink bool `gcfg:"allow-no-uplink"`
@@ -680,6 +699,8 @@ type OvnKubeNodeConfig struct {
 	DPUNodeLeaseRenewInterval int    `gcfg:"dpu-node-lease-renew-interval"`
 	DPUNodeLeaseDuration      int    `gcfg:"dpu-node-lease-duration"`
 	SimulateDPU               bool   `gcfg:"simulate-dpu"`
+	// RoutingTableIDStart is added to interface indexes to derive OVN-managed Linux route table IDs.
+	RoutingTableIDStart int `gcfg:"routing-table-id-start"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -776,6 +797,14 @@ var (
 )
 
 func init() {
+	// ClusterDefaultNetworkNAD is normally resolved in completeDefaultConfig, but
+	// unit tests rely on PrepareTestConfig instead of the full init flow. Seed a
+	// valid default here, before savedDefault is captured below, so it is never
+	// nil and PrepareTestConfig restores a usable value for those tests.
+	// ClusterDefaultNADName is deliberately left empty so that savedDefault
+	// records it as unset and CLI/file overrides are still detected.
+	Default.ClusterDefaultNetworkNAD, _ = parseClusterDefaultNAD(defaultClusterDefaultNADName())
+
 	// Cache original default config values
 	savedDefault = Default
 	savedLogging = Logging
@@ -1065,6 +1094,13 @@ var CommonFlags = []cli.Flag{
 		Usage:       "Transport technology for the default network. When unset, the OVN default overlay transport is used. (no-overlay)",
 		Destination: &cliConfig.Default.Transport,
 	},
+	&cli.StringFlag{
+		Name:  "cluster-default-nad",
+		Value: Default.ClusterDefaultNADName,
+		Usage: "Namespace/name of the default cluster network NAD. " +
+			"When unset, defaults to <ovn-config-namespace>/" + types.DefaultNetworkName + ".",
+		Destination: &cliConfig.Default.ClusterDefaultNADName,
+	},
 	&cli.BoolFlag{
 		Name:        "unprivileged-mode",
 		Usage:       "Run ovnkube-node container in unprivileged mode. Valid only with --init-node option.",
@@ -1263,6 +1299,12 @@ var OVNK8sFeatureFlags = []cli.Flag{
 		Usage:       "Configure to use network connect feature with ovn-kubernetes.",
 		Destination: &cliConfig.OVNKubernetesFeature.EnableNetworkConnect,
 		Value:       OVNKubernetesFeature.EnableNetworkConnect,
+	},
+	&cli.BoolFlag{
+		Name:        "enable-uplink",
+		Usage:       "Configure to use the Uplink feature with ovn-kubernetes. Requires network segmentation.",
+		Destination: &cliConfig.OVNKubernetesFeature.EnableUplink,
+		Value:       OVNKubernetesFeature.EnableUplink,
 	},
 	&cli.BoolFlag{
 		Name:        "enable-preconfigured-udn-addresses",
@@ -1665,8 +1707,9 @@ var OVNGatewayFlags = []cli.Flag{
 		Destination: &cliConfig.Gateway.DisableSNATMultipleGWs,
 	},
 	&cli.BoolFlag{
-		Name:        "disable-forwarding",
-		Usage:       "Disable forwarding on OVNK controlled interfaces.",
+		Name: "disable-forwarding",
+		Usage: "Disable IPv6 forwarding except on OVNK controlled interfaces when using " +
+			"an older kernel that doesn't allow per-interface IPv6 forwarding.",
 		Destination: &cliConfig.Gateway.DisableForwarding,
 	},
 	&cli.StringFlag{
@@ -1826,6 +1869,14 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "Use simulated DPU operations instead of real SR-IOV/switchdev hardware. Required for Kind and VM-based DPU simulation environments.",
 		Value:       OvnKubeNode.SimulateDPU,
 		Destination: &cliConfig.OvnKubeNode.SimulateDPU,
+	},
+	&cli.IntFlag{
+		Name: "ovnkube-node-routing-table-id-start",
+		Usage: fmt.Sprintf("Start of the Linux route table ID range managed by ovnkube-node "+
+			"for generated VRF and route tables. Must be between %d and %d",
+			MinimumRoutingTableIDStart, MaximumRoutingTableIDStart),
+		Value:       OvnKubeNode.RoutingTableIDStart,
+		Destination: &cliConfig.OvnKubeNode.RoutingTableIDStart,
 	},
 }
 
@@ -2291,6 +2342,9 @@ func buildOVNKubernetesFeatureConfig(cli, file *config) error {
 	if OVNKubernetesFeature.EnableDynamicUDNAllocation && !OVNKubernetesFeature.EnableNetworkSegmentation {
 		return fmt.Errorf("the Dynamic UDN Allocation feature cannot be enabled without also enabling Network Segmentation")
 	}
+	if OVNKubernetesFeature.EnableUplink && !OVNKubernetesFeature.EnableNetworkSegmentation {
+		return fmt.Errorf("the Uplink feature cannot be enabled without also enabling Network Segmentation")
+	}
 	return nil
 }
 
@@ -2602,7 +2656,45 @@ func completeDefaultConfig(allSubnets *ConfigSubnets) error {
 	Default.OVNMasqConntrackZone = Default.ConntrackZone + 2
 	Default.HostNodePortConntrackZone = Default.ConntrackZone + 3
 	Default.ReassemblyConntrackZone = Default.ConntrackZone + 4
+
+	// Resolve here rather than at package init so that the fallback picks up
+	// --ovn-config-namespace, which is only merged into Kubernetes by
+	// buildKubernetesConfig earlier in InitConfig.
+	if Default.ClusterDefaultNADName == "" {
+		Default.ClusterDefaultNADName = defaultClusterDefaultNADName()
+	}
+	Default.ClusterDefaultNetworkNAD, err = parseClusterDefaultNAD(Default.ClusterDefaultNADName)
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+// defaultClusterDefaultNADName returns the location of the default cluster
+// network NAD when cluster-default-nad is not configured: the default network
+// NAD in the namespace ovn-kubernetes itself runs in.
+func defaultClusterDefaultNADName() string {
+	return Kubernetes.OVNConfigNamespace + "/" + types.DefaultNetworkName
+}
+
+// parseClusterDefaultNAD parses a "namespace/name" cluster-default-nad value
+// into a NetworkSelectionElement, returning an error if it is malformed. The
+// namespace and NAD name are validated as Kubernetes resource names.
+func parseClusterDefaultNAD(name string) (*nettypes.NetworkSelectionElement, error) {
+	nsAndName := strings.Split(name, "/")
+	if len(nsAndName) != 2 || nsAndName[0] == "" || nsAndName[1] == "" {
+		return nil, fmt.Errorf("cluster-default-nad %q must be in the format of \"namespace/name\"", name)
+	}
+	if errs := validation.ValidateNamespaceName(nsAndName[0], false); len(errs) != 0 {
+		return nil, fmt.Errorf("cluster-default-nad %q has an invalid namespace: %s", name, strings.Join(errs, ", "))
+	}
+	if errs := validation.NameIsDNSSubdomain(nsAndName[1], false); len(errs) != 0 {
+		return nil, fmt.Errorf("cluster-default-nad %q has an invalid name: %s", name, strings.Join(errs, ", "))
+	}
+	return &nettypes.NetworkSelectionElement{
+		Namespace: nsAndName[0],
+		Name:      nsAndName[1],
+	}, nil
 }
 
 // parseServicesNamespacedNames splits the input string by `,` and returns a slice
@@ -3017,6 +3109,14 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	if OvnKubeNode.DPUNodeLeaseDuration <= OvnKubeNode.DPUNodeLeaseRenewInterval {
 		return fmt.Errorf("invalid dpu-node-lease-duration '%d'. must be > dpu-node-lease-renew-interval '%d'",
 			OvnKubeNode.DPUNodeLeaseDuration, OvnKubeNode.DPUNodeLeaseRenewInterval)
+	}
+	if OvnKubeNode.RoutingTableIDStart < MinimumRoutingTableIDStart {
+		return fmt.Errorf("invalid routing-table-id-start '%d'. must be >= %d",
+			OvnKubeNode.RoutingTableIDStart, MinimumRoutingTableIDStart)
+	}
+	if OvnKubeNode.RoutingTableIDStart > MaximumRoutingTableIDStart {
+		return fmt.Errorf("invalid routing-table-id-start '%d'. must be <= %d",
+			OvnKubeNode.RoutingTableIDStart, MaximumRoutingTableIDStart)
 	}
 
 	// Warn the user if both MgmtPortNetdev and MgmtPortDPResourceName are specified since they

@@ -40,7 +40,7 @@ type podRequestInterfaceOpsStub struct {
 	unconfiguredInterfaces []*PodInterfaceInfo
 }
 
-func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, _ PodInfoGetter, pii *PodInterfaceInfo) ([]*current.Interface, error) {
+func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, _ client.Client, _ PodInfoGetter, pii *PodInterfaceInfo) ([]*current.Interface, error) {
 	if len(pii.IPs) > 0 {
 		return []*current.Interface{
 			{
@@ -169,6 +169,10 @@ var _ = Describe("Network Segmentation", func() {
 		Expect(wf.Start()).To(Succeed())
 
 		cniServer = getTestServer(wf, fakeClient.KubeClient, fakeNetworkManager)
+		ovsClient, ovsCleanup, err := newOVSClientWithExternalIDs(map[string]string{})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(ovsCleanup.Cleanup)
+		cniServer.ovsClient = ovsClient
 	}
 
 	handlePodRequest := func() *Response {
@@ -179,6 +183,44 @@ var _ = Describe("Network Segmentation", func() {
 		Expect(err).NotTo(HaveOccurred())
 		return response
 	}
+
+	Context("CNI DEL on a simulated DPU host", func() {
+		BeforeEach(func() {
+			config.OvnKubeNode.Mode = ovntypes.NodeModeDPUHost
+			config.OvnKubeNode.SimulateDPU = true
+			pr.Command = CNIDel
+			pr.CNIConf.DeviceID = "eth0-14"
+		})
+
+		It("unconfigures the device after the pod is deleted", func() {
+			startCNIServer(testing.NewNamespace(pr.PodNamespace))
+
+			handlePodRequest()
+
+			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(ConsistOf(&PodInterfaceInfo{
+				IsDPUHostMode: true,
+				NetdevName:    pr.CNIConf.DeviceID,
+			}))
+		})
+
+		It("unconfigures the device after its connection details are removed", func() {
+			pod = &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        pr.PodName,
+					Namespace:   pr.PodNamespace,
+					Annotations: map[string]string{},
+				},
+			}
+			startCNIServer(testing.NewNamespace(pr.PodNamespace), pod)
+
+			handlePodRequest()
+
+			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(ConsistOf(&PodInterfaceInfo{
+				IsDPUHostMode: true,
+				NetdevName:    pr.CNIConf.DeviceID,
+			}))
+		})
+	})
 
 	Context("with network segmentation fg disabled and annotation without role field", func() {
 		BeforeEach(func() {
@@ -240,6 +282,13 @@ var _ = Describe("Network Segmentation", func() {
 					pr.Command = CNIDel
 					handlePodRequest()
 					Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(HaveLen(1))
+				})
+				It("should fail cmdAdd when the server has no OVS client", func() {
+					startCNIServer(testing.NewNamespace(pod.Namespace), pod)
+					cniServer.ovsClient = nil
+
+					_, err := cniServer.handleCNIRequest(podRequestToHTTPRequest(&pr))
+					Expect(err).To(MatchError(ContainSubstring("OVS client is required in privileged mode")))
 				})
 			})
 
@@ -395,47 +444,51 @@ var _ = Describe("checkBridgeMapping", func() {
 
 	Context("when topology is not localnet", func() {
 		It("should return nil without checking bridge mappings", func() {
-			ovsClient, err := newOVSClientWithExternalIDs(map[string]string{})
+			ovsClient, ovsCleanup, err := newOVSClientWithExternalIDs(map[string]string{})
 			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(ovsCleanup.Cleanup)
 			Expect(checkBridgeMapping(ovsClient, ovntypes.Layer2Topology, networkName)).To(Succeed())
 		})
 	})
 
 	Context("when using default network", func() {
 		It("should return nil without checking bridge mappings", func() {
-			ovsClient, err := newOVSClientWithExternalIDs(map[string]string{})
+			ovsClient, ovsCleanup, err := newOVSClientWithExternalIDs(map[string]string{})
 			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(ovsCleanup.Cleanup)
 			Expect(checkBridgeMapping(ovsClient, ovntypes.LocalnetTopology, ovntypes.DefaultNetworkName)).To(Succeed())
 		})
 	})
 
 	Context("when bridge mapping exists in external IDs", func() {
 		It("should return nil if the bridge mapping is found", func() {
-			ovsClient, err := newOVSClientWithExternalIDs(map[string]string{
+			ovsClient, ovsCleanup, err := newOVSClientWithExternalIDs(map[string]string{
 				"ovn-bridge-mappings": "test-network:br-int",
 			})
 			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(ovsCleanup.Cleanup)
 			Expect(checkBridgeMapping(ovsClient, ovntypes.LocalnetTopology, networkName)).To(Succeed())
 		})
 
 		It("should return error if the bridge mapping isn't found", func() {
-			ovsClient, err := newOVSClientWithExternalIDs(map[string]string{
+			ovsClient, ovsCleanup, err := newOVSClientWithExternalIDs(map[string]string{
 				"ovn-bridge-mappings": "other-network:br-int",
 			})
 			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(ovsCleanup.Cleanup)
 			Expect(checkBridgeMapping(ovsClient, ovntypes.LocalnetTopology, networkName).Error()).To(
 				Equal(`failed to find OVN bridge-mapping for network: "test-network"`))
 		})
 	})
 })
 
-func newOVSClientWithExternalIDs(externalIDs map[string]string) (client.Client, error) {
-	ovsClient, _, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+func newOVSClientWithExternalIDs(externalIDs map[string]string) (client.Client, *libovsdbtest.Context, error) {
+	ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
 		OVSData: []libovsdbtest.TestData{
 			&vswitchd.OpenvSwitch{
 				ExternalIDs: externalIDs,
 			},
 		},
 	})
-	return ovsClient, err
+	return ovsClient, ovsCleanup, err
 }

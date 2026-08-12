@@ -141,8 +141,18 @@ fi
 
 # Only run network segmentation tests if they are explicitly requested
 NETWORK_SEGMENTATION_TESTS="Network Segmentation"
-if [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
-  skip $NETWORK_SEGMENTATION_TESTS
+if [[ "${WHAT}" = "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
+  require_label "Feature:NetworkSegmentation"
+  shift # don't "focus" on Network Segmentation since we filter by label
+elif [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
+  skip_label "Feature:NetworkSegmentation"
+fi
+
+# Network Segmentation suite selection uses a feature label and removes the
+# suite prefix from the positional arguments. Keep any text after that prefix
+# as a narrower Ginkgo focus.
+if [[ "${WHAT}" == "${NETWORK_SEGMENTATION_TESTS} "* ]]; then
+  set -- "${WHAT#"${NETWORK_SEGMENTATION_TESTS} "}"
 fi
 
 # Only run cluster network connect tests if they are explicitly requested
@@ -164,6 +174,22 @@ fi
 
 if [ "$ENABLE_NO_OVERLAY" != true ]; then
   skip_label "Feature:NoOverlay"
+fi
+
+# RouteAdvertisements tests over dynamically allocated UDNs require a cluster
+# with both route advertisements and dynamic UDN allocation enabled.
+if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ] || [ "$DYNAMIC_UDN_ALLOCATION" != true ]; then
+  skip_label "Feature:RouteAdvertisementsDynamicUDN"
+fi
+
+# The "BGP: For BGP configured networks" tests (VRF-Lite and EVPN CUDNs) only
+# run in local gateway mode, while dynamic UDN allocation is only covered in
+# shared gateway mode lanes, so the two never overlap in CI. Skip them
+# explicitly on dynamic UDN clusters regardless: they set up and expect
+# per-network topology on every node, which does not hold with dynamic UDN
+# allocation (okep-5552).
+if [ "$DYNAMIC_UDN_ALLOCATION" == true ]; then
+  skip "BGP: For BGP configured networks"
 fi
 
 if [ "$ENABLE_ROUTE_ADVERTISEMENTS" != true ]; then
@@ -200,15 +226,15 @@ else
     # tests that specifically expect the node SNAT to happen
     # TODO: expect the pod IP where it makes sense
     skip "e2e egress firewall policy validation with external containers"
-    skip "e2e egress IP validation Cluster Default Network \[OVN network\] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts"
-    skip "e2e egress IP validation Cluster Default Network \[OVN network\] Should validate the egress IP SNAT functionality against host-networked pods"
-    skip "e2e egress IP validation Cluster Default Network Should validate egress IP logic when one pod is managed by more than one egressIP object"
-    skip "e2e egress IP validation Cluster Default Network Should re-assign egress IPs when node readiness / reachability goes down/up"
+    skip "e2e egress IP validation on network of type Cluster Default \[OVN network\] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts"
+    skip "e2e egress IP validation on network of type Cluster Default \[OVN network\] Should validate the egress IP SNAT functionality against host-networked pods"
+    skip "e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object"
+    skip "e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up"
     skip "Pod to external server PMTUD when a client ovnk pod targeting an external server is created when tests are run towards the agnhost echo server queries to the hostNetworked server pod on another node shall work for UDP"
-    skip "e2e egress IP validation Cluster Default Network Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates"
+    skip "e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates"
 
     # https://issues.redhat.com/browse/OCPBUGS-55028
-    skip "e2e egress IP validation Cluster Default Network \[secondary-host-eip\]"
+    skip "e2e egress IP validation on network of type Cluster Default \[secondary-host-eip\]"
 
 
     # https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5240
@@ -271,6 +297,7 @@ if [ "$ENABLE_EVPN" = true ] && [[ "${WHAT}" != "${KV_LIVE_MIGRATION_TESTS}"* ]]
         -procs=3 \
         -v \
         --focus="${FOCUS:-.}" \
+        --fail-on-empty \
         --timeout="${TEST_TIMEOUT}m" \
         --flake-attempts="${FLAKE_ATTEMPTS:-2}" \
         --skip="${SKIPPED_TESTS}" \
@@ -286,6 +313,7 @@ else
   go test -test.timeout ${GO_TEST_TIMEOUT}m -v . \
           -ginkgo.v \
           -ginkgo.focus ${FOCUS:-.} \
+          -ginkgo.fail-on-empty \
           -ginkgo.timeout ${TEST_TIMEOUT}m \
           -ginkgo.flake-attempts ${FLAKE_ATTEMPTS:-2} \
           -ginkgo.skip="${SKIPPED_TESTS}" \

@@ -25,11 +25,26 @@ type ClusterUserDefinedNetwork struct {
 }
 
 // ClusterUserDefinedNetworkSpec defines the desired state of ClusterUserDefinedNetwork.
+// +kubebuilder:validation:XValidation:rule="!has(self.uplinks) || ((self.network.topology == 'Layer2' && has(self.network.layer2) && self.network.layer2.role == 'Primary') || (self.network.topology == 'Layer3' && has(self.network.layer3) && self.network.layer3.role == 'Primary'))", message="spec.uplinks is supported only for primary Layer2 and Layer3 networks"
+// +kubebuilder:validation:XValidation:rule="!has(self.uplinks) || !has(self.network.transport) || self.network.transport != 'EVPN'", message="spec.uplinks is not supported with EVPN transport"
 type ClusterUserDefinedNetworkSpec struct {
 	// NamespaceSelector Label selector for which namespace network should be available for.
 	// +kubebuilder:validation:Required
 	// +required
 	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector"`
+
+	// Uplinks references Uplink resources used for this network's external
+	// traffic. Currently, one Uplink is supported. When omitted, existing gateway
+	// behavior is preserved.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=1
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="uplinks is immutable"
+	// +optional
+	// +listType=atomic
+	Uplinks []string `json:"uplinks,omitempty"`
 
 	// Network is the user-defined-network spec
 	// +kubebuilder:validation:Required
@@ -172,12 +187,13 @@ type LocalnetConfig struct {
 	// This field must be omitted if `subnets` is unset or `ipam.mode` is `Disabled`.
 	// When `physicalNetworkName` points to OVS bridge mapping of a network with reserved IP addresses
 	// (which shouldn't be assigned by OVN-Kubernetes), the specified CIDRs will not be assigned. For example:
-	// Given: `subnets: "10.0.0.0/24"`, `excludeSubnets: "10.0.0.200/30", the following addresses will not be assigned
+	// Given: `subnets: "10.0.0.0/24"`, `excludeSubnets`: "10.0.0.200/30", the following addresses will not be assigned
 	// to pods: `10.0.0.201`, `10.0.0.202`.
 	//
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=25
+	// +listType=atomic
 	ExcludeSubnets []CIDR `json:"excludeSubnets,omitempty"`
 
 	// ipam configurations for the network.
