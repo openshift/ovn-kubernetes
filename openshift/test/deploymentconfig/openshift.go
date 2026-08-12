@@ -7,16 +7,10 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
-
-var deploymentConfig api.DeploymentConfig
-
-func init() {
-	deploymentConfig = openshift{}
-	deploymentconfig.Set(deploymentConfig)
-}
 
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -36,10 +30,12 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 	return false, nil
 }
 
-type openshift struct{}
+type openshift struct {
+	kubeConfig *rest.Config
+}
 
-func New() api.DeploymentConfig {
-	return deploymentConfig
+func New(config *rest.Config) api.DeploymentConfig {
+	return openshift{kubeConfig: config}
 }
 
 func (m openshift) OVNKubernetesNamespace() string {
@@ -68,4 +64,8 @@ func (m openshift) GetAgnHostContainerImage() string {
 
 func (m openshift) IsConfigurationEnabled(config api.Config) bool {
 	return false
+}
+
+func (m openshift) GetMachineNetworkSubnets() (ipv4, ipv6 sets.Set[string], err error) {
+	return deploymentconfig.GetMachineNetworkSubnets(m.kubeConfig)
 }
