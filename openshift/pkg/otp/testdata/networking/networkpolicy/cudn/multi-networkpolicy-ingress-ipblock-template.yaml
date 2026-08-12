@@ -18,7 +18,11 @@ objects:
     - from:
       - ipBlock:
           cidr: "${CIDR}"
+      - ipBlock:
+          cidr: "${CIDR2}"
 parameters:
 - name: NAME
 - name: CIDR
+- name: CIDR2
+  value: ""
 - name: NAMESPACE

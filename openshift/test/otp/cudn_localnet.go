@@ -2,6 +2,7 @@ package otp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	exutil "github.com/openshift/origin/test/extended/util"
 
@@ -55,6 +57,7 @@ var _ = Describe("CUDN Localnet", func() {
 			statefulsetFile              = filepath.Join(buildPruningBaseDir, "cudn/statefulset-hello-cudn.yaml")
 			multiNetPolIngressTemplate   = filepath.Join(buildPruningBaseDir, "networkpolicy/cudn/multi-networkpolicy-ingress-ipblock-template.yaml")
 			multiNetPolEgressTemplate    = filepath.Join(buildPruningBaseDir, "networkpolicy/cudn/multi-networkpolicy-egress-ipblock-template.yaml")
+			originalMultiNetPolSetting   string
 		)
 
 		nodeList, err := e2enode.GetReadySchedulableNodes(context.TODO(), oc.KubeFramework().ClientSet)
@@ -64,9 +67,11 @@ var _ = Describe("CUDN Localnet", func() {
 		}
 
 		By("Step 0: Enable MultiNetworkPolicy support if not already enabled")
-		// Check if MultiNetworkPolicy is enabled
+		// Check if MultiNetworkPolicy is enabled and save original value
 		output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("network.operator.openshift.io", "cluster", "-o", "jsonpath={.spec.useMultiNetworkPolicy}").Output()
-		if err != nil || output != "true" {
+		originalMultiNetPolSetting = strings.TrimSpace(output)
+
+		if err != nil || originalMultiNetPolSetting != "true" {
 			By("Enabling MultiNetworkPolicy in cluster network operator")
 			err = oc.AsAdmin().WithoutNamespace().Run("patch").Args("network.operator.openshift.io", "cluster", "--type=merge", "-p", `{"spec":{"useMultiNetworkPolicy":true}}`).Execute()
 			Expect(err).NotTo(HaveOccurred())
@@ -77,11 +82,24 @@ var _ = Describe("CUDN Localnet", func() {
 				return err == nil, nil
 			})
 			Expect(err).NotTo(HaveOccurred(), "MultiNetworkPolicy CRD did not become available")
+
+			// Register cleanup to restore MultiNetworkPolicy setting
+			DeferCleanup(func() {
+				if originalMultiNetPolSetting != "" && originalMultiNetPolSetting != "true" {
+					By("Cleanup: Restoring original MultiNetworkPolicy setting")
+					patchValue := fmt.Sprintf(`{"spec":{"useMultiNetworkPolicy":%s}}`, originalMultiNetPolSetting)
+					_ = oc.AsAdmin().WithoutNamespace().Run("patch").Args("network.operator.openshift.io", "cluster", "--type=merge", "-p", patchValue).Execute()
+				}
+			})
 		}
 
 		By("Step 1: Create NNCP policy to map another network to br-ex ovs-bridge")
 		err = oc.AsAdmin().WithoutNamespace().Run("apply").Args("-f", nncpFile).Execute()
 		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			By("Cleanup - Delete NNCP")
+			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("nncp", "bridge-mapping", "--ignore-not-found=true").Execute()
+		})
 
 		By("Wait for NNCP to be Available")
 		err = wait.PollImmediate(5*time.Second, 3*time.Minute, func() (bool, error) {
@@ -97,15 +115,27 @@ var _ = Describe("CUDN Localnet", func() {
 		err = oc.AsAdmin().WithoutNamespace().Run("create").Args("namespace", "a1").Execute()
 		Expect(err).NotTo(HaveOccurred())
 		ns1 := "a1"
+		DeferCleanup(func() {
+			By("Cleanup - Delete namespace a1")
+			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("namespace", ns1, "--ignore-not-found=true").Execute()
+		})
 
 		By("Step 3: Create second UDN namespace a2")
 		err = oc.AsAdmin().WithoutNamespace().Run("create").Args("namespace", "a2").Execute()
 		Expect(err).NotTo(HaveOccurred())
 		ns2 := "a2"
+		DeferCleanup(func() {
+			By("Cleanup - Delete namespace a2")
+			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("namespace", ns2, "--ignore-not-found=true").Execute()
+		})
 
 		By("Step 4: Create ClusterUserDefinedNetwork secondary Localnet")
 		err = oc.AsAdmin().WithoutNamespace().Run("apply").Args("-f", cudnFile).Execute()
 		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			By("Cleanup - Delete ClusterUserDefinedNetwork")
+			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("clusteruserdefinednetwork", "sec-localnet-net-ipblock", "--ignore-not-found=true").Execute()
+		})
 
 		By("Wait for ClusterUserDefinedNetwork to be ready")
 		err = wait.PollImmediate(10*time.Second, 10*time.Minute, func() (bool, error) {
@@ -205,11 +235,12 @@ var _ = Describe("CUDN Localnet", func() {
 			fmt.Sprintf("Before policy: %s to %s (same node)", sameNodePairs[0].ns2Pod, sameNodePairs[0].ns1Pod))
 
 		By("Step 9: Create Ingress IPBlock MultiNetworkPolicy in namespace a1")
-		// Allow ingress only from 192.168.100.0/30 (IPs: .0, .1, .2, .3)
+		// Allow ingress only from 192.168.100.0/30 (IPs: .0, .1, .2, .3) and fd00:192:168:100::/126
 		ingressPolicyNs1 := otputils.IpBlockCIDRsSingle{
 			Name:      "ingress-ipblock",
 			Template:  multiNetPolIngressTemplate,
 			Cidr:      "192.168.100.0/30",
+			Cidr2:     "fd00:192:168:100::/126",
 			Namespace: ns1,
 		}
 		ingressPolicyNs1.CreateipBlockCIDRObjectSingle(oc)
@@ -259,11 +290,12 @@ var _ = Describe("CUDN Localnet", func() {
 		}
 
 		By("Step 12: Create Egress IPBlock MultiNetworkPolicy in both namespaces")
-		// Allow egress only to 192.168.100.0/30
+		// Allow egress only to 192.168.100.0/30 and fd00:192:168:100::/126
 		egressPolicyNs1 := otputils.IpBlockCIDRsSingle{
 			Name:      "egress-ipblock",
 			Template:  multiNetPolEgressTemplate,
 			Cidr:      "192.168.100.0/30",
+			Cidr2:     "fd00:192:168:100::/126",
 			Namespace: ns1,
 		}
 		egressPolicyNs1.CreateipBlockCIDRObjectSingle(oc)
@@ -272,6 +304,7 @@ var _ = Describe("CUDN Localnet", func() {
 			Name:      "egress-ipblock",
 			Template:  multiNetPolEgressTemplate,
 			Cidr:      "192.168.100.0/30",
+			Cidr2:     "fd00:192:168:100::/126",
 			Namespace: ns2,
 		}
 		egressPolicyNs2.CreateipBlockCIDRObjectSingle(oc)
@@ -343,18 +376,6 @@ var _ = Describe("CUDN Localnet", func() {
 			verifyCurlSuccess(oc, ns1, sameNodePairs[1].ns1Pod, sameNodePairs[1].ns2IP,
 				fmt.Sprintf("After egress policy deletion: %s to %s (same node)", sameNodePairs[1].ns1Pod, sameNodePairs[1].ns2Pod))
 		}
-
-		By("Cleanup - Delete ClusterUserDefinedNetwork")
-		err = oc.AsAdmin().WithoutNamespace().Run("delete").Args("clusteruserdefinednetwork", "sec-localnet-net-ipblock").Execute()
-		Expect(err).NotTo(HaveOccurred())
-
-		By("Cleanup - Delete NNCP")
-		err = oc.AsAdmin().WithoutNamespace().Run("delete").Args("nncp", "bridge-mapping").Execute()
-		Expect(err).NotTo(HaveOccurred())
-
-		By("Cleanup - Delete namespaces")
-		_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("namespace", ns1).Execute()
-		_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("namespace", ns2).Execute()
 	})
 })
 
@@ -365,38 +386,42 @@ func getCUDNPodIP(oc *exutil.CLI, namespace, podName string) (string, error) {
 		return "", err
 	}
 
-	// Parse the network-status JSON to find the ovn-udn2 interface IP
-	// Look for the sec-localnet-net-ipblock network entry
-	lines := strings.Split(output, "},{")
-	for _, line := range lines {
-		if strings.Contains(line, "sec-localnet-net-ipblock") && strings.Contains(line, "ovn-udn2") {
-			// Extract IP from the ips array
-			ipStart := strings.Index(line, `"ips":[`)
-			if ipStart == -1 {
-				continue
+	// Unmarshal the network-status JSON
+	var networkStatuses []nettypes.NetworkStatus
+	if err := json.Unmarshal([]byte(output), &networkStatuses); err != nil {
+		return "", fmt.Errorf("failed to unmarshal network-status annotation: %v", err)
+	}
+
+	// Find the sec-localnet-net-ipblock network entry with ovn-udn2 interface
+	for _, ns := range networkStatuses {
+		if ns.Name == "sec-localnet-net-ipblock" && ns.Interface == "ovn-udn2" {
+			// Return the first IP from the IPs array (supports both IPv4 and IPv6)
+			if len(ns.IPs) > 0 {
+				return ns.IPs[0], nil
 			}
-			ipSection := line[ipStart:]
-			ipEnd := strings.Index(ipSection, "]")
-			if ipEnd == -1 {
-				continue
-			}
-			ipArray := ipSection[7:ipEnd] // Skip `"ips":[`
-			ip := strings.Trim(strings.Trim(ipArray, `"`), " ")
-			return ip, nil
 		}
 	}
 
 	// Fallback: use ip command to get IP from ovn-udn2 interface
-	cmd := "ip -4 addr show ovn-udn2 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1"
-	output, err = e2eoutput.RunHostCmd(namespace, podName, cmd)
-	if err != nil {
-		return "", err
+	// Try IPv4 first, then IPv6
+	for _, ipVersion := range []struct {
+		flag   string
+		filter string
+	}{
+		{"-4", "inet "},
+		{"-6", "inet6 "},
+	} {
+		cmd := fmt.Sprintf("ip %s addr show ovn-udn2 | grep '%s' | awk '{print $2}' | cut -d'/' -f1 | head -n1", ipVersion.flag, ipVersion.filter)
+		output, err = e2eoutput.RunHostCmd(namespace, podName, cmd)
+		if err == nil {
+			ip := strings.TrimSpace(output)
+			if ip != "" {
+				return ip, nil
+			}
+		}
 	}
-	ip := strings.TrimSpace(output)
-	if ip == "" {
-		return "", fmt.Errorf("no IP address found on interface ovn-udn2 for pod %s", podName)
-	}
-	return ip, nil
+
+	return "", fmt.Errorf("no IP address found on interface ovn-udn2 for pod %s", podName)
 }
 
 // verifyCurlSuccess verifies that curl succeeds

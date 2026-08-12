@@ -424,7 +424,7 @@ func (ipBlock_policy *IpBlockCIDRsDual) CreateipBlockCIDRObjectDual(oc *exutil.C
 // Single CIDR on single stack
 func (ipBlock_policy *IpBlockCIDRsSingle) CreateipBlockCIDRObjectSingle(oc *exutil.CLI) {
 	err := wait.Poll(5*time.Second, 20*time.Second, func() (bool, error) {
-		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ipBlock_policy.Template, "-p", "NAME="+ipBlock_policy.Name, "NAMESPACE="+ipBlock_policy.Namespace, "CIDR="+ipBlock_policy.Cidr)
+		err1 := ApplyResourceFromTemplateByAdmin(oc, "--ignore-unknown-parameters=true", "-f", ipBlock_policy.Template, "-p", "NAME="+ipBlock_policy.Name, "NAMESPACE="+ipBlock_policy.Namespace, "CIDR="+ipBlock_policy.Cidr, "CIDR2="+ipBlock_policy.Cidr2)
 		if err1 != nil {
 			e2e.Logf("the err:%v, and try next round", err1)
 			return false, nil
@@ -713,11 +713,11 @@ func GetDefaultSubnet(oc *exutil.CLI) (string, error) {
 	int1, _ := GetDefaultInterface(oc)
 	getDefaultSubnetCmd := "/usr/sbin/ip -4 -brief a show " + int1
 	subnet1, err := ExecCommandInNetworkingPod(oc, getDefaultSubnetCmd)
-	defSubnet := strings.Fields(subnet1)[2]
 	if err != nil {
 		e2e.Logf("Cannot get default subnet, errors: %v", err)
 		return "", err
 	}
+	defSubnet := strings.Fields(subnet1)[2]
 	e2e.Logf("Get the default subnet: %s", defSubnet)
 	return defSubnet, nil
 }
@@ -2221,7 +2221,7 @@ func CheckClusterStatus(oc *exutil.CLI, expectedStatus string) {
 
 	// check master nodes status, expect Ready status for them
 	for _, masterNode := range masterNodes {
-		CheckNodeStatus(oc, masterNode, "Ready")
+		CheckNodeStatus(oc, masterNode, expectedStatus)
 	}
 
 	// get all worker nodes
@@ -2230,8 +2230,8 @@ func CheckClusterStatus(oc *exutil.CLI, expectedStatus string) {
 	o.Expect(workerNodes).NotTo(o.BeEmpty())
 
 	// check worker nodes status, expect Ready status for them
-	for _, workerNode := range masterNodes {
-		CheckNodeStatus(oc, workerNode, "Ready")
+	for _, workerNode := range workerNodes {
+		CheckNodeStatus(oc, workerNode, expectedStatus)
 	}
 }
 

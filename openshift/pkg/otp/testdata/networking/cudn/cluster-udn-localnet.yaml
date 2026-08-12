@@ -13,4 +13,4 @@ spec:
     localnet:
       role: Secondary
       physicalNetworkName: mylocalnet
-      subnets: ["192.168.100.0/29"]
+      subnets: ["192.168.100.0/28", "fd00:192:168:100::/64"]
