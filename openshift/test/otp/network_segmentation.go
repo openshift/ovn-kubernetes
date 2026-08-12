@@ -36,10 +36,10 @@ func isIPInCIDR(ipStr, cidr string) bool {
 	return ipNet.Contains(ip)
 }
 
-var _ = Describe("CUDN Localnet", func() {
+var _ = Describe("Network Segmentation", func() {
 	defer GinkgoRecover()
 
-	var oc = exutil.NewCLI("cudn-localnet")
+	var oc = exutil.NewCLI("network-segmentation")
 
 	BeforeEach(func() {
 		networkType := otputils.CheckNetworkType(oc)
@@ -48,8 +48,16 @@ var _ = Describe("CUDN Localnet", func() {
 		}
 	})
 
-	// OCP-81190 - Verify IP Block network policy with CUDN with localnet topology
-	It("[JIRA:Networking][OTP][FdpOvnOvs] OCP-81190:Verify IP Block network policy with CUDN with localnet topology", func() {
+	// 81190 - Verify IP Block network policy with CUDN with localnet topology
+	//
+	// Prerequisites (must be installed on cluster before running test):
+	// 1. NMState Operator - Required for NodeNetworkConfigurationPolicy (NNCP) support
+	//    See nmstate-install.yaml and nmstate-instance.yaml for installation
+	//
+	// The test will automatically:
+	// - Enable MultiNetworkPolicy support via cluster network operator (if not already enabled)
+	// - Create and cleanup all test resources (namespaces, CUDN, policies, pods, etc.)
+	It("[JIRA:Networking][OTP][sig-network] 81190 Verify IP Block network policy with CUDN with localnet topology", func() {
 		var (
 			buildPruningBaseDir          = testdata.FixturePath("networking")
 			nncpFile                     = filepath.Join(buildPruningBaseDir, "cudn/nncp-bridge-mapping.yaml")
@@ -178,17 +186,17 @@ var _ = Describe("CUDN Localnet", func() {
 		// Get pod to node mapping for both namespaces
 		podToNodeNs1 := make(map[string]string)
 		podToNodeNs2 := make(map[string]string)
-		podToIPNs1 := make(map[string]string)
-		podToIPNs2 := make(map[string]string)
+		podToIPsNs1 := make(map[string][]string)
+		podToIPsNs2 := make(map[string][]string)
 
 		for _, podName := range helloPodNamesNs1 {
 			node, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("pod", podName, "-n", ns1, "-o", "jsonpath={.spec.nodeName}").Output()
 			Expect(err).NotTo(HaveOccurred())
 			podToNodeNs1[podName] = node
 
-			ip, err := getCUDNPodIP(oc, ns1, podName)
+			ips, err := getCUDNPodIPs(oc, ns1, podName)
 			Expect(err).NotTo(HaveOccurred())
-			podToIPNs1[podName] = ip
+			podToIPsNs1[podName] = ips
 		}
 
 		for _, podName := range helloPodNamesNs2 {
@@ -196,15 +204,15 @@ var _ = Describe("CUDN Localnet", func() {
 			Expect(err).NotTo(HaveOccurred())
 			podToNodeNs2[podName] = node
 
-			ip, err := getCUDNPodIP(oc, ns2, podName)
+			ips, err := getCUDNPodIPs(oc, ns2, podName)
 			Expect(err).NotTo(HaveOccurred())
-			podToIPNs2[podName] = ip
+			podToIPsNs2[podName] = ips
 		}
 
 		// Find same-node pod pairs for connectivity testing
 		type PodPair struct {
 			ns1Pod, ns2Pod string
-			ns1IP, ns2IP   string
+			ns1IPs, ns2IPs []string
 		}
 		var sameNodePairs []PodPair
 
@@ -214,8 +222,8 @@ var _ = Describe("CUDN Localnet", func() {
 					sameNodePairs = append(sameNodePairs, PodPair{
 						ns1Pod: ns1Pod,
 						ns2Pod: ns2Pod,
-						ns1IP:  podToIPNs1[ns1Pod],
-						ns2IP:  podToIPNs2[ns2Pod],
+						ns1IPs: podToIPsNs1[ns1Pod],
+						ns2IPs: podToIPsNs2[ns2Pod],
 					})
 					break // Only need one pair per ns1 pod
 				}
@@ -227,11 +235,11 @@ var _ = Describe("CUDN Localnet", func() {
 
 		By("Step 8: Verify all pods can communicate before applying NetworkPolicy")
 		// Use same-node pod pairs for localnet topology (cross-node traffic requires physical network configuration)
-		verifyCurlSuccess(oc, ns1, sameNodePairs[0].ns1Pod, sameNodePairs[0].ns2IP,
+		verifyCurlSuccess(oc, ns1, sameNodePairs[0].ns1Pod, sameNodePairs[0].ns2IPs[0],
 			fmt.Sprintf("Before policy: %s to %s (same node)", sameNodePairs[0].ns1Pod, sameNodePairs[0].ns2Pod))
-		verifyCurlSuccess(oc, ns1, sameNodePairs[1].ns1Pod, sameNodePairs[1].ns2IP,
+		verifyCurlSuccess(oc, ns1, sameNodePairs[1].ns1Pod, sameNodePairs[1].ns2IPs[0],
 			fmt.Sprintf("Before policy: %s to %s (same node)", sameNodePairs[1].ns1Pod, sameNodePairs[1].ns2Pod))
-		verifyCurlSuccess(oc, ns2, sameNodePairs[0].ns2Pod, sameNodePairs[0].ns1IP,
+		verifyCurlSuccess(oc, ns2, sameNodePairs[0].ns2Pod, sameNodePairs[0].ns1IPs[0],
 			fmt.Sprintf("Before policy: %s to %s (same node)", sameNodePairs[0].ns2Pod, sameNodePairs[0].ns1Pod))
 
 		By("Step 9: Create Ingress IPBlock MultiNetworkPolicy in namespace a1")
@@ -253,30 +261,48 @@ var _ = Describe("CUDN Localnet", func() {
 		time.Sleep(10 * time.Second)
 
 		By("Step 10: Verify Ingress IPBlock policy enforcement in namespace a1")
-		// Find a pair where ns2 pod IP is in range and another where it's outside
-		// Use the same CIDR as defined in the ingress policy
-		ingressCIDR := ingressPolicyNs1.Cidr
-		var inRangePair, outRangePair *PodPair
-		for i := range sameNodePairs {
-			ns2IP := sameNodePairs[i].ns2IP
-			if isIPInCIDR(ns2IP, ingressCIDR) && inRangePair == nil {
-				inRangePair = &sameNodePairs[i]
-			} else if !isIPInCIDR(ns2IP, ingressCIDR) && outRangePair == nil {
-				outRangePair = &sameNodePairs[i]
+		// Test both IPv4 (Cidr) and IPv6 (Cidr2) ingress filtering
+		for _, cidrTest := range []struct {
+			cidr     string
+			ipFamily string
+		}{
+			{ingressPolicyNs1.Cidr, "IPv4"},
+			{ingressPolicyNs1.Cidr2, "IPv6"},
+		} {
+			if cidrTest.cidr == "" {
+				continue // Skip if CIDR not defined
 			}
-			if inRangePair != nil && outRangePair != nil {
-				break
+
+			By(fmt.Sprintf("Testing ingress policy for %s CIDR: %s", cidrTest.ipFamily, cidrTest.cidr))
+			var inRangePair, outRangePair *PodPair
+
+			for i := range sameNodePairs {
+				pair := &sameNodePairs[i]
+				// Check each IP in ns2IPs array
+				for _, ns2IP := range pair.ns2IPs {
+					if isIPInCIDR(ns2IP, cidrTest.cidr) {
+						if inRangePair == nil {
+							inRangePair = pair
+							verifyCurlSuccess(oc, ns2, pair.ns2Pod, pair.ns1IPs[0],
+								fmt.Sprintf("Ingress allowed (%s): %s (IP %s) to %s (source in range, same node)",
+									cidrTest.ipFamily, pair.ns2Pod, ns2IP, pair.ns1Pod))
+						}
+					} else {
+						if outRangePair == nil {
+							outRangePair = pair
+							verifyCurlFailure(oc, ns2, pair.ns2Pod, pair.ns1IPs[0],
+								fmt.Sprintf("Ingress blocked (%s): %s (IP %s) to %s (source outside range, same node)",
+									cidrTest.ipFamily, pair.ns2Pod, ns2IP, pair.ns1Pod))
+						}
+					}
+					if inRangePair != nil && outRangePair != nil {
+						break
+					}
+				}
+				if inRangePair != nil && outRangePair != nil {
+					break
+				}
 			}
-		}
-
-		if inRangePair != nil {
-			verifyCurlSuccess(oc, ns2, inRangePair.ns2Pod, inRangePair.ns1IP,
-				fmt.Sprintf("Ingress allowed: %s (IP %s) to %s (source in range, same node)", inRangePair.ns2Pod, inRangePair.ns2IP, inRangePair.ns1Pod))
-		}
-
-		if outRangePair != nil {
-			verifyCurlFailure(oc, ns2, outRangePair.ns2Pod, outRangePair.ns1IP,
-				fmt.Sprintf("Ingress blocked: %s (IP %s) to %s (source outside range, same node)", outRangePair.ns2Pod, outRangePair.ns2IP, outRangePair.ns1Pod))
 		}
 
 		By("Step 11: Delete Ingress policy and verify connectivity is restored")
@@ -284,10 +310,8 @@ var _ = Describe("CUDN Localnet", func() {
 		Expect(err).NotTo(HaveOccurred())
 		time.Sleep(5 * time.Second)
 
-		if outRangePair != nil {
-			verifyCurlSuccess(oc, ns2, outRangePair.ns2Pod, outRangePair.ns1IP,
-				fmt.Sprintf("After ingress policy deletion: %s to %s (same node)", outRangePair.ns2Pod, outRangePair.ns1Pod))
-		}
+		verifyCurlSuccess(oc, ns2, sameNodePairs[0].ns2Pod, sameNodePairs[0].ns1IPs[0],
+			fmt.Sprintf("After ingress policy deletion: %s to %s (same node)", sameNodePairs[0].ns2Pod, sameNodePairs[0].ns1Pod))
 
 		By("Step 12: Create Egress IPBlock MultiNetworkPolicy in both namespaces")
 		// Allow egress only to 192.168.100.0/30 and fd00:192:168:100::/126
@@ -321,47 +345,63 @@ var _ = Describe("CUDN Localnet", func() {
 		time.Sleep(10 * time.Second)
 
 		By("Step 13: Verify Egress IPBlock policy enforcement")
-		// Find pairs where destination is in range and out of range
-		// Use the same CIDR as defined in the egress policy
-		egressCIDR := egressPolicyNs1.Cidr
-
-		// Track which pod-destination combinations we've found
-		type EgressTest struct {
-			srcNamespace, srcPod, destPod, destIP string
-		}
-		var allowedTests, blockedTests []EgressTest
-
-		// Check all same-node pairs, looking at both ns1→ns2 and ns2→ns1 traffic
-		for i := range sameNodePairs {
-			pair := &sameNodePairs[i]
-
-			// Check ns1→ns2 traffic (from ns1 pod to ns2 pod's IP)
-			if isIPInCIDR(pair.ns2IP, egressCIDR) {
-				allowedTests = append(allowedTests, EgressTest{ns1, pair.ns1Pod, pair.ns2Pod, pair.ns2IP})
-			} else {
-				blockedTests = append(blockedTests, EgressTest{ns1, pair.ns1Pod, pair.ns2Pod, pair.ns2IP})
+		// Test both IPv4 (Cidr) and IPv6 (Cidr2) egress filtering
+		for _, cidrTest := range []struct {
+			cidr     string
+			ipFamily string
+		}{
+			{egressPolicyNs1.Cidr, "IPv4"},
+			{egressPolicyNs1.Cidr2, "IPv6"},
+		} {
+			if cidrTest.cidr == "" {
+				continue // Skip if CIDR not defined
 			}
 
-			// Check ns2→ns1 traffic (from ns2 pod to ns1 pod's IP)
-			if isIPInCIDR(pair.ns1IP, egressCIDR) {
-				allowedTests = append(allowedTests, EgressTest{ns2, pair.ns2Pod, pair.ns1Pod, pair.ns1IP})
-			} else {
-				blockedTests = append(blockedTests, EgressTest{ns2, pair.ns2Pod, pair.ns1Pod, pair.ns1IP})
+			By(fmt.Sprintf("Testing egress policy for %s CIDR: %s", cidrTest.ipFamily, cidrTest.cidr))
+
+			type EgressTest struct {
+				srcNamespace, srcPod, destPod, destIP string
 			}
-		}
+			var allowedTests, blockedTests []EgressTest
 
-		// Run at least one test for allowed traffic if available
-		if len(allowedTests) > 0 {
-			test := allowedTests[0]
-			verifyCurlSuccess(oc, test.srcNamespace, test.srcPod, test.destIP,
-				fmt.Sprintf("Egress allowed: %s to %s (IP %s, dest in range, same node)", test.srcPod, test.destPod, test.destIP))
-		}
+			// Check all same-node pairs, testing both ns1→ns2 and ns2→ns1 traffic
+			for i := range sameNodePairs {
+				pair := &sameNodePairs[i]
 
-		// Run at least one test for blocked traffic if available
-		if len(blockedTests) > 0 {
-			test := blockedTests[0]
-			verifyCurlFailure(oc, test.srcNamespace, test.srcPod, test.destIP,
-				fmt.Sprintf("Egress blocked: %s to %s (IP %s, dest outside range, same node)", test.srcPod, test.destPod, test.destIP))
+				// Check ns1→ns2 traffic for each ns2 IP
+				for _, ns2IP := range pair.ns2IPs {
+					if isIPInCIDR(ns2IP, cidrTest.cidr) {
+						allowedTests = append(allowedTests, EgressTest{ns1, pair.ns1Pod, pair.ns2Pod, ns2IP})
+					} else {
+						blockedTests = append(blockedTests, EgressTest{ns1, pair.ns1Pod, pair.ns2Pod, ns2IP})
+					}
+				}
+
+				// Check ns2→ns1 traffic for each ns1 IP
+				for _, ns1IP := range pair.ns1IPs {
+					if isIPInCIDR(ns1IP, cidrTest.cidr) {
+						allowedTests = append(allowedTests, EgressTest{ns2, pair.ns2Pod, pair.ns1Pod, ns1IP})
+					} else {
+						blockedTests = append(blockedTests, EgressTest{ns2, pair.ns2Pod, pair.ns1Pod, ns1IP})
+					}
+				}
+			}
+
+			// Run at least one test for allowed traffic if available
+			if len(allowedTests) > 0 {
+				test := allowedTests[0]
+				verifyCurlSuccess(oc, test.srcNamespace, test.srcPod, test.destIP,
+					fmt.Sprintf("Egress allowed (%s): %s to %s (IP %s, dest in range, same node)",
+						cidrTest.ipFamily, test.srcPod, test.destPod, test.destIP))
+			}
+
+			// Run at least one test for blocked traffic if available
+			if len(blockedTests) > 0 {
+				test := blockedTests[0]
+				verifyCurlFailure(oc, test.srcNamespace, test.srcPod, test.destIP,
+					fmt.Sprintf("Egress blocked (%s): %s to %s (IP %s, dest outside range, same node)",
+						cidrTest.ipFamily, test.srcPod, test.destPod, test.destIP))
+			}
 		}
 
 		By("Step 14: Cleanup - Delete Egress policies")
@@ -373,37 +413,37 @@ var _ = Describe("CUDN Localnet", func() {
 		By("Step 15: Verify connectivity is restored after policy deletion")
 		time.Sleep(5 * time.Second)
 		if len(sameNodePairs) > 1 {
-			verifyCurlSuccess(oc, ns1, sameNodePairs[1].ns1Pod, sameNodePairs[1].ns2IP,
+			verifyCurlSuccess(oc, ns1, sameNodePairs[1].ns1Pod, sameNodePairs[1].ns2IPs[0],
 				fmt.Sprintf("After egress policy deletion: %s to %s (same node)", sameNodePairs[1].ns1Pod, sameNodePairs[1].ns2Pod))
 		}
 	})
 })
 
-// getCUDNPodIP extracts the CUDN IP address from the pod's network-status annotation
-func getCUDNPodIP(oc *exutil.CLI, namespace, podName string) (string, error) {
+// getCUDNPodIPs extracts all CUDN IP addresses (IPv4 and IPv6) from the pod's network-status annotation
+func getCUDNPodIPs(oc *exutil.CLI, namespace, podName string) ([]string, error) {
 	output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("pod", podName, "-n", namespace, "-o", "jsonpath={.metadata.annotations.k8s\\.v1\\.cni\\.cncf\\.io/network-status}").Output()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Unmarshal the network-status JSON
 	var networkStatuses []nettypes.NetworkStatus
 	if err := json.Unmarshal([]byte(output), &networkStatuses); err != nil {
-		return "", fmt.Errorf("failed to unmarshal network-status annotation: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal network-status annotation: %v", err)
 	}
 
 	// Find the sec-localnet-net-ipblock network entry with ovn-udn2 interface
 	for _, ns := range networkStatuses {
 		if ns.Name == "sec-localnet-net-ipblock" && ns.Interface == "ovn-udn2" {
-			// Return the first IP from the IPs array (supports both IPv4 and IPv6)
+			// Return all IPs (both IPv4 and IPv6 for dual-stack)
 			if len(ns.IPs) > 0 {
-				return ns.IPs[0], nil
+				return ns.IPs, nil
 			}
 		}
 	}
 
-	// Fallback: use ip command to get IP from ovn-udn2 interface
-	// Try IPv4 first, then IPv6
+	// Fallback: use ip command to get IPs from ovn-udn2 interface
+	var ips []string
 	for _, ipVersion := range []struct {
 		flag   string
 		filter string
@@ -416,11 +456,27 @@ func getCUDNPodIP(oc *exutil.CLI, namespace, podName string) (string, error) {
 		if err == nil {
 			ip := strings.TrimSpace(output)
 			if ip != "" {
-				return ip, nil
+				ips = append(ips, ip)
 			}
 		}
 	}
 
+	if len(ips) > 0 {
+		return ips, nil
+	}
+
+	return nil, fmt.Errorf("no IP addresses found on interface ovn-udn2 for pod %s", podName)
+}
+
+// getCUDNPodIP extracts the primary CUDN IP address (backward compatibility)
+func getCUDNPodIP(oc *exutil.CLI, namespace, podName string) (string, error) {
+	ips, err := getCUDNPodIPs(oc, namespace, podName)
+	if err != nil {
+		return "", err
+	}
+	if len(ips) > 0 {
+		return ips[0], nil
+	}
 	return "", fmt.Errorf("no IP address found on interface ovn-udn2 for pod %s", podName)
 }
 
