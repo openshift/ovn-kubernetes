@@ -118,6 +118,11 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 	enableMetricsOption := client.WithMetricsRegistryNamespaceSubsystem(promRegistry,
 		"ovnkube", "master_libovsdb")
 
+	dbModel.SetIndexes(map[string][]model.ClientIndex{
+		// seconday index to find mac bindings by port
+		sbdb.MACBindingTable: {{Columns: []model.ColumnKey{{Column: "logical_port"}}}},
+	})
+
 	c, err := newClient(endpoint, dbModel, enableMetricsOption)
 	if err != nil {
 		return nil, err
@@ -149,6 +154,7 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 			client.WithTable(&sbdb.SBGlobal{}),
 			// used for metrics
 			client.WithTable(&sbdb.PortBinding{}),
+			client.WithTable(&sbdb.MACBinding{}),
 		),
 	)
 	if err != nil {
