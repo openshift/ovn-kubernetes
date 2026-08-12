@@ -489,16 +489,10 @@ var _ = ginkgo.Describe("e2e egress IP validation", func() {
 	// rt_addrprotos. IFA_PROTO requires Linux kernel 5.18+; on older kernels
 	// the attribute is silently ignored by the kernel and the ip CLI will not
 	// report a protocol field, so the check is skipped.
-	// EgressIP addresses are only assigned to node interfaces when both
-	// interconnect and network segmentation are enabled (see canHandleBridgeEgressIP
-	// in gateway.go); otherwise EgressIP is handled entirely through OVN logical
-	// flows and no Linux address is present on the node.
+	//
+	// Callers must only invoke this for secondary-host EIPs, which assign
+	// the address on a host NIC. OVN-network EIPs use logical flows on this branch.
 	verifyEgressIPAddrProto := func(nodeName, eipAddr string) {
-		if !isInterconnectEnabled() {
-			framework.Logf("Skipping IFA_PROTO check for EgressIP %s on node %s: EgressIP addresses are only assigned to node interfaces when interconnect and network segmentation are enabled", eipAddr, nodeName)
-			return
-		}
-
 		type ipAddrInfo struct {
 			Local    string `json:"local"`
 			Protocol string `json:"protocol"`
@@ -744,11 +738,6 @@ spec:
 				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod2Name, podNamespace.Name, true, []string{egressIP1.String(), egressIP2.String()}))
 				framework.ExpectNoError(err, "Step 4. Check connectivity from second to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
 
-				ginkgo.By("4a. Check that the EgressIP addresses have IFA_PROTO set to OVN-K (85)")
-				for _, status := range statuses {
-					verifyEgressIPAddrProto(status.Node, status.EgressIP)
-				}
-
 				ginkgo.By("5. Check connectivity from one pod to the other and verify that the connection is achieved")
 				err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP))
 				framework.ExpectNoError(err, "Step 5. Check connectivity from one pod to the other and verify that the connection is achieved, failed, err: %v", err)
@@ -941,9 +930,6 @@ spec:
 		ginkgo.By("6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(targetNode, pod1Name, podNamespace.Name, true, []string{egressIP1.String()}))
 		framework.ExpectNoError(err, "Step 6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP, failed: %v", err)
-
-		ginkgo.By("6a. Check that the EgressIP address has IFA_PROTO set to OVN-K (85)")
-		verifyEgressIPAddrProto(statuses[0].Node, statuses[0].EgressIP)
 
 		ginkgo.By("7. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected nodeIP")
 		err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(hostNetPod, pod1Name, podNamespace.Name, true, []string{egressNodeIP.String()}))
