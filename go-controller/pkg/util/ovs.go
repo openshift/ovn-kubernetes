@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -322,6 +323,62 @@ func runWithEnvVars(cmdPath string, envVars []string, args ...string) (*bytes.Bu
 func RunOVSOfctl(args ...string) (string, string, error) {
 	stdout, stderr, err := run(runner.ofctlPath, args...)
 	return strings.Trim(stdout.String(), "\" \n"), stderr.String(), err
+}
+
+// SetPortNoFlood sets the OFPPC_NO_FLOOD bit on the given OVS port via
+// "ovs-ofctl mod-port", preventing NORMAL/FLOOD actions from sending
+// packets to that port. The no-flood property is an OpenFlow port
+// config flag and cannot be set through the OVSDB Port table.
+// The caller must resolve the ofport number (e.g. via libovsdb)
+// because ovs-ofctl uses OpenFlow to map names to numbers and OpenFlow
+// limits port names to 15 bytes (see ovs-ofctl(8) --names documentation).
+func SetPortNoFlood(bridgeName, ofport string) error {
+	_, stderr, err := RunOVSOfctl("mod-port", bridgeName, ofport, "no-flood")
+	if err != nil {
+		return fmt.Errorf("failed to set no-flood on ofport %s of bridge %s: stderr: %s, error: %w",
+			ofport, bridgeName, stderr, err)
+	}
+	return nil
+}
+
+// GetNoFloodPorts returns the set of ofport numbers on bridgeName that
+// already have OFPPC_NO_FLOOD set, by parsing "ovs-ofctl dump-ports-desc".
+// The returned map keys are ofport number strings (e.g. "42").
+func GetNoFloodPorts(bridgeName string) (map[string]bool, error) {
+	stdout, stderr, err := RunOVSOfctl("dump-ports-desc", bridgeName)
+	if err != nil {
+		return nil, fmt.Errorf("dump-ports-desc on %s failed: stderr: %s, error: %w",
+			bridgeName, stderr, err)
+	}
+	// Output format (one block per port):
+	//  1(eth0): addr:...
+	//      config:     NO_FLOOD
+	//      state:      LIVE
+	result := make(map[string]bool)
+	var currentOfport string
+	for _, line := range strings.Split(stdout, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Port header, e.g.:
+		//  1(eth0): addr:...
+		if idx := strings.IndexByte(trimmed, '('); idx > 0 {
+			port := strings.TrimSpace(trimmed[:idx])
+			if _, err := strconv.ParseUint(port, 10, 32); err == nil {
+				currentOfport = port
+			}
+			continue
+		}
+		// Port configuration, e.g.:
+		//  config:     NO_FLOOD
+		if currentOfport != "" && strings.HasPrefix(trimmed, "config:") {
+			for _, flag := range strings.Fields(strings.TrimPrefix(trimmed, "config:")) {
+				if flag == "NO_FLOOD" {
+					result[currentOfport] = true
+					break
+				}
+			}
+		}
+	}
+	return result, nil
 }
 
 // RunOVSVsctl runs a command via ovs-vsctl.

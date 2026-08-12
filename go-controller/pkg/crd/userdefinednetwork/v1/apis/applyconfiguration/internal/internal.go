@@ -26,6 +26,502 @@ func Parser() *typed.Parser {
 var parserOnce sync.Once
 var parser *typed.Parser
 var schemaYAML = typed.YAMLObject(`types:
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.AccessVLANConfig
+  map:
+    fields:
+    - name: id
+      type:
+        scalar: numeric
+      default: 0
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.ClusterUserDefinedNetwork
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+      default: {}
+    - name: spec
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.ClusterUserDefinedNetworkSpec
+      default: {}
+    - name: status
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.ClusterUserDefinedNetworkStatus
+      default: {}
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.ClusterUserDefinedNetworkSpec
+  map:
+    fields:
+    - name: namespaceSelector
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+      default: {}
+    - name: network
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.NetworkSpec
+      default: {}
+    - name: uplinks
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.ClusterUserDefinedNetworkStatus
+  map:
+    fields:
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: associative
+          keys:
+          - type
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.EVPNConfig
+  map:
+    fields:
+    - name: ipVRF
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.VRFConfig
+    - name: macVRF
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.VRFConfig
+    - name: vtep
+      type:
+        scalar: string
+      default: ""
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.IPAMConfig
+  map:
+    fields:
+    - name: lifecycle
+      type:
+        scalar: string
+    - name: mode
+      type:
+        scalar: string
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.Layer2Config
+  map:
+    fields:
+    - name: defaultGatewayIPs
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: infrastructureSubnets
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: ipam
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.IPAMConfig
+    - name: joinSubnets
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: mtu
+      type:
+        scalar: numeric
+    - name: reservedSubnets
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: role
+      type:
+        scalar: string
+      default: ""
+    - name: subnets
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.Layer3Config
+  map:
+    fields:
+    - name: joinSubnets
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: mtu
+      type:
+        scalar: numeric
+    - name: role
+      type:
+        scalar: string
+      default: ""
+    - name: subnets
+      type:
+        list:
+          elementType:
+            namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.Layer3Subnet
+          elementRelationship: atomic
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.Layer3Subnet
+  map:
+    fields:
+    - name: cidr
+      type:
+        scalar: string
+    - name: hostSubnet
+      type:
+        scalar: numeric
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.LocalnetConfig
+  map:
+    fields:
+    - name: excludeSubnets
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: ipam
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.IPAMConfig
+    - name: mtu
+      type:
+        scalar: numeric
+    - name: physicalNetworkName
+      type:
+        scalar: string
+      default: ""
+    - name: role
+      type:
+        scalar: string
+      default: ""
+    - name: subnets
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+    - name: vlan
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.VLANConfig
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.NetworkSpec
+  map:
+    fields:
+    - name: evpn
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.EVPNConfig
+    - name: layer2
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.Layer2Config
+    - name: layer3
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.Layer3Config
+    - name: localnet
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.LocalnetConfig
+    - name: noOverlay
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.NoOverlayConfig
+    - name: topology
+      type:
+        scalar: string
+      default: ""
+    - name: transport
+      type:
+        scalar: string
+    unions:
+    - discriminator: topology
+      fields:
+      - fieldName: evpn
+        discriminatorValue: EVPN
+      - fieldName: layer2
+        discriminatorValue: Layer2
+      - fieldName: layer3
+        discriminatorValue: Layer3
+      - fieldName: localnet
+        discriminatorValue: Localnet
+      - fieldName: noOverlay
+        discriminatorValue: NoOverlay
+      - fieldName: transport
+        discriminatorValue: Transport
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.NoOverlayConfig
+  map:
+    fields:
+    - name: outboundSNAT
+      type:
+        scalar: string
+      default: ""
+    - name: routing
+      type:
+        scalar: string
+      default: ""
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.UserDefinedNetwork
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: kind
+      type:
+        scalar: string
+    - name: metadata
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+      default: {}
+    - name: spec
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.UserDefinedNetworkSpec
+      default: {}
+    - name: status
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.UserDefinedNetworkStatus
+      default: {}
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.UserDefinedNetworkSpec
+  map:
+    fields:
+    - name: layer2
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.Layer2Config
+    - name: layer3
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.Layer3Config
+    - name: topology
+      type:
+        scalar: string
+      default: ""
+    unions:
+    - discriminator: topology
+      fields:
+      - fieldName: layer2
+        discriminatorValue: Layer2
+      - fieldName: layer3
+        discriminatorValue: Layer3
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.UserDefinedNetworkStatus
+  map:
+    fields:
+    - name: conditions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+          elementRelationship: associative
+          keys:
+          - type
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.VLANConfig
+  map:
+    fields:
+    - name: access
+      type:
+        namedType: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.AccessVLANConfig
+    - name: mode
+      type:
+        scalar: string
+      default: ""
+    unions:
+    - discriminator: mode
+      fields:
+      - fieldName: access
+        discriminatorValue: Access
+- name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.VRFConfig
+  map:
+    fields:
+    - name: routeTarget
+      type:
+        scalar: string
+    - name: vni
+      type:
+        scalar: numeric
+      default: 0
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.Condition
+  map:
+    fields:
+    - name: lastTransitionTime
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: message
+      type:
+        scalar: string
+      default: ""
+    - name: observedGeneration
+      type:
+        scalar: numeric
+    - name: reason
+      type:
+        scalar: string
+      default: ""
+    - name: status
+      type:
+        scalar: string
+      default: ""
+    - name: type
+      type:
+        scalar: string
+      default: ""
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1
+  map:
+    elementType:
+      scalar: untyped
+      list:
+        elementType:
+          namedType: __untyped_atomic_
+        elementRelationship: atomic
+      map:
+        elementType:
+          namedType: __untyped_deduced_
+        elementRelationship: separable
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector
+  map:
+    fields:
+    - name: matchExpressions
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement
+          elementRelationship: atomic
+    - name: matchLabels
+      type:
+        map:
+          elementType:
+            scalar: string
+    elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement
+  map:
+    fields:
+    - name: key
+      type:
+        scalar: string
+      default: ""
+    - name: operator
+      type:
+        scalar: string
+      default: ""
+    - name: values
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+    - name: fieldsType
+      type:
+        scalar: string
+    - name: fieldsV1
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.FieldsV1
+    - name: manager
+      type:
+        scalar: string
+    - name: operation
+      type:
+        scalar: string
+    - name: subresource
+      type:
+        scalar: string
+    - name: time
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta
+  map:
+    fields:
+    - name: annotations
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: creationTimestamp
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: deletionGracePeriodSeconds
+      type:
+        scalar: numeric
+    - name: deletionTimestamp
+      type:
+        namedType: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+    - name: finalizers
+      type:
+        list:
+          elementType:
+            scalar: string
+          elementRelationship: associative
+    - name: generateName
+      type:
+        scalar: string
+    - name: generation
+      type:
+        scalar: numeric
+    - name: labels
+      type:
+        map:
+          elementType:
+            scalar: string
+    - name: managedFields
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.ManagedFieldsEntry
+          elementRelationship: atomic
+    - name: name
+      type:
+        scalar: string
+    - name: namespace
+      type:
+        scalar: string
+    - name: ownerReferences
+      type:
+        list:
+          elementType:
+            namedType: io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference
+          elementRelationship: associative
+          keys:
+          - uid
+    - name: resourceVersion
+      type:
+        scalar: string
+    - name: selfLink
+      type:
+        scalar: string
+    - name: uid
+      type:
+        scalar: string
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.OwnerReference
+  map:
+    fields:
+    - name: apiVersion
+      type:
+        scalar: string
+      default: ""
+    - name: blockOwnerDeletion
+      type:
+        scalar: boolean
+    - name: controller
+      type:
+        scalar: boolean
+    - name: kind
+      type:
+        scalar: string
+      default: ""
+    - name: name
+      type:
+        scalar: string
+      default: ""
+    - name: uid
+      type:
+        scalar: string
+      default: ""
+    elementRelationship: atomic
+- name: io.k8s.apimachinery.pkg.apis.meta.v1.Time
+  scalar: untyped
 - name: __untyped_atomic_
   scalar: untyped
   list:

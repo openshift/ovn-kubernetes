@@ -118,8 +118,8 @@ func TestUplinkControllerReportsBoundedPartialFailureSummary(t *testing.T) {
 			uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound),
 		newUnresolvedUplinkState("br-blue", "node-b", "br-blue",
 			uplinkv1alpha1.UplinkStateReasonBridgeNotFound),
-		newUnresolvedUplinkState("br-blue", "node-c", "br-blue",
-			uplinkv1alpha1.UplinkStateReasonWaitingForDPU),
+		newDPUHostBlockedUplinkState("br-blue", "node-c", "br-blue",
+			uplinkv1alpha1.UplinkStateReasonInvalidHostInterface),
 		newUnresolvedUplinkState("br-blue", "node-d", "br-blue",
 			uplinkv1alpha1.UplinkStateReasonGatewayInfoUnavailable),
 		newResolvedUplinkState("br-blue", "node-e", "br-blue"),
@@ -134,7 +134,7 @@ func TestUplinkControllerReportsBoundedPartialFailureSummary(t *testing.T) {
 		gomega.HaveField("Message", gomega.ContainSubstring("4 of 5 selected node(s)")),
 		gomega.HaveField("Message", gomega.ContainSubstring("node-a=HostInterfaceNotFound")),
 		gomega.HaveField("Message", gomega.ContainSubstring("node-b=BridgeNotFound")),
-		gomega.HaveField("Message", gomega.ContainSubstring("node-c=WaitingForDPU")),
+		gomega.HaveField("Message", gomega.ContainSubstring("node-c=InvalidHostInterface")),
 		gomega.HaveField("Message", gomega.Not(gomega.ContainSubstring("node-d="))),
 	))
 }
@@ -259,6 +259,35 @@ func TestUplinkControllerReportsOverlappingSelectors(t *testing.T) {
 	)
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	g.Expect(states.Items).To(gomega.BeEmpty())
+}
+
+func TestUplinkControllerReportsInvalidSpec(t *testing.T) {
+	g := gomega.NewWithT(t)
+	uplink := newUplink("br-blue", "role", "blue", "br-blue")
+	// A LabelSelector can pass CRD schema validation yet fail to parse:
+	// Exists takes no values (LabelSelectorOpIn would be the right operator
+	// for matching against values).
+	uplink.Spec.NodeConfigs[0].NodeSelector = metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{
+			Key:      "role",
+			Operator: metav1.LabelSelectorOpExists,
+			Values:   []string{"blue"},
+		}},
+	}
+	controller, client := newTestController(t,
+		newNode("node-a", map[string]string{"role": "blue"}),
+		uplink,
+	)
+
+	// A rejected spec is reported but not retried: the cluster admin must
+	// fix the Uplink CR, and that update triggers a new reconcile.
+	g.Expect(controller.reconcileUplink("br-blue")).To(gomega.Succeed())
+
+	cond := getUplinkCondition(g, client, "br-blue", uplinkv1alpha1.UplinkConditionReady)
+	g.Expect(cond).To(gomega.And(
+		gomega.HaveField("Status", metav1.ConditionFalse),
+		gomega.HaveField("Reason", reasonInvalidSpec),
+	))
 }
 
 func TestUplinkControllerEnsuresFinalizerFromCUDNReference(t *testing.T) {
@@ -1084,6 +1113,48 @@ func newUnresolvedUplinkState(
 	state := newResolvedUplinkState(uplinkName, nodeName, hostInterfaceName)
 	state.Status.Conditions[0].Status = metav1.ConditionFalse
 	state.Status.Conditions[0].Reason = reason
+	return state
+}
+
+func TestUplinkStateNotResolvedReasonSurfacesHostCause(t *testing.T) {
+	g := gomega.NewWithT(t)
+	nodeConfig := uplinkv1alpha1.UplinkNodeConfig{
+		Type:              uplinkv1alpha1.UplinkTypeOVSBridge,
+		HostInterfaceName: "br-blue",
+	}
+
+	// The DPU is blocked on host data: the host-side cause is surfaced.
+	state := newDPUHostBlockedUplinkState("br-blue", "node-a", "br-blue",
+		uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound)
+	g.Expect(uplinkStateNotResolvedReason(state, nodeConfig)).
+		To(gomega.Equal(uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound))
+
+	// Same when the DPU has not written a Resolved condition at all.
+	meta.RemoveStatusCondition(&state.Status.Conditions, uplinkv1alpha1.UplinkStateConditionResolved)
+	g.Expect(uplinkStateNotResolvedReason(state, nodeConfig)).
+		To(gomega.Equal(uplinkv1alpha1.UplinkStateReasonHostInterfaceNotFound))
+
+	// Without a host-side failure either, fall back to the generic reason.
+	meta.RemoveStatusCondition(&state.Status.Conditions, uplinkv1alpha1.UplinkStateConditionHostDataReady)
+	g.Expect(uplinkStateNotResolvedReason(state, nodeConfig)).
+		To(gomega.Equal("ResolvedConditionMissing"))
+}
+
+// newDPUHostBlockedUplinkState models a split DPU state where the DPU waits
+// on host data and the DPU-host reports the root cause on HostDataReady.
+func newDPUHostBlockedUplinkState(
+	uplinkName string,
+	nodeName string,
+	hostInterfaceName string,
+	hostDataReason string,
+) *uplinkv1alpha1.UplinkState {
+	state := newUnresolvedUplinkState(uplinkName, nodeName, hostInterfaceName,
+		uplinkv1alpha1.UplinkStateReasonWaitingForDPUHost)
+	state.Status.Conditions = append(state.Status.Conditions, metav1.Condition{
+		Type:   uplinkv1alpha1.UplinkStateConditionHostDataReady,
+		Status: metav1.ConditionFalse,
+		Reason: hostDataReason,
+	})
 	return state
 }
 

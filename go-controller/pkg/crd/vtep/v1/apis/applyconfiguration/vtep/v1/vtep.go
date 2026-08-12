@@ -6,8 +6,11 @@
 package v1
 
 import (
+	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -32,6 +35,46 @@ func VTEP(name string) *VTEPApplyConfiguration {
 	b.WithKind("VTEP")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractVTEPFrom extracts the applied configuration owned by fieldManager from
+// vTEP for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// vTEP must be a unmodified VTEP API object that was retrieved from the Kubernetes API.
+// ExtractVTEPFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractVTEPFrom(vTEP *vtepv1.VTEP, fieldManager string, subresource string) (*VTEPApplyConfiguration, error) {
+	b := &VTEPApplyConfiguration{}
+	err := managedfields.ExtractInto(vTEP, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.vtep.v1.VTEP"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(vTEP.Name)
+
+	b.WithKind("VTEP")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractVTEP extracts the applied configuration owned by fieldManager from
+// vTEP. If no managedFields are found in vTEP for fieldManager, a
+// VTEPApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// vTEP must be a unmodified VTEP API object that was retrieved from the Kubernetes API.
+// ExtractVTEP provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractVTEP(vTEP *vtepv1.VTEP, fieldManager string) (*VTEPApplyConfiguration, error) {
+	return ExtractVTEPFrom(vTEP, fieldManager, "")
+}
+
+// ExtractVTEPStatus extracts the applied configuration owned by fieldManager from
+// vTEP for the status subresource.
+func ExtractVTEPStatus(vTEP *vtepv1.VTEP, fieldManager string) (*VTEPApplyConfiguration, error) {
+	return ExtractVTEPFrom(vTEP, fieldManager, "status")
 }
 
 func (b VTEPApplyConfiguration) IsApplyConfiguration() {}

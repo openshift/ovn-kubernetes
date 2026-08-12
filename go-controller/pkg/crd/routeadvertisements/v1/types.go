@@ -56,6 +56,7 @@ type RouteAdvertisementsSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:XValidation:rule="self.all(x, self.exists_one(y, x == y))"
+	// +listType=atomic
 	Advertisements []AdvertisementType `json:"advertisements,omitempty"`
 }
 
