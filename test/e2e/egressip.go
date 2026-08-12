@@ -606,16 +606,12 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 		// rt_addrprotos. IFA_PROTO requires Linux kernel 5.18+; on older kernels
 		// the attribute is silently ignored by the kernel and the ip CLI will not
 		// report a protocol field, so the check is skipped.
-		// EgressIP addresses are only assigned to node interfaces when both
-		// interconnect and network segmentation are enabled (see canHandleBridgeEgressIP
-		// in gateway.go); otherwise EgressIP is handled entirely through OVN logical
-		// flows and no Linux address is present on the node.
+		//
+		// Callers must only invoke this when a Linux address is expected:
+		// - secondary-host EIPs always assign the address on a host NIC
+		// - OVN-network EIPs assign the address on the gateway bridge only when
+		//   network segmentation is enabled (see canHandleBridgeEgressIP)
 		verifyEgressIPAddrProto := func(nodeName, eipAddr string) {
-			if !isInterconnectEnabled() || !isNetworkSegmentationEnabled() {
-				framework.Logf("Skipping IFA_PROTO check for EgressIP %s on node %s: EgressIP addresses are only assigned to node interfaces when interconnect and network segmentation are enabled", eipAddr, nodeName)
-				return
-			}
-
 			type ipAddrInfo struct {
 				Local    string `json:"local"`
 				Protocol string `json:"protocol"`
@@ -1067,8 +1063,12 @@ spec:
 					framework.ExpectNoError(err, "Step 4. Check connectivity from second to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
 
 					ginkgo.By("4a. Check that the EgressIP addresses have IFA_PROTO set to OVN-K (85)")
-					for _, status := range statuses {
-						verifyEgressIPAddrProto(status.Node, status.EgressIP)
+					// OVN-network EIPs are assigned on the gateway bridge only when
+					// network segmentation is enabled (canHandleBridgeEgressIP).
+					if isNetworkSegmentationEnabled() {
+						for _, status := range statuses {
+							verifyEgressIPAddrProto(status.Node, status.EgressIP)
+						}
 					}
 
 					ginkgo.By("5. Check connectivity from one pod to the other and verify that the connection is achieved")
@@ -1286,7 +1286,11 @@ spec:
 			framework.ExpectNoError(err, "Step 6. Check connectivity from pod to an external node and verify that the srcIP is the expected egressIP, failed: %v", err)
 
 			ginkgo.By("6a. Check that the EgressIP address has IFA_PROTO set to OVN-K (85)")
-			verifyEgressIPAddrProto(statuses[0].Node, statuses[0].EgressIP)
+			// OVN-network EIPs are assigned on the gateway bridge only when
+			// network segmentation is enabled (canHandleBridgeEgressIP).
+			if isNetworkSegmentationEnabled() {
+				verifyEgressIPAddrProto(statuses[0].Node, statuses[0].EgressIP)
+			}
 
 			ginkgo.By("7. Check connectivity from pod to another node primary IP and verify that the srcIP is the expected nodeIP")
 			err = wait.PollImmediate(retryInterval, retryTimeout, targetHostNetworkContainerAndTest(hostNetPod, podNamespace.Name, pod1Name, true, []string{egress1Node.nodeIP}))
