@@ -1430,14 +1430,21 @@ var _ = ginkgo.Describe("BGP: When an advertised CUDN network is dynamically all
 
 var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 	ginkgo.DescribeTableSubtree("between advertised networks", func(cudnATemplate, cudnBTemplate *udnv1.ClusterUserDefinedNetwork) {
-		const curlConnectionTimeoutCode = "28"
-		// match the whole phrase: a bare "7" is always contained in the curl
-		// error output, if only in the target address
-		const curlConnectionRefusedCode = "exit code 7"
 		const nodePortBackendLabel = "nodeport-backend"
 		const clientNodeBackend = "client-node"
 		const remoteNodeBackend = "remote-node"
 		const nodePortNodeBackend = "nodeport-node"
+
+		// The pod-to-X tests use e2epodoutput.RunHostCmdWithFullOutput(), which
+		// returns output like "exit code 28" on error, while the host-to-X tests
+		// use infraprovider.Get().ExecK8NodeCommand()), which returns output like
+		// "exit status 28" ("status" rather than "code"). We just look for just
+		// "28" (and hope there are no false positives).
+		const curlConnectionTimeoutCode = "28"
+
+		// Currently only pod-to-X tests ever expect "connection refused", so we
+		// can match the longer error string.
+		const curlConnectionRefusedCode = "exit code 7"
 
 		f := wrappedTestFramework("bgp-network-isolation")
 		f.SkipNamespaceCreation = true
@@ -2122,7 +2129,7 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(hostNetworkPort)) + "/clientip", clientNodeIP, false
 					}),
 				ginkgo.Entry("[ETP=Cluster] UDN pod to the same node nodeport service in default network should not work",
-					// FIXME: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5410
+					// FIXME: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5419
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
 						clientPod := podsNetA[0]
 						// podsNetA[0] is on nodes[0]. We need the same node. Let's hit the nodeport on nodes[0].
@@ -2135,7 +2142,16 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 						}
 						nodePort := svcNodePortNetDefault.Spec.Ports[0].NodePort
 
-						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", curlConnectionTimeoutCode, true
+						// Because of the difference in IPv4 vs IPv6 "fib daddr type local" (see #5419, above),
+						// forbidden IPv4 NodePort connections do not match the nftables rule, don't get DNATted,
+						// and then get rejected by the host, while forbidden IPv6 NodePort connections do get
+						// DNATted but then get dropped by OVN ACLs.
+						expectedOutput = curlConnectionRefusedCode
+						if ipFamily == utilnet.IPv6 {
+							expectedOutput = curlConnectionTimeoutCode
+						}
+
+						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", expectedOutput, true
 					}),
 				ginkgo.Entry("[ETP=Cluster] UDN pod to a different node nodeport service in default network should work",
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
@@ -2231,9 +2247,9 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 							// network B is not active on the client's node: the
 							// nodeport is unreachable for both families
 							expectErr = true
+						}
+						if expectErr {
 							expectedOutput = curlConnectionRefusedCode
-						} else if expectErr {
-							expectedOutput = curlConnectionTimeoutCode
 						}
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", expectedOutput, expectErr
 					}),
@@ -2337,7 +2353,14 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 						nodePortA := svcNodePortETPLocalNetA.Spec.Ports[0].NodePort
 						expectErr = ipFamily == utilnet.IPv4 || IsGatewayModeLocal(f.ClientSet)
 						if expectErr {
-							expectedOutput = curlConnectionTimeoutCode
+							// Because of the difference in IPv4 vs IPv6 "fib daddr type local" (see #5419, above),
+							// forbidden IPv4 NodePort connections do not match the nftables rule, don't get DNATted,
+							// and then get rejected by the host, while forbidden IPv6 NodePort connections do get
+							// DNATted but then get dropped by OVN ACLs.
+							expectedOutput = curlConnectionRefusedCode
+							if ipFamily == utilnet.IPv6 {
+								expectedOutput = curlConnectionTimeoutCode
+							}
 						}
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePortA)) + "/hostname", expectedOutput, expectErr
 					}),
@@ -2366,7 +2389,16 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 							nodeIP = nodeIPv6
 						}
 						nodePortB := svcNodePortETPLocalDefault.Spec.Ports[0].NodePort
-						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePortB)) + "/hostname", curlConnectionTimeoutCode, true
+						// Because of the difference in IPv4 vs IPv6 "fib daddr type local" (see #5419, above),
+						// forbidden IPv4 NodePort connections do not match the nftables rule, don't get DNATted,
+						// and then get rejected by the host, while forbidden IPv6 NodePort connections do get
+						// DNATted but then get dropped by OVN ACLs.
+						expectedOutput = curlConnectionRefusedCode
+						if ipFamily == utilnet.IPv6 {
+							expectedOutput = curlConnectionTimeoutCode
+						}
+
+						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePortB)) + "/hostname", expectedOutput, true
 					}),
 				ginkgo.Entry("[ETP=LOCAL] UDN pod to a different node nodeport service in default network should work",
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
