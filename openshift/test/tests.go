@@ -61,6 +61,17 @@ var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
+
+	// OTE metrics tests
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 45841-Add OVN flow count metric",
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 47471-Record update to cache versus port binding",
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 52072-Add mechanism to record duration for k8 kinds",
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 47524-Metrics for ovn-appctl stopwatch/show command",
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 45689-Metrics for idling enable/disabled",
+	"[Feature:Metrics][JIRA:Networking][Serial][ovn-kubernetes-ote][sig-network] OVN metrics 60539-Verify metrics ovs_vswitchd_interfaces_total",
+	"[Feature:Metrics][JIRA:Networking][Serial][ovn-kubernetes-ote][sig-network] OVN metrics 60704-Verify metrics ovs_vswitchd_interface_up_wait_seconds_total",
+	"[Feature:Metrics][JIRA:Networking][Serial][Slow][Timeout:25m][ovn-kubernetes-ote][sig-network] OVN metrics 60708-Verify metrics ovnkube_resource_retry_failures_total",
+	
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs

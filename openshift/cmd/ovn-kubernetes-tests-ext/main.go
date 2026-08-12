@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	exutil "github.com/openshift/origin/test/extended/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
@@ -11,6 +12,8 @@ import (
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	// import OTE migrated tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -38,6 +41,7 @@ var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
+	featureLabelMetrics             = "Feature:Metrics"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
 
@@ -127,6 +131,7 @@ func main() {
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
 		}
+		exutil.WithCleanup(func() {})
 	})
 
 	informingTests := sets.New(test.InformingTests...)
@@ -152,7 +157,7 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name
 
 		switch {
 		case informingTests.Has(spec.Name):
