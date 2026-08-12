@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	configv1 "github.com/openshift/api/config/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
@@ -24,6 +25,7 @@ import (
 const (
 	hypervisorNodeUser = "root"
 	hypervisorSshport  = "22"
+	containerRuntime   = "podman"
 	// use network name created for attaching frr container with
 	// cluster primary network as per changes in the link:
 	// https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L123-L124
@@ -35,8 +37,11 @@ const (
 
 type baremetalInfra struct {
 	engine               *container.Engine
+	runner               api.Runner            // SSH runner for direct podman commands
 	machineNetwork       api.Network           // contains subnet details about cluster machine network
 	machineNetworkGwInfo *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	mu                   sync.Mutex
+	externalContainers   map[string]api.ExternalContainer // cache of host-networked containers
 }
 
 func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
@@ -67,6 +72,8 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if _, err := sshRunner.Run("echo", "connection test"); err != nil {
 		return nil, fmt.Errorf("failed to check frr container status, connectivity check failed with hypervisor: %w", err)
 	}
+	ci.runner = sshRunner
+	ci.externalContainers = make(map[string]api.ExternalContainer)
 	// Initialize podman container engine
 	ci.engine = container.NewEngine("podman", sshRunner)
 	// just mimic machine network with ContainerEngineNetwork to make it
@@ -148,37 +155,121 @@ func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.Ext
 				IPv6Prefix:  ci.machineNetworkGwInfo.IPv6Prefix},
 			nil
 	}
+	// Check if this is a cached host-networked container on the primary network.
+	ci.mu.Lock()
+	cached, isCached := ci.externalContainers[container.Name]
+	ci.mu.Unlock()
+	if isCached && network.Name() == primaryNetworkName {
+		if ci.machineNetworkGwInfo == nil {
+			return api.NetworkInterface{}, fmt.Errorf("can not find primary network interface info for cached container %q", container.Name)
+		}
+		return api.NetworkInterface{
+			IPv4:       cached.IPv4,
+			IPv6:       cached.IPv6,
+			IPv4Prefix: ci.machineNetworkGwInfo.IPv4Prefix,
+			IPv6Prefix: ci.machineNetworkGwInfo.IPv6Prefix,
+		}, nil
+	}
 	return ci.engine.GetNetworkInterface(container.Name, network.Name())
 }
 
 func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
-	ciWithTestContext := &baremetalInfra{
-		engine: ci.engine.WithTestContext(context)}
-	return ciWithTestContext
+	return &baremetalContextProvider{
+		parent: ci,
+		engine: ci.engine.WithTestContext(context),
+	}
 }
 
-func (ci *baremetalInfra) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	return ci.engine.CreateExternalContainer(container)
+// baremetalContextProvider implements api.ExternalContainerContextProvider.
+// For primary network containers, it delegates to the parent baremetalInfra's
+// host-networked container cache. For secondary network containers, it
+// delegates to the container engine (standard per-test lifecycle).
+type baremetalContextProvider struct {
+	parent *baremetalInfra   // shared state: cache, runner, machine network info
+	engine *container.Engine // engine with per-test TestContext (for secondary network ops)
 }
 
-func (ci *baremetalInfra) DeleteExternalContainer(container api.ExternalContainer) error {
-	return ci.engine.DeleteExternalContainer(container)
+func (p *baremetalContextProvider) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
+	if container.Network != nil && container.Network.Name() == primaryNetworkName {
+		return p.parent.getOrCreateHostNetworkedContainer(container)
+	}
+	return p.engine.CreateExternalContainer(container)
 }
 
-func (ci *baremetalInfra) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	return ci.engine.CreateNetwork(name, subnets...)
+func (p *baremetalContextProvider) DeleteExternalContainer(container api.ExternalContainer) error {
+	p.parent.mu.Lock()
+	_, cached := p.parent.externalContainers[container.Name]
+	p.parent.mu.Unlock()
+	if cached {
+		framework.Logf("skipping deletion of cached host-networked container %q", container.Name)
+		return nil
+	}
+	return p.engine.DeleteExternalContainer(container)
 }
 
-func (ci *baremetalInfra) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
-	return ci.engine.AttachNetwork(network, container)
+func (p *baremetalContextProvider) CreateNetwork(name string, subnets ...string) (api.Network, error) {
+	return p.engine.CreateNetwork(name, subnets...)
 }
 
-func (ci *baremetalInfra) DetachNetwork(network api.Network, container string) error {
-	return ci.engine.DetachNetwork(network, container)
+func (p *baremetalContextProvider) DeleteNetwork(network api.Network) error {
+	return p.engine.DeleteNetwork(network)
 }
 
-func (ci *baremetalInfra) DeleteNetwork(network api.Network) error {
-	return ci.engine.DeleteNetwork(network)
+func (p *baremetalContextProvider) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
+	if _, err := p.parent.runner.Run(containerRuntime, "container", "inspect", instance); err != nil {
+		return api.NetworkInterface{}, nil
+	}
+	return p.engine.AttachNetwork(network, instance)
+}
+
+func (p *baremetalContextProvider) DetachNetwork(network api.Network, instance string) error {
+	return p.engine.DetachNetwork(network, instance)
+}
+
+// getOrCreateHostNetworkedContainer returns a cached host-networked container
+// or creates one on the hypervisor using podman with --network host.
+// These containers are never cleaned up per-test; they persist across the suite.
+func (ci *baremetalInfra) getOrCreateHostNetworkedContainer(ec api.ExternalContainer) (api.ExternalContainer, error) {
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+
+	if cached, ok := ci.externalContainers[ec.Name]; ok {
+		framework.Logf("reusing cached host-networked container %q", ec.Name)
+		return cached, nil
+	}
+
+	// Check if container already exists in podman (from a previous suite run).
+	if out, err := ci.runner.Run(containerRuntime, "container", "inspect", "--format", "{{.State.Running}}", ec.Name); err == nil {
+		running := strings.TrimSpace(out) == "true"
+		if !running {
+			framework.Logf("existing host-networked container %q is stopped, starting it", ec.Name)
+			if _, err := ci.runner.Run(containerRuntime, "start", ec.Name); err != nil {
+				return api.ExternalContainer{}, fmt.Errorf("failed to start stopped host-networked container %q: %w", ec.Name, err)
+			}
+		}
+		framework.Logf("found existing host-networked container %q from a previous run", ec.Name)
+	} else {
+		// Container does not exist; create it.
+		cmd := []string{"run", "-itd", "--privileged", "--network", "host", "--name", ec.Name, "--hostname", ec.Name}
+		cmd = append(cmd, ec.RuntimeArgs...)
+		cmd = append(cmd, ec.Image)
+		if len(ec.CmdArgs) > 0 {
+			cmd = append(cmd, ec.CmdArgs...)
+		}
+		framework.Logf("creating host-networked container with command: %s %s", containerRuntime, strings.Join(cmd, " "))
+		if _, err := ci.runner.Run(containerRuntime, cmd...); err != nil {
+			return api.ExternalContainer{}, fmt.Errorf("failed to create host-networked container %q: %w", ec.Name, err)
+		}
+	}
+
+	// Populate IPs from the hypervisor's machine network interface.
+	if ci.machineNetworkGwInfo != nil {
+		ec.IPv4 = ci.machineNetworkGwInfo.IPv4
+		ec.IPv6 = ci.machineNetworkGwInfo.IPv6
+	}
+
+	ci.externalContainers[ec.Name] = ec
+	return ec, nil
 }
 
 func hypervisorSshCmdRunner() (api.Runner, error) {
