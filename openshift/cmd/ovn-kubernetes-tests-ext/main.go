@@ -11,6 +11,8 @@ import (
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	// import OTE migrated tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -38,6 +40,7 @@ var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
+	featureLabelMetrics             = "Feature:Metrics"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
 
