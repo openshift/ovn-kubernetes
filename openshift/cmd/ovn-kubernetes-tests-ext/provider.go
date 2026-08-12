@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	exutil "github.com/openshift/origin/test/extended/util"
 	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 
 	"github.com/onsi/gomega"
@@ -73,6 +74,11 @@ func initializeTestFramework(provider string, cfg *rest.Config) error {
 	}
 	framework.TestContext.DumpLogsOnFailure = true
 	framework.TestContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
+	// Take the exutil helpers out of dry run mode, so that test code calling them does not
+	// panic with "May only be called from within a test case". The callback is empty on
+	// purpose: the tests are driven by the framework afterwards, not from inside here, and
+	// we only need the flag flipped as part of framework initialization.
+	exutil.WithCleanup(func() {})
 	return nil
 }
 
