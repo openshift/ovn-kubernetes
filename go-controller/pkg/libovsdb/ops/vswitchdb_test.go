@@ -73,6 +73,17 @@ func TestGetPortBridge(t *testing.T) {
 				port.DeepCopy(),
 			}},
 		},
+		{
+			// Matches ovs-vsctl port-to-br / list-ports: the bridge local port is hidden.
+			desc:      "returns ErrNotFound for a bridge's local port",
+			portName:  "br-ex",
+			expectErr: libovsdbclient.ErrNotFound,
+			initialOvs: libovsdbtest.TestSetup{OVSData: []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{bridgeAUUID}},
+				&vswitchd.Bridge{UUID: bridgeAUUID, Name: "br-ex", Ports: []string{portUUID}},
+				&vswitchd.Port{UUID: portUUID, Name: "br-ex"},
+			}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
