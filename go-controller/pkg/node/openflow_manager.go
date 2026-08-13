@@ -734,6 +734,12 @@ func checkPorts(ovsClient libovsdbclient.Client, netConfigs []*bridgeconfig.Brid
 		}
 	}
 
+	// With --allow-no-uplink, NewBridgeConfiguration may leave physIntf empty.
+	// There is then no physical ofport to track.
+	if config.Gateway.AllowNoUplink && physIntf == "" {
+		return nil
+	}
+
 	// it could be that someone removed the physical interface and added it back on the OVS host
 	// bridge, as a result the ofport number changed for that physical interface
 	curOfportPhys, err := getOfport(ovsClient, physIntf)
