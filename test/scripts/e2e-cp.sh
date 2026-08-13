@@ -73,10 +73,6 @@ if [ "$PLATFORM_IPV4_SUPPORT" == false ]; then
   skip "\[IPv4\]"
 fi
 
-if [ "$OVN_HA" == true ]; then
-  skip "e2e br-int NetFlow export validation"
-fi
-
 if [ "$PLATFORM_IPV6_SUPPORT" == true ]; then
   # No support for these tests in IPv6 mode yet
   skip $IPV6_SKIPPED_TESTS

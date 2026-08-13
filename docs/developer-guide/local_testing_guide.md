@@ -69,7 +69,6 @@ export JOB_NAME=(... job name ...)
 export OVN_HYBRID_OVERLAY_ENABLE=[true|false]
 export OVN_MULTICAST_ENABLE=[true|false]
 export OVN_EMPTY_LB_EVENTS=[true|false]
-export OVN_HA=[true|false]
 export OVN_DISABLE_SNAT_MULTIPLE_GWS=[true|false]
 export OVN_GATEWAY_MODE=["local"|"shared"]
 export PLATFORM_IPV4_SUPPORT=[true|false]
@@ -80,17 +79,16 @@ export OVN_SECOND_BRIDGE=[true|false]
 
 You can refer to a recent CI run from any pull request in [https://github.com/ovn-kubernetes/ovn-kubernetes/actions](https://github.com/ovn-kubernetes/ovn-kubernetes/actions) to get a valid set of settings.
 
-As an example for the `control-plane-noHA-local-ipv4-snatGW-1br` job, the settings are at time of this writing:
+As an example for the `control-plane-local-ipv4-snatGW-1br` job, the settings are at time of this writing:
 ```
 export KIND_CLUSTER_NAME=ovn
 export KIND_INSTALL_INGRESS=true
 export KIND_ALLOW_SYSTEM_WRITES=true
 export PARALLEL=true
-export JOB_NAME=control-plane-noHA-local-ipv4-snatGW-1br
+export JOB_NAME=control-plane-local-ipv4-snatGW-1br
 export OVN_HYBRID_OVERLAY_ENABLE=true
 export OVN_MULTICAST_ENABLE=true
 export OVN_EMPTY_LB_EVENTS=true
-export OVN_HA=false
 export OVN_DISABLE_SNAT_MULTIPLE_GWS=false
 export OVN_GATEWAY_MODE="local"
 export PLATFORM_IPV4_SUPPORT=true
