@@ -504,6 +504,13 @@ func setManagementPortFakeCommands(fexec *ovntest.FakeExec, nodeName string) {
 func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 	// GetNicName lookups (list-ports / get Port Interfaces / get Interface Type)
 	// are now served by the libovsdb harness seeded in BeforeEach.
+	// getGatewayNextHops rewrites eth0 → breth0; GetPortBridge hides the
+	// bridge local port, so NewBridgeConfiguration takes the "is a bridge"
+	// path and getIntfName verifies eth0's ofport first.
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
+		Output: "7",
+	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 mac_in_use",
 		Output: "00:00:00:55:66:99",
@@ -536,13 +543,13 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Output: "5",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 get interface breth0 ofport",
+		Cmd:    "ovs-vsctl --timeout=15 get interface eth0 ofport",
 		Output: "7",
 	})
 	// newNodePortWatcher() looks up the physical interface's ofport via exec;
 	// this is unrelated to checkPorts(), which now reads it from libovsdb.
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 ofport",
+		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface eth0 ofport",
 		Output: "7",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
@@ -820,9 +827,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 					Name:  "breth0",
 					Ports: []string{"breth0-port-uuid", "eth0-port-uuid"},
 				},
+				// Local port of the bridge (hidden by GetPortBridge / port-to-br).
 				&vswitchd.Port{UUID: "breth0-port-uuid", Name: "breth0", Interfaces: []string{"breth0-iface-uuid"}},
-				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "system", Ofport: ptr.To(7)},
-				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0"},
+				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "internal", Ofport: ptr.To(65534)},
+				// Physical uplink: system-typed so GetNicName resolves eth0.
+				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0", Interfaces: []string{"eth0-iface-uuid"}},
+				&vswitchd.Interface{UUID: "eth0-iface-uuid", Name: "eth0", Type: "system", Ofport: ptr.To(7)},
 			},
 		})
 		Expect(ovsErr).NotTo(HaveOccurred())
