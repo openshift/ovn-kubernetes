@@ -103,6 +103,68 @@ func getUplinkGatewayCondition(
 		meta.FindStatusCondition(state.Status.Conditions, uplinkv1alpha1.UplinkStateConditionResolved)
 }
 
+func TestUplinkGatewayControllerRepublishesWipedCondition(t *testing.T) {
+	prepareUplinkGatewayControllerTest(t)
+	const (
+		uplinkName = "uplink1"
+		nodeName   = "node-a"
+	)
+	controller, client := newUplinkGatewayControllerForTest(t, uplinkName, nodeName)
+	network := uplinkGatewayNetInfo(t, "red", uplinkName)
+
+	// Nothing published yet: republish must not invent a condition.
+	if err := controller.RepublishGatewayCondition(uplinkName); err != nil {
+		t.Fatalf("failed to republish before first publish: %v", err)
+	}
+	gatewayReady, _ := getUplinkGatewayCondition(t, client, uplinkName, nodeName)
+	if gatewayReady != nil {
+		t.Fatalf("expected no GatewayReady condition before first publish, got %#v", gatewayReady)
+	}
+
+	if err := controller.ReconcileNetwork(network, func() error { return nil }); err != nil {
+		t.Fatalf("failed to reconcile network: %v", err)
+	}
+	gatewayReady, _ = getUplinkGatewayCondition(t, client, uplinkName, nodeName)
+	if gatewayReady == nil || gatewayReady.Status != metav1.ConditionTrue {
+		t.Fatalf("expected published GatewayReady condition, got %#v", gatewayReady)
+	}
+
+	// Simulate an out-of-band deletion and recreation: the recreated object
+	// carries only the discovery condition. The lister already reflects that
+	// shape (it was never updated with the published condition).
+	recreated := &uplinkv1alpha1.UplinkState{
+		ObjectMeta: metav1.ObjectMeta{Name: uplinkutil.StateName(uplinkName, nodeName)},
+		Spec: uplinkv1alpha1.UplinkStateSpec{
+			UplinkName: uplinkName,
+			NodeName:   nodeName,
+		},
+		Status: uplinkv1alpha1.UplinkStateStatus{
+			Conditions: []metav1.Condition{{
+				Type:   uplinkv1alpha1.UplinkStateConditionResolved,
+				Status: metav1.ConditionTrue,
+				Reason: uplinkv1alpha1.UplinkStateReasonResolved,
+			}},
+		},
+	}
+	if _, err := client.K8sV1alpha1().UplinkStates().Update(
+		context.Background(), recreated, metav1.UpdateOptions{},
+	); err != nil {
+		t.Fatalf("failed to wipe GatewayReady condition: %v", err)
+	}
+
+	if err := controller.RepublishGatewayCondition(uplinkName); err != nil {
+		t.Fatalf("failed to republish after wipe: %v", err)
+	}
+	gatewayReady, resolved := getUplinkGatewayCondition(t, client, uplinkName, nodeName)
+	if gatewayReady == nil || gatewayReady.Status != metav1.ConditionTrue ||
+		gatewayReady.Reason != uplinkv1alpha1.UplinkStateReasonGatewayConfigured {
+		t.Fatalf("expected restored GatewayReady condition, got %#v", gatewayReady)
+	}
+	if resolved == nil || resolved.Status != metav1.ConditionTrue {
+		t.Fatalf("expected Resolved to remain true, got %#v", resolved)
+	}
+}
+
 func TestUplinkGatewayControllerAggregatesActiveNetworks(t *testing.T) {
 	prepareUplinkGatewayControllerTest(t)
 	const (

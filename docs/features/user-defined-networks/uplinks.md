@@ -269,6 +269,16 @@ metadata:
 When one or more CUDNs reference an `Uplink`, OVN-Kubernetes keeps a finalizer
 on the `Uplink` so it cannot be deleted while still selected by a CUDN.
 
+`UplinkState` objects are exclusively owned by OVN-Kubernetes and recover from
+out-of-band deletion: if an `UplinkState` is deleted directly (for example with
+`kubectl delete`), ovnkube-node recreates it without a restart, discovery
+republishes `Resolved=True`, a previously published `GatewayReady` condition is
+restored (on a brand-new `UplinkState` it still appears only once gateway
+programming has run), and the CUDN returns to `UplinksReady=True`. An `UplinkState` is not
+recreated when its `Uplink` is terminating (its `UplinkState` objects are
+deleted on purpose during teardown), no longer exists, or no longer selects the
+node.
+
 The CUDN reports a CUDN-specific `UplinksReady` condition. This condition is
 computed from the active nodes for that CUDN, not directly from aggregate
 `Uplink.status`. This matters with Dynamic UDN, where two CUDNs can reference

@@ -1030,6 +1030,67 @@ func TestNodeUplinkControllerRecreatesDeletedState(t *testing.T) {
 	})
 }
 
+type fakeGatewayPublisher struct {
+	republished []string
+	err         error
+}
+
+func (f *fakeGatewayPublisher) RepublishGatewayCondition(uplinkName string) error {
+	f.republished = append(f.republished, uplinkName)
+	return f.err
+}
+
+// A recreated UplinkState lost the gateway-owned GatewayReady condition, which
+// only network events republish: the reconciler must restore it via the
+// gateway publisher, and only when it is missing.
+func TestNodeUplinkControllerRepublishesGatewayCondition(t *testing.T) {
+	newController := func(g gomega.Gomega, state *uplinkv1alpha1.UplinkState) (*Controller, *fakeGatewayPublisher) {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{state: newStatusTestHostState()},
+			fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "eth0"},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			state,
+		)
+		publisher := &fakeGatewayPublisher{}
+		controller.gatewayPublisher = publisher
+		return controller, publisher
+	}
+
+	t.Run("republishes when the condition is missing", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		controller, publisher := newController(g, newUplinkState("br-blue.node-a", "br-blue", "node-a"))
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(publisher.republished).To(gomega.ConsistOf("br-blue"))
+	})
+
+	t.Run("does not republish a present condition", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		state := newUplinkState("br-blue.node-a", "br-blue", "node-a")
+		state.Status.Conditions = []metav1.Condition{{
+			Type:   uplinkv1alpha1.UplinkStateConditionGatewayReady,
+			Status: metav1.ConditionTrue,
+			Reason: uplinkv1alpha1.UplinkStateReasonGatewayConfigured,
+		}}
+		controller, publisher := newController(g, state)
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(publisher.republished).To(gomega.BeEmpty())
+	})
+
+	// A failed republish must fail the reconcile so it is retried.
+	t.Run("propagates a republish failure", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		controller, publisher := newController(g, newUplinkState("br-blue.node-a", "br-blue", "node-a"))
+		publisher.err = fmt.Errorf("apply failed")
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.MatchError(
+			gomega.ContainSubstring("failed to republish gateway condition for Uplink br-blue")))
+	})
+}
+
 func TestEnsureUplinkStateGetsExistingObjectAfterCreateRace(t *testing.T) {
 	g := gomega.NewWithT(t)
 	uplink := newUplink("br-blue", "role", "blue", "breth0")

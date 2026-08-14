@@ -272,6 +272,26 @@ func (c *UplinkGatewayController) completeNetworkDelete(
 	return c.publishGatewayCondition(network.Uplink())
 }
 
+// RepublishGatewayCondition restores this controller's GatewayReady condition
+// on an UplinkState recreated after an out-of-band deletion. It only restores
+// a condition that was already published once: on a first creation the
+// condition is published by network reconciliation.
+func (c *UplinkGatewayController) RepublishGatewayCondition(uplinkName string) error {
+	c.mutex.Lock()
+	uplinkState := c.uplinks[uplinkName]
+	c.mutex.Unlock()
+	if uplinkState == nil {
+		return nil
+	}
+	uplinkState.conditionMutex.Lock()
+	published := uplinkState.lastCondition != nil
+	uplinkState.conditionMutex.Unlock()
+	if !published {
+		return nil
+	}
+	return c.publishGatewayCondition(uplinkName)
+}
+
 func (c *UplinkGatewayController) publishGatewayConditions(uplinkNames []string) error {
 	var errs []error
 	sort.Strings(uplinkNames)

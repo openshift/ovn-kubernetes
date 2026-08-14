@@ -83,6 +83,12 @@ func newDiscoveryError(reason string, err error) error {
 	return &discoveryError{reason: reason, err: err}
 }
 
+// GatewayConditionPublisher restores a gateway-owned UplinkState condition
+// that an out-of-band deletion wiped.
+type GatewayConditionPublisher interface {
+	RepublishGatewayCondition(uplinkName string) error
+}
+
 // Controller publishes UplinkState discovery status for this node.
 type Controller struct {
 	nodeName string
@@ -92,8 +98,9 @@ type Controller struct {
 	uplinkStateLister uplinklisters.UplinkStateLister
 	nodeLister        corelisters.NodeLister
 
-	hostDiscoverer hostInterfaceDiscoverer
-	bridgeResolver ovsBridgeResolver
+	hostDiscoverer   hostInterfaceDiscoverer
+	bridgeResolver   ovsBridgeResolver
+	gatewayPublisher GatewayConditionPublisher
 
 	uplinkController      controllerutil.Controller
 	uplinkStateController controllerutil.Controller
@@ -113,6 +120,7 @@ func discoveryRateLimiter() workqueue.TypedRateLimiter[string] {
 
 // NewController creates an ovnkube-node Uplink controller.
 func NewController(nodeName string, wf factory.NodeWatchFactory, ovnClient *util.OVNNodeClientset, ovsClient libovsdbclient.Client,
+	gatewayPublisher GatewayConditionPublisher,
 ) *Controller {
 	c := &Controller{
 		nodeName:          nodeName,
@@ -122,6 +130,7 @@ func NewController(nodeName string, wf factory.NodeWatchFactory, ovnClient *util
 		nodeLister:        wf.NodeCoreInformer().Lister(),
 		hostDiscoverer:    netlinkHostInterfaceDiscoverer{},
 		bridgeResolver:    defaultOVSBridgeResolver{ovsClient: ovsClient},
+		gatewayPublisher:  gatewayPublisher,
 	}
 
 	uplinkCfg := &controllerutil.ControllerConfig[uplinkv1alpha1.Uplink]{
@@ -258,6 +267,16 @@ func (c *Controller) reconcileUplinkState(key string) error {
 			return nil
 		}
 		return fmt.Errorf("failed to get Uplink %s: %w", uplinkName, err)
+	}
+
+	// An UplinkState recreated after an out-of-band deletion lost the
+	// GatewayReady condition, and nothing republishes it until a network event
+	// runs gateway reconciliation: restore it here.
+	if c.gatewayPublisher != nil &&
+		meta.FindStatusCondition(state.Status.Conditions, uplinkv1alpha1.UplinkStateConditionGatewayReady) == nil {
+		if err := c.gatewayPublisher.RepublishGatewayCondition(uplinkName); err != nil {
+			return fmt.Errorf("failed to republish gateway condition for Uplink %s: %w", uplinkName, err)
+		}
 	}
 
 	node, err := c.nodeLister.Get(c.nodeName)
