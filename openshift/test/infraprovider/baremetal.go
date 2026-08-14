@@ -130,7 +130,13 @@ func (ci *baremetalInfra) GetExternalContainerLogs(container api.ExternalContain
 }
 
 func (ci *baremetalInfra) GetExternalContainerPort() uint16 {
-	return ci.engine.GetExternalContainerPort()
+	port := ci.engine.GetExternalContainerPort()
+	if ci.machineNetworkGwInfo != nil {
+		if err := configureFirewallForPort(ci.runner, ci.machineNetworkGwInfo.InfName, port); err != nil {
+			framework.Logf("Warning: failed to configure firewall for port %d: %v", port, err)
+		}
+	}
+	return port
 }
 
 func (ci *baremetalInfra) ListNetworks() ([]string, error) {
@@ -438,6 +444,26 @@ func tryMatchLink(link linkInfo, v4Subnet, v6Subnet string) *api.NetworkInterfac
 	}
 
 	// Not a complete match, return nil
+	return nil
+}
+
+// configureFirewallForPort configures firewall on the hypervisor to allow traffic on the
+// given port for both tcp and udp protocols.
+func configureFirewallForPort(runner api.Runner, interfaceName string, port uint16) error {
+	zone, err := runner.Run("firewall-cmd", "--get-zone-of-interface="+interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to get firewall zone for interface %s: %w", interfaceName, err)
+	}
+	zone = strings.TrimSpace(zone)
+	portStr := fmt.Sprintf("%d", port)
+	for _, proto := range []string{"tcp", "udp"} {
+		if _, err := runner.Run("firewall-cmd", "--zone="+zone, "--add-port="+portStr+"/"+proto, "--permanent"); err != nil {
+			return fmt.Errorf("failed to add firewall port %s/%s to zone %s: %w", portStr, proto, zone, err)
+		}
+	}
+	if _, err := runner.Run("firewall-cmd", "--reload"); err != nil {
+		return fmt.Errorf("failed to reload firewall: %w", err)
+	}
 	return nil
 }
 
