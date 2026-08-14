@@ -5,12 +5,13 @@ import (
 	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
-	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -96,11 +97,6 @@ func main() {
 		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
 	})
 
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
-	if err != nil {
-		panic(err)
-	}
-
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
 	// Ensure calling methods do not log any output, as this can break test listing with
@@ -114,7 +110,15 @@ func main() {
 		} else {
 			ocpInfra = infra
 			infraprovider.Set(ocpInfra)
+			deploymentconfig.Set(ocpdeploymentconfig.New(cfg))
 		}
+	} else {
+		deploymentconfig.Set(ocpdeploymentconfig.New(nil))
+	}
+
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
+	if err != nil {
+		panic(err)
 	}
 
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
