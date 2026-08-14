@@ -165,6 +165,141 @@ func TestUplinkGatewayControllerRepublishesWipedCondition(t *testing.T) {
 	}
 }
 
+func TestUplinkGatewayControllerInvalidatesIntentionalStateDeletion(t *testing.T) {
+	prepareUplinkGatewayControllerTest(t)
+	const (
+		uplinkName = "uplink1"
+		nodeName   = "node-a"
+	)
+	controller, client := newUplinkGatewayControllerForTest(t, uplinkName, nodeName)
+	network := uplinkGatewayNetInfo(t, "red", uplinkName)
+
+	if err := controller.ReconcileNetwork(network, func() error { return nil }); err != nil {
+		t.Fatalf("failed to reconcile network: %v", err)
+	}
+	controller.InvalidateGatewayState(uplinkName)
+
+	// Model the UplinkState created after the node is selected again. Unlike an
+	// out-of-band deletion, an intentional deletion invalidated the old
+	// GatewayReady condition, so it must not be restored.
+	recreated := &uplinkv1alpha1.UplinkState{
+		ObjectMeta: metav1.ObjectMeta{Name: uplinkutil.StateName(uplinkName, nodeName)},
+		Spec: uplinkv1alpha1.UplinkStateSpec{
+			UplinkName: uplinkName,
+			NodeName:   nodeName,
+		},
+	}
+	if _, err := client.K8sV1alpha1().UplinkStates().Update(
+		context.Background(), recreated, metav1.UpdateOptions{},
+	); err != nil {
+		t.Fatalf("failed to recreate UplinkState: %v", err)
+	}
+
+	if err := controller.RepublishGatewayCondition(uplinkName); err != nil {
+		t.Fatalf("failed to check invalidated gateway condition: %v", err)
+	}
+	gatewayReady, _ := getUplinkGatewayCondition(t, client, uplinkName, nodeName)
+	if gatewayReady != nil {
+		t.Fatalf("expected invalidated GatewayReady not to be restored, got %#v", gatewayReady)
+	}
+
+	controller.mutex.Lock()
+	networkState := controller.uplinks[uplinkName].networks[network.GetNetworkName()]
+	phase := networkState.phase
+	controller.mutex.Unlock()
+	if phase != uplinkGatewayNetworkPending {
+		t.Fatalf("expected cached network readiness to be pending, got %q", phase)
+	}
+
+	if err := controller.ReconcileNetwork(network, func() error { return nil }); err != nil {
+		t.Fatalf("failed to reconcile network in the new lifecycle: %v", err)
+	}
+	gatewayReady, _ = getUplinkGatewayCondition(t, client, uplinkName, nodeName)
+	if gatewayReady == nil || gatewayReady.Status != metav1.ConditionTrue {
+		t.Fatalf("expected GatewayReady after fresh reconciliation, got %#v", gatewayReady)
+	}
+}
+
+func TestUplinkGatewayControllerDeletesRemovedUplinkCache(t *testing.T) {
+	prepareUplinkGatewayControllerTest(t)
+	const (
+		uplinkName = "uplink1"
+		nodeName   = "node-a"
+	)
+	controller, client := newUplinkGatewayControllerForTest(t, uplinkName, nodeName)
+	network := uplinkGatewayNetInfo(t, "red", uplinkName)
+
+	if err := controller.ReconcileNetwork(network, func() error { return nil }); err != nil {
+		t.Fatalf("failed to reconcile network: %v", err)
+	}
+	controller.DeleteGatewayState(uplinkName)
+
+	controller.mutex.Lock()
+	_, uplinkFound := controller.uplinks[uplinkName]
+	_, networkFound := controller.uplinkByNetworkName[network.GetNetworkName()]
+	controller.mutex.Unlock()
+	if uplinkFound || networkFound {
+		t.Fatalf("expected deleted Uplink cache to be removed, uplinkFound=%t networkFound=%t",
+			uplinkFound, networkFound)
+	}
+
+	// A same-name Uplink created later is a new lifecycle and must not inherit
+	// readiness from the deleted resource.
+	recreated := &uplinkv1alpha1.UplinkState{
+		ObjectMeta: metav1.ObjectMeta{Name: uplinkutil.StateName(uplinkName, nodeName)},
+		Spec: uplinkv1alpha1.UplinkStateSpec{
+			UplinkName: uplinkName,
+			NodeName:   nodeName,
+		},
+	}
+	if _, err := client.K8sV1alpha1().UplinkStates().Update(
+		context.Background(), recreated, metav1.UpdateOptions{},
+	); err != nil {
+		t.Fatalf("failed to recreate UplinkState: %v", err)
+	}
+	if err := controller.RepublishGatewayCondition(uplinkName); err != nil {
+		t.Fatalf("failed to check deleted gateway cache: %v", err)
+	}
+	gatewayReady, _ := getUplinkGatewayCondition(t, client, uplinkName, nodeName)
+	if gatewayReady != nil {
+		t.Fatalf("expected no GatewayReady from deleted Uplink cache, got %#v", gatewayReady)
+	}
+}
+
+func TestUplinkGatewayControllerInvalidationDiscardsInFlightCompletion(t *testing.T) {
+	prepareUplinkGatewayControllerTest(t)
+	const (
+		uplinkName = "uplink1"
+		nodeName   = "node-a"
+	)
+	controller, client := newUplinkGatewayControllerForTest(t, uplinkName, nodeName)
+	network := uplinkGatewayNetInfo(t, "red", uplinkName)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+
+	go func() {
+		done <- controller.ReconcileNetwork(network, func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+
+	controller.InvalidateGatewayState(uplinkName)
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("failed to finish invalidated reconciliation: %v", err)
+	}
+
+	gatewayReady, _ := getUplinkGatewayCondition(t, client, uplinkName, nodeName)
+	if gatewayReady == nil || gatewayReady.Status != metav1.ConditionFalse ||
+		gatewayReady.Reason != uplinkv1alpha1.UplinkStateReasonGatewayConfigurationPending {
+		t.Fatalf("expected old completion to leave GatewayReady pending, got %#v", gatewayReady)
+	}
+}
+
 func TestUplinkGatewayControllerAggregatesActiveNetworks(t *testing.T) {
 	prepareUplinkGatewayControllerTest(t)
 	const (
