@@ -12,7 +12,10 @@ import (
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+
+	kclientset "k8s.io/client-go/kubernetes"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -129,6 +132,13 @@ func main() {
 		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
+		}
+		client, err := kclientset.NewForConfig(cfg)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
+		}
+		if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
 	})
 
