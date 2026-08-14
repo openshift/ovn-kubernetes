@@ -184,7 +184,138 @@ var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", featur
 			}
 		}
 	})
+
+	ginkgo.It("recreates an UplinkState deleted out of band", func() {
+		env := provisionUplinkWithActiveCUDN(f, ictx, ipFamilySet, testSuffix, "updel")
+		node, uplinkName, bridgeName, networkName := env.node, env.uplinkName, env.bridgeName, env.networkName
+
+		ginkgo.By("deleting the UplinkState out of band")
+		state, err := getUplinkState(f, uplinkName, node.Name)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		deletedUID := state.GetUID()
+		gomega.Expect(f.DynamicClient.Resource(uplinkStateGVR).Delete(
+			context.Background(),
+			state.GetName(),
+			metav1.DeleteOptions{},
+		)).To(gomega.Succeed())
+
+		ginkgo.By("waiting for a new UplinkState without restarting ovnkube-node")
+		gomega.Eventually(func() error {
+			state, err := getUplinkState(f, uplinkName, node.Name)
+			if err != nil {
+				return err
+			}
+			if state.GetUID() == deletedUID {
+				return fmt.Errorf("UplinkState %s still carries the deleted object's UID %s",
+					state.GetName(), deletedUID)
+			}
+			return nil
+		}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
+			gomega.Succeed(),
+			"expected the UplinkState for uplink %q on node %q to be recreated",
+			uplinkName,
+			node.Name,
+		)
+
+		ginkgo.By("waiting for the recreated UplinkState to recover discovery and gateway readiness")
+		waitForUplinkStatesResolved(f, uplinkName, bridgeName, []corev1.Node{node})
+		waitForUplinkStateGatewayCondition(
+			f,
+			uplinkName,
+			node.Name,
+			metav1.ConditionTrue,
+			uplinkv1alpha1.UplinkStateReasonGatewayConfigured,
+		)
+		waitForCUDNUplinksReady(f, networkName)
+	})
 })
+
+// uplinkRecoveryEnv is the provisioning shared by the UplinkState recovery
+// tests: one Uplink resolved on every node, and one CUDN activated on a single
+// schedulable node with gateway readiness published for it.
+type uplinkRecoveryEnv struct {
+	node        corev1.Node
+	uplinkName  string
+	bridgeName  string
+	networkName string
+}
+
+func provisionUplinkWithActiveCUDN(
+	f *framework.Framework,
+	ictx infraapi.Context,
+	ipFamilySet sets.Set[utilnet.IPFamily],
+	testSuffix string,
+	prefix string,
+) uplinkRecoveryEnv {
+	ginkgo.GinkgoHelper()
+
+	nodes, err := f.ClientSet.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	schedulableNodes, err := e2enode.GetBoundedReadySchedulableNodes(context.Background(), f.ClientSet, 1)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(schedulableNodes.Items).NotTo(gomega.BeEmpty())
+	node := schedulableNodes.Items[0]
+
+	uplinkAlloc, err := allocators.AllocateBGP(f, ictx)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	_, nodeIfaces := setupUplinkNetwork(
+		ictx,
+		nodes.Items,
+		ipFamilySet,
+		"upnet"+testSuffix,
+		[]string{uplinkAlloc.BGPPeerSubnet, uplinkAlloc.BGPPeerSubnet6},
+	)
+
+	bridgeName := uplinkBridgeName(prefix + testSuffix)
+	gomega.Expect(configureUplinkBridge(f, ictx, bridgeName, nodeIfaces)).To(gomega.Succeed())
+	gomega.Expect(configureUplinkBridgeDefaultRoutes(
+		ictx,
+		bridgeName,
+		nodeIfaces,
+	)).To(gomega.Succeed())
+
+	uplinkName := prefix + testSuffix
+	createUplink(f, ictx, uplinkName, nodes.Items, nodeIfaces, bridgeName)
+	waitForUplinkStatesResolved(f, uplinkName, bridgeName, nodes.Items)
+
+	ginkgo.By("activating a CUDN on the Uplink so GatewayReady is published")
+	networkName := prefix + "net" + testSuffix
+	bgpAlloc, err := allocators.AllocateBGP(f, ictx)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	networkSpec := uplinkLayer3NetworkSpec(ipFamilySet, bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6)
+	namespace, err := createUplinkNamespace(
+		f,
+		ictx,
+		"uplink-default",
+		networkName,
+	)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(createUplinkCUDN(
+		f,
+		ictx,
+		namespace,
+		networkName,
+		networkSpec,
+		nil,
+		uplinkName,
+	)).To(gomega.Succeed())
+	createUplinkNetexecPod(f, namespace.Name, "client-"+networkName, node.Name)
+	waitForUplinkStateGatewayCondition(
+		f,
+		uplinkName,
+		node.Name,
+		metav1.ConditionTrue,
+		uplinkv1alpha1.UplinkStateReasonGatewayConfigured,
+	)
+	waitForCUDNUplinksReady(f, networkName)
+
+	return uplinkRecoveryEnv{
+		node:        node,
+		uplinkName:  uplinkName,
+		bridgeName:  bridgeName,
+		networkName: networkName,
+	}
+}
 
 var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, func() {
 	f := wrappedTestFramework("uplink-bgp")
@@ -932,6 +1063,65 @@ var _ = ginkgo.Describe("Network Segmentation Uplink split DPU status conditions
 			gomega.Succeed(),
 			"expected the host-owned data fields to be pruned once discovery fails",
 		)
+	})
+
+	ginkgo.It("recreates an UplinkState deleted out of band", func() {
+		schedulableNodes, err := e2enode.GetReadySchedulableNodes(context.Background(), f.ClientSet)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		dpuHostNodes := filterNodesByLabel(schedulableNodes.Items, uplinkDPUHostNodeLabel)
+		gomega.Expect(dpuHostNodes).NotTo(gomega.BeEmpty(), "expected at least one ready schedulable DPU host node")
+		nodeIfaces := collectDPUHostUplinkInterfaces(dpuHostNodes)
+		node := dpuHostNodes[0]
+
+		ginkgo.By("resolving an Uplink on the provisioned host interface")
+		uplinkName := "updel" + testSuffix
+		createUplink(f, ictx, uplinkName, []corev1.Node{node}, nodeIfaces, "")
+		waitForUplinkStatesResolved(f, uplinkName, os.Getenv(uplinkDPUExpectedBridgeEnv), []corev1.Node{node})
+
+		ginkgo.By("deleting the UplinkState out of band")
+		state, err := getUplinkState(f, uplinkName, node.Name)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		deletedUID := state.GetUID()
+		gomega.Expect(f.DynamicClient.Resource(uplinkStateGVR).Delete(
+			context.Background(),
+			state.GetName(),
+			metav1.DeleteOptions{},
+		)).To(gomega.Succeed())
+
+		ginkgo.By("waiting for both DPU sides to republish their status on a recreated UplinkState")
+		gomega.Eventually(func() error {
+			state, err := getUplinkState(f, uplinkName, node.Name)
+			if err != nil {
+				return err
+			}
+			// A new UID proves recreation rather than a surviving object.
+			if state.GetUID() == deletedUID {
+				return fmt.Errorf("UplinkState %s still carries the deleted object's UID %s",
+					state.GetName(), deletedUID)
+			}
+			// The DPU-host republished the host interface data on the new
+			// object...
+			if err := checkUplinkStateCondition(state,
+				uplinkv1alpha1.UplinkStateConditionHostDataReady,
+				metav1.ConditionTrue,
+				uplinkv1alpha1.UplinkStateReasonHostDataDiscovered,
+			); err != nil {
+				return err
+			}
+			// ...and the DPU consumed it and re-resolved its bridge, having
+			// survived the create race between the two sides.
+			return checkUplinkStateCondition(state,
+				uplinkv1alpha1.UplinkStateConditionResolved,
+				metav1.ConditionTrue,
+				uplinkv1alpha1.UplinkStateReasonResolved,
+			)
+		}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
+			gomega.Succeed(),
+			"expected the deleted UplinkState to be recreated and re-resolved without a restart",
+		)
+		// Full status recovery: the resolved bridge and the host IPs were
+		// republished on the recreated object, not just the conditions.
+		waitForUplinkStatesResolved(f, uplinkName, os.Getenv(uplinkDPUExpectedBridgeEnv), []corev1.Node{node})
 	})
 })
 
