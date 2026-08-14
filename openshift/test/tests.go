@@ -12,6 +12,15 @@ package test
 // InformingTests lists tests that generally pass but are not considered stable
 // and should not block CI jobs if they fail.
 var InformingTests = []string{
+	// OTE metrics tests
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 45841-Add OVN flow count metric",
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 47471-Record update to cache versus port binding",
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 52072-Add mechanism to record duration for k8 kinds",
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 47524-Metrics for ovn-appctl stopwatch/show command",
+	"[Feature:Metrics][JIRA:Networking][ovn-kubernetes-ote][sig-network] OVN metrics 45689-Metrics for idling enable/disabled",
+	"[Feature:Metrics][JIRA:Networking][Serial][ovn-kubernetes-ote][sig-network] OVN metrics 60539-Verify metrics ovs_vswitchd_interfaces_total",
+	"[Feature:Metrics][JIRA:Networking][Serial][ovn-kubernetes-ote][sig-network] OVN metrics 60704-Verify metrics ovs_vswitchd_interface_up_wait_seconds_total",
+	"[Feature:Metrics][JIRA:Networking][Serial][Slow][Timeout:25m][ovn-kubernetes-ote][sig-network] OVN metrics 60708-Verify metrics ovnkube_resource_retry_failures_total",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN with custom network [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L3 primary UDN [Suite:openshift/conformance/parallel]",
