@@ -95,6 +95,13 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve hypervisor node interface for machine network: %w", err)
 	}
+	// Open the external container port range (12000-65535/tcp) in the
+	// hypervisor firewall once, instead of per-port during each test.
+	if ci.machineNetworkGwInfo != nil {
+		if err := configureFirewallForExternalContainerPorts(sshRunner, ci.machineNetworkGwInfo.InfName); err != nil {
+			return nil, fmt.Errorf("failed to configure firewall for external container ports: %w", err)
+		}
+	}
 	return ci, nil
 }
 
@@ -438,6 +445,25 @@ func tryMatchLink(link linkInfo, v4Subnet, v6Subnet string) *api.NetworkInterfac
 	}
 
 	// Not a complete match, return nil
+	return nil
+}
+
+// configureFirewallForExternalContainerPorts opens the external container port
+// range (12000-65535/tcp) in the hypervisor firewall. The range matches the
+// port allocator in the container engine. The rule is added as permanent and
+// reloaded so it survives firewall restarts during the test run.
+func configureFirewallForExternalContainerPorts(runner api.Runner, interfaceName string) error {
+	zone, err := runner.Run("firewall-cmd", "--get-zone-of-interface="+interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to get firewall zone for interface %s: %w", interfaceName, err)
+	}
+	zone = strings.TrimSpace(zone)
+	if _, err := runner.Run("firewall-cmd", "--zone="+zone, "--add-port=12000-65535/tcp", "--permanent"); err != nil {
+		return fmt.Errorf("failed to add firewall port range 12000-65535/tcp to zone %s: %w", zone, err)
+	}
+	if _, err := runner.Run("firewall-cmd", "--reload"); err != nil {
+		return fmt.Errorf("failed to reload firewall: %w", err)
+	}
 	return nil
 }
 
