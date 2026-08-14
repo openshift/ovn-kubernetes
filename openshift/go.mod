@@ -2,6 +2,8 @@ module github.com/ovn-kubernetes/ovn-kubernetes/openshift
 
 go 1.26.0
 
+toolchain go1.26.3
+
 require (
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
