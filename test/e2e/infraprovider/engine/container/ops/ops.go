@@ -420,7 +420,11 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 	if exists {
 		return container, fmt.Errorf("external container %s already exists", container.Name)
 	}
-	cmd := []string{"run", "-itd", "--privileged", "--name", container.Name, "--network", container.Network.Name(), "--hostname", container.Name}
+	network := "none"
+	if container.Network != nil {
+		network = container.Network.Name()
+	}
+	cmd := []string{"run", "-itd", "--privileged", "--name", container.Name, "--network", network, "--hostname", container.Name}
 	if container.IPv4 != "" {
 		cmd = append(cmd, "--ip", container.IPv4)
 	}
@@ -463,7 +467,6 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 			return container, fmt.Errorf("failed to get network interface information: %w", err)
 		}
 	}
-
 	if valid, err := container.IsValidPostCreate(); !valid {
 		return container, err
 	}
