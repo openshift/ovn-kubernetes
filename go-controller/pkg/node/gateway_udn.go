@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"syscall"
 	"time"
 
@@ -1113,11 +1114,11 @@ func (udng *UserDefinedNetworkGateway) getV6MasqueradeIP() (*net.IPNet, error) {
 // 2000:	from all fwmark 0x1001 lookup 1007
 // 2000:	from all to 10.132.0.0/14 lookup 1007
 // 2000:	from all to 169.254.0.12 lookup 1007
-func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules() ([]netlink.Rule, []netlink.Rule, error) {
-	var addIPRules []netlink.Rule
-	var delIPRules []netlink.Rule
-	var masqIPRules []netlink.Rule
-	var subnetIPRules []netlink.Rule
+func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules() ([]iprulemanager.IPRule, []iprulemanager.IPRule, error) {
+	var addIPRules []iprulemanager.IPRule
+	var delIPRules []iprulemanager.IPRule
+	var masqIPRules []iprulemanager.IPRule
+	var subnetIPRules []iprulemanager.IPRule
 	masqIPv4, err := udng.getV4MasqueradeIP()
 	if err != nil {
 		return nil, nil, err
@@ -1158,39 +1159,47 @@ func (udng *UserDefinedNetworkGateway) constructUDNVRFIPRules() ([]netlink.Rule,
 	return addIPRules, delIPRules, nil
 }
 
-func generateIPRuleForPacketMark(mark uint, isIPv6 bool, vrfTableId uint) netlink.Rule {
-	r := *netlink.NewRule()
-	r.Table = int(vrfTableId)
-	r.Priority = UDNMasqueradeIPRulePriority
-	r.Family = netlink.FAMILY_V4
+func generateIPRuleForPacketMark(mark uint, isIPv6 bool, vrfTableId uint) iprulemanager.IPRule {
+	family := netlink.FAMILY_V4
 	if isIPv6 {
-		r.Family = netlink.FAMILY_V6
+		family = netlink.FAMILY_V6
 	}
-	r.Mark = uint32(mark)
-	return r
-}
-func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) netlink.Rule {
-	r := *netlink.NewRule()
-	r.Table = int(vrfTableId)
-	r.Priority = UDNMasqueradeIPRulePriority
-	r.Family = netlink.FAMILY_V4
-	if isIPv6 {
-		r.Family = netlink.FAMILY_V6
+	return iprulemanager.IPRule{
+		Table:    int(vrfTableId),
+		Priority: UDNMasqueradeIPRulePriority,
+		Family:   family,
+		Mark:     uint32(mark),
 	}
-	r.Dst = util.GetIPNetFullMaskFromIP(masqIP)
-	return r
 }
 
-func generateIPRuleForUDNSubnet(udnIP *net.IPNet, isIPv6 bool, vrfTableId uint) netlink.Rule {
-	r := *netlink.NewRule()
-	r.Table = int(vrfTableId)
-	r.Priority = UDNMasqueradeIPRulePriority
-	r.Family = netlink.FAMILY_V4
+func generateIPRuleForMasqIP(masqIP net.IP, isIPv6 bool, vrfTableId uint) iprulemanager.IPRule {
+	family := netlink.FAMILY_V4
 	if isIPv6 {
-		r.Family = netlink.FAMILY_V6
+		family = netlink.FAMILY_V6
 	}
-	r.Dst = udnIP
-	return r
+	addr, _ := netip.AddrFromSlice(masqIP)
+	addr = addr.Unmap()
+	return iprulemanager.IPRule{
+		Table:    int(vrfTableId),
+		Priority: UDNMasqueradeIPRulePriority,
+		Family:   family,
+		Dst:      netip.PrefixFrom(addr, addr.BitLen()),
+	}
+}
+
+func generateIPRuleForUDNSubnet(udnIP *net.IPNet, isIPv6 bool, vrfTableId uint) iprulemanager.IPRule {
+	family := netlink.FAMILY_V4
+	if isIPv6 {
+		family = netlink.FAMILY_V6
+	}
+	addr, _ := netip.AddrFromSlice(udnIP.IP)
+	ones, _ := udnIP.Mask.Size()
+	return iprulemanager.IPRule{
+		Table:    int(vrfTableId),
+		Priority: UDNMasqueradeIPRulePriority,
+		Family:   family,
+		Dst:      netip.PrefixFrom(addr.Unmap(), ones),
+	}
 }
 
 func (udng *UserDefinedNetworkGateway) run() {
