@@ -942,6 +942,94 @@ func TestNodeUplinkControllerDeletesUnselectedNodeState(t *testing.T) {
 	g.Expect(apierrors.IsNotFound(err)).To(gomega.BeTrue())
 }
 
+func TestNodeUplinkControllerRecreatesDeletedState(t *testing.T) {
+	// Deleting an UplinkState generates no event on the owning Uplink, so the
+	// UplinkState reconciler must requeue the owner to recreate the
+	// UplinkState. A delete event reconciles the UplinkState's key with the
+	// object gone from the lister, so it is simulated by not seeding the
+	// UplinkState at all.
+	t.Run("requeues the owning Uplink", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			// no UplinkState: reconciling its key simulates its deletion
+		)
+
+		stateName := uplinkutil.StateName("br-blue", "node-a")
+		g.Expect(controller.reconcileUplinkState(stateName)).To(gomega.Succeed())
+		// The fake Uplink controller records the requeue that would recreate
+		// the UplinkState (creation itself is covered by
+		// TestNodeUplinkControllerCreatesSelectedNodeState).
+		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.ConsistOf("RateLimited:br-blue"))
+	})
+
+	// The delete handler must not filter on node selection: its node labels
+	// may be stale, and a stale "not selected" would skip a needed recovery.
+	// The owner is requeued unconditionally and its reconcile decides; for an
+	// unselected node it settles by deleting nothing
+	// (TestNodeUplinkControllerDeletesUnselectedNodeState).
+	t.Run("requeues the owning Uplink when it no longer selects the node", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "red"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+		)
+
+		g.Expect(controller.reconcileUplinkState(
+			uplinkutil.StateName("br-blue", "node-a"))).To(gomega.Succeed())
+		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.ConsistOf("RateLimited:br-blue"))
+	})
+
+	// The cluster-manager deletes the UplinkStates of a terminating Uplink
+	// before releasing its finalizer; recreating them would fight that
+	// teardown.
+	t.Run("does not requeue a terminating Uplink", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		uplink := newUplink("br-blue", "role", "blue", "breth0")
+		now := metav1.Now()
+		uplink.DeletionTimestamp = &now
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			uplink,
+		)
+
+		g.Expect(controller.reconcileUplinkState(
+			uplinkutil.StateName("br-blue", "node-a"))).To(gomega.Succeed())
+		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.BeEmpty())
+	})
+
+	// A key no Uplink owns (remote node's UplinkState, or deleted Uplink)
+	// must not requeue anything.
+	t.Run("ignores UplinkStates not owned by any Uplink", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+		)
+
+		g.Expect(controller.reconcileUplinkState(
+			uplinkutil.StateName("br-red", "node-a"))).To(gomega.Succeed())
+		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.BeEmpty())
+	})
+}
+
 func TestEnsureUplinkStateGetsExistingObjectAfterCreateRace(t *testing.T) {
 	g := gomega.NewWithT(t)
 	uplink := newUplink("br-blue", "role", "blue", "breth0")

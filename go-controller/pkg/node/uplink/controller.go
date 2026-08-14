@@ -20,6 +20,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -245,7 +246,7 @@ func (c *Controller) reconcileUplinkState(key string) error {
 	state, err := c.uplinkStateLister.Get(key)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return c.reconcileOwnerOfDeletedUplinkState(key)
 		}
 		return fmt.Errorf("failed to get UplinkState %s: %w", key, err)
 	}
@@ -402,6 +403,34 @@ func (c *Controller) reconcileUplinkState(key string) error {
 		bridgeName,
 		"Uplink discovery succeeded",
 	)
+}
+
+// reconcileOwnerOfDeletedUplinkState reacts to an UplinkState deletion: the deletion
+// generates no event on the Uplink that owns it, so reconcile that Uplink
+// here to recreate the UplinkState. UplinkState names are opaque keys (long
+// ones are hashed), so the owner is found by computing every Uplink's
+// UplinkState name for this node.
+func (c *Controller) reconcileOwnerOfDeletedUplinkState(key string) error {
+	uplinks, err := c.uplinkLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list Uplinks: %w", err)
+	}
+	for _, uplink := range uplinks {
+		if uplinkutil.StateName(uplink.Name, c.nodeName) != key {
+			continue
+		}
+		// The cluster-manager finalizer flow deletes the UplinkStates of a
+		// terminating Uplink before releasing it; don't recreate them.
+		if !uplink.DeletionTimestamp.IsZero() {
+			return nil
+		}
+		klog.Infof("UplinkState %s was deleted, reconciling Uplink %s to recreate it", key, uplink.Name)
+		// Rate-limited so recreation backs off while the informer cache still
+		// misses a just-created UplinkState, or against a persistent deleter.
+		c.uplinkController.ReconcileRateLimited(uplink.Name)
+		return nil
+	}
+	return nil
 }
 
 func selectedNodeConfigForNode(
