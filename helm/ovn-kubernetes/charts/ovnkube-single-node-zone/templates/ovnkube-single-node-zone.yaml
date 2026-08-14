@@ -248,7 +248,18 @@ spec:
       - name: ovnkube-controller
         image: {{ include "getImage" . }}
         imagePullPolicy: {{ default "IfNotPresent" .Values.global.image.pullPolicy }}
+        {{- if eq (hasKey .Values.global "dummyGatewayBridge" | ternary .Values.global.dummyGatewayBridge false) true }}
+        command:
+        - /bin/bash
+        - -c
+        - |
+          until ovs-vsctl --timeout=15 --may-exist add-br br-ex; do sleep 1; done
+          ip address replace 10.44.0.1/32 dev br-ex
+          ip link set br-ex up
+          exec /root/ovnkube.sh ovnkube-controller-with-node
+        {{- else }}
         command: ["/root/ovnkube.sh", "ovnkube-controller-with-node"]
+        {{- end }}
         securityContext:
           runAsUser: 0
           {{- if eq (hasKey .Values.global "unprivilegedMode" | ternary .Values.global.unprivilegedMode false) false }}

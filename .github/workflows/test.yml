@@ -506,7 +506,7 @@ jobs:
       fail-fast: false
       matrix:
         # Valid options are:
-        # target: ["shard-conformance", "control-plane", "multi-homing", "node-ip-mac-migration",
+        # target: ["shard-conformance", "no-uplink", "control-plane", "multi-homing", "node-ip-mac-migration",
         #          "external-gateway", "kv-live-migration", "network-segmentation",
         #          "network-segmentation-dynamic", "bgp", "bgp-no-overlay", "bgp-no-overlay-dynamic", "bgp-loose-isolation",
         #          "evpn", "traffic-flow-test-only", "tools", "serial"]
@@ -526,6 +526,9 @@ jobs:
         # traffic-flow-tests : "<tests range. i.e. 1-24>"
         include:
           - {"target": "shard-conformance", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          # Keep dedicated coverage for a local gateway bridge without a system uplink so gateway initialization
+          # cannot silently fall back to the normal bridge-plus-uplink topology.
+          - {"target": "no-uplink", "ha": "noHA", "gateway-mode": "local", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv4",      "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default"}
           - {"target": "shard-conformance", "ha": "HA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default"}
           - {"target": "shard-conformance", "ha": "HA",   "gateway-mode": "shared", "ipfamily": "ipv6",      "disable-snat-multiple-gws": "noSnatGW",   "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "no-overlay": "true"}
@@ -580,6 +583,7 @@ jobs:
       OVN_DISABLE_SNAT_MULTIPLE_GWS: "${{ matrix.disable-snat-multiple-gws == 'noSnatGW' }}"
       KIND_INSTALL_METALLB: "${{ matrix.target == 'control-plane' || startsWith(matrix.target, 'network-segmentation') }}"
       OVN_GATEWAY_MODE: "${{ matrix.gateway-mode }}"
+      OVN_DUMMY_GATEWAY_BRIDGE: "${{ matrix.target == 'no-uplink' }}"
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || startsWith(matrix.target, 'network-segmentation') || matrix.target == 'tools' || matrix.target == 'traffic-flow-test-only' || matrix.routeadvertisements != '' }}"
       ENABLE_NETWORK_SEGMENTATION: "${{ startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation' }}"
@@ -755,6 +759,8 @@ jobs:
       run: |
         if [ "${{ matrix.target }}" == "multi-homing" ]; then
           make -C test control-plane WHAT="Multi Homing"
+        elif [ "${{ matrix.target }}" == "no-uplink" ]; then
+          make -C test shard-network
         elif [ "${{ matrix.target }}" == "node-ip-mac-migration" ]; then
           make -C test control-plane WHAT="Node IP and MAC address migration"
         elif [ "${{ matrix.target }}" == "external-gateway" ]; then

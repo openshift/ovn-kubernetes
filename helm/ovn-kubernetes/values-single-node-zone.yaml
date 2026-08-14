@@ -27,6 +27,8 @@ global:
   gatewayMode: shared
   # -- Optional extra gateway options
   gatewayOpts: ""
+  # -- Create a gateway bridge without a system uplink (for development and CI)
+  dummyGatewayBridge: false
   # -- Use simulated DPU operations instead of SR-IOV/switchdev hardware (for Kind/VM-based DPU simulation)
   simulateDpu: false
   # -- The DPU-side representor interface for the host's uplink (PF). Required for simulated environments where switchdev metadata is unavailable.
