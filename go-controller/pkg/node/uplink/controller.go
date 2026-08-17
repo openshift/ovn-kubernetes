@@ -442,32 +442,30 @@ func (c *Controller) reconcileUplinkState(key string) error {
 
 // reconcileOwnerOfDeletedUplinkState reacts to an UplinkState deletion: the deletion
 // generates no event on the Uplink that owns it, so reconcile that Uplink
-// here to recreate the UplinkState. UplinkState names are opaque keys (long
-// ones are hashed), so the owner is found by computing every Uplink's
-// UplinkState name for this node.
+// here to recreate the UplinkState.
 func (c *Controller) reconcileOwnerOfDeletedUplinkState(key string) error {
 	uplinks, err := c.uplinkLister.List(labels.Everything())
 	if err != nil {
 		return fmt.Errorf("failed to list Uplinks: %w", err)
 	}
-	for _, uplink := range uplinks {
-		if uplinkutil.StateName(uplink.Name, c.nodeName) != key {
-			continue
-		}
-		// The cluster-manager finalizer flow deletes the UplinkStates of a
-		// terminating Uplink before releasing it; don't recreate them.
-		if !uplink.DeletionTimestamp.IsZero() {
-			if c.gatewayStateManager != nil {
-				c.gatewayStateManager.DeleteGatewayState(uplink.Name)
-			}
-			return nil
-		}
-		klog.Infof("UplinkState %s was deleted, reconciling Uplink %s to recreate it", key, uplink.Name)
-		// Rate-limited so recreation backs off while the informer cache still
-		// misses a just-created UplinkState, or against a persistent deleter.
-		c.uplinkController.ReconcileRateLimited(uplink.Name)
+	uplink, found := uplinkutil.UplinkForState(uplinks, []string{c.nodeName}, key)
+	if !found {
 		return nil
 	}
+	// The cluster-manager finalizer flow deletes the UplinkStates of a
+	// terminating Uplink before releasing it; don't recreate them.
+	if !uplink.DeletionTimestamp.IsZero() {
+		if c.gatewayStateManager != nil {
+			c.gatewayStateManager.DeleteGatewayState(uplink.Name)
+		}
+		return nil
+	}
+	klog.Infof("UplinkState %s was deleted, reconciling Uplink %s to recreate it", key, uplink.Name)
+	// Rate-limited so recreation backs off while the informer cache still
+	// misses a just-created UplinkState. Successful recreations reset the
+	// per-key backoff, so a persistent deleter is only throttled to the
+	// rate limiter's sustained token-bucket rate.
+	c.uplinkController.ReconcileRateLimited(uplink.Name)
 	return nil
 }
 
