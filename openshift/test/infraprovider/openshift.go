@@ -25,18 +25,26 @@ import (
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
+// platformInfra abstracts the platform-specific infrastructure (baremetal, AWS, etc.)
+// for managing external containers and networks.
+type platformInfra interface {
+	api.ExternalContainerProvider
+	PrimaryNetwork() (api.Network, error)
+	GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider
+}
+
 type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
 	hostPort                *portalloc.PortAllocator
-	clusterInfra            *baremetalInfra
+	clusterInfra            platformInfra
 }
 
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
 	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
-	clusterInfra, err := initializeClusterInfra(config)
+	clusterInfra, err := initializePlatformInfra(config)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +190,7 @@ func (o *OpenshiftInfraProvider) PrimaryNetwork() (api.Network, error) {
 	if o.clusterInfra == nil {
 		panic("not implemented")
 	}
-	return o.clusterInfra.GetNetwork(primaryNetworkName)
+	return o.clusterInfra.PrimaryNetwork()
 }
 
 func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
@@ -317,4 +325,34 @@ func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 
 func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
 	panic("not implemented")
+}
+
+// initializePlatformInfra fetches the cluster infrastructure object, checks the
+// platform type, and dispatches to the appropriate platform initializer.
+// Returns nil when no platform-specific infra is needed.
+func initializePlatformInfra(config *rest.Config) (platformInfra, error) {
+	configClient, err := configclient.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve config client: %w", err)
+	}
+	infra, err := configClient.ConfigV1().Infrastructures().Get(context.Background(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve cluster infrastructure object: %w", err)
+	}
+	switch infra.Spec.PlatformSpec.Type {
+	case configv1.BareMetalPlatformType:
+		bm, err := initializeClusterInfra(infra)
+		if err != nil || bm == nil {
+			return nil, err
+		}
+		return bm, nil
+	case configv1.AWSPlatformType:
+		aws, err := initializeAWSInfra()
+		if err != nil || aws == nil {
+			return nil, err
+		}
+		return aws, nil
+	default:
+		return nil, nil
+	}
 }
