@@ -103,6 +103,12 @@ func newPod(namespace, name, node, podIP string) *v1.Pod {
 			Phase:  v1.PodRunning,
 			PodIP:  podIP,
 			PodIPs: podIPs,
+			Conditions: []v1.PodCondition{
+				{
+					Type:   v1.PodReady,
+					Status: v1.ConditionTrue,
+				},
+			},
 		},
 	}
 }

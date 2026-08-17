@@ -28,6 +28,7 @@ import (
 	ktypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+	v1pod "k8s.io/kubernetes/pkg/api/v1/pod"
 )
 
 type gatewayInfo struct {
@@ -48,6 +49,13 @@ func (oc *DefaultNetworkController) addPodExternalGW(pod *kapi.Pod) error {
 	}
 
 	klog.Infof("External gateway pod: %s, detected for namespace(s) %s", pod.Name, podRoutingNamespaceAnno)
+
+	// If an external gateway pod is in terminating or not ready state then don't add the
+	// routes for the external gateway pod
+	if util.PodTerminating(pod) || !v1pod.IsPodReadyConditionTrue(pod.Status) {
+		klog.Warningf("External gateway pod cannot serve traffic; it's in terminating or not ready state: %s/%s", pod.Namespace, pod.Name)
+		return nil
+	}
 
 	foundGws, err := getExGwPodIPs(pod)
 	if err != nil {
