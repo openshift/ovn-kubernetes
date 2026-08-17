@@ -68,7 +68,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Future feature-based filters can be added here
+	// secondary-host-eip tests: only include on platforms with a
+	// pre-configured secondary network (currently baremetal only)
+	if strings.Contains(spec.Name, "secondary-host-eip") && !ocpInfra.HasSecondaryHostEIPSupport() {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
