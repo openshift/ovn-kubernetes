@@ -20,6 +20,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -82,6 +83,14 @@ func newDiscoveryError(reason string, err error) error {
 	return &discoveryError{reason: reason, err: err}
 }
 
+// GatewayStateManager owns the node-local gateway cache and the GatewayReady
+// condition published from it.
+type GatewayStateManager interface {
+	RepublishGatewayCondition(uplinkName string) error
+	InvalidateGatewayState(uplinkName string)
+	DeleteGatewayState(uplinkName string)
+}
+
 // Controller publishes UplinkState discovery status for this node.
 type Controller struct {
 	nodeName string
@@ -91,8 +100,9 @@ type Controller struct {
 	uplinkStateLister uplinklisters.UplinkStateLister
 	nodeLister        corelisters.NodeLister
 
-	hostDiscoverer hostInterfaceDiscoverer
-	bridgeResolver ovsBridgeResolver
+	hostDiscoverer      hostInterfaceDiscoverer
+	bridgeResolver      ovsBridgeResolver
+	gatewayStateManager GatewayStateManager
 
 	uplinkController      controllerutil.Controller
 	uplinkStateController controllerutil.Controller
@@ -112,15 +122,17 @@ func discoveryRateLimiter() workqueue.TypedRateLimiter[string] {
 
 // NewController creates an ovnkube-node Uplink controller.
 func NewController(nodeName string, wf factory.NodeWatchFactory, ovnClient *util.OVNNodeClientset, ovsClient libovsdbclient.Client,
+	gatewayStateManager GatewayStateManager,
 ) *Controller {
 	c := &Controller{
-		nodeName:          nodeName,
-		uplinkClient:      ovnClient.UplinkClient,
-		uplinkLister:      wf.UplinkInformer().Lister(),
-		uplinkStateLister: wf.UplinkStateInformer().Lister(),
-		nodeLister:        wf.NodeCoreInformer().Lister(),
-		hostDiscoverer:    netlinkHostInterfaceDiscoverer{},
-		bridgeResolver:    defaultOVSBridgeResolver{ovsClient: ovsClient},
+		nodeName:            nodeName,
+		uplinkClient:        ovnClient.UplinkClient,
+		uplinkLister:        wf.UplinkInformer().Lister(),
+		uplinkStateLister:   wf.UplinkStateInformer().Lister(),
+		nodeLister:          wf.NodeCoreInformer().Lister(),
+		hostDiscoverer:      netlinkHostInterfaceDiscoverer{},
+		bridgeResolver:      defaultOVSBridgeResolver{ovsClient: ovsClient},
+		gatewayStateManager: gatewayStateManager,
 	}
 
 	uplinkCfg := &controllerutil.ControllerConfig[uplinkv1alpha1.Uplink]{
@@ -193,6 +205,9 @@ func (c *Controller) reconcileUplink(key string) error {
 	uplink, err := c.uplinkLister.Get(key)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			if c.gatewayStateManager != nil {
+				c.gatewayStateManager.DeleteGatewayState(key)
+			}
 			return c.deleteUplinkState(uplinkutil.StateName(key, c.nodeName))
 		}
 		return fmt.Errorf("failed to get Uplink %s: %w", key, err)
@@ -205,6 +220,9 @@ func (c *Controller) reconcileUplink(key string) error {
 
 	nodeConfig, nodeConfigErr := selectedNodeConfigForNode(uplink, node)
 	if nodeConfigErr == nil && nodeConfig == nil {
+		if c.gatewayStateManager != nil {
+			c.gatewayStateManager.InvalidateGatewayState(uplink.Name)
+		}
 		return c.deleteUplinkState(uplinkutil.StateName(uplink.Name, c.nodeName))
 	}
 
@@ -245,7 +263,7 @@ func (c *Controller) reconcileUplinkState(key string) error {
 	state, err := c.uplinkStateLister.Get(key)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return c.reconcileOwnerOfDeletedUplinkState(key)
 		}
 		return fmt.Errorf("failed to get UplinkState %s: %w", key, err)
 	}
@@ -254,6 +272,9 @@ func (c *Controller) reconcileUplinkState(key string) error {
 	uplink, err := c.uplinkLister.Get(uplinkName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			if c.gatewayStateManager != nil {
+				c.gatewayStateManager.DeleteGatewayState(uplinkName)
+			}
 			return nil
 		}
 		return fmt.Errorf("failed to get Uplink %s: %w", uplinkName, err)
@@ -277,7 +298,22 @@ func (c *Controller) reconcileUplinkState(key string) error {
 		))
 	}
 	if nodeConfig == nil {
+		if c.gatewayStateManager != nil {
+			c.gatewayStateManager.InvalidateGatewayState(uplinkName)
+		}
 		return c.deleteUplinkState(state.Name)
+	}
+
+	// An UplinkState recreated after an out-of-band deletion lost the
+	// GatewayReady condition, and nothing republishes it until a network event
+	// runs gateway reconciliation: restore it only after confirming this
+	// Uplink still selects the node. Intentional deselection starts a new
+	// gateway lifecycle and must not restore cached readiness.
+	if c.gatewayStateManager != nil &&
+		meta.FindStatusCondition(state.Status.Conditions, uplinkv1alpha1.UplinkStateConditionGatewayReady) == nil {
+		if err := c.gatewayStateManager.RepublishGatewayCondition(uplinkName); err != nil {
+			return fmt.Errorf("failed to republish gateway condition for Uplink %s: %w", uplinkName, err)
+		}
 	}
 
 	hostInterfaceName := string(nodeConfig.HostInterfaceName)
@@ -402,6 +438,35 @@ func (c *Controller) reconcileUplinkState(key string) error {
 		bridgeName,
 		"Uplink discovery succeeded",
 	)
+}
+
+// reconcileOwnerOfDeletedUplinkState reacts to an UplinkState deletion: the deletion
+// generates no event on the Uplink that owns it, so reconcile that Uplink
+// here to recreate the UplinkState.
+func (c *Controller) reconcileOwnerOfDeletedUplinkState(key string) error {
+	uplinks, err := c.uplinkLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list Uplinks: %w", err)
+	}
+	uplink, found := uplinkutil.UplinkForState(uplinks, []string{c.nodeName}, key)
+	if !found {
+		return nil
+	}
+	// The cluster-manager finalizer flow deletes the UplinkStates of a
+	// terminating Uplink before releasing it; don't recreate them.
+	if !uplink.DeletionTimestamp.IsZero() {
+		if c.gatewayStateManager != nil {
+			c.gatewayStateManager.DeleteGatewayState(uplink.Name)
+		}
+		return nil
+	}
+	klog.Infof("UplinkState %s was deleted, reconciling Uplink %s to recreate it", key, uplink.Name)
+	// Rate-limited so recreation backs off while the informer cache still
+	// misses a just-created UplinkState. Successful recreations reset the
+	// per-key backoff, so a persistent deleter is only throttled to the
+	// rate limiter's sustained token-bucket rate.
+	c.uplinkController.ReconcileRateLimited(uplink.Name)
+	return nil
 }
 
 func selectedNodeConfigForNode(

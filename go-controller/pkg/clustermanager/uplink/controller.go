@@ -574,19 +574,16 @@ func (c *Controller) uplinkNameForStateName(stateName string) (string, bool, err
 	if err != nil {
 		return "", false, fmt.Errorf("failed to list Nodes for UplinkState %s: %w", stateName, err)
 	}
-
-	var matchedUplink string
-	matches := 0
-	for _, uplink := range uplinks {
-		for _, node := range nodes {
-			if uplinkutil.StateName(uplink.Name, node.Name) != stateName {
-				continue
-			}
-			matchedUplink = uplink.Name
-			matches++
-		}
+	nodeNames := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		nodeNames = append(nodeNames, node.Name)
 	}
-	return matchedUplink, matches == 1, nil
+
+	uplink, found := uplinkutil.UplinkForState(uplinks, nodeNames, stateName)
+	if !found {
+		return "", false, nil
+	}
+	return uplink.Name, true, nil
 }
 
 // Node controllers normally remove their own UplinkStates, but the responsible
