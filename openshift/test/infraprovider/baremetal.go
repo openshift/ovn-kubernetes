@@ -25,10 +25,20 @@ const (
 	frrContainerPrimaryNetIPv4 = "192.168.111.3"
 	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
 	externalFRRContainerName   = "frr"
+
+	bmSecondaryNetworkName = "secondarynetwork"
+	// Secondary subnets must match the values in test/e2e/egressip.go
+	// (secondaryIPV4Subnet / secondaryIPV6Subnet) because EgressIP tests
+	// hardcode addresses from these ranges. The CI step that provisions
+	// the baremetal secondary network must use the same subnets.
+	bmSecondaryIPv4Subnet = "10.10.10.0/24"
+	bmSecondaryIPv6Subnet = "2001:db8:abcd:1234::/64"
 )
 
 type baremetalInfra struct {
-	base *baseInfra
+	base                 *baseInfra
+	secondaryNetwork     api.Network
+	secondaryHostNetInfo *api.NetworkInterface
 }
 
 func initializeClusterInfra(infra *configv1.Infrastructure) (*baremetalInfra, error) {
@@ -78,7 +88,21 @@ func initializeClusterInfra(infra *configv1.Infrastructure) (*baremetalInfra, er
 		return nil, fmt.Errorf("failed to retrieve hypervisor node interface for machine network: %w", err)
 	}
 
-	return &baremetalInfra{base: h}, nil
+	bm := &baremetalInfra{base: h}
+
+	// Discover secondary network interface on hypervisor (optional).
+	secondaryNetInfo, err := findHypervisorNodeInterface(sshRunner, bmSecondaryIPv4Subnet, bmSecondaryIPv6Subnet)
+	if err == nil && secondaryNetInfo != nil {
+		secondaryNet := &network.ContainerEngineNetwork{NetName: bmSecondaryNetworkName}
+		secondaryNet.Configs = []network.ContainerEngineNetworkConfig{
+			{Subnet: bmSecondaryIPv4Subnet},
+			{Subnet: bmSecondaryIPv6Subnet},
+		}
+		bm.secondaryNetwork = secondaryNet
+		bm.secondaryHostNetInfo = secondaryNetInfo
+	}
+
+	return bm, nil
 }
 
 func (ci *baremetalInfra) PrimaryNetwork() (api.Network, error) {
@@ -86,6 +110,9 @@ func (ci *baremetalInfra) PrimaryNetwork() (api.Network, error) {
 }
 
 func (ci *baremetalInfra) GetNetwork(name string) (api.Network, error) {
+	if name == bmSecondaryNetworkName && ci.secondaryNetwork != nil {
+		return ci.secondaryNetwork, nil
+	}
 	return ci.base.GetNetwork(name)
 }
 
@@ -106,7 +133,14 @@ func (ci *baremetalInfra) GetExternalContainerLogs(container api.ExternalContain
 }
 
 func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
-	return ci.base.GetExternalContainerContextProvider(context)
+	baseProvider := &baseContextProvider{
+		parent: ci.base,
+		engine: ci.base.engine.WithTestContext(context),
+	}
+	if ci.secondaryNetwork == nil {
+		return baseProvider
+	}
+	return &baremetalContextProvider{base: baseProvider, bm: ci}
 }
 
 // GetExternalContainerPort delegates to base and also configures the
@@ -140,6 +174,22 @@ func (ci *baremetalInfra) GetExternalContainerNetworkInterface(ec api.ExternalCo
 				IPv4Prefix:  ci.base.hostNetworkInfo.IPv4Prefix,
 				IPv6Prefix:  ci.base.hostNetworkInfo.IPv6Prefix},
 			nil
+	}
+	// Cached secondary network container: return IPs from cache with
+	// secondary network prefix info.
+	if network.Name() == bmSecondaryNetworkName && ci.secondaryHostNetInfo != nil {
+		ci.base.mu.Lock()
+		cached, isCached := ci.base.externalContainers[ec.Name]
+		ci.base.mu.Unlock()
+		if isCached {
+			return api.NetworkInterface{
+				IPv4:       cached.IPv4,
+				IPv6:       cached.IPv6,
+				IPv4Prefix: ci.secondaryHostNetInfo.IPv4Prefix,
+				IPv6Prefix: ci.secondaryHostNetInfo.IPv6Prefix,
+				InfName:    ci.secondaryHostNetInfo.InfName,
+			}, nil
+		}
 	}
 	return ci.base.GetExternalContainerNetworkInterface(ec, network)
 }
@@ -245,6 +295,54 @@ func configureFirewallForPort(runner api.Runner, interfaceName string, port uint
 		return fmt.Errorf("failed to reload firewall: %w", err)
 	}
 	return nil
+}
+
+// baremetalContextProvider wraps baseContextProvider with secondary network
+// awareness. On baremetal, the secondary network is pre-configured by CI and
+// containers use host networking, so network creation/deletion and network
+// attach/detach are no-ops.
+type baremetalContextProvider struct {
+	base *baseContextProvider
+	bm   *baremetalInfra
+}
+
+func (p *baremetalContextProvider) CreateNetwork(name string, subnets ...string) (api.Network, error) {
+	if name == bmSecondaryNetworkName {
+		return p.bm.secondaryNetwork, nil
+	}
+	return p.base.CreateNetwork(name, subnets...)
+}
+
+func (p *baremetalContextProvider) DeleteNetwork(network api.Network) error {
+	if network.Name() == bmSecondaryNetworkName {
+		return nil
+	}
+	return p.base.DeleteNetwork(network)
+}
+
+func (p *baremetalContextProvider) CreateExternalContainer(ec api.ExternalContainer) (api.ExternalContainer, error) {
+	if ec.Network != nil && ec.Network.Name() == bmSecondaryNetworkName {
+		return p.bm.base.getOrCreateHostNetworkedContainer(ec, p.bm.secondaryHostNetInfo)
+	}
+	return p.base.CreateExternalContainer(ec)
+}
+
+func (p *baremetalContextProvider) DeleteExternalContainer(ec api.ExternalContainer) error {
+	return p.base.DeleteExternalContainer(ec)
+}
+
+func (p *baremetalContextProvider) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
+	if network.Name() == bmSecondaryNetworkName {
+		return api.NetworkInterface{}, nil
+	}
+	return p.base.AttachNetwork(network, instance)
+}
+
+func (p *baremetalContextProvider) DetachNetwork(network api.Network, instance string) error {
+	if network.Name() == bmSecondaryNetworkName {
+		return nil
+	}
+	return p.base.DetachNetwork(network, instance)
 }
 
 func ipInCIDR(ipStr, cidrStr string) (bool, error) {

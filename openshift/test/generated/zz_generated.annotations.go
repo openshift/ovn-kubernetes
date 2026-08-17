@@ -1919,21 +1919,21 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
 	"e2e egress IP validation on network of type Cluster Default of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
@@ -1965,21 +1965,21 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
@@ -2011,21 +2011,21 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
@@ -2057,21 +2057,21 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
@@ -2103,21 +2103,21 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:openshift/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:openshift/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:openshift/conformance/serial]",
 
