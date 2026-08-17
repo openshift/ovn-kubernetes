@@ -934,12 +934,222 @@ func TestNodeUplinkControllerDeletesUnselectedNodeState(t *testing.T) {
 		newUplink("br-blue", "role", "blue", "breth0"),
 		newUplinkState(stateName, "br-blue", "node-a"),
 	)
+	gatewayStateManager := &fakeGatewayStateManager{}
+	controller.gatewayStateManager = gatewayStateManager
 
 	g.Expect(controller.reconcileUplinkState(stateName)).To(gomega.Succeed())
 
 	_, err := client.UplinkClient.K8sV1alpha1().UplinkStates().Get(
 		context.Background(), stateName, metav1.GetOptions{})
 	g.Expect(apierrors.IsNotFound(err)).To(gomega.BeTrue())
+	g.Expect(gatewayStateManager.invalidated).To(gomega.ConsistOf("br-blue"))
+	g.Expect(gatewayStateManager.republished).To(gomega.BeEmpty())
+}
+
+func TestNodeUplinkControllerInvalidatesUnselectedUplinkGatewayState(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	stateName := uplinkutil.StateName("br-blue", "node-a")
+	controller, client := newTestController(t,
+		fakeHostDiscoverer{},
+		fakeBridgeResolver{},
+		newNode("node-a", map[string]string{"role": "red"}),
+		newUplink("br-blue", "role", "blue", "breth0"),
+		newUplinkState(stateName, "br-blue", "node-a"),
+	)
+	gatewayStateManager := &fakeGatewayStateManager{}
+	controller.gatewayStateManager = gatewayStateManager
+
+	g.Expect(controller.reconcileUplink("br-blue")).To(gomega.Succeed())
+
+	_, err := client.UplinkClient.K8sV1alpha1().UplinkStates().Get(
+		context.Background(), stateName, metav1.GetOptions{})
+	g.Expect(apierrors.IsNotFound(err)).To(gomega.BeTrue())
+	g.Expect(gatewayStateManager.invalidated).To(gomega.ConsistOf("br-blue"))
+}
+
+func TestNodeUplinkControllerDeletesRemovedUplinkGatewayState(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	stateName := uplinkutil.StateName("br-blue", "node-a")
+	controller, client := newTestController(t,
+		fakeHostDiscoverer{},
+		fakeBridgeResolver{},
+		newNode("node-a", map[string]string{"role": "blue"}),
+		newUplinkState(stateName, "br-blue", "node-a"),
+		// No Uplink: reconciling its key models an Uplink delete event.
+	)
+	gatewayStateManager := &fakeGatewayStateManager{}
+	controller.gatewayStateManager = gatewayStateManager
+
+	g.Expect(controller.reconcileUplink("br-blue")).To(gomega.Succeed())
+
+	_, err := client.UplinkClient.K8sV1alpha1().UplinkStates().Get(
+		context.Background(), stateName, metav1.GetOptions{})
+	g.Expect(apierrors.IsNotFound(err)).To(gomega.BeTrue())
+	g.Expect(gatewayStateManager.deleted).To(gomega.ConsistOf("br-blue"))
+}
+
+func TestNodeUplinkControllerRecreatesDeletedState(t *testing.T) {
+	// Deleting an UplinkState generates no event on the owning Uplink, so the
+	// UplinkState reconciler must requeue the owner to recreate the
+	// UplinkState. A delete event reconciles the UplinkState's key with the
+	// object gone from the lister, so it is simulated by not seeding the
+	// UplinkState at all.
+	t.Run("requeues the owning Uplink", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			// no UplinkState: reconciling its key simulates its deletion
+		)
+
+		stateName := uplinkutil.StateName("br-blue", "node-a")
+		g.Expect(controller.reconcileUplinkState(stateName)).To(gomega.Succeed())
+		// The fake Uplink controller records the requeue that would recreate
+		// the UplinkState (creation itself is covered by
+		// TestNodeUplinkControllerCreatesSelectedNodeState).
+		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.ConsistOf("RateLimited:br-blue"))
+	})
+
+	// The delete handler must not filter on node selection: its node labels
+	// may be stale, and a stale "not selected" would skip a needed recovery.
+	// The owner is requeued unconditionally and its reconcile decides; for an
+	// unselected node it settles by deleting nothing
+	// (TestNodeUplinkControllerDeletesUnselectedNodeState).
+	t.Run("requeues the owning Uplink when it no longer selects the node", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "red"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+		)
+
+		g.Expect(controller.reconcileUplinkState(
+			uplinkutil.StateName("br-blue", "node-a"))).To(gomega.Succeed())
+		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.ConsistOf("RateLimited:br-blue"))
+	})
+
+	// The cluster-manager deletes the UplinkStates of a terminating Uplink
+	// before releasing its finalizer; recreating them would fight that
+	// teardown.
+	t.Run("does not requeue a terminating Uplink", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		uplink := newUplink("br-blue", "role", "blue", "breth0")
+		now := metav1.Now()
+		uplink.DeletionTimestamp = &now
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			uplink,
+		)
+		gatewayStateManager := &fakeGatewayStateManager{}
+		controller.gatewayStateManager = gatewayStateManager
+
+		g.Expect(controller.reconcileUplinkState(
+			uplinkutil.StateName("br-blue", "node-a"))).To(gomega.Succeed())
+		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.BeEmpty())
+		g.Expect(gatewayStateManager.deleted).To(gomega.ConsistOf("br-blue"))
+	})
+
+	// A key no Uplink owns (remote node's UplinkState, or deleted Uplink)
+	// must not requeue anything.
+	t.Run("ignores UplinkStates not owned by any Uplink", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{},
+			fakeBridgeResolver{},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+		)
+
+		g.Expect(controller.reconcileUplinkState(
+			uplinkutil.StateName("br-red", "node-a"))).To(gomega.Succeed())
+		g.Expect(controller.uplinkController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.BeEmpty())
+	})
+}
+
+type fakeGatewayStateManager struct {
+	republished []string
+	invalidated []string
+	deleted     []string
+	err         error
+}
+
+func (f *fakeGatewayStateManager) RepublishGatewayCondition(uplinkName string) error {
+	f.republished = append(f.republished, uplinkName)
+	return f.err
+}
+
+func (f *fakeGatewayStateManager) InvalidateGatewayState(uplinkName string) {
+	f.invalidated = append(f.invalidated, uplinkName)
+}
+
+func (f *fakeGatewayStateManager) DeleteGatewayState(uplinkName string) {
+	f.deleted = append(f.deleted, uplinkName)
+}
+
+// A recreated UplinkState lost the gateway-owned GatewayReady condition, which
+// only network events republish: the reconciler must restore it via the
+// gateway publisher, and only when it is missing.
+func TestNodeUplinkControllerRepublishesGatewayCondition(t *testing.T) {
+	newController := func(g gomega.Gomega, state *uplinkv1alpha1.UplinkState) (*Controller, *fakeGatewayStateManager) {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		controller, _ := newTestController(t,
+			fakeHostDiscoverer{state: newStatusTestHostState()},
+			fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "eth0"},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			state,
+		)
+		publisher := &fakeGatewayStateManager{}
+		controller.gatewayStateManager = publisher
+		return controller, publisher
+	}
+
+	t.Run("republishes when the condition is missing", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		controller, publisher := newController(g, newUplinkState("br-blue.node-a", "br-blue", "node-a"))
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(publisher.republished).To(gomega.ConsistOf("br-blue"))
+	})
+
+	t.Run("does not republish a present condition", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		state := newUplinkState("br-blue.node-a", "br-blue", "node-a")
+		state.Status.Conditions = []metav1.Condition{{
+			Type:   uplinkv1alpha1.UplinkStateConditionGatewayReady,
+			Status: metav1.ConditionTrue,
+			Reason: uplinkv1alpha1.UplinkStateReasonGatewayConfigured,
+		}}
+		controller, publisher := newController(g, state)
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(publisher.republished).To(gomega.BeEmpty())
+	})
+
+	// A failed republish must fail the reconcile so it is retried.
+	t.Run("propagates a republish failure", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		controller, publisher := newController(g, newUplinkState("br-blue.node-a", "br-blue", "node-a"))
+		publisher.err = fmt.Errorf("apply failed")
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.MatchError(
+			gomega.ContainSubstring("failed to republish gateway condition for Uplink br-blue")))
+	})
 }
 
 func TestEnsureUplinkStateGetsExistingObjectAfterCreateRace(t *testing.T) {
