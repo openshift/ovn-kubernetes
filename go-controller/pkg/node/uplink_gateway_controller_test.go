@@ -25,25 +25,33 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
-func newUplinkGatewayControllerForTest(
-	t *testing.T,
-	uplinkName, nodeName string,
-) (*UplinkGatewayController, *uplinkfake.Clientset) {
-	t.Helper()
-	state := &uplinkv1alpha1.UplinkState{
+func newUplinkStateFixture(
+	uplinkName, nodeName string, conditions ...metav1.Condition,
+) *uplinkv1alpha1.UplinkState {
+	return &uplinkv1alpha1.UplinkState{
 		ObjectMeta: metav1.ObjectMeta{Name: uplinkutil.StateName(uplinkName, nodeName)},
 		Spec: uplinkv1alpha1.UplinkStateSpec{
 			UplinkName: uplinkName,
 			NodeName:   nodeName,
 		},
-		Status: uplinkv1alpha1.UplinkStateStatus{
-			Conditions: []metav1.Condition{{
-				Type:   uplinkv1alpha1.UplinkStateConditionResolved,
-				Status: metav1.ConditionTrue,
-				Reason: uplinkv1alpha1.UplinkStateReasonResolved,
-			}},
-		},
+		Status: uplinkv1alpha1.UplinkStateStatus{Conditions: conditions},
 	}
+}
+
+func resolvedTrueCondition() metav1.Condition {
+	return metav1.Condition{
+		Type:   uplinkv1alpha1.UplinkStateConditionResolved,
+		Status: metav1.ConditionTrue,
+		Reason: uplinkv1alpha1.UplinkStateReasonResolved,
+	}
+}
+
+func newUplinkGatewayControllerForTest(
+	t *testing.T,
+	uplinkName, nodeName string,
+) (*UplinkGatewayController, *uplinkfake.Clientset) {
+	t.Helper()
+	state := newUplinkStateFixture(uplinkName, nodeName, resolvedTrueCondition())
 	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
 	if err := indexer.Add(state); err != nil {
 		t.Fatalf("failed to add UplinkState: %v", err)
@@ -132,20 +140,7 @@ func TestUplinkGatewayControllerRepublishesWipedCondition(t *testing.T) {
 	// Simulate an out-of-band deletion and recreation: the recreated object
 	// carries only the discovery condition. The lister already reflects that
 	// shape (it was never updated with the published condition).
-	recreated := &uplinkv1alpha1.UplinkState{
-		ObjectMeta: metav1.ObjectMeta{Name: uplinkutil.StateName(uplinkName, nodeName)},
-		Spec: uplinkv1alpha1.UplinkStateSpec{
-			UplinkName: uplinkName,
-			NodeName:   nodeName,
-		},
-		Status: uplinkv1alpha1.UplinkStateStatus{
-			Conditions: []metav1.Condition{{
-				Type:   uplinkv1alpha1.UplinkStateConditionResolved,
-				Status: metav1.ConditionTrue,
-				Reason: uplinkv1alpha1.UplinkStateReasonResolved,
-			}},
-		},
-	}
+	recreated := newUplinkStateFixture(uplinkName, nodeName, resolvedTrueCondition())
 	if _, err := client.K8sV1alpha1().UplinkStates().Update(
 		context.Background(), recreated, metav1.UpdateOptions{},
 	); err != nil {
@@ -182,13 +177,7 @@ func TestUplinkGatewayControllerInvalidatesIntentionalStateDeletion(t *testing.T
 	// Model the UplinkState created after the node is selected again. Unlike an
 	// out-of-band deletion, an intentional deletion invalidated the old
 	// GatewayReady condition, so it must not be restored.
-	recreated := &uplinkv1alpha1.UplinkState{
-		ObjectMeta: metav1.ObjectMeta{Name: uplinkutil.StateName(uplinkName, nodeName)},
-		Spec: uplinkv1alpha1.UplinkStateSpec{
-			UplinkName: uplinkName,
-			NodeName:   nodeName,
-		},
-	}
+	recreated := newUplinkStateFixture(uplinkName, nodeName)
 	if _, err := client.K8sV1alpha1().UplinkStates().Update(
 		context.Background(), recreated, metav1.UpdateOptions{},
 	); err != nil {
@@ -245,13 +234,7 @@ func TestUplinkGatewayControllerDeletesRemovedUplinkCache(t *testing.T) {
 
 	// A same-name Uplink created later is a new lifecycle and must not inherit
 	// readiness from the deleted resource.
-	recreated := &uplinkv1alpha1.UplinkState{
-		ObjectMeta: metav1.ObjectMeta{Name: uplinkutil.StateName(uplinkName, nodeName)},
-		Spec: uplinkv1alpha1.UplinkStateSpec{
-			UplinkName: uplinkName,
-			NodeName:   nodeName,
-		},
-	}
+	recreated := newUplinkStateFixture(uplinkName, nodeName)
 	if _, err := client.K8sV1alpha1().UplinkStates().Update(
 		context.Background(), recreated, metav1.UpdateOptions{},
 	); err != nil {
