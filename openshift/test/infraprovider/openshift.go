@@ -107,6 +107,20 @@ func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 	}
 }
 
+// HasSecondaryHostEIPSupport checks if the platform supports secondary-host-eip
+// tests (i.e., has a pre-configured secondary network for EgressIP on secondary
+// host interfaces). Currently only baremetal with a discovered secondary network.
+func (o *OpenshiftInfraProvider) HasSecondaryHostEIPSupport() bool {
+	if o.clusterInfra == nil {
+		return false
+	}
+	bm, ok := o.clusterInfra.(*baremetalInfra)
+	if !ok {
+		return false
+	}
+	return bm.secondaryNetwork != nil
+}
+
 // CheckForEVPN checks all EVPN prerequisites
 func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
 	if o.operNetwork == nil {
