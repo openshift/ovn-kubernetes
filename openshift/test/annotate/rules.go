@@ -105,9 +105,6 @@ var (
 			// These tests need bgpServerNetwork "bgpnet" which is not configured
 			// for downstream tests, so disable it.
 			"It cannot reach an external server on a different network",
-			// TODO: remove once baremetal CI lane is available with additional interface on
-			// cluster nodes and external host having a http endpoint.
-			"secondary-host-eip",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},

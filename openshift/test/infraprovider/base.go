@@ -86,7 +86,7 @@ func (h *baseInfra) GetExternalContainerContextProvider(context *testcontext.Tes
 // getOrCreateHostNetworkedContainer returns a cached host-networked container
 // or creates one on the remote host using podman with --network host.
 // These containers persist across the suite and are not cleaned up per-test.
-func (h *baseInfra) getOrCreateHostNetworkedContainer(ec api.ExternalContainer) (api.ExternalContainer, error) {
+func (h *baseInfra) getOrCreateHostNetworkedContainer(ec api.ExternalContainer, netInfo *api.NetworkInterface) (api.ExternalContainer, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -118,12 +118,12 @@ func (h *baseInfra) getOrCreateHostNetworkedContainer(ec api.ExternalContainer) 
 			return api.ExternalContainer{}, fmt.Errorf("failed to create host-networked container %q: %w", ec.Name, err)
 		}
 	}
-	// Populate IPs from the host's primary network interface.
-	if h.hostNetworkInfo == nil {
-		return api.ExternalContainer{}, fmt.Errorf("no host network info available for host-networked container %q", ec.Name)
+	// Populate IPs from the provided network interface.
+	if netInfo == nil {
+		return api.ExternalContainer{}, fmt.Errorf("no network info for host-networked container %q", ec.Name)
 	}
-	ec.IPv4 = h.hostNetworkInfo.IPv4
-	ec.IPv6 = h.hostNetworkInfo.IPv6
+	ec.IPv4 = netInfo.IPv4
+	ec.IPv6 = netInfo.IPv6
 
 	h.externalContainers[ec.Name] = ec
 	return ec, nil
@@ -140,7 +140,7 @@ type baseContextProvider struct {
 
 func (p *baseContextProvider) CreateExternalContainer(ec api.ExternalContainer) (api.ExternalContainer, error) {
 	if ec.Network != nil && ec.Network.Name() == p.parent.primaryNetworkName {
-		return p.parent.getOrCreateHostNetworkedContainer(ec)
+		return p.parent.getOrCreateHostNetworkedContainer(ec, p.parent.hostNetworkInfo)
 	}
 	return p.engine.CreateExternalContainer(ec)
 }
