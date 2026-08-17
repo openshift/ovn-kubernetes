@@ -1459,13 +1459,19 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Disabled:Unimplemented]",
 
+	"Network Segmentation Uplink default-VRF egress does not restore gateway readiness on an UplinkState recreated after deselection": "[Suite:openshift/conformance/parallel]",
+
 	"Network Segmentation Uplink default-VRF egress maps multiple CUDNs to the same Uplink bridge": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation Uplink default-VRF egress recreates an UplinkState deleted out of band": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation Uplink route advertisements uses the default VRF as the BGP peering path": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation Uplink split DPU status conditions keeps one writer per condition and recovers a missing host interface": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation Uplink split DPU status conditions recreates an UplinkState deleted out of band": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network pod connected to UserDefinedNetwork cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
 
