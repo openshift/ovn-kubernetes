@@ -3,9 +3,11 @@ package infraprovider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -119,6 +121,20 @@ func (o *OpenshiftInfraProvider) HasClusterInfra() bool {
 	return o.initialized
 }
 
+// HasSecondaryHostEIPSupport checks if the platform supports secondary-host-eip
+// tests (i.e., has a pre-configured secondary network for EgressIP on secondary
+// host interfaces). Currently only baremetal with a discovered secondary network.
+func (o *OpenshiftInfraProvider) HasSecondaryHostEIPSupport() bool {
+	if o.clusterInfra == nil {
+		return false
+	}
+	bm, ok := o.clusterInfra.(*baremetalInfra)
+	if !ok {
+		return false
+	}
+	return bm.secondaryNetwork != nil
+}
+
 // CheckForEVPN checks all EVPN prerequisites
 func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
 	if o.operNetwork == nil {
@@ -224,8 +240,69 @@ func (o *OpenshiftInfraProvider) GetK8HostPort() uint16 {
 	return o.hostPort.Allocate()
 }
 
+// GetK8NodeNetworkInterface returns the network interface on the given node whose
+// address falls within the provided network's IPv4/IPv6 subnets. It inspects the
+// node's links via "ip -json address show" (run through oc debug) and matches each
+// address against the network CIDRs.
 func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
-	panic("not implemented")
+	if network == nil {
+		return api.NetworkInterface{}, fmt.Errorf("network must not be nil")
+	}
+	v4Subnet, v6Subnet, err := network.IPv4IPv6Subnets()
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get subnets for network %s: %w", network.Name(), err)
+	}
+
+	result, err := o.ExecK8NodeCommand(instance, []string{"ip", "-json", "address", "show"})
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to retrieve network interfaces from node %s: %w", instance, err)
+	}
+
+	var links []linkInfo
+	if err := json.Unmarshal([]byte(result), &links); err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to parse network interfaces from node %s: %w", instance, err)
+	}
+
+	return findNetworkInterfaceForSubnets(links, v4Subnet, v6Subnet)
+}
+
+func findNetworkInterfaceForSubnets(links []linkInfo, v4Subnet, v6Subnet string) (api.NetworkInterface, error) {
+	for _, link := range links {
+		netInterface := api.NetworkInterface{
+			InfName: link.IfName,
+			MAC:     link.Mac,
+		}
+		for _, addr := range link.AddrInfo {
+			if v4Subnet != "" {
+				match, err := ipInCIDR(addr.Local, v4Subnet)
+				if err != nil {
+					return api.NetworkInterface{}, fmt.Errorf("failed to match address %q against IPv4 subnet %q: %w", addr.Local, v4Subnet, err)
+				}
+				if match {
+					netInterface.IPv4 = addr.Local
+					netInterface.IPv4Prefix = strconv.Itoa(addr.PrefixLen)
+				}
+			}
+			if v6Subnet != "" {
+				match, err := ipInCIDR(addr.Local, v6Subnet)
+				if err != nil {
+					return api.NetworkInterface{}, fmt.Errorf("failed to match address %q against IPv6 subnet %q: %w", addr.Local, v6Subnet, err)
+				}
+				if match {
+					netInterface.IPv6 = addr.Local
+					netInterface.IPv6Prefix = strconv.Itoa(addr.PrefixLen)
+				}
+			}
+		}
+
+		hasV4Match := v4Subnet == "" || netInterface.IPv4 != ""
+		hasV6Match := v6Subnet == "" || netInterface.IPv6 != ""
+		if hasV4Match && hasV6Match {
+			return netInterface, nil
+		}
+	}
+
+	return api.NetworkInterface{}, fmt.Errorf("no node network interface found matching subnets v4=%s v6=%s", v4Subnet, v6Subnet)
 }
 
 func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
