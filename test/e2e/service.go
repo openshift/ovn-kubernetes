@@ -127,16 +127,8 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		namespace := f.Namespace.Name
 		jig := e2eservice.NewTestJig(cs, namespace, serviceName)
 
-		ginkgo.By("creating a host-network backend pod")
-		targetPort := infraprovider.Get().GetK8HostPort()
-		httpPort := infraprovider.Get().GetK8HostPort()
-		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: (int32(targetPort))}, {ContainerPort: (int32(targetPort)), Protocol: "UDP"}},
-			"netexec", fmt.Sprintf("--http-port=%d", httpPort), fmt.Sprintf("--udp-port=%d", targetPort))
-		serverPod.Labels = jig.Labels
-		serverPod.Spec.HostNetwork = true
-		serverPod = e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)
-
 		ginkgo.By("Creating a ClusterIP service")
+		targetPort := infraprovider.Get().GetK8HostPort()
 		service, err := jig.CreateUDPService(context.TODO(), func(s *v1.Service) {
 			s.Spec.Ports = []v1.ServicePort{
 				{
@@ -148,6 +140,16 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			}
 		})
 		framework.ExpectNoError(err)
+
+		ginkgo.By("creating a host-network backend pod")
+
+		httpPort := infraprovider.Get().GetK8HostPort()
+		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: (int32(targetPort))}, {ContainerPort: (int32(targetPort)), Protocol: "UDP"}},
+			"netexec", fmt.Sprintf("--http-port=%d", httpPort), fmt.Sprintf("--udp-port=%d", targetPort))
+		serverPod.Labels = jig.Labels
+		serverPod.Spec.HostNetwork = true
+
+		serverPod = e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)
 		nodeName := serverPod.Spec.NodeName
 
 		ginkgo.By("Connecting to the service from another host-network pod on node " + nodeName)
@@ -707,7 +709,6 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		// now that 2.2.2.2 exists on the node's lo interface, let's start a server listening on it
 		// we use UDP here since agnhost lets us pick the listen address only for UDP
 		httpPort := infraprovider.Get().GetK8HostPort()
-		udpHostNsPort = infraprovider.Get().GetK8HostPort()
 		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: int32(udpHostNsPort)}, {ContainerPort: int32(udpHostNsPort), Protocol: "UDP"}},
 			"netexec", fmt.Sprintf("--http-port=%d", httpPort), "--udp-port="+fmt.Sprintf("%d", udpHostNsPort), "--udp-listen-addresses="+extraIP)
 		serverPod.Labels = jig.Labels
@@ -3757,10 +3758,8 @@ func getServingAndReadyEndpointSliceAddresses(epSlice discoveryv1.EndpointSlice)
 	return addresses
 }
 
-// hostnameMatchesNode compares a hostname returned by agnhost (os.Hostname())
-// against a Kubernetes node name. On cloud providers the node name is often a
-// FQDN (e.g. "ip-10-0-2-8.ec2.internal") while os.Hostname() returns the
-// short hostname ("ip-10-0-2-8"). This helper accepts either form.
+// hostnameMatchesNode matches an agnhost hostname against a node name,
+// accepting either the full node name or its short hostname.
 func hostnameMatchesNode(hostname, nodeName string) bool {
 	return hostname == nodeName || hostname == strings.Split(nodeName, ".")[0]
 }
