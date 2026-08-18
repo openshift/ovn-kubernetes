@@ -101,6 +101,58 @@ add chain inet ovn-kubernetes ovn-kube-pod-subnet-masq
 add rule inet ovn-kubernetes ovn-kube-pod-subnet-masq ip saddr 10.1.1.0/24 masquerade
 `
 
+// The additional rules expected if initGatewayNFTables() is called
+const nftablesRulesGatewayServices = `
+add chain inet ovn-kubernetes services { comment "DNAT for ordinary NodePort/ExternalIP/LB traffic" ; }
+add chain inet ovn-kubernetes services-etp { comment "Special DNAT for NodePort/ExternalIP/LB traffic with ExternalTrafficPolicy: Local" ; }
+add chain inet ovn-kubernetes services-etp-no-nodeport { comment "Special DNAT for ExternalIP/LB traffic with ExternalTrafficPolicy: Local and no NodePorts" ; }
+add chain inet ovn-kubernetes services-itp { comment "Redirects for traffic with InternalTrafficPolicy: Local" ; }
+add chain inet ovn-kubernetes services-itp-mark { type route hook output priority -150 ; comment "Chain to mark InternalTrafficPolicy: Local traffic for special routing" ; }
+add chain inet ovn-kubernetes services-output { type nat hook output priority -100 ; }
+add chain inet ovn-kubernetes services-prerouting { type nat hook prerouting priority -100 ; }
+add map inet ovn-kubernetes nodeports-v4 { type inet_proto . inet_service : ipv4_addr . inet_service ; comment "DNAT mappings for ordinary IPv4 NodePort traffic" ; }
+add map inet ovn-kubernetes nodeports-v6 { type inet_proto . inet_service : ipv6_addr . inet_service ; comment "DNAT mappings for ordinary IPv6 NodePort traffic" ; }
+add map inet ovn-kubernetes nodeports-etp-local-v4 { type inet_proto . inet_service : ipv4_addr . inet_service ; comment "DNAT mappings for IPv4 NodePort traffic with ExternalTrafficPolicy: Local" ; }
+add map inet ovn-kubernetes nodeports-etp-local-v6 { type inet_proto . inet_service : ipv6_addr . inet_service ; comment "DNAT mappings for IPv6 NodePort traffic with ExternalTrafficPolicy: Local" ; }
+add map inet ovn-kubernetes external-ips-etp-local-v4 { type ipv4_addr . inet_proto . inet_service : ipv4_addr . inet_service ; comment "DNAT mappings for IPv4 ExternalIP/LB traffic with ExternalTrafficPolicy: Local" ; }
+add map inet ovn-kubernetes external-ips-etp-local-v6 { type ipv6_addr . inet_proto . inet_service : ipv6_addr . inet_service ; comment "DNAT mappings for IPv6 ExternalIP/LB traffic with ExternalTrafficPolicy: Local" ; }
+add map inet ovn-kubernetes external-ips-v4 { type ipv4_addr . inet_proto . inet_service : ipv4_addr . inet_service ; comment "DNAT mappings for ordinary IPv4 ExternalIP/LB traffic" ; }
+add map inet ovn-kubernetes external-ips-v6 { type ipv6_addr . inet_proto . inet_service : ipv6_addr . inet_service ; comment "DNAT mappings for ordinary IPv6 ExternalIP/LB traffic" ; }
+add set inet ovn-kubernetes itp-services-to-mark-v4 { type ipv4_addr . inet_proto . inet_service ; comment "InternalTrafficPolicy: Local traffic to mark for special routing" ; }
+add set inet ovn-kubernetes itp-services-to-mark-v6 { type ipv6_addr . inet_proto . inet_service ; comment "InternalTrafficPolicy: Local traffic to mark for special routing" ; }
+add map inet ovn-kubernetes itp-services-to-redirect-v4 { type ipv4_addr . inet_proto . inet_service : inet_service ; comment "Port redirections for ordinary InternalTrafficPolicy: Local traffic" ; }
+add map inet ovn-kubernetes itp-services-to-redirect-v6 { type ipv6_addr . inet_proto . inet_service : inet_service ; comment "Port redirections for ordinary InternalTrafficPolicy: Local traffic" ; }
+add rule inet ovn-kubernetes services-etp dnat ip addr . port to  ip daddr . meta l4proto . th dport map @external-ips-etp-local-v4
+add rule inet ovn-kubernetes services-etp dnat ip6 addr . port to  ip6 daddr . meta l4proto . th dport map @external-ips-etp-local-v6
+add rule inet ovn-kubernetes services-etp fib daddr type local dnat ip addr . port to meta l4proto . th dport map @nodeports-etp-local-v4
+add rule inet ovn-kubernetes services-etp fib daddr type local dnat ip6 addr . port to meta l4proto . th dport map @nodeports-etp-local-v6
+add rule inet ovn-kubernetes services-itp meta l4proto { tcp, udp, sctp } redirect to ip daddr . meta l4proto . th dport map @itp-services-to-redirect-v4
+add rule inet ovn-kubernetes services-itp meta l4proto { tcp, udp, sctp } redirect to ip6 daddr . meta l4proto . th dport map @itp-services-to-redirect-v6
+add rule inet ovn-kubernetes services-itp-mark ip daddr . meta l4proto . th dport @itp-services-to-mark-v4 mark set 0x1745ec
+add rule inet ovn-kubernetes services-itp-mark ip6 daddr . meta l4proto . th dport @itp-services-to-mark-v6 mark set 0x1745ec
+add rule inet ovn-kubernetes services dnat ip to  ip daddr . meta l4proto . th dport map @external-ips-v4
+add rule inet ovn-kubernetes services dnat ip6 to  ip6 daddr . meta l4proto . th dport map @external-ips-v6
+add rule inet ovn-kubernetes services fib daddr type local dnat ip addr . port to meta l4proto . th dport map @nodeports-v4
+add rule inet ovn-kubernetes services fib daddr type local dnat ip6 addr . port to meta l4proto . th dport map @nodeports-v6
+add rule inet ovn-kubernetes services-output jump services-itp
+add rule inet ovn-kubernetes services-output jump services
+add rule inet ovn-kubernetes services-prerouting jump services-etp
+add rule inet ovn-kubernetes services-prerouting jump services-etp-no-nodeport
+add rule inet ovn-kubernetes services-prerouting jump services
+`
+
+// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+const nftablesRulesMCS = `
+add chain inet ovn-kubernetes mcs-blocking
+add rule inet ovn-kubernetes mcs-blocking tcp dport { 22623, 22624 } tcp flags syn / fin,syn,rst,ack reject
+add chain inet ovn-kubernetes mcs-blocking-output { type filter hook output priority 0 ; }
+add rule inet ovn-kubernetes mcs-blocking-output jump mcs-blocking
+add chain inet ovn-kubernetes mcs-blocking-forward { type filter hook forward priority 0 ; }
+add rule inet ovn-kubernetes mcs-blocking-forward jump mcs-blocking
+`
+
+// END OCP HACK
+
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link, hwOffload, setNodeIP bool) {
 	const mtu string = "1234"
@@ -261,7 +313,6 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 			existingNode.Status = corev1.NodeStatus{Addresses: []corev1.NodeAddress{nodeAddr}}
 		}
 
-		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 		nft := nodenft.SetFakeNFTablesHelper()
 
 		ovsClient, ovsCleanup := newTestOVSClient()
@@ -501,53 +552,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				"'k8s.ovn.org/gateway-mtu-support' with value == \"false\"")
 		}
 
-		expectedTables := map[string]util.FakeTable{
-			"nat": {
-				"PREROUTING": []string{
-					"-j OVN-KUBE-ETP",
-					"-j OVN-KUBE-EXTERNALIP",
-					"-j OVN-KUBE-NODEPORT",
-				},
-				"OUTPUT": []string{
-					"-j OVN-KUBE-EXTERNALIP",
-					"-j OVN-KUBE-NODEPORT",
-					"-j OVN-KUBE-ITP",
-				},
-				"OVN-KUBE-NODEPORT":   []string{},
-				"OVN-KUBE-EXTERNALIP": []string{},
-				"OVN-KUBE-ETP":        []string{},
-				"OVN-KUBE-ITP":        []string{},
-			},
-			"filter": {},
-			"mangle": {
-				"OUTPUT": []string{
-					"-j OVN-KUBE-ITP",
-				},
-				"OVN-KUBE-ITP": []string{},
-			},
-		}
-		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
-		expectedMCSRules := []string{
-			"-p tcp -m tcp --dport 22624 --syn -j REJECT",
-			"-p tcp -m tcp --dport 22623 --syn -j REJECT",
-		}
-		expectedTables["filter"]["FORWARD"] = append(expectedMCSRules, expectedTables["filter"]["FORWARD"]...)
-		expectedTables["filter"]["OUTPUT"] = append(expectedMCSRules, expectedTables["filter"]["OUTPUT"]...)
-		// END OCP HACK
-		f4 := iptV4.(*util.FakeIPTables)
-		err = f4.MatchState(expectedTables, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		expectedTables = map[string]util.FakeTable{
-			"nat":    {},
-			"filter": {},
-			"mangle": {},
-		}
-		f6 := iptV6.(*util.FakeIPTables)
-		err = f6.MatchState(expectedTables, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		expectedNFT := nftablesRulesBase
+		expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices + nftablesRulesMCS
 		err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -1253,7 +1258,6 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		Expect(err).NotTo(HaveOccurred())
 
 		k := &kube.Kube{KClient: kubeFakeClient}
-		iptV4, iptV6 := util.SetFakeIPTablesHelpers()
 
 		nodeAnnotator := kube.NewNodeAnnotator(k, existingNode.Name)
 
@@ -1374,68 +1378,11 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
-		expectedTables := map[string]util.FakeTable{
-			"nat": {
-				"PREROUTING": []string{
-					"-j OVN-KUBE-ETP",
-					"-j OVN-KUBE-EXTERNALIP",
-					"-j OVN-KUBE-NODEPORT",
-				},
-				"OUTPUT": []string{
-					"-j OVN-KUBE-EXTERNALIP",
-					"-j OVN-KUBE-NODEPORT",
-					"-j OVN-KUBE-ITP",
-				},
-				"OVN-KUBE-NODEPORT": []string{},
-				"OVN-KUBE-EXTERNALIP": []string{
-					fmt.Sprintf("-p %s -d %s --dport %v -j DNAT --to-destination %s:%v", service.Spec.Ports[0].Protocol, externalIP, service.Spec.Ports[0].Port, service.Spec.ClusterIP, service.Spec.Ports[0].Port),
-				},
-				"OVN-KUBE-ETP": []string{},
-				"OVN-KUBE-ITP": []string{},
-			},
-			"filter": {},
-			"mangle": {
-				"OUTPUT": []string{
-					"-j OVN-KUBE-ITP",
-				},
-				"OVN-KUBE-ITP": []string{},
-			},
-		}
-		// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
-		expectedMCSRules := []string{
-			"-p tcp -m tcp --dport 22624 --syn -j REJECT",
-			"-p tcp -m tcp --dport 22623 --syn -j REJECT",
-		}
-		expectedTables["filter"]["FORWARD"] = append(expectedMCSRules, expectedTables["filter"]["FORWARD"]...)
-		expectedTables["filter"]["OUTPUT"] = append(expectedMCSRules, expectedTables["filter"]["OUTPUT"]...)
-		// END OCP HACK
-		if util.IsNetworkSegmentationSupportEnabled() {
-			expectedTables["nat"]["POSTROUTING"] = append(expectedTables["nat"]["POSTROUTING"],
-				"-j OVN-KUBE-UDN-MASQUERADE",
-			)
-			expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"] = append(expectedTables["nat"]["OVN-KUBE-UDN-MASQUERADE"],
-				"-s 169.254.169.0/29 -j RETURN",     // this guarantees we don't SNAT default network masqueradeIPs
-				"-d 172.16.1.0/24 -j RETURN",        // this guarantees we don't SNAT service traffic
-				"-s 169.254.169.0/24 -j MASQUERADE", // this guarantees we SNAT all UDN MasqueradeIPs traffic leaving the node
-			)
-		}
-		f4 := iptV4.(*util.FakeIPTables)
-		err = f4.MatchState(expectedTables, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		expectedTables = map[string]util.FakeTable{
-			"nat":    {},
-			"filter": {},
-			"mangle": {},
-		}
-		f6 := iptV6.(*util.FakeIPTables)
-		err = f6.MatchState(expectedTables, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		expectedNFT := nftablesRulesBase + nftablesRulesLocalGateway
+		expectedNFT := nftablesRulesBase + nftablesRulesLocalGateway + nftablesRulesGatewayServices + nftablesRulesMCS
 		if util.IsNetworkSegmentationSupportEnabled() {
 			expectedNFT += nftablesRulesUDN
 		}
+		expectedNFT += "add element inet ovn-kubernetes external-ips-v4 { 1.1.1.1 . tcp . 8032 : 10.129.0.2 . 8032 }"
 		err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 		Expect(err).NotTo(HaveOccurred())
 
