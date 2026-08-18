@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
@@ -22,13 +23,19 @@ import (
 )
 
 func DeleteRoutingForMigratedPodWithZone(nbClient libovsdbclient.Client, pod *corev1.Pod, zone string) error {
-	vm := ExtractVMNameFromPod(pod)
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return err
+	}
+	if vmDescription == nil {
+		return nil
+	}
 	predicate := func(itemExternalIDs map[string]string) bool {
 		containsZone := true
 		if zone != "" {
 			containsZone = itemExternalIDs[OvnZoneExternalIDKey] == zone
 		}
-		return containsZone && externalIDsContainsVM(itemExternalIDs, vm)
+		return containsZone && externalIDsContainsVM(itemExternalIDs, ptr.To(vmDescription.Key()))
 	}
 	routePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
 		return predicate(item.ExternalIDs)
@@ -117,6 +124,13 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 	}
 	for _, podIP := range podAnnotation.IPs {
 		podAddress := podIP.IP.String()
+		vmDescription, err := NewVMDescriptionFromPod(pod)
+		if err != nil {
+			return err
+		}
+		if vmDescription == nil {
+			return nil
+		}
 
 		if !config.OVNKubernetesFeature.EnableInterconnect {
 			// Policy to with low priority to route traffic to the gateway
@@ -156,7 +170,7 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 			OutputPort: &outputPort,
 			ExternalIDs: map[string]string{
 				OvnZoneExternalIDKey:         OvnLocalZone,
-				VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
+				VirtualMachineExternalIDsKey: vmDescription.Key().Name,
 				NamespaceExternalIDsKey:      pod.Namespace,
 			},
 		}
@@ -221,6 +235,13 @@ func EnsureRemoteZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory,
 	if err != nil {
 		return err
 	}
+	vmDescription, err := NewVMDescriptionFromPod(pod)
+	if err != nil {
+		return err
+	}
+	if vmDescription == nil {
+		return nil
+	}
 	for _, podIP := range podAnnotation.IPs {
 		ipFamily := utilnet.IPFamilyOfCIDR(podIP)
 		transitSwitchPortAddr, err := util.MatchFirstIPNetFamily(ipFamily == utilnet.IPv6, transitSwitchPortAddrs)
@@ -233,7 +254,7 @@ func EnsureRemoteZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory,
 			Policy:   &nbdb.LogicalRouterStaticRoutePolicyDstIP,
 			ExternalIDs: map[string]string{
 				OvnZoneExternalIDKey:         OvnRemoteZone,
-				VirtualMachineExternalIDsKey: pod.Labels[kubevirtv1.VirtualMachineNameLabel],
+				VirtualMachineExternalIDsKey: vmDescription.Key().Name,
 				NamespaceExternalIDsKey:      pod.Namespace,
 			},
 		}
