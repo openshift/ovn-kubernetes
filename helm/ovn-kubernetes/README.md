@@ -80,6 +80,15 @@ false
 			<td>The secret used for pulling image. Use only if needed. Set create to have have secret created by helm</td>
 		</tr>
 		<tr>
+			<td>global.dummyGatewayBridge</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>Create a gateway bridge without a system uplink (for development and CI)</td>
+		</tr>
+		<tr>
 			<td>global.egressIpHealthCheckPort</td>
 			<td>int</td>
 			<td><pre lang="json">
