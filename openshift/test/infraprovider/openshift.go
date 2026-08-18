@@ -355,17 +355,17 @@ func initializePlatformInfra(config *rest.Config) (platformInfra, error) {
 	}
 	switch infra.Spec.PlatformSpec.Type {
 	case configv1.BareMetalPlatformType:
-		bm, err := initializeClusterInfra(infra)
+		bm, err := initializeBaremetalInfra(infra)
 		if err != nil || bm == nil {
 			return nil, err
 		}
 		return bm, nil
-	case configv1.AWSPlatformType:
-		aws, err := initializeAWSInfra()
-		if err != nil || aws == nil {
+	case configv1.AWSPlatformType, configv1.AzurePlatformType, configv1.GCPPlatformType:
+		bi, err := intializeCloudInfra()
+		if err != nil || bi == nil {
 			return nil, err
 		}
-		return aws, nil
+		return bi, nil
 	default:
 		return nil, nil
 	}

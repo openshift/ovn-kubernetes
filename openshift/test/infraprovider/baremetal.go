@@ -41,7 +41,7 @@ type baremetalInfra struct {
 	secondaryHostNetInfo *api.NetworkInterface
 }
 
-func initializeClusterInfra(infra *configv1.Infrastructure) (*baremetalInfra, error) {
+func initializeBaremetalInfra(infra *configv1.Infrastructure) (*baremetalInfra, error) {
 	// Initialize command runner for executing commands on hypervisor
 	// (optional, may not be available)
 	sshRunner, err := hypervisorSshCmdRunner()
