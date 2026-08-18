@@ -42,7 +42,10 @@ const (
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
-// and test labels. When ocpInfra is nil (no cluster access), all tests are included.
+// and test labels. When ocpInfra is nil, behavior depends on whether KUBECONFIG is set:
+// during an informational listing (KUBECONFIG unset) all eligible tests are included,
+// including EVPN; when KUBECONFIG is set but infra initialization failed, EVPN tests are
+// excluded because their prerequisites cannot be verified.
 func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// Disable specs that are not explicitly assigned a lifecycle
 	if spec.Lifecycle == "" {
@@ -53,8 +56,23 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Without cluster access, include all eligible tests
+	// ocpInfra is nil during "list tests"/"info" and also when infra
+	// initialization fails intermittently. Distinguish the two cases using
+	// KUBECONFIG:
+	//
+	//   - KUBECONFIG unset: this is an informational listing with no cluster
+	//     to talk to, so include all eligible tests (including EVPN) to report
+	//     the full catalog.
+	//
+	//   - KUBECONFIG set but infra init failed: EVPN prerequisites cannot be
+	//     verified. Exclude EVPN specs so listing stays consistent with
+	//     execution; otherwise a later invocation where infra init succeeds
+	//     and CheckForEVPN() returns false would drop them from the spec set,
+	//     causing a non-deterministic "no such tests" error at dispatch.
 	if ocpInfra == nil {
+		if os.Getenv("KUBECONFIG") != "" {
+			return !spec.Labels.Has(featureLabelEVPN)
+		}
 		return true
 	}
 
@@ -102,7 +120,10 @@ func main() {
 	}
 
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
-	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
+	// (e.g. during "info" or "list tests") or infra initialization fails, ocpInfra stays
+	// nil; in that case all eligible tests are included except those gated on infrastructure
+	// we cannot verify (e.g. EVPN), while tests without a lifecycle and explicitly disabled
+	// tests remain excluded (see shouldIncludeTest).
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
