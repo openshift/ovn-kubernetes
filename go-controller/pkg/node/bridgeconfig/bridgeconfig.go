@@ -1,6 +1,7 @@
 package bridgeconfig
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -10,8 +11,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/egressip"
 	nodetypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/types"
 	nodeutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/util"
@@ -85,7 +89,7 @@ type BridgeConfiguration struct {
 	dropGARP   bool
 }
 
-func NewBridgeConfiguration(intfName, nodeName,
+func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
 	physicalNetworkName string,
 	nodeSubnets, gwIPs []*net.IPNet,
 	advertised bool) (*BridgeConfiguration, error) {
@@ -214,7 +218,7 @@ func NewBridgeConfiguration(intfName, nodeName,
 		}
 	}
 
-	res.interfaceID, err = bridgedGatewayNodeSetup(nodeName, res.bridgeName, physicalNetworkName)
+	res.interfaceID, err = bridgedGatewayNodeSetup(ovsClient, nodeName, res.bridgeName, physicalNetworkName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to set up shared interface gateway: %v", err)
 	}
@@ -463,7 +467,61 @@ func (b *BridgeConfiguration) SetNetworkOfPatchPort(netName string) error {
 	if !found {
 		return fmt.Errorf("failed to find network %s configuration on bridge %s", netName, b.bridgeName)
 	}
-	return netConfig.setOfPatchPort()
+	if err := netConfig.setOfPatchPort(); err != nil {
+		return err
+	}
+
+	// Only set no-flood on bridges that also carry the default network.
+	// The ARP storm occurs because CUDNs share the node IP with the
+	// default GR on the same bridge.
+	if netName != types.DefaultNetworkName && util.IsNetworkSegmentationSupportEnabled() {
+		if _, isSharedBridge := b.netConfig[types.DefaultNetworkName]; isSharedBridge {
+			if err := util.SetPortNoFlood(b.bridgeName, netConfig.OfPortPatch); err != nil {
+				return fmt.Errorf("failed to set no-flood on port %s of bridge %s: %w",
+					netConfig.PatchPort, b.bridgeName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// SyncNoFlood ensures OFPPC_NO_FLOOD is set on every non-default patch port
+// that shares the bridge with the default network. The flag is OpenFlow
+// port config (not OVSDB-persisted), so it must be reapplied after
+// ovs-vswitchd restarts or ports are re-created.
+//
+// To avoid running mod-port for every CUDN patch port on every sync
+// cycle, we first query dump-ports-desc once to learn which ports
+// already carry the flag and only touch ports that are missing it.
+func (b *BridgeConfiguration) SyncNoFlood() error {
+	if !util.IsNetworkSegmentationSupportEnabled() {
+		return nil
+	}
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	if _, hasDefault := b.netConfig[types.DefaultNetworkName]; !hasDefault {
+		return nil
+	}
+
+	alreadyNoFlood, err := util.GetNoFloodPorts(b.bridgeName)
+	if err != nil {
+		return fmt.Errorf("failed to check no-flood state on bridge %s: %w", b.bridgeName, err)
+	}
+
+	for netName, netConfig := range b.netConfig {
+		if netName == types.DefaultNetworkName || netConfig.PatchPort == "" || netConfig.OfPortPatch == "" {
+			continue
+		}
+		if alreadyNoFlood[netConfig.OfPortPatch] {
+			continue
+		}
+		if err := util.SetPortNoFlood(b.bridgeName, netConfig.OfPortPatch); err != nil {
+			return fmt.Errorf("failed to set no-flood on port %s of bridge %s: %w",
+				netConfig.PatchPort, b.bridgeName, err)
+		}
+	}
+	return nil
 }
 
 func (b *BridgeConfiguration) GetInterfaceID() string {
@@ -523,7 +581,7 @@ func getIntfName(gatewayIntf string) (string, error) {
 
 // bridgedGatewayNodeSetup enables forwarding on bridge interface, sets up the physical network name mappings for the bridge,
 // and returns an ifaceID created from the bridge name and the node name
-func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (string, error) {
+func bridgedGatewayNodeSetup(ovsClient libovsdbclient.Client, nodeName, bridgeName, physicalNetworkName string) (string, error) {
 	// IPv6 forwarding is enabled globally
 	if config.IPv4Mode {
 		// we use forward slash as path separator to allow dotted bridgeName e.g. foo.200
@@ -539,21 +597,27 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (
 	// that provides connectivity to that network. It is in the form of physnet1:br1,physnet2:br2.
 	// Note that there may be multiple ovs bridge mappings, be sure not to override
 	// the mappings for the other physical network
-	stdout, stderr, err := util.RunOVSVsctl("--if-exists", "get", "Open_vSwitch", ".",
-		"external_ids:ovn-bridge-mappings")
-	if err != nil {
-		return "", fmt.Errorf("failed to get ovn-bridge-mappings stderr:%s (%v)", stderr, err)
+	existing := ""
+	if ovs, err := ovsops.GetOpenvSwitch(ovsClient); err != nil {
+		if !errors.Is(err, libovsdbclient.ErrNotFound) {
+			return "", fmt.Errorf("failed to get Open_vSwitch row: %w", err)
+		}
+		// no row yet => no existing mappings
+	} else {
+		existing = ovs.ExternalIDs["ovn-bridge-mappings"]
 	}
+
 	// skip the existing mapping setting for the specified physicalNetworkName
 	mapString := ""
-	bridgeMappings := strings.Split(stdout, ",")
-	for _, bridgeMapping := range bridgeMappings {
-		m := strings.Split(bridgeMapping, ":")
-		if network := m[0]; network != physicalNetworkName {
-			if len(mapString) != 0 {
-				mapString += ","
+	if existing != "" {
+		for _, bridgeMapping := range strings.Split(existing, ",") {
+			m := strings.Split(bridgeMapping, ":")
+			if network := m[0]; network != physicalNetworkName {
+				if len(mapString) != 0 {
+					mapString += ","
+				}
+				mapString += bridgeMapping
 			}
-			mapString += bridgeMapping
 		}
 	}
 	if len(mapString) != 0 {
@@ -561,11 +625,10 @@ func bridgedGatewayNodeSetup(nodeName, bridgeName, physicalNetworkName string) (
 	}
 	mapString += physicalNetworkName + ":" + bridgeName
 
-	_, stderr, err = util.RunOVSVsctl("set", "Open_vSwitch", ".",
-		fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", mapString))
-	if err != nil {
-		return "", fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s"+
-			", stderr:%s (%v)", bridgeName, stderr, err)
+	if err := ovsops.UpdateOpenvSwitchExternalIDs(ovsClient, map[string]string{
+		"ovn-bridge-mappings": mapString,
+	}); err != nil {
+		return "", fmt.Errorf("failed to set ovn-bridge-mappings for ovs bridge %s: %w", bridgeName, err)
 	}
 
 	ifaceID := bridgeName + "_" + nodeName
