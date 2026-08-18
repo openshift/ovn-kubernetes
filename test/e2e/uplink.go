@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1218,6 +1220,79 @@ var _ = ginkgo.Describe("Network Segmentation Uplink split DPU status conditions
 		// republished on the recreated object, not just the conditions.
 		waitForUplinkStatesResolved(f, uplinkName, os.Getenv(uplinkDPUExpectedBridgeEnv), []corev1.Node{node})
 	})
+
+	ginkgo.It("resolves the bridge by host function and falls back to host MAC", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), uplinkShortTimeout)
+		defer cancel()
+		schedulableNodes, err := e2enode.GetReadySchedulableNodes(ctx, f.ClientSet)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		dpuHostNodes := filterNodesByLabel(schedulableNodes.Items, uplinkDPUHostNodeLabel)
+		gomega.Expect(dpuHostNodes).NotTo(gomega.BeEmpty(), "expected at least one ready schedulable DPU host node")
+		nodeIfaces := collectDPUHostUplinkInterfaces(dpuHostNodes)
+		expectedBridge := os.Getenv(uplinkDPUExpectedBridgeEnv)
+
+		ginkgo.By("resolving an Uplink through published host function")
+		deviceUplink := "updd" + testSuffix
+		createUplink(f, ictx, deviceUplink, dpuHostNodes, nodeIfaces, "")
+		waitForUplinkStatesResolved(f, deviceUplink, expectedBridge, dpuHostNodes)
+		for _, node := range dpuHostNodes {
+			node := node
+			gomega.Eventually(func() error {
+				state, err := getUplinkState(f, deviceUplink, node.Name)
+				if err != nil {
+					return err
+				}
+				if err := checkUplinkStateHostFunction(state, nodeIfaces[node.Name].InfName); err != nil {
+					return err
+				}
+				return checkUplinkStateResolvedVia(state, "host function")
+			}).WithTimeout(uplinkShortTimeout).WithPolling(uplinkPoll).Should(
+				gomega.Succeed(),
+				"expected the DPU-host on node %q to publish host function and the DPU to resolve through it",
+				node.Name,
+			)
+		}
+
+		ginkgo.By("resolving an Uplink by host MAC when no host function can be published")
+		// A dummy interface is not an SR-IOV function, so the DPU-host
+		// publishes host data without host function and the DPU must fall
+		// back to matching the published MAC against the representor peer
+		// MACs on its bridges. Cloning the provisioned uplink interface MAC
+		// steers that match to the same representor and bridge.
+		node := dpuHostNodes[0]
+		hostInterfaceName := nodeIfaces[node.Name].InfName
+		hostMAC, err := infraprovider.Get().ExecK8NodeCommand(node.Name, []string{
+			"cat", "/sys/class/net/" + hostInterfaceName + "/address",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		hostMAC = strings.TrimSpace(hostMAC)
+		gomega.Expect(hostMAC).NotTo(gomega.BeEmpty(),
+			"expected a MAC address on the provisioned uplink interface %s", hostInterfaceName)
+
+		macIface := "upm" + testSuffix
+		ictx.AddCleanUpFn(func() error {
+			return runNodeCommand(node.Name, "ip link del %s || true", macIface)
+		})
+		createIface := fmt.Sprintf(
+			"ip link add %[1]s address %[2]s type dummy && ip addr add 192.0.2.10/24 dev %[1]s",
+			macIface, hostMAC)
+		if ipFamilySet.Has(utilnet.IPv6) {
+			createIface += fmt.Sprintf(" && ip addr add 2001:db8:e2e::10/64 dev %s", macIface)
+		}
+		createIface += fmt.Sprintf(" && ip link set %s up", macIface)
+		gomega.Expect(runNodeCommand(node.Name, "%s", createIface)).To(gomega.Succeed())
+
+		macUplink := "upmac" + testSuffix
+		createUplink(f, ictx, macUplink, []corev1.Node{node}, nodeIfaces, macIface)
+		waitForUplinkStatesResolved(f, macUplink, expectedBridge, []corev1.Node{node})
+		state, err := getUplinkState(f, macUplink, node.Name)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		_, hasHostFunction, err := unstructured.NestedMap(state.Object, "status", "hostFunction")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(hasHostFunction).To(gomega.BeFalse(),
+			"a non SR-IOV host interface must resolve by MAC, without host function")
+		gomega.Expect(checkUplinkStateResolvedVia(state, "host MAC")).To(gomega.Succeed())
+	})
 })
 
 func uplinkStateCondition(state *unstructured.Unstructured, conditionType string) (*metav1.Condition, error) {
@@ -1230,6 +1305,69 @@ func uplinkStateCondition(state *unstructured.Unstructured, conditionType string
 		return nil, fmt.Errorf("UplinkState %s has no %s condition", state.GetName(), conditionType)
 	}
 	return condition, nil
+}
+
+// checkUplinkStateResolvedVia verifies which resolution method produced the
+// resolved bridge, as reported by the Resolved condition message: the
+// methods resolve the same bridge, so nothing else distinguishes a live
+// host function path from a silent fallback to the host MAC scan.
+func checkUplinkStateResolvedVia(state *unstructured.Unstructured, method string) error {
+	resolved, err := uplinkStateCondition(state, uplinkv1alpha1.UplinkStateConditionResolved)
+	if err != nil {
+		return err
+	}
+	expected := "Uplink DPU bridge discovery succeeded via " + method
+	if resolved.Message != expected {
+		return fmt.Errorf("UplinkState %s Resolved message is %q, expected %q",
+			state.GetName(), resolved.Message, expected)
+	}
+	return nil
+}
+
+// uplinkSimNetdevRe extracts the PF and function indices from a DPU simulator
+// netdev name (<prefix><pfID>-<funcID>, e.g. eth0-16).
+var uplinkSimNetdevRe = regexp.MustCompile(`^\D*(\d+)-(\d+)$`)
+
+// checkUplinkStateHostFunction verifies that status.hostFunction was
+// published, and that it matches the PF and VF indices encoded in the
+// provisioned host interface name when it follows the simulator convention.
+func checkUplinkStateHostFunction(state *unstructured.Unstructured, hostInterfaceName string) error {
+	_, found, err := unstructured.NestedMap(state.Object, "status", "hostFunction")
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("UplinkState %s has no host function", state.GetName())
+	}
+	matches := uplinkSimNetdevRe.FindStringSubmatch(hostInterfaceName)
+	if len(matches) != 3 {
+		return nil
+	}
+	expectedPF, err := strconv.ParseInt(matches[1], 10, 64)
+	if err != nil {
+		return err
+	}
+	expectedVF, err := strconv.ParseInt(matches[2], 10, 64)
+	if err != nil {
+		return err
+	}
+	pfID, _, err := unstructured.NestedInt64(state.Object, "status", "hostFunction", "pfID")
+	if err != nil {
+		return err
+	}
+	vfID, vfFound, err := unstructured.NestedInt64(state.Object, "status", "hostFunction", "vfID")
+	if err != nil {
+		return err
+	}
+	if !vfFound {
+		return fmt.Errorf("UplinkState %s host function for VF %s have no vfID",
+			state.GetName(), hostInterfaceName)
+	}
+	if pfID != expectedPF || vfID != expectedVF {
+		return fmt.Errorf("UplinkState %s host function are pf%dvf%d, expected pf%dvf%d for %s",
+			state.GetName(), pfID, vfID, expectedPF, expectedVF, hostInterfaceName)
+	}
+	return nil
 }
 
 func checkUplinkStateCondition(
