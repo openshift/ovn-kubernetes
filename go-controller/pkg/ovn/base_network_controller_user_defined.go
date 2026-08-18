@@ -357,10 +357,10 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 		bsnc.logicalPortCache.remove(pod, nadName)
 	}
 
-	if shouldHandleLiveMigration &&
-		kubevirtLiveMigrationStatus.IsTargetDomainReady() &&
-		// At localnet there is no source pod remote LSP so it should be skipped
-		(bsnc.TopologyType() != types.LocalnetTopology || bsnc.isPodScheduledinLocalZone(kubevirtLiveMigrationStatus.SourcePod)) {
+	if shouldHandleLiveMigration && kubevirtLiveMigrationStatus.IsTargetDomainReady() {
+		// We have a source pod LSP at this zone if the source pod and:
+		// - layer2 IC There is one at all the zones since we have the remote LSP to implement east/west
+		// - localnet only if this is the zone where the source pod is running
 		ops, err = bsnc.disableLiveMigrationSourceLSPOps(kubevirtLiveMigrationStatus, nadName, ops)
 		if err != nil {
 			return fmt.Errorf("failed to create LSP ops for source pod during Live-migration status: %w", err)
@@ -430,11 +430,6 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 
 	podDesc := pod.Namespace + "/" + pod.Name
 
-	// there is only a logical port for local pods or remote pods of layer2
-	// networks on interconnect, so only delete in these cases
-	isLocalPod := bsnc.isPodScheduledinLocalZone(pod)
-	hasLogicalPort := isLocalPod || bsnc.isLayer2Interconnect()
-
 	// for a specific NAD belongs to this network, Pod's logical port might already be created half-way
 	// without its lpInfo cache being created; need to deleted resources created for that NAD as well.
 	// So, first get all nadNames from pod annotation, but handle NADs belong to this network only.
@@ -457,7 +452,7 @@ func (bsnc *BaseUserDefinedNetworkController) removePodForUserDefinedNetwork(pod
 		klog.Infof("Deleting pod: %s for network %s, NAD: %s", podDesc, bsnc.GetNetworkName(), nadName)
 
 		// handle remote pod clean up but only do this one time
-		if !hasLogicalPort && !alreadyProcessed {
+		if !bsnc.hasPodLogicalPort(pod) && !alreadyProcessed {
 			if bsnc.doesNetworkRequireIPAM() &&
 				// address set is for network policy only. So either multi network policy is enabled or network
 				// segmentation, and it is a primary UDN (regular netpol)
@@ -968,7 +963,12 @@ func (bsnc *BaseUserDefinedNetworkController) disableLiveMigrationSourceLSPOps(
 	kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus,
 	nadName string, ops []ovsdb.Operation,
 ) ([]ovsdb.Operation, error) {
-	// closing the sourcePod lsp to ensure traffic goes to the now ready targetPod.
+
+	// Only disable the source LSP if it exists at this zone
+	if !bsnc.hasPodLogicalPort(kubevirtLiveMigrationStatus.SourcePod) {
+		return ops, nil
+	}
+
 	ops, _, err := bsnc.setPodLogicalSwitchPortAddressesAndEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, "", nil, false, ops)
 	return ops, err
 }
@@ -983,6 +983,12 @@ func (bsnc *BaseUserDefinedNetworkController) enableSourceLSPFailedLiveMigration
 		kubevirtLiveMigrationStatus.State != kubevirt.LiveMigrationFailed {
 		return nil
 	}
+
+	// Only re-enable the source LSP if it exists at this zone
+	if !bsnc.hasPodLogicalPort(kubevirtLiveMigrationStatus.SourcePod) {
+		return nil
+	}
+
 	// make sure sourcePod lsp is enabled if migration failed after DomainReady was set.
 	ops, sourcePodLsp, err := bsnc.setPodLogicalSwitchPortAddressesAndEnabledField(kubevirtLiveMigrationStatus.SourcePod, nadName, mac, ips, true, nil)
 	if err != nil {
@@ -994,6 +1000,12 @@ func (bsnc *BaseUserDefinedNetworkController) enableSourceLSPFailedLiveMigration
 	}
 
 	return nil
+}
+
+// hasPodLogicalPort On localnet topologies with interconnect the pod's LSP lives only on the
+// node where the pod was scheduled
+func (bsnc *BaseUserDefinedNetworkController) hasPodLogicalPort(pod *corev1.Pod) bool {
+	return pod != nil && (bsnc.isPodScheduledinLocalZone(pod) || bsnc.isLayer2Interconnect())
 }
 
 func shouldAddPort(oldPod, newPod *corev1.Pod, inRetryCache bool) bool {
