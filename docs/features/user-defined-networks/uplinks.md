@@ -155,10 +155,19 @@ DPU deployments split Uplink discovery across the host and DPU components:
 
 * The DPU-host ovnkube-node reads `hostInterfaceName`, discovers the host-side
   MAC address, IP addresses, and default gateways, and writes that data to
-  `UplinkState`.
-* The DPU ovnkube-node reads the same `UplinkState`, uses the host MAC address
-  to find the DPU-local representor and OVS bridge, validates the bridge, and
-  writes `status.ovsBridge.name`.
+  `UplinkState`. When the host interface is an SR-IOV function, it also
+  writes the PF index — and, for a VF, the VF index — to
+  `status.hostFunction`.
+* The DPU ovnkube-node reads the same `UplinkState` and finds the DPU-local
+  representor and OVS bridge: with `status.hostFunction` it resolves the PF
+  or VF representor directly from the published indices, and a representor
+  resolved this way must peer with the published host MAC, the uplink's
+  identity, whenever that peer MAC is readable. Without
+  `status.hostFunction`, and when the published indices do not resolve, it
+  scans bridges for the representor whose host-side peer has the published
+  MAC address. Index resolution covers PF indices 0 and 1 on the default
+  controller; other layouts resolve through the MAC scan. It then validates
+  the bridge and writes `status.ovsBridge.name`.
 * Once both sides have published the required data, the `UplinkState` becomes
   `Resolved=True`.
 
