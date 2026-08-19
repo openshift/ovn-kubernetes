@@ -1700,6 +1700,18 @@ func runDPUUplinkVRFLiteRouteAdvertisements(
 		))
 	}
 
+	// Each side of the split deployment reports its share of the gateway
+	// programming on its own condition, and cluster manager aggregates both
+	// into the CUDN's UplinksReady.
+	for _, node := range dpuHostNodes {
+		waitForUplinkStateGatewayCondition(f, networkName, node.Name,
+			metav1.ConditionTrue, uplinkv1alpha1.UplinkStateReasonGatewayConfigured)
+		waitForUplinkStateConditionOfType(f, networkName, node.Name,
+			uplinkv1alpha1.UplinkStateConditionHostGatewayReady,
+			metav1.ConditionTrue, uplinkv1alpha1.UplinkStateReasonGatewayConfigured)
+	}
+	waitForCUDNUplinksReady(f, networkName)
+
 	// The pre-existing route was migrated into the host-side CUDN VRF on
 	// enslavement. With dynamic network allocation the network is only
 	// rendered on a node once a pod attached to it runs there, so this can
@@ -2596,6 +2608,19 @@ func waitForUplinkStateGatewayCondition(
 	expectedReason string,
 ) {
 	ginkgo.GinkgoHelper()
+	waitForUplinkStateConditionOfType(f, uplinkName, nodeName,
+		uplinkv1alpha1.UplinkStateConditionGatewayReady, expectedStatus, expectedReason)
+}
+
+func waitForUplinkStateConditionOfType(
+	f *framework.Framework,
+	uplinkName string,
+	nodeName string,
+	conditionType string,
+	expectedStatus metav1.ConditionStatus,
+	expectedReason string,
+) {
+	ginkgo.GinkgoHelper()
 
 	gomega.Eventually(func() error {
 		state, err := getUplinkState(f, uplinkName, nodeName)
@@ -2607,16 +2632,16 @@ func waitForUplinkStateGatewayCondition(
 			return err
 		}
 		for _, condition := range conditions {
-			if condition.Type != "GatewayReady" {
+			if condition.Type != conditionType {
 				continue
 			}
 			if condition.Status == expectedStatus && condition.Reason == expectedReason {
 				return nil
 			}
-			return fmt.Errorf("UplinkState %s GatewayReady condition is %s/%s, expected %s/%s",
-				state.GetName(), condition.Status, condition.Reason, expectedStatus, expectedReason)
+			return fmt.Errorf("UplinkState %s %s condition is %s/%s, expected %s/%s",
+				state.GetName(), conditionType, condition.Status, condition.Reason, expectedStatus, expectedReason)
 		}
-		return fmt.Errorf("UplinkState %s has no GatewayReady condition", state.GetName())
+		return fmt.Errorf("UplinkState %s has no %s condition", state.GetName(), conditionType)
 	}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(gomega.Succeed())
 }
 
