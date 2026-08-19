@@ -4433,7 +4433,12 @@ func createRouteAdvertisements(
 		return fmt.Errorf("failed to create RouteAdvertisements: %w", err)
 	}
 	ictx.AddCleanUpFn(func() error {
-		return raClient.K8sV1().RouteAdvertisements().Delete(context.Background(), name, metav1.DeleteOptions{})
+		err := raClient.K8sV1().RouteAdvertisements().Delete(context.Background(), name, metav1.DeleteOptions{})
+		if apierrors.IsNotFound(err) {
+			// tolerate tests that delete the RouteAdvertisements themselves
+			return nil
+		}
+		return err
 	})
 	var lastReadyErr error
 	if err := wait.PollUntilContextTimeout(
