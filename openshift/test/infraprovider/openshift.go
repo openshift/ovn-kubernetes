@@ -25,6 +25,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
@@ -90,10 +91,10 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 	}
 	// check ovn gateway mode and export required env variable
 	o.configureOVNGatewayMode()
-	if o.clusterInfra != nil {
+	if bm, ok := o.clusterInfra.(*baremetalInfra); ok {
 		// check for frr external container availability
 		frrContainer := api.ExternalContainer{Name: externalFRRContainerName}
-		output, _ := o.clusterInfra.ExecExternalContainerCommand(frrContainer, []string{"hostname"})
+		output, _ := bm.ExecExternalContainerCommand(frrContainer, []string{"hostname"})
 		o.hasFRRExternalContainer = output != ""
 	}
 	return nil
@@ -133,6 +134,28 @@ func (o *OpenshiftInfraProvider) HasSecondaryHostEIPSupport() bool {
 		return false
 	}
 	return bm.secondaryNetwork != nil
+}
+
+// EnableSecondaryForwarding enables IP forwarding on secondary network
+// interfaces of baremetal cluster nodes. This is a no-op on non-baremetal
+// platforms or when no secondary network is configured.
+func (o *OpenshiftInfraProvider) EnableSecondaryForwarding(clientset kubernetes.Interface) error {
+	if o.clusterInfra == nil {
+		return nil
+	}
+	bm, ok := o.clusterInfra.(*baremetalInfra)
+	if !ok || bm.secondaryNetwork == nil {
+		return nil
+	}
+	nodes, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list cluster nodes: %w", err)
+	}
+	var nodeNames []string
+	for _, node := range nodes.Items {
+		nodeNames = append(nodeNames, node.Name)
+	}
+	return bm.enableSecondaryForwarding(nodeNames, o.ExecK8NodeCommand)
 }
 
 // CheckForEVPN checks all EVPN prerequisites

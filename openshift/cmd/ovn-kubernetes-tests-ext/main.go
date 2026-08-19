@@ -161,6 +161,9 @@ func main() {
 		if err != nil {
 			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
 		}
+		if err := ocpInfra.EnableSecondaryForwarding(client); err != nil {
+			panic(fmt.Sprintf("failed to enable secondary network forwarding: %v", err))
+		}
 		if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
 			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
