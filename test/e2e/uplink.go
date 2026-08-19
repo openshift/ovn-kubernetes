@@ -62,7 +62,7 @@ const (
 	uplinkBGPServerIPv4CIDREnv      = "OVN_TEST_BGP_SERVER_NET_SUBNET_IPV4"
 	uplinkBGPServerIPv6CIDREnv      = "OVN_TEST_BGP_SERVER_NET_SUBNET_IPV6"
 	uplinkDefaultDPUResourceName    = "dpusim.io/vf"
-	uplinkDefaultBGPServerIPv4CIDR  = "172.27.0.0/16"
+	uplinkDefaultBGPServerIPv4CIDR  = "172.29.0.0/16"
 	uplinkDefaultBGPServerIPv6CIDR  = "fc00:f853:ccd:e797::/64"
 )
 
