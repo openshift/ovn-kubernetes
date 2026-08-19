@@ -57,8 +57,14 @@ func AgnHost() string {
 	return deploymentconfig.Get().GetAgnHostContainerImage()
 }
 
-func ExternalAgnHost() string {
-	if v := os.Getenv("EXTERNAL_AGNHOST_IMAGE"); v != "" {
+// ExternalContainerImage returns the default image used for external
+// (host-side) containers. Such containers may run on a host that cannot reach
+// the same registry as in-cluster pods, so USER_PROVIDED_AGNHOST_IMAGE can point
+// them at a reachable image. When it is unset the value falls back to AgnHost()
+// (which itself honors the cluster-wide AGNHOST_IMAGE override), so the default
+// image is unchanged.
+func ExternalContainerImage() string {
+	if v := os.Getenv("USER_PROVIDED_AGNHOST_IMAGE"); v != "" {
 		return v
 	}
 	return AgnHost()

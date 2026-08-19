@@ -38,8 +38,10 @@ type OpenshiftInfraProvider struct {
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
 	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
-	if os.Getenv("EXTERNAL_AGNHOST_IMAGE") == "" {
-		os.Setenv("EXTERNAL_AGNHOST_IMAGE", "registry.k8s.io/e2e-test-images/agnhost:2.40")
+	if os.Getenv("USER_PROVIDED_AGNHOST_IMAGE") == "" {
+		if err := os.Setenv("USER_PROVIDED_AGNHOST_IMAGE", "registry.k8s.io/e2e-test-images/agnhost:2.40"); err != nil {
+			return nil, err
+		}
 	}
 	clusterInfra, err := initializeClusterInfra(config)
 	if err != nil {
