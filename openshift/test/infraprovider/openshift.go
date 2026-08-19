@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
@@ -83,11 +84,28 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 	}
 	// check ovn gateway mode and export required env variable
 	o.configureOVNGatewayMode()
-	if o.clusterInfra != nil {
+	if bm, ok := o.clusterInfra.(*baremetalInfra); ok {
 		// check for frr external container availability
 		frrContainer := api.ExternalContainer{Name: externalFRRContainerName}
-		output, _ := o.clusterInfra.ExecExternalContainerCommand(frrContainer, []string{"hostname"})
+		output, _ := bm.ExecExternalContainerCommand(frrContainer, []string{"hostname"})
 		o.hasFRRExternalContainer = output != ""
+
+		// Enable IP forwarding on secondary network interfaces of cluster nodes.
+		clientset, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			return fmt.Errorf("failed to create kubernetes clientset: %w", err)
+		}
+		nodes, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list cluster nodes: %w", err)
+		}
+		var nodeNames []string
+		for _, node := range nodes.Items {
+			nodeNames = append(nodeNames, node.Name)
+		}
+		if err := bm.enableSecondaryForwarding(nodeNames, o.ExecK8NodeCommand); err != nil {
+			return fmt.Errorf("failed to enable secondary network forwarding: %w", err)
+		}
 	}
 	return nil
 }

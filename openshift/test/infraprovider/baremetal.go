@@ -105,6 +105,67 @@ func initializeClusterInfra(infra *configv1.Infrastructure) (*baremetalInfra, er
 	return bm, nil
 }
 
+// enableSecondaryForwarding enables IPv4/IPv6 forwarding on the secondary
+// network interface of each cluster node. On baremetal, these interfaces are
+// pre-configured but may have forwarding disabled by default. The interface
+// name is the same across all cluster nodes, so it is discovered once from
+// the first reachable node and reused for the rest.
+func (ci *baremetalInfra) enableSecondaryForwarding(nodeNames []string, execNodeCmd func(nodeName string, cmd []string) (string, error)) error {
+	if ci.secondaryNetwork == nil {
+		return nil
+	}
+	// Discover interface name from the first reachable node.
+	var ifName string
+	for _, nodeName := range nodeNames {
+		output, err := execNodeCmd(nodeName, []string{"ip", "-j", "addr"})
+		if err != nil {
+			return fmt.Errorf("failed to get addresses from node %s: %w", nodeName, err)
+		}
+		ifName = findInterfaceBySubnet(output, bmSecondaryIPv4Subnet, bmSecondaryIPv6Subnet)
+		if ifName != "" {
+			break
+		}
+	}
+	if ifName == "" {
+		return fmt.Errorf("no secondary network interface found on any node for subnets %s, %s", bmSecondaryIPv4Subnet, bmSecondaryIPv6Subnet)
+	}
+	for _, nodeName := range nodeNames {
+		for _, sysctl := range []string{
+			fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", ifName),
+			fmt.Sprintf("net.ipv6.conf.%s.forwarding=1", ifName),
+		} {
+			if _, err := execNodeCmd(nodeName, []string{"sysctl", "-w", sysctl}); err != nil {
+				return fmt.Errorf("failed to set %s on node %s: %w", sysctl, nodeName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// findInterfaceBySubnet parses ip -j addr output and returns the interface
+// name that has an address within one of the given subnets.
+func findInterfaceBySubnet(ipAddrJSON, v4Subnet, v6Subnet string) string {
+	var links []linkInfo
+	if err := json.Unmarshal([]byte(ipAddrJSON), &links); err != nil {
+		return ""
+	}
+	for _, link := range links {
+		for _, addr := range link.AddrInfo {
+			if v4Subnet != "" {
+				if ok, _ := ipInCIDR(addr.Local, v4Subnet); ok {
+					return link.IfName
+				}
+			}
+			if v6Subnet != "" {
+				if ok, _ := ipInCIDR(addr.Local, v6Subnet); ok {
+					return link.IfName
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func (ci *baremetalInfra) PrimaryNetwork() (api.Network, error) {
 	return ci.base.PrimaryNetwork()
 }
