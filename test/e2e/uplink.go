@@ -538,7 +538,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 			gomega.Expect(frrIP).NotTo(gomega.BeEmpty())
 			for _, node := range schedulableNodes.Items {
 				gomega.Eventually(func() (bool, error) {
-					return hasRouteInCUDNVRF(node, networkName, serverCIDR, frrIP)
+					return hasRouteInCUDNVRF(node, networkName, serverCIDR, bgpNextHopsForPeer(family, frrIface)...)
 				}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
 					gomega.BeTrue(),
 					"expected node %s to learn %s via %s in CUDN VRF %s",
@@ -1089,7 +1089,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 			gomega.Expect(frrIP).NotTo(gomega.BeEmpty())
 			for _, node := range schedulableNodes.Items {
 				gomega.Eventually(func() (bool, error) {
-					return hasRouteInDefaultVRF(node, serverCIDR, frrIP)
+					return hasRouteInDefaultVRF(node, serverCIDR, bgpNextHopsForPeer(family, frrIface)...)
 				}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
 					gomega.BeTrue(),
 					"expected node %s to learn %s via %s in the default VRF",
@@ -1098,7 +1098,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 					frrIP,
 				)
 				gomega.Eventually(func() (bool, error) {
-					return hasRouteInCUDNVRF(node, networkName, serverCIDR, frrIP)
+					return hasRouteInCUDNVRF(node, networkName, serverCIDR, bgpNextHopsForPeer(family, frrIface)...)
 				}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
 					gomega.BeTrue(),
 					"expected node %s to leak %s via %s into CUDN VRF %s",
@@ -3031,7 +3031,35 @@ func interfaceMaster(output, interfaceName string) (string, error) {
 	return links[0].Master, nil
 }
 
-func hasRouteInDefaultVRF(node corev1.Node, cidr, nextHop string) (bool, error) {
+// bgpNextHopsForPeer returns the next hops a BGP route learned from the peer
+// may carry in the kernel: the peer's address of the given family and, for
+// IPv6, its EUI-64 link-local, since a directly connected peer may advertise
+// IPv6 routes with its link-local as next hop rather than its global address.
+func bgpNextHopsForPeer(family utilnet.IPFamily, peer infraapi.NetworkInterface) []string {
+	nextHops := []string{getFirstIPStringOfFamily(family, []string{peer.IPv4, peer.IPv6})}
+	if family != utilnet.IPv6 {
+		return nextHops
+	}
+	if ll := ipv6LinkLocalFromMAC(peer.MAC); ll != "" {
+		nextHops = append(nextHops, ll)
+	}
+	return nextHops
+}
+
+// ipv6LinkLocalFromMAC returns the EUI-64 IPv6 link-local address derived
+// from the given MAC, or an empty string if the MAC cannot be parsed.
+func ipv6LinkLocalFromMAC(mac string) string {
+	hw, err := net.ParseMAC(mac)
+	if err != nil || len(hw) != 6 {
+		return ""
+	}
+	return net.IP{
+		0xfe, 0x80, 0, 0, 0, 0, 0, 0,
+		hw[0] ^ 0x02, hw[1], hw[2], 0xff, 0xfe, hw[3], hw[4], hw[5],
+	}.String()
+}
+
+func hasRouteInDefaultVRF(node corev1.Node, cidr string, nextHops ...string) (bool, error) {
 	routeCommand := []string{"ip", "--json", "route", "show", cidr}
 	if utilnet.IsIPv6CIDRString(cidr) {
 		routeCommand = []string{"ip", "-6", "--json", "route", "show", cidr}
@@ -3046,7 +3074,7 @@ func hasRouteInDefaultVRF(node corev1.Node, cidr, nextHop string) (bool, error) 
 		return false, fmt.Errorf("failed to parse routes on node %s: %w; output: %s", node.Name, err, out)
 	}
 	framework.Logf("Routes in default VRF on node %s for %s: %s", node.Name, cidr, out)
-	return hasBGPRoute(routes, cidr, nextHop), nil
+	return hasBGPRoute(routes, cidr, nextHops...), nil
 }
 
 func hasRouteInDPUCUDNVRF(hostNode corev1.Node, cudnName, cidr, nextHop string) (bool, error) {
