@@ -208,11 +208,7 @@ set_common_default_params() {
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   ENABLE_NETWORK_SEGMENTATION=${ENABLE_NETWORK_SEGMENTATION:-false}
   ENABLE_UDN_ARP_PROXY=${ENABLE_UDN_ARP_PROXY:-}
-<<<<<<< HEAD
-  ENABLE_UDN_NDP_PROXY=${ENABLE_UDN_NDP_PROXY:-false}
-=======
   ENABLE_UDN_NDP_PROXY=${ENABLE_UDN_NDP_PROXY:-}
->>>>>>> upstream-own/7329-flags
   if [ "$ENABLE_NETWORK_SEGMENTATION" == true ] && [ "$ENABLE_MULTI_NET" != true ]; then
     echo "Network segmentation (UDN) requires multi-network to be enabled (-mne)"
     exit 1

@@ -1274,10 +1274,10 @@ func isUDNProxyEnabled() bool {
 	valNDP, presentNDP := os.LookupEnv("ENABLE_UDN_NDP_PROXY")
 	udnARPEnabled := false
 	udnNDPEnabled := false
-	if presentARP && (valARP == "flows" || valARP == "macbindings") {
+	if presentARP && valARP != "" {
 		udnARPEnabled = true
 	}
-	if presentNDP && valNDP == "true" {
+	if presentNDP && valNDP != "" {
 		udnNDPEnabled = true
 	}
 	return udnARPEnabled || udnNDPEnabled
