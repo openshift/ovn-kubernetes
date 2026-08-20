@@ -2731,7 +2731,7 @@ func checkUplinkStateHostFunction(state *unstructured.Unstructured, hostInterfac
 		return err
 	}
 	if !vfFound {
-		return fmt.Errorf("UplinkState %s host function for VF %s have no vfID",
+		return fmt.Errorf("UplinkState %s host function for host interface %s has no vfID",
 			state.GetName(), hostInterfaceName)
 	}
 	if pfID != expectedPF || vfID != expectedVF {
