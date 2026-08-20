@@ -108,7 +108,7 @@ type dpuHostAddrAnnotation struct {
 	IPv6 string `json:"ipv6"`
 }
 
-var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", feature.NetworkSegmentation, func() {
+var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", feature.NetworkSegmentation, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-default")
 	f.SkipNamespaceCreation = true
 
@@ -429,7 +429,7 @@ func provisionUplinkWithActiveCUDN(
 	}
 }
 
-var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, func() {
+var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-bgp")
 	f.SkipNamespaceCreation = true
 
@@ -783,7 +783,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 	})
 })
 
-var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation", feature.RouteAdvertisementsDynamicUDN, func() {
+var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation", feature.RouteAdvertisementsDynamicUDN, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-dynamic-bgp")
 	f.SkipNamespaceCreation = true
 
@@ -983,7 +983,7 @@ var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation
 	})
 })
 
-var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, func() {
+var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-bgp")
 	f.SkipNamespaceCreation = true
 
@@ -1058,6 +1058,12 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 			"client-"+networkName,
 			schedulableNodes.Items[0].Name,
 		)
+		cudnNodes := schedulableNodes.Items
+		if isDynamicUDNEnabled() {
+			// With dynamic UDN allocation, the CUDN and its VRF only exist on
+			// nodes running workloads attached to the network.
+			cudnNodes = []corev1.Node{schedulableNodes.Items[0]}
+		}
 
 		serverNetwork, err := infraprovider.Get().GetNetwork(serverNetworkName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1097,6 +1103,8 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 					serverCIDR,
 					frrIP,
 				)
+			}
+			for _, node := range cudnNodes {
 				gomega.Eventually(func() (bool, error) {
 					return hasRouteInCUDNVRF(node, networkName, serverCIDR, bgpNextHopsForPeer(family, frrIface)...)
 				}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
@@ -1213,7 +1221,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 	})
 })
 
-var _ = ginkgo.Describe("Network Segmentation Uplink split DPU status conditions", feature.NetworkSegmentation, func() {
+var _ = ginkgo.Describe("Network Segmentation Uplink split DPU status conditions", feature.NetworkSegmentation, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-conditions")
 	f.SkipNamespaceCreation = true
 

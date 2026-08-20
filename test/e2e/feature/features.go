@@ -36,6 +36,7 @@ var (
 	// is specific to dynamic UDN allocation; these tests require clusters
 	// with both route advertisements and dynamic UDN allocation enabled.
 	RouteAdvertisementsDynamicUDN = New("RouteAdvertisementsDynamicUDN")
+	Uplink                        = New("Uplink")
 	Unidle                        = New("Unidle")
 	NetworkQos                    = New("NetworkQos")
 	NetworkConnect                = New("NetworkConnect")
