@@ -370,7 +370,7 @@ func parseUDNProxyFlags(udnARPProxy, udnNDPProxy string) *udnProxyFlags {
 	// applies to the IPv4 ARP proxy since ARP responder flows are not
 	// supported for the IPv6 address family.
 	parse := func(flags string, isARP bool) {
-		for token := range strings.SplitSeq(flags, ",") {
+		for token := range strings.SplitSeq(flags, ":") {
 			switch strings.TrimSpace(token) {
 			case "host":
 				upfs.useHostAsSource = true

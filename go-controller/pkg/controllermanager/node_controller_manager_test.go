@@ -561,26 +561,26 @@ var _ = Describe("parseUDNProxyFlags", func() {
 
 		// host|cdn: useHostAsSource set when "host" is defined
 		Entry("sets useHostAsSource when host defined on ARP string",
-			true, false, "flows,host", "",
+			true, false, "flows:host", "",
 			udnProxyFlags{ipv4Enabled: true, ipv4UseARPFlows: true, useHostAsSource: true}),
 		Entry("does not set useHostAsSource when cdn defined",
-			true, false, "flows,cdn", "",
+			true, false, "flows:cdn", "",
 			udnProxyFlags{ipv4Enabled: true, ipv4UseARPFlows: true}),
 		Entry("sets useHostAsSource when host defined on NDP string",
-			false, true, "", "macbindings,host",
+			false, true, "", "macbindings:host",
 			udnProxyFlags{ipv6Enabled: true, useHostAsSource: true}),
 
 		// cache|nocache: useCache set when "cache" is defined
 		Entry("sets useCache when cache defined",
-			true, false, "macbindings,cache", "",
+			true, false, "macbindings:cache", "",
 			udnProxyFlags{ipv4Enabled: true, useCache: true}),
 		Entry("does not set useCache when nocache defined",
-			true, false, "macbindings,nocache", "",
+			true, false, "macbindings:nocache", "",
 			udnProxyFlags{ipv4Enabled: true}),
 
 		// dual-stack: both address families enabled with all tokens combined
 		Entry("parses all tokens on dual-stack",
-			true, true, "flows,host,cache", "macbindings,host,cache",
+			true, true, "flows:host:cache", "macbindings:host:cache",
 			udnProxyFlags{
 				ipv4Enabled:     true,
 				ipv4UseARPFlows: true,
@@ -591,7 +591,7 @@ var _ = Describe("parseUDNProxyFlags", func() {
 
 		// tokens on a disabled address family's string are ignored
 		Entry("ignores tokens from ARP string when IPv4 mode off",
-			false, true, "flows,host,cache", "macbindings",
+			false, true, "flows:host:cache", "macbindings",
 			udnProxyFlags{ipv6Enabled: true}),
 	)
 })
