@@ -239,7 +239,7 @@ ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
 #OVN_UDN_ARP_PROXY_ENABLE - UDN ARP Proxy mode for ovn-kubernetes ("macbindings" or "flows", empty to disable)
 ovn_udn_arp_proxy_enable=${OVN_UDN_ARP_PROXY_ENABLE:=}
 #OVN_UDN_NDP_PROXY_ENABLE - enable UDN NDP Proxy for ovn-kubernetes
-ovn_udn_ndp_proxy_enable=${OVN_UDN_NDP_PROXY_ENABLE:=false}
+ovn_udn_ndp_proxy_enable=${OVN_UDN_NDP_PROXY_ENABLE:=}
 #OVN_NETWORK_CONNECT_ENABLE - enable network connect for ovn-kubernetes
 ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE:=false}
 #OVN_UPLINK_ENABLE - enable uplink for ovn-kubernetes
@@ -1131,8 +1131,8 @@ ovnkube-controller() {
   echo "udn_arp_proxy_enabled_flag=${udn_arp_proxy_enabled_flag}"
 
   udn_ndp_proxy_enabled_flag=
-  if [[ ${ovn_udn_ndp_proxy_enable} == "true" ]]; then
-	  udn_ndp_proxy_enabled_flag="--enable-udn-ndp-proxy"
+  if [[ -n ${ovn_udn_ndp_proxy_enable} ]]; then
+	  udn_ndp_proxy_enabled_flag="--enable-udn-ndp-proxy=${ovn_udn_ndp_proxy_enable}"
   fi
   echo "udn_ndp_proxy_enabled_flag=${udn_ndp_proxy_enabled_flag}"
 
@@ -1490,8 +1490,8 @@ ovnkube-controller-with-node() {
   echo "udn_arp_proxy_enabled_flag=${udn_arp_proxy_enabled_flag}"
 
   udn_ndp_proxy_enabled_flag=
-  if [[ ${ovn_udn_ndp_proxy_enable} == "true" ]]; then
-	  udn_ndp_proxy_enabled_flag="--enable-udn-ndp-proxy"
+  if [[ -n ${ovn_udn_ndp_proxy_enable} ]]; then
+	  udn_ndp_proxy_enabled_flag="--enable-udn-ndp-proxy=${ovn_udn_ndp_proxy_enable}"
   fi
   echo "udn_ndp_proxy_enabled_flag=${udn_ndp_proxy_enabled_flag}"
 
