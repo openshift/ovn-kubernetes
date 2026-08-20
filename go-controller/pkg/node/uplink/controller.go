@@ -26,6 +26,7 @@ import (
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/ptr"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -51,6 +52,11 @@ const (
 	dpuFieldManager      = "ovnkube-node-uplink-controller-dpu"
 	dpuHostFieldManager  = "ovnkube-node-uplink-controller-dpu-host"
 	ovsIntegrationBridge = "br-int"
+
+	// missingDefaultGatewayRepollInterval paces the rediscovery of an
+	// UplinkState whose host interface is missing a default gateway route
+	// for one of its address families (see repollMissingDefaultGateways).
+	missingDefaultGatewayRepollInterval = 30 * time.Second
 
 	// maxDefaultGateways matches the status.defaultGateways CRD bound: room
 	// for 128 next hops per family. Overflow fails discovery instead of
@@ -331,6 +337,7 @@ func (c *Controller) reconcileUplinkState(key string) error {
 		// Host interface discovery succeeded, which is everything the
 		// DPU-host reports: publish HostDataReady=True. Bridge resolution,
 		// validation and the Resolved condition belong to the DPU side.
+		c.repollMissingDefaultGateways(state.Name, hostInterfaceName, hostState)
 		return c.updateUplinkStateStatus(
 			state,
 			hostInterfaceName,
@@ -438,6 +445,7 @@ func (c *Controller) reconcileUplinkState(key string) error {
 		))
 	}
 
+	c.repollMissingDefaultGateways(state.Name, hostInterfaceName, hostState)
 	return c.updateResolvedUplinkStateStatus(
 		state,
 		hostInterfaceName,
@@ -445,6 +453,57 @@ func (c *Controller) reconcileUplinkState(key string) error {
 		bridgeName,
 		"Uplink discovery succeeded",
 	)
+}
+
+// repollMissingDefaultGateways schedules a delayed rediscovery while an IP
+// family the host interface has an address for is missing its default
+// gateway: netlink route events do not currently enqueue Uplink discovery.
+// Quiet by design —
+// an uplink without a default gateway is valid, so this is not an error and
+// no condition degrades; the empty status.defaultGateways field is the
+// signal. Only the netlink-discovering side re-polls: the DPU reads host
+// data from the UplinkState and is reconciled by its status updates.
+func (c *Controller) repollMissingDefaultGateways(
+	stateName, hostInterfaceName string,
+	hostState *hostInterfaceState,
+) {
+	missing := missingDefaultGatewayFamilies(hostState)
+	if missing == "" {
+		return
+	}
+	klog.V(5).Infof("UplinkState %s: no %s default gateway route found for host interface %s, re-polling",
+		stateName, missing, hostInterfaceName)
+	c.uplinkStateController.ReconcileAfter(stateName, missingDefaultGatewayRepollInterval)
+}
+
+// missingDefaultGatewayFamilies names the IP families ("IPv4", "IPv6" or
+// "IPv4/IPv6") the host interface has an address but no default gateway for,
+// or "" if none.
+func missingDefaultGatewayFamilies(hostState *hostInterfaceState) string {
+	wantV4, wantV6 := false, false
+	for _, ipAddress := range hostState.ipAddresses {
+		if utilnet.IsIPv6CIDR(ipAddress) {
+			wantV6 = true
+		} else {
+			wantV4 = true
+		}
+	}
+	for _, gateway := range hostState.defaultGateways {
+		if utilnet.IsIPv6(gateway) {
+			wantV6 = false
+		} else {
+			wantV4 = false
+		}
+	}
+	switch {
+	case wantV4 && wantV6:
+		return "IPv4/IPv6"
+	case wantV4:
+		return "IPv4"
+	case wantV6:
+		return "IPv6"
+	}
+	return ""
 }
 
 // reconcileOwnerOfDeletedUplinkState reacts to an UplinkState deletion: the deletion

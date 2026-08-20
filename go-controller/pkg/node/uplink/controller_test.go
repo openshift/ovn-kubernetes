@@ -966,6 +966,139 @@ func TestNodeUplinkControllerRejectsBridgeUplinkAsHostInterface(t *testing.T) {
 	)))
 }
 
+func TestNodeUplinkControllerRepollsWhileDefaultGatewaysMissing(t *testing.T) {
+	hostState := &hostInterfaceState{
+		macAddress:  net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x02},
+		ipAddresses: []*net.IPNet{ovntest.MustParseIPNet("192.0.2.10/24")},
+	}
+
+	// Discovery without default gateways publishes success — networks that
+	// import their routes over BGP run without a default gateway — and
+	// schedules a delayed rediscovery (not an error, to keep the logs
+	// quiet) that keeps re-polling the host routes until a gateway appears.
+	t.Run("full mode", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.OvnKubeNode.Mode = ovntypes.NodeModeFull
+
+		controller, client := newTestController(t,
+			fakeHostDiscoverer{state: hostState},
+			fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "eth0"},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
+		)
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.ConsistOf("After:br-blue.node-a"), "expected a delayed rediscovery")
+
+		state := getUplinkState(g, client, "br-blue.node-a")
+		g.Expect(state.Status.MACAddress).To(gomega.Equal(uplinkv1alpha1.MACAddress("02:42:ac:12:00:02")))
+		g.Expect(state.Status.IPAddresses).To(gomega.Equal([]uplinkv1alpha1.IPAddressCIDR{"192.0.2.10/24"}))
+		g.Expect(state.Status.DefaultGateways).To(gomega.BeEmpty())
+		g.Expect(state.Status.OVSBridge.Name).To(gomega.Equal("br-blue"))
+		g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+			gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionResolved),
+			gomega.HaveField("Status", metav1.ConditionTrue),
+			gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonResolved),
+		)))
+	})
+
+	t.Run("DPU-host mode", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.OvnKubeNode.Mode = ovntypes.NodeModeDPUHost
+
+		controller, client := newTestController(t,
+			fakeHostDiscoverer{state: hostState},
+			failingBridgeResolver{t: t},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
+		)
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.ConsistOf("After:br-blue.node-a"), "expected a delayed rediscovery")
+
+		state := getUplinkState(g, client, "br-blue.node-a")
+		g.Expect(state.Status.MACAddress).To(gomega.Equal(uplinkv1alpha1.MACAddress("02:42:ac:12:00:02")))
+		g.Expect(state.Status.IPAddresses).To(gomega.Equal([]uplinkv1alpha1.IPAddressCIDR{"192.0.2.10/24"}))
+		g.Expect(state.Status.DefaultGateways).To(gomega.BeEmpty())
+		g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+			gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionHostDataReady),
+			gomega.HaveField("Status", metav1.ConditionTrue),
+			gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonHostDataDiscovered),
+		)))
+	})
+
+	// A family with an address but no gateway keeps re-polling even when
+	// the other family's gateway is present.
+	t.Run("dual stack with one missing family", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.OvnKubeNode.Mode = ovntypes.NodeModeFull
+
+		controller, client := newTestController(t,
+			fakeHostDiscoverer{state: &hostInterfaceState{
+				macAddress: net.HardwareAddr{0x02, 0x42, 0xac, 0x12, 0x00, 0x02},
+				ipAddresses: []*net.IPNet{
+					ovntest.MustParseIPNet("192.0.2.10/24"),
+					ovntest.MustParseIPNet("2001:db8::10/64"),
+				},
+				defaultGateways: []net.IP{ovntest.MustParseIP("192.0.2.1")},
+			}},
+			fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "eth0"},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			newUplinkState("br-blue.node-a", "br-blue", "node-a"),
+		)
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.ConsistOf("After:br-blue.node-a"), "expected a delayed rediscovery")
+
+		state := getUplinkState(g, client, "br-blue.node-a")
+		g.Expect(state.Status.DefaultGateways).To(gomega.Equal([]uplinkv1alpha1.IPAddress{"192.0.2.1"}))
+		g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+			gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionResolved),
+			gomega.HaveField("Status", metav1.ConditionTrue),
+			gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonResolved),
+		)))
+	})
+
+	// The DPU does not poll the host: its host data comes from the
+	// UplinkState and its reconciles are driven by status updates.
+	t.Run("DPU mode resolves without host data", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.OvnKubeNode.Mode = ovntypes.NodeModeDPU
+
+		state := newHostResolvedUplinkState("br-blue.node-a", "br-blue", "node-a", "breth0")
+		state.Status.DefaultGateways = nil
+
+		controller, client := newTestController(t,
+			fakeHostDiscoverer{err: fmt.Errorf("must not inspect host interface")},
+			fakeBridgeResolver{bridgeName: "br-blue", bridgeUplink: "p0"},
+			newNode("node-a", map[string]string{"role": "blue"}),
+			newUplink("br-blue", "role", "blue", "breth0"),
+			state,
+		)
+
+		g.Expect(controller.reconcileUplinkState("br-blue.node-a")).To(gomega.Succeed())
+		g.Expect(controller.uplinkStateController.(*controllerutil.FakeController).Reconciles).To(
+			gomega.BeEmpty(), "expected no rediscovery on the DPU")
+
+		state = getUplinkState(g, client, "br-blue.node-a")
+		g.Expect(state.Status.Conditions).To(gomega.ContainElement(gomega.And(
+			gomega.HaveField("Type", uplinkv1alpha1.UplinkStateConditionResolved),
+			gomega.HaveField("Status", metav1.ConditionTrue),
+			gomega.HaveField("Reason", uplinkv1alpha1.UplinkStateReasonResolved),
+		)))
+	})
+}
+
 func TestHostInterfaceRoutes(t *testing.T) {
 	mainTableRoutes := []netlink.Route{{Gw: ovntest.MustParseIP("192.0.2.1")}}
 	vrfTableRoutes := []netlink.Route{{Gw: ovntest.MustParseIP("192.0.2.254"), Table: 1005}}
