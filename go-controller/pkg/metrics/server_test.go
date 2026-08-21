@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
+
+	kexec "k8s.io/utils/exec"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -263,6 +266,146 @@ var _ = Describe("MetricServer", func() {
 				}
 			})
 		})
+	})
+})
+
+var _ = Describe("scrapeBudget", func() {
+	DescribeTable("derives the collection budget from the scrape-timeout header",
+		func(header string, expected time.Duration) {
+			r, err := http.NewRequest(http.MethodGet, "/metrics", nil)
+			Expect(err).NotTo(HaveOccurred())
+			if header != "" {
+				r.Header.Set("X-Prometheus-Scrape-Timeout-Seconds", header)
+			}
+			Expect(scrapeBudget(r)).To(Equal(expected))
+		},
+		Entry("no header falls back", "", metricsScrapeBudgetFallback),
+		Entry("valid header minus slack", "12", 12*time.Second-metricsScrapeBudgetSlack),
+		Entry("fractional header minus slack", "5.5", time.Duration(5.5*float64(time.Second))-metricsScrapeBudgetSlack),
+		Entry("valid header at slack falls back to advertised", "0.5", time.Duration(0.5*float64(time.Second))),
+		Entry("valid header below slack falls back to advertised", "0.2", time.Duration(0.2*float64(time.Second))),
+		Entry("garbage header falls back", "nope", metricsScrapeBudgetFallback),
+		Entry("zero header falls back", "0", metricsScrapeBudgetFallback),
+	)
+})
+
+// stallingExecRunner is an ExecRunner that blocks the metric collection commands
+// (coverage/show, stopwatch/show) on the release channel to simulate a saturated
+// daemon that cannot answer, while returning immediately for every other command.
+// It lets the overrun test stall only the on-scrape collection path without also
+// blocking promhttp's gather tail.
+//
+// Because the fix runs collection in a detached goroutine, that goroutine outlives
+// the scrape. connectionStatusDone is closed once the goroutine finishes its final
+// runner call (connection-status), which is the last thing it does that reads any
+// process-global; the test waits on it before restoring globals so cleanup does not
+// race the still-running collection.
+type stallingExecRunner struct {
+	release              chan struct{}
+	connectionStatusDone chan struct{}
+}
+
+func (r *stallingExecRunner) RunCmd(_ kexec.Cmd, _ string, _ []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+	for _, a := range args {
+		switch a {
+		case "coverage/show", "stopwatch/show":
+			<-r.release
+		case "connection-status":
+			defer close(r.connectionStatusDone)
+		}
+	}
+	return bytes.NewBuffer(nil), bytes.NewBuffer(nil), nil
+}
+
+var _ = Describe("scrape budget overrun", func() {
+	It("returns within the budget and serves the registry when collection stalls", func() {
+		savedRunner := util.RunCmdExecRunner
+		DeferCleanup(func() { util.RunCmdExecRunner = savedRunner })
+
+		setupAppFs()
+
+		// Minimal OVS DB so the ovn-controller registration/config metrics resolve.
+		ovsVersion := "2.17.0"
+		br := vswitchd.Bridge{Name: "br-int", UUID: buildUUID()}
+		testDB := []libovsdbtest.TestData{
+			&vswitchd.Bridge{UUID: br.UUID, Name: br.Name},
+			&vswitchd.OpenvSwitch{
+				UUID:       buildUUID(),
+				OVSVersion: &ovsVersion,
+				Bridges:    []string{br.UUID},
+				ExternalIDs: map[string]string{
+					"ovn-remote": "unix:/var/run/ovn/ovnsb_db.sock",
+				},
+			},
+		}
+		ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: testDB})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(cleanup.Cleanup)
+
+		// Build a mock kexec interface so the appctl wrappers can construct a Cmd;
+		// the actual exec is intercepted by stallingExecRunner below.
+		mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+		mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+		for _, n := range []int{3, 4, 5, 6} {
+			anys := make([]interface{}, n)
+			for i := range anys {
+				anys[i] = mock.Anything
+			}
+			mockKexecIface.Mock.On("Command", anys...).Maybe().Return(mockCmd)
+		}
+		_ = util.SetSpecificExec(mockKexecIface)
+		DeferCleanup(util.ResetRunner)
+
+		// The collection path (coverage/show, stopwatch/show) blocks until released,
+		// far past the budget; everything else returns immediately.
+		runner := &stallingExecRunner{
+			release:              make(chan struct{}),
+			connectionStatusDone: make(chan struct{}),
+		}
+		util.RunCmdExecRunner = runner
+
+		opts := MetricServerOptions{
+			EnableOVNControllerMetrics: true,
+			OVSDBClient:                ovsClient,
+			Registerer:                 prometheus.NewRegistry(),
+		}
+		server := NewMetricServer(opts)
+		server.registerMetrics()
+
+		ts := httptest.NewServer(server.mux)
+		DeferCleanup(ts.Close)
+
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/metrics", nil)
+		Expect(err).NotTo(HaveOccurred())
+		// budget = 2s - 500ms slack = 1.5s; collection stays blocked past it.
+		req.Header.Set("X-Prometheus-Scrape-Timeout-Seconds", "2")
+
+		start := time.Now()
+		resp, err := http.DefaultClient.Do(req)
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		elapsed := time.Since(start)
+
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Handler must shed the stalled collection at the budget rather than
+		// blocking on it, and still serve the registry (up stays 1).
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		Expect(body).NotTo(BeEmpty())
+		Expect(elapsed).To(BeNumerically("<", 5*time.Second),
+			"scrape blocked on stalled collection instead of returning within the budget")
+		// It should also not return early - the handler is expected to wait out the
+		// ~1.5s budget (2s header minus 500ms slack) because collection never
+		// completes, which proves the budget, not a fast collection, released it.
+		Expect(elapsed).To(BeNumerically(">", time.Second),
+			"scrape returned before the budget elapsed; collection was not actually stalled")
+
+		// Let the detached collection goroutine finish and wait for it before the
+		// DeferCleanups restore the process-global exec runner, otherwise cleanup
+		// races the still-running collection.
+		close(runner.release)
+		Eventually(runner.connectionStatusDone).Within(5 * time.Second).Should(BeClosed())
 	})
 })
 
