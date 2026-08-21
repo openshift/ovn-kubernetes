@@ -9,8 +9,6 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/vishvananda/netlink"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -18,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 )
 
 // podIPConfig holds pod specific info to implement egress IP for secondary host networks for a single pod IP. A pod may
@@ -28,7 +28,7 @@ type podIPConfig struct {
 	snatKey   string // pod IP used as key in nftables SNAT map
 	snatValue string // egress IP used as value in nftables SNAT map
 	ifName    string // output interface name used as part of the nftables SNAT map concatenated key
-	ipRule    netlink.Rule
+	ipRule    iprulemanager.IPRule
 }
 
 func newPodIPConfig() *podIPConfig {
@@ -42,10 +42,7 @@ func (pIC *podIPConfig) equal(pIC2 *podIPConfig) bool {
 	if pIC.snatKey != pIC2.snatKey || pIC.snatValue != pIC2.snatValue || pIC.ifName != pIC2.ifName {
 		return false
 	}
-	if pIC.ipRule.String() != pIC2.ipRule.String() {
-		return false
-	}
-	return true
+	return pIC.ipRule == pIC2.ipRule
 }
 
 // podIPConfigList holds a list of podIPConfig to configure EIP for a single pod and its IPs.
