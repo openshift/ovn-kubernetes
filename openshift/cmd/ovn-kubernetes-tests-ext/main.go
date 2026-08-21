@@ -94,19 +94,15 @@ func main() {
 	// TODO: register test images using tests extension
 	// add ovn-kubernetes test suites into openshift suites
 	// by default, we treat all tests as parallel and only expose tests as Serial if the appropriate label is added - "Serial"
+	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
+	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name: "ovn-kubernetes/conformance/serial",
-		Parents: []string{
-			"openshift/conformance/serial",
-		},
+		Name:       "ovn-kubernetes/conformance/serial",
 		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name: "ovn-kubernetes/conformance/parallel",
-		Parents: []string{
-			"openshift/conformance/parallel",
-		},
+		Name:       "ovn-kubernetes/conformance/parallel",
 		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
 	})
 
