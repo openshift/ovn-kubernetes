@@ -16,6 +16,7 @@ import (
 	utilnet "k8s.io/utils/net"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
@@ -259,6 +260,15 @@ func (gw *GatewayManager) createGWRouter(l3GatewayConfig *util.L3GatewayConfig, 
 	// for UDN's OVN will pick a random one
 	if gw.netInfo.GetNetworkName() == types.DefaultNetworkName {
 		logicalRouterOptions["snat-ct-zone"] = "0"
+	}
+	// Defensive: since nat-addresses=router isn't set on UDN external
+	// switch ports, there is no extra benefit from setting this to true
+	// today. However, the default (false) would allow GARP/RARP if
+	// nat-addresses were ever added back; keeping it true ensures that
+	// any future change enabling GARPs on UDN GRs must explicitly
+	// justify which traffic flow requires it.
+	if gw.netInfo.IsUserDefinedNetwork() {
+		logicalRouterOptions["disable_garp_rarp"] = "true"
 	}
 	if gw.netInfo.TopologyType() == types.Layer2Topology {
 		// When multiple networks are set of the same logical-router-port
@@ -1010,26 +1020,32 @@ func (gw *GatewayManager) addExternalSwitch(prefix, interfaceID, gatewayRouter, 
 
 	// Also add the port to connect the external_switch to the router.
 	externalSwitchPortToRouter := prefix + types.EXTSwitchToGWRouterPrefix + gatewayRouter
+	etorOptions := map[string]string{
+		libovsdbops.RouterPort: externalRouterPort,
+	}
+	if !gw.netInfo.IsUserDefinedNetwork() {
+		// nat-addresses=router programs OVN to send GARPs for all external IPs
+		// that the logical switch port has been configured to use. This is
+		// necessary for egress IP because if an egress IP is moved between two
+		// nodes, the nodes need to actively update the ARP cache of all neighbors
+		// as to notify them the change. If this is not the case: packets will
+		// continue to be routed to the old node which hosted the egress IP before
+		// it was moved, and the connections will fail.
+		// For UDNs this is not set: UDN GRs only carry masquerade IPs which are
+		// link-local and identical across nodes, so GARPs for them cause an ARP
+		// storm on the physical network. EgressIP for UDNs has no SNATs on the
+		// GR, so nat-addresses=router is not needed.
+		etorOptions["nat-addresses"] = "router"
+
+		// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
+		// hosted on the GR. Setting exclude-lb-vips-from-garp to true will make sure GARPs for
+		// LB VIPs are not sent, thereby preventing GARP overload.
+		etorOptions["exclude-lb-vips-from-garp"] = "true"
+	}
 	externalLogicalSwitchPortToRouter := nbdb.LogicalSwitchPort{
-		Name: externalSwitchPortToRouter,
-		Type: "router",
-		Options: map[string]string{
-			libovsdbops.RouterPort: externalRouterPort,
-
-			// This option will program OVN to start sending GARPs for all external IPS
-			// that the logical switch port has been configured to use. This is
-			// necessary for egress IP because if an egress IP is moved between two
-			// nodes, the nodes need to actively update the ARP cache of all neighbors
-			// as to notify them the change. If this is not the case: packets will
-			// continue to be routed to the old node which hosted the egress IP before
-			// it was moved, and the connections will fail.
-			"nat-addresses": "router",
-
-			// Setting nat-addresses to router will send out GARPs for all externalIPs and LB VIPs
-			// hosted on the GR. Setting exclude-lb-vips-from-garp to true will make sure GARPs for
-			// LB VIPs are not sent, thereby preventing GARP overload.
-			"exclude-lb-vips-from-garp": "true",
-		},
+		Name:      externalSwitchPortToRouter,
+		Type:      "router",
+		Options:   etorOptions,
 		Addresses: []string{macAddress},
 	}
 
@@ -1127,67 +1143,60 @@ func deleteStaleMasqueradeResources(nbClient libovsdbclient.Client, routerName, 
 // list of nextHopIPs. If nextHopIPs is empty, then an attempt will be made to detect the stale route and MAC bindings
 func deleteStaleMasqueradeRouteAndMACBinding(nbClient libovsdbclient.Client, routerName string, nextHopIPs []net.IP) error {
 	logicalport := types.GWRouterToExtSwitchPrefix + routerName
+
+	var matchNextHop func(nexthop string) bool
 	if len(nextHopIPs) == 0 {
-		// build valid values
-		validNextHops := []net.IP{config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP, config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP}
-		// lookup routes for external id that dont match currently configured masquerade subnets
-		for _, validNextHop := range validNextHops {
-			staticRoutePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
-				if item.OutputPort != nil && *item.OutputPort == logicalport &&
-					item.Nexthop != validNextHop.String() && utilnet.IPFamilyOfString(item.Nexthop) == utilnet.IPFamilyOf(validNextHop) {
-					if _, ok := item.ExternalIDs[util.OvnNodeMasqCIDR]; ok {
-						return true
-					}
-				}
-				return false
-			}
-
-			staleRoutes, err := libovsdbops.FindLogicalRouterStaticRoutesWithPredicate(nbClient, staticRoutePredicate)
-			if err != nil {
-				return fmt.Errorf("failed to search for stale masquerade routes: %w", err)
-			}
-
-			for _, staleRoute := range staleRoutes {
-				klog.Infof("Stale masquerade route found: %#v", *staleRoute)
-				// found stale routes, derive nexthop and flush the route and mac binding if it exists
-				staleNextHop := staleRoute.Nexthop
-
-				macBindingPredicate := func(item *nbdb.StaticMACBinding) bool {
-					return item.LogicalPort == logicalport && item.IP == staleNextHop &&
-						utilnet.IPFamilyOfString(item.IP) == utilnet.IPFamilyOfString(staleNextHop)
-				}
-				if err := libovsdbops.DeleteStaticMACBindingWithPredicate(nbClient, macBindingPredicate); err != nil {
-					return fmt.Errorf("failed to delete static MAC binding for logical port %s: %v", logicalport, err)
-				}
-			}
-			if err := libovsdbops.DeleteLogicalRouterStaticRoutes(nbClient, routerName, staleRoutes...); err != nil {
-				return err
-			}
+		configuredNextHops := sets.New(
+			config.Gateway.MasqueradeIPs.V4DummyNextHopMasqueradeIP.String(),
+			config.Gateway.MasqueradeIPs.V6DummyNextHopMasqueradeIP.String(),
+		)
+		matchNextHop = func(nexthop string) bool {
+			return !configuredNextHops.Has(nexthop)
 		}
-		return nil
+	} else {
+		targetNextHops := sets.New[string]()
+		for _, ip := range nextHopIPs {
+			targetNextHops.Insert(ip.String())
+		}
+		matchNextHop = func(nexthop string) bool {
+			return targetNextHops.Has(nexthop)
+		}
 	}
 
-	for _, nextHop := range nextHopIPs {
-		staticRoutePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
-			if item.OutputPort != nil && *item.OutputPort == logicalport &&
-				item.Nexthop == nextHop.String() && utilnet.IPFamilyOfString(item.Nexthop) == utilnet.IPFamilyOf(nextHop) {
-				if _, ok := item.ExternalIDs[util.OvnNodeMasqCIDR]; ok {
-					return true
-				}
-			}
+	var staleNextHops []string
+	staticRoutePredicate := func(item *nbdb.LogicalRouterStaticRoute) bool {
+		if item.OutputPort == nil || *item.OutputPort != logicalport {
 			return false
 		}
-		if err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicate(nbClient, routerName, staticRoutePredicate); err != nil {
-			return fmt.Errorf("failed to delete static route from gateway router %s: %v", routerName, err)
+		if _, ok := item.ExternalIDs[util.OvnNodeMasqCIDR]; !ok {
+			return false
 		}
+		if matchNextHop(item.Nexthop) {
+			staleNextHops = append(staleNextHops, item.Nexthop)
+			return true
+		}
+		return false
+	}
 
+	var ops []ovsdb.Operation
+	ops, err := libovsdbops.DeleteLogicalRouterStaticRoutesWithPredicateOps(nbClient, ops, routerName, staticRoutePredicate)
+	if err != nil {
+		return fmt.Errorf("failed to build ops to delete stale masquerade routes from router %s: %w", routerName, err)
+	}
+
+	for _, staleNextHop := range staleNextHops {
+		klog.Infof("Stale masquerade route found on router %s with nexthop %s", routerName, staleNextHop)
 		macBindingPredicate := func(item *nbdb.StaticMACBinding) bool {
-			return item.LogicalPort == logicalport && item.IP == nextHop.String() &&
-				utilnet.IPFamilyOfString(item.IP) == utilnet.IPFamilyOf(nextHop)
+			return item.LogicalPort == logicalport && item.IP == staleNextHop
 		}
-		if err := libovsdbops.DeleteStaticMACBindingWithPredicate(nbClient, macBindingPredicate); err != nil {
-			return fmt.Errorf("failed to delete static MAC binding for logical port %s: %v", logicalport, err)
+		ops, err = libovsdbops.DeleteStaticMACBindingWithPredicateOps(nbClient, ops, macBindingPredicate)
+		if err != nil {
+			return fmt.Errorf("failed to build ops to delete static MAC binding for logical port %s: %w", logicalport, err)
 		}
+	}
+
+	if _, err := libovsdbops.TransactAndCheck(nbClient, ops); err != nil {
+		return fmt.Errorf("failed to delete stale masquerade routes and MAC bindings from router %s: %w", routerName, err)
 	}
 	return nil
 }
