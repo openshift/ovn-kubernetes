@@ -14,15 +14,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	kubeMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/github.com/vishvananda/netlink"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	utilMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/vswitchd"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -52,6 +57,8 @@ var _ = Describe("Mananagement port DPU tests", func() {
 	var netlinkOpsMock *utilMocks.NetLinkOps
 	var execMock *ovntest.FakeExec
 	var nodeAnnotatorMock *kubeMocks.Annotator
+	var ovsClient libovsdbclient.Client
+	var ovsCleanup *libovsdbtest.Context
 
 	BeforeEach(func() {
 		Expect(config.PrepareTestConfig()).To(Succeed())
@@ -64,10 +71,18 @@ var _ = Describe("Mananagement port DPU tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		util.SetNetLinkOpMockInst(netlinkOpsMock)
 		nftables.SetFakeNFTablesHelper()
+
+		ovsClient, ovsCleanup, err = libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+			OVSData: []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root-ovs"},
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	AfterEach(func() {
 		util.SetNetLinkOpMockInst(origNetlinkOps)
+		ovsCleanup.Cleanup()
 	})
 
 	Context("Create Management port DPU", func() {
@@ -106,7 +121,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 		})
 
 		It("Fails if set Name to ovn-k8s-mp0 fails", func() {
-			mgmtPortDpu := newManagementPortRepresentor(types.K8sMgmtIntfName+"_0", "enp3s0f0v0", nil)
+			mgmtPortDpu := newManagementPortRepresentor(types.K8sMgmtIntfName+"_0", "enp3s0f0v0", nil, ovsClient)
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: "enp3s0f0v0", MTU: 1400})
 
@@ -144,7 +159,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
 			}
-			mgmtPortDpu := newManagementPortRepresentor(types.K8sMgmtIntfName+"_0", "enp3s0f0v0", cfg)
+			mgmtPortDpu := newManagementPortRepresentor(types.K8sMgmtIntfName+"_0", "enp3s0f0v0", cfg, ovsClient)
 			nodeAnnotatorMock.On("Set", mock.Anything, map[string]string{"default": expectedMgmtPortMac.String()}).Return(nil)
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: "enp3s0f0v0", MTU: 1500})
@@ -198,7 +213,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 				nodeName:    "k8s-worker0",
 				hostSubnets: []*net.IPNet{ipnet},
 			}
-			mgmtPortDpu := newManagementPortRepresentor(types.K8sMgmtIntfName+"_0", "enp3s0f0v0", cfg)
+			mgmtPortDpu := newManagementPortRepresentor(types.K8sMgmtIntfName+"_0", "enp3s0f0v0", cfg, ovsClient)
 			nodeAnnotatorMock.On("Set", mock.Anything, map[string]string{"default": expectedMgmtPortMac.String()}).Return(nil)
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{Name: types.K8sMgmtIntfName + "_0", MTU: config.Default.MTU})
@@ -266,7 +281,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			cfg := &managementPortConfig{
 				hostSubnets: []*net.IPNet{ipnet},
 			}
-			mgmtPortDpuHost := newManagementPortNetdev("enp3s0f0v0", cfg, nil)
+			mgmtPortDpuHost := newManagementPortNetdev("enp3s0f0v0", cfg, nil, ovsClient)
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{
 				Name: "enp3s0f0v0", MTU: 1500, HardwareAddr: currentMgmtPortMac})
@@ -280,9 +295,6 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			netlinkOpsMock.On("LinkSetMTU", linkMock, config.Default.MTU).Return(nil)
 			netlinkOpsMock.On("LinkSetUp", linkMock).Return(nil, nil)
 			mockOVSListInterfaceMgmtPortNotExistCmd(execMock, types.K8sMgmtIntfName)
-			execMock.AddFakeCmdsNoOutputNoError([]string{
-				"ovs-vsctl --timeout=15 set Open_vSwitch . external-ids:ovn-orig-mgmt-port-netdev-name=" + mgmtPortDpuHost.netdevDevName,
-			})
 
 			// mock createPlatformManagementPort, we fail it as it covers what we want to test without the
 			// need to mock the entire flow down to routes and iptable rules.
@@ -292,6 +304,10 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			err = mgmtPortDpuHost.create()
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("createPlatformManagementPort error"))
+
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-orig-mgmt-port-netdev-name", "enp3s0f0v0"))
 		})
 
 		It("Does not configure VF if already configured", func() {
@@ -305,10 +321,7 @@ var _ = Describe("Mananagement port DPU tests", func() {
 			cfg := &managementPortConfig{
 				hostSubnets: []*net.IPNet{ipnet},
 			}
-			mgmtPortDpuHost := managementPortNetdev{
-				cfg:           cfg,
-				netdevDevName: "enp3s0f0v0",
-			}
+			mgmtPortDpuHost := newManagementPortNetdev("ovn-k8s-mp0", cfg, nil, ovsClient)
 			linkMock := &mocks.Link{}
 			linkMock.On("Attrs").Return(&netlink.LinkAttrs{
 				Name: "ovn-k8s-mp0", MTU: 1400, HardwareAddr: expectedMgmtPortMac})
@@ -320,8 +333,8 @@ var _ = Describe("Mananagement port DPU tests", func() {
 
 			err = mgmtPortDpuHost.create()
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring(
-				"createPlatformManagementPort error"))
+			Expect(err.Error()).To(ContainSubstring("createPlatformManagementPort error"))
 		})
 	})
+
 })

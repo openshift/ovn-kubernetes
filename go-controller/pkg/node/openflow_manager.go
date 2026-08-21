@@ -130,6 +130,9 @@ func (c *openflowManager) syncFlows() {
 	if err != nil {
 		klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.flowCache)
 	}
+	if err := c.defaultBridge.SyncNoFlood(); err != nil {
+		klog.Errorf("Failed to sync no-flood port config: %v", err)
+	}
 
 	if c.externalGatewayBridge != nil {
 		c.exGWFlowMutex.Lock()
@@ -143,6 +146,9 @@ func (c *openflowManager) syncFlows() {
 		_, stderr, err := util.ReplaceOFFlows(c.externalGatewayBridge.GetBridgeName(), flows)
 		if err != nil {
 			klog.Errorf("Failed to add flows, error: %v, stderr, %s, flows: %s", err, stderr, c.exGWFlowCache)
+		}
+		if err := c.externalGatewayBridge.SyncNoFlood(); err != nil {
+			klog.Errorf("Failed to sync no-flood port config: %v", err)
 		}
 	}
 }
