@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -12,6 +13,9 @@ import (
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
+
+	kclientset "k8s.io/client-go/kubernetes"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -64,7 +68,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Future feature-based filters can be added here
+	// secondary-host-eip tests: only include on platforms with a
+	// pre-configured secondary network (currently baremetal only)
+	if strings.Contains(spec.Name, "secondary-host-eip") && !ocpInfra.HasSecondaryHostEIPSupport() {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
@@ -127,6 +135,13 @@ func main() {
 		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
+		}
+		client, err := kclientset.NewForConfig(cfg)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
+		}
+		if err := ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
 	})
 
