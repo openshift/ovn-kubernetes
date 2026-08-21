@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -24,12 +25,16 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/knftables"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	rafakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
 	udnfakeclient "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory/mocks"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/generator/udn"
 	kubemocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube/mocks"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
@@ -38,11 +43,13 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
 	ovntest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing"
+	libovsdbtest "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	coreinformermocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/informers/core/v1"
 	v1mocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/mocks/k8s.io/client-go/listers/core/v1"
 	fakenetworkmanager "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/networkmanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
+	utilmocks "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/mocks"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -158,13 +165,8 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 			Output: "net.ipv4.conf.breth0.forwarding = 1",
 		})
 	}
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:ovn-bridge-mappings",
-		Output: "",
-	})
-	fexec.AddFakeCmdsNoOutputNoError([]string{
-		"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-bridge-mappings=" + types.PhysicalNetworkName + ":breth0",
-	})
+	// ovn-bridge-mappings get/set are now handled via libovsdb in
+	// bridgeconfig.bridgedGatewayNodeSetup; no fexec entries needed.
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get Open_vSwitch . external_ids:system-id",
 		Output: "cb9ec8fa-b409-4ef3-9f42-d9283c47aac6",
@@ -189,23 +191,27 @@ func setUpGatewayFakeOVSCommands(fexec *ovntest.FakeExec) {
 		Output: "7",
 	})
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-		Cmd:    "ovs-vsctl --timeout=15 get Open_vSwitch . external_ids:ovn-encap-ip",
-		Output: "192.168.1.10",
-	})
-	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 --if-exists get interface breth0 ofport",
 		Output: "7",
 	})
 	fexec.AddFakeCmdsNoOutputNoError([]string{
 		"ovs-ofctl -O OpenFlow13 --bundle replace-flows breth0 -",
 	})
+	// SyncNoFlood calls GetNoFloodPorts (dump-ports-desc) during syncFlows.
+	// Before any UDN is added, no ports have NO_FLOOD.
+	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+		Cmd:    "ovs-ofctl dump-ports-desc breth0",
+		Output: " 5(patch-breth0_w): addr:00:00:00:00:00:00\n     config:     0\n     state:      LIVE\n",
+	})
 }
 
 func setUpUDNOpenflowManagerFakeOVSCommands(fexec *ovntest.FakeExec) {
-	// UDN patch port
 	fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 		Cmd:    "ovs-vsctl --timeout=15 get Interface patch-breth0_bluenet_worker1-to-br-int ofport",
 		Output: "15",
+	})
+	fexec.AddFakeCmdsNoOutputNoError([]string{
+		"ovs-ofctl mod-port breth0 15 no-flood",
 	})
 }
 
@@ -277,11 +283,19 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 		mgtPort        = fmt.Sprintf("%s%s", types.K8sMgmtIntfNamePrefix, netID)
 		v4NodeIP       = "192.168.1.10/24"
 		v6NodeIP       = "fc00:f853:ccd:e793::3/64"
+		ovsClient      libovsdbclient.Client
+		ovsCleanup     *libovsdbtest.Context
 	)
 	BeforeEach(func() {
 		// Restore global default values before each testcase
 		err := config.PrepareTestConfig()
 		Expect(err).NotTo(HaveOccurred())
+		// Skip the encap-update path inside addressManager.sync() — these tests
+		// don't fake ovn-appctl and aren't exercising encap reconciliation.
+		config.Default.EncapIP = "test-encap-ip"
+		ovsClient, ovsCleanup = newTestOVSClient()
+		// Ensure gateway tests never rely on host iptables binaries.
+		util.SetFakeIPTablesHelpers()
 
 		// Set dual-stack service CIDRs directly after PrepareTestConfig
 		config.Kubernetes.ServiceCIDRs = ovntest.MustParseIPNets("172.16.1.0/24", "fd02::/112")
@@ -346,6 +360,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 	AfterEach(func() {
 		close(stopCh)
 		wg.Wait()
+		ovsCleanup.Cleanup()
 		Expect(testNS.Close()).To(Succeed())
 		Expect(testutils.UnmountNS(testNS)).To(Succeed())
 	})
@@ -576,7 +591,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", rm, netInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeAnnotatorMock := &kubemocks.Annotator{}
@@ -642,8 +657,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeLocal,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			err = localGw.initFunc()
@@ -663,8 +682,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				&kubeMock, vrf, ipRulesManager, localGw)
 			Expect(err).NotTo(HaveOccurred())
 			flowMap := udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(50))
-
+			baseFlowCount := 52
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
 			for _, flows := range flowMap {
@@ -678,10 +697,11 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			}
 			Expect(udnFlows).To(Equal(0))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // only default network
-
 			Expect(udnGateway.AddNetwork()).To(Succeed())
+
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(70))                                      // 18 UDN Flows are added by default
+			udnDefaultFlows := 22
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount + udnDefaultFlows))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("default")
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("bluenet")
@@ -717,7 +737,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(50))                                      // only default network flows are present
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // default network only
 			udnFlows = 0
 			for _, flows := range flowMap {
@@ -814,7 +834,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", rm, netInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", rm, netInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeAnnotatorMock := &kubemocks.Annotator{}
@@ -875,8 +895,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeLocal,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			Expect(localGw.initFunc()).To(Succeed())
@@ -895,7 +919,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				&kubeMock, vrf, ipRulesManager, localGw)
 			Expect(err).NotTo(HaveOccurred())
 			flowMap := udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(50))
+			baseFlowCount := 52
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
 			for _, flows := range flowMap {
@@ -909,10 +934,10 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			}
 			Expect(udnFlows).To(Equal(0))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // only default network
-
 			Expect(udnGateway.AddNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(70))                                      // 18 UDN Flows are added by default
+			udnDefaultFlows := 22
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount + udnDefaultFlows))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("default")
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("bluenet")
@@ -948,7 +973,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(50))                                      // only default network flows are present
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // default network only
 			udnFlows = 0
 			for _, flows := range flowMap {
@@ -1048,7 +1073,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 
 		// Make Management port
 		nodeSubnets := ovntest.MustParseIPNets(v4NodeSubnet, v6NodeSubnet)
-		mp, err := managementport.NewManagementPortController(node, nodeSubnets, "", "", rm, mutableNetInfo)
+		mp, err := managementport.NewManagementPortController(ovsClient, node, nodeSubnets, "", "", rm, mutableNetInfo)
 		Expect(err).NotTo(HaveOccurred())
 
 		nodeAnnotatorMock := &kubemocks.Annotator{}
@@ -1114,8 +1139,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				nil,
 				networkmanager.Default().Interface(),
 				config.GatewayModeLocal,
+				ovsClient,
 			)
 			Expect(err).NotTo(HaveOccurred())
+			ovs, err := ovsops.GetOpenvSwitch(ovsClient)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ovs.ExternalIDs).To(HaveKeyWithValue("ovn-bridge-mappings", types.PhysicalNetworkName+":breth0"))
 			stop := make(chan struct{})
 			wg := &sync.WaitGroup{}
 			err = localGw.initFunc()
@@ -1135,7 +1164,8 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 				&kubeMock, vrf, ipRulesManager, localGw)
 			Expect(err).NotTo(HaveOccurred())
 			flowMap := udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(50))
+			baseFlowCount := 52
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
 
 			Expect(udnGateway.masqCTMark).To(Equal(udnGateway.masqCTMark))
 			var udnFlows int
@@ -1150,10 +1180,12 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			}
 			Expect(udnFlows).To(Equal(0))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // only default network
-
 			Expect(udnGateway.AddNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(80))                                      // 18 UDN Flows, 5 advertisedUDN flows, and 2 packet mark flows (IPv4+IPv6) are added by default
+			udnDefaultFlows := 24
+			advertisedFlows := 3
+			packetMarkFlows := 5
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount + udnDefaultFlows + advertisedFlows + packetMarkFlows))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(2)) // default network + UDN network
 			defaultUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("default")
 			bridgeUdnConfig := udnGateway.openflowManager.defaultBridge.GetNetworkConfig("bluenet")
@@ -1191,7 +1223,7 @@ var _ = Describe("UserDefinedNetworkGateway", func() {
 			kubeMock.On("UpdateNodeStatus", cnode).Return(nil) // check if network key gets deleted from annotation
 			Expect(udnGateway.DelNetwork()).To(Succeed())
 			flowMap = udnGateway.gateway.openflowManager.flowCache
-			Expect(flowMap["DEFAULT"]).To(HaveLen(50))                                      // only default network flows are present
+			Expect(flowMap["DEFAULT"]).To(HaveLen(baseFlowCount))
 			Expect(udnGateway.openflowManager.defaultBridge.GetNetConfigLen()).To(Equal(1)) // default network only
 			udnFlows = 0
 			for _, flows := range flowMap {
@@ -2198,6 +2230,264 @@ func TestUserDefinedNetworkGateway_updateAdvertisedUDNIsolationRules(t *testing.
 				g.Expect(element.Key[0]).To(BeEquivalentTo(v6Elems[i].Key[0]))
 				g.Expect(element.Comment).To(BeEquivalentTo(v6Elems[i].Comment))
 			}
+		})
+	}
+}
+
+func TestAddUDNMasqIPNeighbors(t *testing.T) {
+	bridgeName := "breth0"
+	linkIndex := 7
+	link := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: bridgeName, Index: linkIndex}}
+
+	v4Masq := &udn.MasqueradeIPs{GatewayRouter: ovntest.MustParseIPNet("169.254.0.11/16")}
+	v6Masq := &udn.MasqueradeIPs{GatewayRouter: ovntest.MustParseIPNet("fd69::b/112")}
+	v4IP := net.ParseIP("169.254.0.11")
+	v6IP := net.ParseIP("fd69::b")
+	v4MAC := util.IPAddrToHWAddr(v4IP)
+	v6MAC := util.IPAddrToHWAddr(v6IP)
+
+	tests := []struct {
+		name    string
+		v4      *udn.MasqueradeIPs
+		v6      *udn.MasqueradeIPs
+		setup   func(m *utilmocks.NetLinkOps)
+		wantErr string
+	}{
+		{
+			name: "link lookup fails",
+			v4:   v4Masq, v6: v6Masq,
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(nil, fmt.Errorf("no such device"))
+			},
+			wantErr: "unable to get link for breth0",
+		},
+		{
+			name: "dual-stack adds both entries when none exist",
+			v4:   v4Masq, v6: v6Masq,
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				m.On("NeighList", linkIndex, netlink.FAMILY_V4).Return([]netlink.Neigh{}, nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP)
+				})).Return(nil).Once()
+				m.On("NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP) && n.LinkIndex == linkIndex &&
+						n.HardwareAddr.String() == v4MAC.String() &&
+						n.State == netlink.NUD_PERMANENT
+				})).Return(nil).Once()
+				m.On("NeighList", linkIndex, netlink.FAMILY_V6).Return([]netlink.Neigh{}, nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP)
+				})).Return(nil).Once()
+				m.On("NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP) && n.LinkIndex == linkIndex &&
+						n.HardwareAddr.String() == v6MAC.String() &&
+						n.State == netlink.NUD_PERMANENT
+				})).Return(nil).Once()
+			},
+		},
+		{
+			name: "IPv4-only single-stack adds only v4 entry",
+			v4:   v4Masq, v6: nil,
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				m.On("NeighList", linkIndex, netlink.FAMILY_V4).Return([]netlink.Neigh{}, nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP)
+				})).Return(nil).Once()
+				m.On("NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP) && n.State == netlink.NUD_PERMANENT
+				})).Return(nil).Once()
+			},
+		},
+		{
+			name: "IPv6-only single-stack adds only v6 entry",
+			v4:   nil, v6: v6Masq,
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				m.On("NeighList", linkIndex, netlink.FAMILY_V6).Return([]netlink.Neigh{}, nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP)
+				})).Return(nil).Once()
+				m.On("NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP) && n.State == netlink.NUD_PERMANENT
+				})).Return(nil).Once()
+			},
+		},
+		{
+			name: "skips when correct entries already exist",
+			v4:   v4Masq, v6: v6Masq,
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				// v4: correct entry exists
+				m.On("NeighList", linkIndex, netlink.FAMILY_V4).Return([]netlink.Neigh{
+					{IP: v4IP, HardwareAddr: v4MAC, State: netlink.NUD_PERMANENT, LinkIndex: linkIndex},
+				}, nil)
+				// v6: correct entry exists
+				m.On("NeighList", linkIndex, netlink.FAMILY_V6).Return([]netlink.Neigh{
+					{IP: v6IP, HardwareAddr: v6MAC, State: netlink.NUD_PERMANENT, LinkIndex: linkIndex},
+				}, nil)
+			},
+		},
+		{
+			name: "replaces stale entry with wrong MAC",
+			v4:   v4Masq, v6: v6Masq,
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				staleMAC, _ := net.ParseMAC("aa:bb:cc:dd:ee:ff")
+				// v4: stale entry with wrong MAC
+				m.On("NeighList", linkIndex, netlink.FAMILY_V4).Return([]netlink.Neigh{
+					{IP: v4IP, HardwareAddr: staleMAC, State: netlink.NUD_REACHABLE, LinkIndex: linkIndex},
+				}, nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP)
+				})).Return(nil).Once()
+				m.On("NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP) && n.HardwareAddr.String() == v4MAC.String()
+				})).Return(nil).Once()
+				// v6: no entry
+				m.On("NeighList", linkIndex, netlink.FAMILY_V6).Return([]netlink.Neigh{}, nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP)
+				})).Return(nil).Once()
+				m.On("NeighAdd", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP)
+				})).Return(nil).Once()
+			},
+		},
+		{
+			name: "returns error when NeighAdd fails",
+			v4:   v4Masq, v6: v6Masq,
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				m.On("NeighList", linkIndex, netlink.FAMILY_V4).Return([]netlink.Neigh{}, nil)
+				m.On("NeighDel", mock.Anything).Return(nil)
+				m.On("NeighAdd", mock.Anything).Return(fmt.Errorf("permission denied"))
+			},
+			wantErr: "failed to add neighbor",
+		},
+		{
+			name: "returns error when NeighList fails",
+			v4:   v4Masq, v6: v6Masq,
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				m.On("NeighList", linkIndex, netlink.FAMILY_V4).Return(nil, fmt.Errorf("netlink error"))
+			},
+			wantErr: "failed to check neighbor",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nlMock := new(utilmocks.NetLinkOps)
+			origOps := util.GetNetLinkOps()
+			util.SetNetLinkOpMockInst(nlMock)
+			t.Cleanup(func() { util.SetNetLinkOpMockInst(origOps) })
+
+			tt.setup(nlMock)
+
+			err := addUDNMasqIPNeighbors(bridgeName, tt.v4, tt.v6)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			nlMock.AssertExpectations(t)
+		})
+	}
+}
+
+func TestDelUDNMasqIPNeighbors(t *testing.T) {
+	bridgeName := "breth0"
+	linkIndex := 7
+	link := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: bridgeName, Index: linkIndex}}
+
+	v4Masq := &udn.MasqueradeIPs{GatewayRouter: ovntest.MustParseIPNet("169.254.0.11/16")}
+	v6Masq := &udn.MasqueradeIPs{GatewayRouter: ovntest.MustParseIPNet("fd69::b/112")}
+	v4IP := net.ParseIP("169.254.0.11")
+	v6IP := net.ParseIP("fd69::b")
+
+	tests := []struct {
+		name    string
+		setup   func(m *utilmocks.NetLinkOps)
+		wantErr string
+	}{
+		{
+			name: "deletes both entries",
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP) && n.LinkIndex == linkIndex
+				})).Return(nil).Once()
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP) && n.LinkIndex == linkIndex
+				})).Return(nil).Once()
+			},
+		},
+		{
+			name: "returns error on link lookup failure",
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(nil, fmt.Errorf("no such device"))
+			},
+			wantErr: "unable to get link for breth0",
+		},
+		{
+			name: "ignores ENOENT (already deleted)",
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP)
+				})).Return(fmt.Errorf("failed: %w", syscall.ENOENT)).Once()
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP)
+				})).Return(fmt.Errorf("failed: %w", syscall.ENOENT)).Once()
+			},
+		},
+		{
+			name: "returns error on non-ENOENT NeighDel failure",
+			setup: func(m *utilmocks.NetLinkOps) {
+				m.On("LinkByName", bridgeName).Return(link, nil)
+				m.On("LinkSetUp", link).Return(nil)
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v4IP)
+				})).Return(fmt.Errorf("permission denied")).Once()
+				m.On("NeighDel", mock.MatchedBy(func(n *netlink.Neigh) bool {
+					return n.IP.Equal(v6IP)
+				})).Return(nil).Once()
+			},
+			wantErr: "failed to delete neighbor",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nlMock := new(utilmocks.NetLinkOps)
+			origOps := util.GetNetLinkOps()
+			util.SetNetLinkOpMockInst(nlMock)
+			t.Cleanup(func() { util.SetNetLinkOpMockInst(origOps) })
+
+			tt.setup(nlMock)
+
+			err := delUDNMasqIPNeighbors(bridgeName, v4Masq, v6Masq)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("expected error containing %q, got %v", tt.wantErr, err)
+				}
+			} else if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			nlMock.AssertExpectations(t)
 		})
 	}
 }

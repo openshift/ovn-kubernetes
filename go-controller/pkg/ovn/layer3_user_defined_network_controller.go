@@ -871,7 +871,7 @@ func (oc *Layer3UserDefinedNetworkController) addUpdateRemoteNodeEvent(node *cor
 // leaving towards nodeIPs on the cluster to masqueradeIP. If network is advertise then the SNAT looks like this:
 // "eth.dst == 0a:58:5d:5d:00:02 && (ip4.dst == $a712973235162149816)" "169.254.0.36" "93.93.0.0/24"
 func (oc *Layer3UserDefinedNetworkController) addOrUpdateUDNNodeSubnetEgressSNAT(localPodSubnets []*net.IPNet, node *corev1.Node, isUDNAdvertised bool) error {
-	outputPort := types.RouterToSwitchPrefix + oc.GetNetworkScopedName(node.Name)
+	outputPort := oc.GetNetworkScopedRouterToSwitchPortName(node.Name)
 	nats, err := oc.buildUDNEgressSNAT(localPodSubnets, outputPort, isUDNAdvertised)
 	if err != nil {
 		return fmt.Errorf("failed to build UDN masquerade SNATs for network %q on node %q, err: %w",
@@ -1031,14 +1031,15 @@ func (oc *Layer3UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Nod
 		return nil, fmt.Errorf("failed to get masquerade IPs, network %s (%d): %v", networkName, networkID, err)
 	}
 
-	l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses, masqIPs...)
+	for _, masqIP := range masqIPs {
+		hostMask := util.GetIPFullMask(masqIP.IP)
+		l3GatewayConfig.IPAddresses = append(l3GatewayConfig.IPAddresses,
+			&net.IPNet{IP: masqIP.IP, Mask: hostMask})
+	}
 
 	// Always SNAT to the per network masquerade IP.
 	var externalIPs []net.IP
 	for _, masqIP := range masqIPs {
-		if masqIP == nil {
-			continue
-		}
 		externalIPs = append(externalIPs, masqIP.IP)
 	}
 
