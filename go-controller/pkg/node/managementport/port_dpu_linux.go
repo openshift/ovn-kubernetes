@@ -12,7 +12,10 @@ import (
 
 	"k8s.io/klog/v2"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
@@ -23,14 +26,19 @@ type managementPortRepresentor struct {
 	ifName     string
 	repDevName string
 	link       netlink.Link
+	ovsClient  libovsdbclient.Client
 }
 
-// newManagementPortRepresentor creates a new managementPortRepresentor
-func newManagementPortRepresentor(name, repDevName string, cfg *managementPortConfig) *managementPortRepresentor {
+// newManagementPortRepresentor creates a new managementPort representor
+// For management port representor only.
+// name is types.K8sMgmtIntfName (on dpu mode node) or types.K8sMgmtIntfName+"_0" (on full mode)
+// repDevName is the representor VF device name
+func newManagementPortRepresentor(name, repDevName string, cfg *managementPortConfig, ovsClient libovsdbclient.Client) *managementPortRepresentor {
 	return &managementPortRepresentor{
 		cfg:        cfg,
 		ifName:     name,
 		repDevName: repDevName,
+		ovsClient:  ovsClient,
 	}
 }
 
@@ -48,7 +56,7 @@ func (mp *managementPortRepresentor) create() error {
 	}
 
 	if link.Attrs().Name != mp.ifName {
-		if err := syncMgmtPortInterface(mp.ifName, false); err != nil {
+		if err := syncMgmtPortInterface(mp.ovsClient, mp.ifName, false); err != nil {
 			return fmt.Errorf("failed to check existing management port: %v", err)
 		}
 	}
@@ -154,15 +162,17 @@ type managementPortNetdev struct {
 	netdevDevName string
 	cfg           *managementPortConfig
 	routeManager  *routemanager.Controller
+	ovsClient     libovsdbclient.Client
 }
 
 // newManagementPortNetdev creates a new managementPortNetdev
-func newManagementPortNetdev(netdevDevName string, cfg *managementPortConfig, routeManager *routemanager.Controller) *managementPortNetdev {
+func newManagementPortNetdev(netdevDevName string, cfg *managementPortConfig, routeManager *routemanager.Controller, ovsClient libovsdbclient.Client) *managementPortNetdev {
 	return &managementPortNetdev{
 		ifName:        types.K8sMgmtIntfName,
 		netdevDevName: netdevDevName,
 		cfg:           cfg,
 		routeManager:  routeManager,
+		ovsClient:     ovsClient,
 	}
 }
 
@@ -174,7 +184,7 @@ func (mp *managementPortNetdev) create() error {
 	}
 
 	if link.Attrs().Name != mp.ifName {
-		err = syncMgmtPortInterface(mp.ifName, false)
+		err = syncMgmtPortInterface(mp.ovsClient, mp.ifName, false)
 		if err != nil {
 			return fmt.Errorf("failed to sync management port: %v", err)
 		}
@@ -217,10 +227,10 @@ func (mp *managementPortNetdev) create() error {
 	}
 
 	if mp.netdevDevName != mp.ifName && config.OvnKubeNode.Mode != types.NodeModeDPUHost {
-		// Store original interface name for later use
-		if _, stderr, err := util.RunOVSVsctl("set", "Open_vSwitch", ".",
-			"external-ids:ovn-orig-mgmt-port-netdev-name="+mp.netdevDevName); err != nil {
-			return fmt.Errorf("failed to store original mgmt port interface name: %s", stderr)
+		if err := ovsops.UpdateOpenvSwitchExternalIDs(mp.ovsClient, map[string]string{
+			"ovn-orig-mgmt-port-netdev-name": mp.netdevDevName,
+		}); err != nil {
+			return fmt.Errorf("failed to store original mgmt port interface name: %w", err)
 		}
 	}
 

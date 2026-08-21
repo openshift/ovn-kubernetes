@@ -13,9 +13,13 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb"
+	ovsops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops/ovs"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/managementport"
 	nodenft "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -276,6 +280,7 @@ func (nc *DefaultNodeNetworkController) initGatewayPreStart(
 			nc.linkManager,
 			nc.networkManager,
 			config.Gateway.Mode,
+			nc.ovsClient,
 		)
 	case config.GatewayModeDisabled:
 		var chassisID string
@@ -494,6 +499,7 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 
 	// TODO(adrianc): revisit if support for nodeIPManager is needed.
 	gw := nc.Gateway.(*gateway)
+	gw.nodeIPManager = newAddressManager(nc.name, nc.Kube, nil, nc.watchFactory, nil, nc.ovsClient)
 	if config.Gateway.NodeportEnable {
 		if err := initSharedGatewayIPTables(); err != nil {
 			return err
@@ -520,24 +526,44 @@ func (nc *DefaultNodeNetworkController) initGatewayDPUHost() error {
 // CleanupClusterNode cleans up OVS resources on the k8s node on ovnkube-node daemonset deletion.
 // This is going to be a best effort cleanup.
 func CleanupClusterNode(name string) error {
-	var err error
-
 	klog.V(5).Infof("Cleaning up gateway resources on node: %q", name)
-	if config.Gateway.Mode == config.GatewayModeLocal || config.Gateway.Mode == config.GatewayModeShared {
-		err = cleanupLocalnetGateway(types.LocalNetworkName)
-		if err != nil {
-			klog.Errorf("Failed to cleanup Localnet Gateway, error: %v", err)
-		}
-		err = cleanupSharedGateway()
-	}
+
+	var ovsClient libovsdbclient.Client
+	// NewOVSClient closes its client when the stop channel fires; use a
+	// dedicated never-shared channel so an in-flight cleanup transaction
+	// can't be torn down mid-operation. Close on return so the libovsdb
+	// lifecycle goroutine exits cleanly.
+	cleanupStopCh := make(chan struct{})
+	defer close(cleanupStopCh)
+	c, err := libovsdb.NewOVSClient(cleanupStopCh)
 	if err != nil {
-		klog.Errorf("Failed to cleanup Gateway, error: %v", err)
+		klog.Warningf("Skipping OVS-side cleanup: failed to initialize libovsdb vswitchd client: %v", err)
+	} else {
+		ovsClient = c
 	}
 
-	stdout, stderr, err := util.RunOVSVsctl("--", "--if-exists", "remove", "Open_vSwitch", ".", "external_ids",
-		"ovn-bridge-mappings")
-	if err != nil {
-		klog.Errorf("Failed to delete ovn-bridge-mappings, stdout: %q, stderr: %q, error: %v", stdout, stderr, err)
+	if config.Gateway.Mode == config.GatewayModeLocal || config.Gateway.Mode == config.GatewayModeShared {
+		if ovsClient != nil {
+			if localErr := cleanupLocalnetGateway(ovsClient, types.LocalNetworkName); localErr != nil {
+				klog.Errorf("Failed to cleanup Localnet Gateway, error: %v", localErr)
+				err = localErr
+			}
+		}
+		// cleanupSharedGateway handles both the OVS-side (no-op when ovsClient
+		// is nil) and the host-side iptables chains.
+		if sharedErr := cleanupSharedGateway(ovsClient); sharedErr != nil {
+			klog.Errorf("Failed to cleanup Gateway, error: %v", sharedErr)
+			err = sharedErr
+		}
+	}
+
+	// Only strip ovn-bridge-mappings once gateway cleanup has fully
+	// succeeded — otherwise we leave bridges/flows behind without the
+	// external_ids that would let a retry re-attach them.
+	if err == nil && ovsClient != nil {
+		if err := ovsops.RemoveOpenvSwitchExternalIDs(ovsClient, "ovn-bridge-mappings"); err != nil {
+			klog.Errorf("Failed to delete ovn-bridge-mappings: %v", err)
+		}
 	}
 
 	// Clean up legacy IPTables rules for management port
