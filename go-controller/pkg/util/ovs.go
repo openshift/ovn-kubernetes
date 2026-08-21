@@ -570,6 +570,15 @@ func RunOVNSBAppCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
+// RunOVNNorthAppCtlWithTimeout runs an 'ovs-appctl -t ovn-northd command' with a
+// --timeout so the subprocess self-terminates instead of blocking indefinitely on
+// a busy daemon.
+func RunOVNNorthAppCtlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	return RunOVNNorthAppCtl(cmdArgs...)
+}
+
 // RunOVNNorthAppCtl runs an 'ovs-appctl -t ovn-northd command'.
 // TODO: Currently no module is invoking this function, will need to consider adding an unit test when actively used
 func RunOVNNorthAppCtl(args ...string) (string, string, error) {
@@ -587,6 +596,15 @@ func RunOVNNorthAppCtl(args ...string) (string, string, error) {
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
 }
 
+// RunOVNControllerAppCtlWithTimeout runs an 'ovs-appctl -t ovn-controller.pid.ctl
+// command' with a --timeout so the subprocess self-terminates instead of blocking
+// indefinitely on a busy daemon.
+func RunOVNControllerAppCtlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	return RunOVNControllerAppCtl(cmdArgs...)
+}
+
 // RunOVNControllerAppCtl runs an 'ovs-appctl -t ovn-controller.pid.ctl command'.
 func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 	getSocketPath := func() ([]string, error) {
@@ -601,6 +619,15 @@ func RunOVNControllerAppCtl(args ...string) (string, string, error) {
 	}
 	stdout, stderr, err := runOVNretry(runner.ovnappctlPath, nil, getSocketPath, args...)
 	return strings.Trim(strings.TrimSpace(stdout.String()), "\""), stderr.String(), err
+}
+
+// RunOvsVswitchdAppCtlWithTimeout runs an 'ovs-appctl -t ovs-vswitchd.pid.ctl command'
+// with a --timeout so the subprocess self-terminates instead of blocking indefinitely
+// on a busy daemon.
+func RunOvsVswitchdAppCtlWithTimeout(timeout int, args ...string) (string, string, error) {
+	cmdArgs := []string{fmt.Sprintf("--timeout=%d", timeout)}
+	cmdArgs = append(cmdArgs, args...)
+	return RunOvsVswitchdAppCtl(cmdArgs...)
 }
 
 // RunOvsVswitchdAppCtl runs an 'ovs-appctl -t /var/run/openvsiwthc/ovs-vswitchd.pid.ctl command'
