@@ -783,10 +783,8 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 	}
 
 	if !config.IsModeDPUHost() {
-		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-			if err := auth.SetDBAuth(); err != nil {
-				return err
-			}
+		if err := config.OvnSouth.SetOVNRemote(); err != nil {
+			return err
 		}
 
 		err = setupOVNNode(node)
@@ -880,10 +878,8 @@ func (nc *DefaultNodeNetworkController) Init(ctx context.Context) error {
 
 	// Connect ovn-controller to SBDB
 	if config.IsModeDPU() || config.IsModeFull() {
-		for _, auth := range []config.OvnAuthConfig{config.OvnNorth, config.OvnSouth} {
-			if err := auth.SetDBAuth(); err != nil {
-				return fmt.Errorf("unable to set the authentication towards OVN local dbs")
-			}
+		if err := config.OvnSouth.SetOVNRemote(); err != nil {
+			return fmt.Errorf("unable to configure the local OVN Southbound database endpoint: %w", err)
 		}
 	}
 
