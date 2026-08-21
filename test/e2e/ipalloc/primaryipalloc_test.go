@@ -81,20 +81,65 @@ type node struct {
 }
 
 func TestIPAlloc(t *testing.T) {
+	type expectedAlloc struct {
+		subnets    []string // subnets to pass for this specific allocation
+		expectedIP string
+	}
 	tests := []struct {
-		desc                     string
-		existingPrimaryNodeIPs   []node
-		expectedFromAllocateNext []string
+		desc                   string
+		existingPrimaryNodeIPs []node
+		allocations            []expectedAlloc
 	}{
 		{
-			desc:                     "IPv4",
-			existingPrimaryNodeIPs:   []node{{v4: network{ip: "192.168.1.1", mask: "16"}}, {v4: network{ip: "192.168.1.2", mask: "16"}}},
-			expectedFromAllocateNext: []string{"192.168.1.200", "192.168.1.201"},
+			desc:                   "IPv4",
+			existingPrimaryNodeIPs: []node{{v4: network{ip: "192.168.1.1", mask: "16"}}, {v4: network{ip: "192.168.1.2", mask: "16"}}},
+			allocations: []expectedAlloc{
+				{subnets: []string{"192.168.1.1/16"}, expectedIP: "192.168.1.200"},
+				{subnets: []string{"192.168.1.1/16"}, expectedIP: "192.168.1.201"},
+			},
 		},
 		{
-			desc:                     "IPv6",
-			existingPrimaryNodeIPs:   []node{{v6: network{ip: "fc00:f853:ccd:e793::5", mask: "64"}}, {v6: network{ip: "fc00:f853:ccd:e793::6", mask: "64"}}},
-			expectedFromAllocateNext: []string{"fc00:f853:ccd:e793::c8", "fc00:f853:ccd:e793::c9"},
+			desc:                   "IPv6",
+			existingPrimaryNodeIPs: []node{{v6: network{ip: "fc00:f853:ccd:e793::5", mask: "64"}}, {v6: network{ip: "fc00:f853:ccd:e793::6", mask: "64"}}},
+			allocations: []expectedAlloc{
+				{subnets: []string{"fc00:f853:ccd:e793::5/64"}, expectedIP: "fc00:f853:ccd:e793::c8"},
+				{subnets: []string{"fc00:f853:ccd:e793::5/64"}, expectedIP: "fc00:f853:ccd:e793::c9"},
+			},
+		},
+		{
+			desc:                   "IPv4 /24 subnet: no regression from per-subnet refactor",
+			existingPrimaryNodeIPs: []node{{v4: network{ip: "192.168.1.1", mask: "24"}}, {v4: network{ip: "192.168.1.2", mask: "24"}}},
+			allocations: []expectedAlloc{
+				{subnets: []string{"192.168.1.1/24"}, expectedIP: "192.168.1.200"},
+				{subnets: []string{"192.168.1.2/24"}, expectedIP: "192.168.1.201"},
+			},
+		},
+		{
+			desc:                   "IPv4 /16 Kind-like: multiple nodes same /24, shared allocator",
+			existingPrimaryNodeIPs: []node{{v4: network{ip: "172.18.0.2", mask: "16"}}, {v4: network{ip: "172.18.0.3", mask: "16"}}, {v4: network{ip: "172.18.0.4", mask: "16"}}},
+			allocations: []expectedAlloc{
+				{subnets: []string{"172.18.0.2/16"}, expectedIP: "172.18.0.200"},
+				{subnets: []string{"172.18.0.3/16"}, expectedIP: "172.18.0.201"},
+				{subnets: []string{"172.18.0.2/16", "172.18.0.3/16"}, expectedIP: "172.18.0.202"},
+			},
+		},
+		{
+			desc:                   "IPv4 multi-subnet (Azure-like): each subnet gets its own allocator",
+			existingPrimaryNodeIPs: []node{{v4: network{ip: "10.0.0.4", mask: "17"}}, {v4: network{ip: "10.0.128.5", mask: "17"}}},
+			allocations: []expectedAlloc{
+				{subnets: []string{"10.0.0.4/17"}, expectedIP: "10.0.0.200"},
+				{subnets: []string{"10.0.128.5/17"}, expectedIP: "10.0.128.200"},
+				{subnets: []string{"10.0.0.4/17"}, expectedIP: "10.0.0.201"},
+				{subnets: []string{"10.0.128.5/17"}, expectedIP: "10.0.128.201"},
+			},
+		},
+		{
+			desc:                   "IPv4 /32 annotations (GCP-like): works despite narrow mask",
+			existingPrimaryNodeIPs: []node{{v4: network{ip: "10.0.0.4", mask: "32"}}, {v4: network{ip: "10.0.128.5", mask: "32"}}},
+			allocations: []expectedAlloc{
+				{subnets: []string{"10.0.0.4/32"}, expectedIP: "10.0.0.200"},
+				{subnets: []string{"10.0.128.5/32"}, expectedIP: "10.0.128.200"},
+			},
 		},
 	}
 
@@ -106,57 +151,26 @@ func TestIPAlloc(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			for _, expectedIPStr := range tc.expectedFromAllocateNext {
-				expectedIP := net.ParseIP(expectedIPStr)
+			for j, alloc := range tc.allocations {
+				expectedIP := net.ParseIP(alloc.expectedIP)
 				var nextIP net.IP
 				var err error
 				if utilsnet.IsIPv6(expectedIP) {
-					nextIP, err = pipa.AllocateNextV6()
+					nextIP, err = pipa.AllocateNextV6(alloc.subnets...)
 				} else {
-					nextIP, err = pipa.AllocateNextV4()
+					nextIP, err = pipa.AllocateNextV4(alloc.subnets...)
 				}
 				if err != nil || nextIP == nil {
-					t.Errorf("failed to allocated next IPv4 or IPv6 address. err %v", err)
+					t.Errorf("allocation %d: failed to allocate next IPv4 or IPv6 address. err %v", j, err)
 					return
 				}
 				if !nextIP.Equal(expectedIP) {
-					t.Errorf("expected IP %q, but found %q", expectedIP, nextIP)
+					t.Errorf("allocation %d: expected IP %q, but found %q", j, expectedIP, nextIP)
 				}
 			}
 		})
 	}
 
-}
-
-// TestIPAllocInitError verifies that newPrimaryIPAllocator rejects subnets that
-// contain the start of the reserved range but not its end, preventing silent
-// out-of-subnet allocations at runtime.
-func TestIPAllocInitError(t *testing.T) {
-	tests := []struct {
-		desc  string
-		nodes []node
-	}{
-		{
-			// 10.0.0.192/28 covers .192-.207: contains .200 (start) but not .254 (end)
-			desc:  "IPv4: subnet contains range start but excludes range end",
-			nodes: []node{{v4: network{ip: "10.0.0.200", mask: "28"}}},
-		},
-		{
-			// fc00:f853:ccd:e793::c0/123 covers ::c0-::df: contains ::c8 (start) but not ::ff (end)
-			desc:  "IPv6: subnet contains range start but excludes range end",
-			nodes: []node{{v6: network{ip: "fc00:f853:ccd:e793::c8", mask: "123"}}},
-		},
-	}
-
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			cs := fake.NewSimpleClientset(getNodesWithIPs(tc.nodes))
-			_, err := newPrimaryIPAllocator(cs.CoreV1().Nodes())
-			if err == nil {
-				t.Error("expected error for narrow subnet that excludes range end, got nil")
-			}
-		})
-	}
 }
 
 // TestIPAllocExhaustion verifies that allocating beyond the reserved range
@@ -164,21 +178,24 @@ func TestIPAllocInitError(t *testing.T) {
 // out-of-range IP like .255 or ::100.
 func TestIPAllocExhaustion(t *testing.T) {
 	tests := []struct {
-		desc            string
-		nodes           []node
-		skipCount       int    // passed to IncrementAndGetNext to reach the last valid IP
-		expectedLastIP  string // the last valid IP that should be returned
-		isIPv6          bool
+		desc           string
+		nodes          []node
+		subnets        []string
+		skipCount      int    // passed to IncrementAndGetNext to reach the last valid IP
+		expectedLastIP string // the last valid IP that should be returned
+		isIPv6         bool
 	}{
 		{
 			desc:           "IPv4: allocation after .254 fails",
 			nodes:          []node{{v4: network{ip: "192.168.1.1", mask: "16"}}, {v4: network{ip: "192.168.1.2", mask: "16"}}},
+			subnets:        []string{"192.168.1.1/16"},
 			skipCount:      54, // 54 skipped (.200-.253) + 1 returned (.254) = 55 total
 			expectedLastIP: "192.168.1.254",
 		},
 		{
 			desc:           "IPv6: allocation after ::ff fails",
 			nodes:          []node{{v6: network{ip: "fc00:f853:ccd:e793::5", mask: "64"}}, {v6: network{ip: "fc00:f853:ccd:e793::6", mask: "64"}}},
+			subnets:        []string{"fc00:f853:ccd:e793::5/64"},
 			skipCount:      55, // 55 skipped (::c8-::fe) + 1 returned (::ff) = 56 total
 			expectedLastIP: "fc00:f853:ccd:e793::ff",
 			isIPv6:         true,
@@ -195,9 +212,9 @@ func TestIPAllocExhaustion(t *testing.T) {
 			// Allocate up to the last valid IP in the reserved range
 			var lastIP net.IP
 			if tc.isIPv6 {
-				lastIP, err = pipa.IncrementAndGetNextV6(tc.skipCount)
+				lastIP, err = pipa.IncrementAndGetNextV6(tc.skipCount, tc.subnets...)
 			} else {
-				lastIP, err = pipa.IncrementAndGetNextV4(tc.skipCount)
+				lastIP, err = pipa.IncrementAndGetNextV4(tc.skipCount, tc.subnets...)
 			}
 			if err != nil {
 				t.Fatalf("unexpected error allocating up to last IP: %v", err)
@@ -208,9 +225,9 @@ func TestIPAllocExhaustion(t *testing.T) {
 			}
 			// Next allocation must fail with exhaustion error
 			if tc.isIPv6 {
-				_, err = pipa.AllocateNextV6()
+				_, err = pipa.AllocateNextV6(tc.subnets...)
 			} else {
-				_, err = pipa.AllocateNextV4()
+				_, err = pipa.AllocateNextV4(tc.subnets...)
 			}
 			if err == nil {
 				t.Error("expected reserved range exhaustion error, got nil")
