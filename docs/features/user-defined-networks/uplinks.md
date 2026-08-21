@@ -226,7 +226,10 @@ attachment. When the active CUDN set changes, `GatewayReady` first becomes
 `False` with reason `GatewayConfigurationPending` and returns to `True` only
 after the complete active set converges. A gateway programming failure does not
 change discovery `Resolved`; the CUDN-specific `UplinksReady` condition reflects
-both states.
+both states. In split DPU mode the host-side share of gateway programming, the
+VRF attachment of the Uplink gateway interface on the DPU-Host, is reported
+separately on the `HostGatewayReady` condition, and the CUDN `UplinksReady`
+condition requires both.
 
 The `Uplink` object reports aggregate status:
 
@@ -438,6 +441,11 @@ Common problems:
 * `UplinkState` with `GatewayReady` condition status `False` and reason
   `UplinkConfigurationConflict`: the resolved Uplink bridge is already
   attached to a different VRF on this node.
+* `UplinkState` with `HostGatewayReady` condition status `False` (split DPU
+  mode only): host-side gateway programming failed on the DPU-Host, for
+  example reason `UplinkVRFAttachmentFailed` when the Uplink gateway
+  interface could not be attached to or detached from the CUDN routing
+  domain on the DPU-Host.
 * CUDN with `UplinksReady` condition status `False` and reason
   `UplinkNotResolvedForNode`: at least one active node for the CUDN does not have
   a matching `UplinkState` with `Resolved=True`.
@@ -458,10 +466,35 @@ Common problems:
   supported with Uplinks.
 
 In split DPU mode each `UplinkState` condition has a single writer: the
-DPU-Host publishes the host interface data and the `HostDataReady` condition,
-while ovnkube-node on the DPU publishes `Resolved` and `GatewayReady`. Bridge
-reasons (`BridgeNotFound`, `BridgeUplinkNotFound`) therefore always describe
-OVS on the DPU, and `HostDataReady` reasons always describe the DPU-Host.
+DPU-Host publishes the host interface data and the `HostDataReady` and
+`HostGatewayReady` conditions, while ovnkube-node on the DPU publishes
+`Resolved` and `GatewayReady`. Bridge reasons (`BridgeNotFound`,
+`BridgeUplinkNotFound`) therefore always describe OVS on the DPU, and
+`HostDataReady`/`HostGatewayReady` reasons always describe the DPU-Host.
+
+In DPU deployments, FRR peering and route import happen on the DPU:
+BGP-learned routes are not propagated to the DPU-Host's CUDN VRF.
+Host-originated traffic toward the Uplink therefore requires a default
+gateway route on the selected host interface (preserved into the CUDN VRF
+across enslavement) or a host-side FRR setup; pod traffic toward the Uplink
+is unaffected, since its routes are imported into the gateway router on the
+DPU.
+
+```text
+             DPU                                DPU-Host
+ +---------------------------+      +----------------------------+
+ | FRR --- BGP peering       |      | CUDN VRF                   |
+ |          |                |      |  - no BGP-learned routes   |
+ |          v                |      |  - preserved default       |
+ | CUDN route-import VRF     |      |    gateway route           |
+ |          | imported       |      |    (or host-side FRR)      |
+ |          v                |      +-------------+--------------+
+ | CUDN gateway router (OVN) |                    |
+ +-------------+-------------+                    | host-originated
+               | pod traffic                      | traffic
+               v                                  v
+             Uplink <-----------------------------+
+```
 
 ## References
 

@@ -16,13 +16,15 @@ const (
 )
 
 // Each UplinkState condition has a single writer per node: in split DPU mode
-// the DPU-host owns HostDataReady, the DPU owns Resolved, and the DPU-side
-// gateway coordinator owns GatewayReady. In full mode the discovery
-// reconciler owns Resolved and HostDataReady is not published.
+// the DPU-host owns HostDataReady and HostGatewayReady, the DPU owns Resolved,
+// and the DPU-side gateway coordinator owns GatewayReady. In full mode the
+// discovery reconciler owns Resolved and the host conditions are not
+// published.
 const (
-	UplinkStateConditionResolved      = "Resolved"
-	UplinkStateConditionGatewayReady  = "GatewayReady"
-	UplinkStateConditionHostDataReady = "HostDataReady"
+	UplinkStateConditionResolved         = "Resolved"
+	UplinkStateConditionGatewayReady     = "GatewayReady"
+	UplinkStateConditionHostDataReady    = "HostDataReady"
+	UplinkStateConditionHostGatewayReady = "HostGatewayReady"
 )
 
 const (

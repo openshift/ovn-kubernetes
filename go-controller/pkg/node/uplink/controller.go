@@ -96,10 +96,13 @@ func newDiscoveryError(reason string, err error) error {
 	return &discoveryError{reason: reason, err: err}
 }
 
-// GatewayStateManager owns the node-local gateway cache and the GatewayReady
+// GatewayStateManager owns the node-local gateway cache and the gateway
 // condition published from it.
 type GatewayStateManager interface {
 	RepublishGatewayCondition(uplinkName string) error
+	// ConditionType is the UplinkState condition this manager publishes:
+	// GatewayReady, or HostGatewayReady on the DPU-host.
+	ConditionType() string
 	InvalidateGatewayState(uplinkName string)
 	DeleteGatewayState(uplinkName string)
 }
@@ -317,13 +320,16 @@ func (c *Controller) reconcileUplinkState(key string) error {
 		return c.deleteUplinkState(state.Name)
 	}
 
-	// An UplinkState recreated after an out-of-band deletion lost the
-	// GatewayReady condition, and nothing republishes it until a network event
-	// runs gateway reconciliation: restore it only after confirming this
-	// Uplink still selects the node. Intentional deselection starts a new
-	// gateway lifecycle and must not restore cached readiness.
+	// An UplinkState recreated after an out-of-band deletion lost the gateway
+	// condition this node publishes, and nothing republishes it until a
+	// network event runs gateway reconciliation: restore it only after
+	// confirming this Uplink still selects the node. Intentional deselection
+	// starts a new gateway lifecycle and must not restore cached readiness.
+	// The gate checks the manager's own condition type: on a DPU-host that is
+	// HostGatewayReady, while GatewayReady on the same UplinkState belongs to
+	// the DPU and says nothing about the host-side condition.
 	if c.gatewayStateManager != nil &&
-		meta.FindStatusCondition(state.Status.Conditions, uplinkv1alpha1.UplinkStateConditionGatewayReady) == nil {
+		meta.FindStatusCondition(state.Status.Conditions, c.gatewayStateManager.ConditionType()) == nil {
 		if err := c.gatewayStateManager.RepublishGatewayCondition(uplinkName); err != nil {
 			return fmt.Errorf("failed to republish gateway condition for Uplink %s: %w", uplinkName, err)
 		}
