@@ -251,3 +251,18 @@ patch-br-ex_multi-homing-worker-0.maiqueb.org-to-br-int`,
 		})
 	}
 }
+
+// --allow-no-uplink can leave physIntf empty. checkPorts must skip the phys
+// ofport check in that case (GetOVSInterface("") cannot look up a zero Name).
+func TestCheckPortsAllowNoUplink(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("PrepareTestConfig: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.Gateway.AllowNoUplink = true
+	if err := checkPorts(nil, nil, "", ""); err != nil {
+		t.Fatalf("checkPorts with AllowNoUplink and empty physIntf: %v", err)
+	}
+}
