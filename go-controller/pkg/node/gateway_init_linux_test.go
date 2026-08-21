@@ -141,6 +141,18 @@ add rule inet ovn-kubernetes services-prerouting jump services-etp-no-nodeport
 add rule inet ovn-kubernetes services-prerouting jump services
 `
 
+// OCP HACK: Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
+const nftablesRulesMCS = `
+add chain inet ovn-kubernetes mcs-blocking
+add rule inet ovn-kubernetes mcs-blocking tcp dport { 22623, 22624 } tcp flags syn / fin,syn,rst,ack reject
+add chain inet ovn-kubernetes mcs-blocking-output { type filter hook output priority 0 ; }
+add rule inet ovn-kubernetes mcs-blocking-output jump mcs-blocking
+add chain inet ovn-kubernetes mcs-blocking-forward { type filter hook forward priority 0 ; }
+add rule inet ovn-kubernetes mcs-blocking-forward jump mcs-blocking
+`
+
+// END OCP HACK
+
 func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 	eth0Name, eth0MAC, eth0GWIP, eth0CIDR string, gatewayVLANID uint, l netlink.Link, hwOffload, setNodeIP bool) {
 	const mtu string = "1234"
@@ -540,7 +552,7 @@ func shareGatewayInterfaceTest(app *cli.App, testNS ns.NetNS,
 				"'k8s.ovn.org/gateway-mtu-support' with value == \"false\"")
 		}
 
-		expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices
+		expectedNFT := nftablesRulesBase + nftablesRulesGatewayServices + nftablesRulesMCS
 		err = nodenft.MatchNFTRules(expectedNFT, nft.Dump())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -1366,7 +1378,7 @@ OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0`
 		Expect(err).NotTo(HaveOccurred())
 		Eventually(fexec.CalledMatchesExpected, 5).Should(BeTrue(), fexec.ErrorDesc)
 
-		expectedNFT := nftablesRulesBase + nftablesRulesLocalGateway + nftablesRulesGatewayServices
+		expectedNFT := nftablesRulesBase + nftablesRulesLocalGateway + nftablesRulesGatewayServices + nftablesRulesMCS
 		if util.IsNetworkSegmentationSupportEnabled() {
 			expectedNFT += nftablesRulesUDN
 		}
