@@ -149,6 +149,8 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 			client.WithTable(&sbdb.SBGlobal{}),
 			// used for metrics
 			client.WithTable(&sbdb.PortBinding{}),
+			// used by mac binding controller
+			client.WithTable(&sbdb.MACBinding{}),
 		),
 	)
 	if err != nil {
