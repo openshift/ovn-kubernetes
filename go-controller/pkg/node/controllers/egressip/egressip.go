@@ -865,7 +865,7 @@ func (c *Controller) repairNode() error {
 	assignedIPRoutes := sets.New[string]()
 	assignedIPRouteStrToRoutes := make(map[string]netlink.Route)
 	assignedIPRules := sets.New[string]()
-	assignedIPRulesStrToRules := make(map[string]netlink.Rule)
+	assignedIPRulesStrToRules := make(map[string]iprulemanager.IPRule)
 	existingAddrsFromAnnot, err := c.getAnnotation()
 	if err != nil {
 		return fmt.Errorf("failed to get annotation: %v", err)
@@ -910,9 +910,10 @@ func (c *Controller) repairNode() error {
 		return fmt.Errorf("failed to list IP rules: %v", err)
 	}
 	for _, existingRule := range existingRules {
-		ruleStr := existingRule.String()
+		ipRule := iprulemanager.IPRuleFromNetlinkRule(&existingRule)
+		ruleStr := ipRule.String()
 		assignedIPRules.Insert(ruleStr)
-		assignedIPRulesStrToRules[ruleStr] = existingRule
+		assignedIPRulesStrToRules[ruleStr] = ipRule
 	}
 	expectedAddrs := sets.New[addrLink]()
 	expectedIPRoutes := sets.New[string]()
@@ -1267,11 +1268,11 @@ func (c *Controller) removeStaleIPRoutes(staleIPRoutes sets.Set[string], routeSt
 	return nil
 }
 
-func (c *Controller) removeStaleIPRules(staleIPRules sets.Set[string], ruleStrToNetlinkRule map[string]netlink.Rule) error {
+func (c *Controller) removeStaleIPRules(staleIPRules sets.Set[string], ruleStrToIPRule map[string]iprulemanager.IPRule) error {
 	for _, ipRule := range staleIPRules.UnsortedList() {
-		rule, ok := ruleStrToNetlinkRule[ipRule]
+		rule, ok := ruleStrToIPRule[ipRule]
 		if !ok {
-			return fmt.Errorf("expected to find route %q in map: %+v", ipRule, ruleStrToNetlinkRule)
+			return fmt.Errorf("expected to find rule %q in map: %+v", ipRule, ruleStrToIPRule)
 		}
 		if err := c.ruleManager.Delete(rule); err != nil {
 			return fmt.Errorf("failed to delete IP rule (%s): %v", rule.String(), err)
@@ -1455,21 +1456,19 @@ func isLinkUp(flags string) bool {
 
 // generateIPRules generates IP rules at a predefined priority for each pod IP with a custom routing table based
 // from the links 'ifindex'
-func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) netlink.Rule {
-	r := *netlink.NewRule()
-	r.Table = util.CalculateRouteTableID(ifIndex)
-	r.Priority = rulePriority
-	var ipFullMask string
+func generateIPRule(srcIP net.IP, isIPv6 bool, ifIndex int) iprulemanager.IPRule {
+	family := netlink.FAMILY_V4
 	if isIPv6 {
-		ipFullMask = fmt.Sprintf("%s/128", srcIP.String())
-		r.Family = netlink.FAMILY_V6
-	} else {
-		ipFullMask = fmt.Sprintf("%s/32", srcIP.String())
-		r.Family = netlink.FAMILY_V4
+		family = netlink.FAMILY_V6
 	}
-	_, ipNet, _ := net.ParseCIDR(ipFullMask)
-	r.Src = ipNet
-	return r
+	addr, _ := netip.AddrFromSlice(srcIP)
+	addr = addr.Unmap()
+	return iprulemanager.IPRule{
+		Table:    util.CalculateRouteTableID(ifIndex),
+		Priority: rulePriority,
+		Family:   family,
+		Src:      netip.PrefixFrom(addr, addr.BitLen()),
+	}
 }
 
 func filterRouteByLinkTable(linkIndex, tableID int) (*netlink.Route, uint64) {
@@ -1522,13 +1521,13 @@ func isValidIP(ipStr string) bool {
 	return len(ip) > 0
 }
 
-func getNodeIPFwMarkIPRule(ipFamily int) netlink.Rule {
-	r := netlink.NewRule()
-	r.Priority = ruleFwMarkPriority
-	r.Mark = types.EgressIPConnmarkMark
-	r.Table = 254 // main
-	r.Family = ipFamily
-	return *r
+func getNodeIPFwMarkIPRule(ipFamily int) iprulemanager.IPRule {
+	return iprulemanager.IPRule{
+		Priority: ruleFwMarkPriority,
+		Mark:     types.EgressIPConnmarkMark,
+		Table:    254, // main
+		Family:   ipFamily,
+	}
 }
 
 func isVRFSlaveDevice(link netlink.Link) bool {

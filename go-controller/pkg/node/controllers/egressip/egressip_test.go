@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
+	"net/netip"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ import (
 	egressipfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	ovnkube "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/linkmanager"
 	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
@@ -51,7 +53,7 @@ type testPodConfig struct {
 	snatKey   string // pod IP (key in nftables SNAT map)
 	snatValue string // egress IP (value in nftables SNAT map)
 	ifName    string // interface name (second key element in nftables SNAT map)
-	ipRule    *netlink.Rule
+	ipRule    *iprulemanager.IPRule
 }
 
 // eipConfig contains all the information needed to validate an EIP. Max one EIP IP maybe configured for a given
@@ -520,13 +522,13 @@ var _ = ginkgo.DescribeTable("EgressIP selectors",
 		}).WithTimeout(time.Second).Should(gomega.Succeed())
 		ginkgo.By("verify expected IP rules match what was found")
 		// verify the correct rules are present and also no rule entries we do not expect
-		expectedIPRules := make(map[string][]netlink.Rule, 0)
+		expectedIPRules := make(map[string][]iprulemanager.IPRule, 0)
 		for _, expectedEIPConfig := range expectedEIPConfigs {
 			if len(expectedEIPConfig.podConfigs) == 0 {
 				// no pod configs expected therefore no IP routes
 				continue
 			}
-			var expectedRules []netlink.Rule
+			var expectedRules []iprulemanager.IPRule
 			for _, status := range expectedEIPConfig.eIP.Status.Items {
 				if status.Node != node1Name {
 					continue
@@ -558,27 +560,24 @@ var _ = ginkgo.DescribeTable("EgressIP selectors",
 						if err != nil {
 							return err
 						}
-						temp := foundRules[:0]
+						var foundIPRules []iprulemanager.IPRule
 						for _, rule := range foundRules {
 							if rule.Priority == rulePriority {
-								temp = append(temp, rule)
+								foundIPRules = append(foundIPRules, iprulemanager.IPRuleFromNetlinkRule(&rule))
 							}
 						}
-						foundRules = temp
 						expectedRules := expectedIPRules[expectedEIPConfig.eIP.Name]
 						var found bool
 						for _, expectedRule := range expectedRules {
 							found = false
-							for _, foundRule := range foundRules {
-								if expectedRule.Src.IP.Equal(foundRule.Src.IP) {
-									if expectedRule.Table == foundRule.Table {
-										found = true
-										break
-									}
+							for _, foundRule := range foundIPRules {
+								if expectedRule == foundRule {
+									found = true
+									break
 								}
 							}
 							if !found {
-								return fmt.Errorf("failed to find rule %s", expectedRule)
+								return fmt.Errorf("failed to find rule %s", expectedRule.String())
 							}
 						}
 					}
@@ -1712,14 +1711,18 @@ func containsRoutes(routes1 []netlink.Route, routes2 []netlink.Route) bool {
 	return true
 }
 
-func getRule(podIP string, tableID int) *netlink.Rule {
-	ipNet, err := util.GetIPNetFullMask(podIP)
+func getRule(podIP string, tableID int) *iprulemanager.IPRule {
+	addr, err := netip.ParseAddr(podIP)
 	if err != nil {
-		panic(err.Error())
+		panic(fmt.Sprintf("invalid IP: %s", podIP))
 	}
-	return &netlink.Rule{
+	bits := 32
+	if addr.Is6() {
+		bits = 128
+	}
+	return &iprulemanager.IPRule{
 		Priority: rulePriority,
-		Src:      ipNet,
+		Src:      netip.PrefixFrom(addr, bits),
 		Table:    tableID,
 	}
 }
