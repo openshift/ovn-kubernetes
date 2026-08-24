@@ -75,6 +75,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		}
 		if f != nil {
 			f.Shutdown()
+			f = nil
 		}
 	})
 
@@ -87,9 +88,13 @@ var _ = Describe("User Defined Network Controller", func() {
 
 		networkManager, err := networkmanager.NewForCluster(&networkmanager.FakeControllerManager{}, f, cs, nil, id.NewTunnelKeyAllocator("TunnelKeys"))
 		Expect(err).NotTo(HaveOccurred())
+		var vtepInformer vtepinformer.VTEPInformer
+		if util.IsEVPNEnabled() {
+			vtepInformer = f.VTEPInformer()
+		}
 		return New(cs.NetworkAttchDefClient, f.NADInformer(),
 			cs.UserDefinedNetworkClient, f.UserDefinedNetworkInformer(), f.ClusterUserDefinedNetworkInformer(),
-			renderNADStub, networkManager.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), f.VTEPInformer(), f.RouteAdvertisementsInformer(), nil,
+			renderNADStub, networkManager.Interface(), f.PodCoreInformer(), f.NamespaceInformer(), vtepInformer, f.RouteAdvertisementsInformer(), nil,
 		)
 	}
 
@@ -158,6 +163,7 @@ var _ = Describe("User Defined Network Controller", func() {
 		AfterEach(func() {
 			if c != nil {
 				c.Shutdown()
+				c = nil
 			}
 		})
 		Context("reconcile UDN CR", func() {
@@ -552,6 +558,127 @@ var _ = Describe("User Defined Network Controller", func() {
 
 				_, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).Get(context.Background(), cudn.Name, metav1.GetOptions{})
 				Expect(apierrors.IsNotFound(err)).To(BeTrue(), "NAD must not be created when the Uplink feature is disabled")
+			})
+
+			It("should publish the VRF name of a primary CUDN whose name fits the device name length limit", func() {
+				nsName := "red"
+				cudn := testLayer3PrimaryClusterUDN("tenant-red", nsName)
+
+				c = newTestController(template.RenderNetAttachDefManifest, testNamespace(nsName), cudn)
+				Expect(c.Run()).To(Succeed())
+
+				Eventually(func() string {
+					var err error
+					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return ptr.Deref(cudn.Status.VRFName, "")
+				}).Should(Equal("tenant-red"), "status should expose the CUDN name as the VRF name")
+			})
+
+			It("should publish the ID-derived VRF name of a primary CUDN whose name exceeds the device name length limit", func() {
+				nsName := "red"
+				cudn := testLayer3PrimaryClusterUDN("tenant-with-a-very-long-name", nsName)
+
+				c = newTestController(template.RenderNetAttachDefManifest, testNamespace(nsName), cudn)
+				Expect(c.Run()).To(Succeed())
+
+				Eventually(func() []metav1.Condition {
+					var err error
+					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return normalizeConditions(filterTransportConditions(cudn.Status.Conditions))
+				}).Should(Equal([]metav1.Condition{{
+					Type:    "NetworkCreated",
+					Status:  "True",
+					Reason:  "NetworkAttachmentDefinitionCreated",
+					Message: "NetworkAttachmentDefinition has been created in following namespaces: [red]",
+				}}))
+				Expect(cudn.Status.VRFName).To(BeNil(),
+					"the VRF name depends on the network ID and must not be published before the NAD is annotated with it")
+
+				By("annotating the NAD with the network ID")
+				Eventually(func() error {
+					nad, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+					if nad.Annotations == nil {
+						nad.Annotations = map[string]string{}
+					}
+					nad.Annotations[ovntypes.OvnNetworkIDAnnotation] = "7"
+					_, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nsName).Update(context.Background(), nad, metav1.UpdateOptions{})
+					return err
+				}).Should(Succeed())
+
+				Eventually(func() string {
+					var err error
+					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return ptr.Deref(cudn.Status.VRFName, "")
+				}).Should(Equal("mp7-udn-vrf"), "status should expose the ID-derived VRF name once the network ID is known")
+			})
+
+			// The fake clientset applies status patches with merge semantics and
+			// never removes omitted fields, so the SSA-based clearing of
+			// status.vrfName cannot be observed end to end here; exercise the
+			// name-derivation branches directly instead.
+			It("should derive the published VRF name from the CUDN sync outcome", func() {
+				cudn := testLayer3PrimaryClusterUDN("tenant-with-a-very-long-name")
+				cudn.Status.VRFName = ptr.To("mp7-udn-vrf")
+				nadWithoutID := *testClusterUdnNAD(cudn.Name, "red")
+				nadWithID := nadWithoutID
+				nadWithID.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: "8"}
+				nadWithReservedID := nadWithoutID
+				nadWithReservedID.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: "0"}
+
+				Expect(clusterUDNVRFName(cudn, []netv1.NetworkAttachmentDefinition{nadWithID}, nil, true)).To(Equal("mp8-udn-vrf"),
+					"the annotated network ID must drive the published name")
+				Expect(clusterUDNVRFName(cudn, []netv1.NetworkAttachmentDefinition{nadWithoutID}, nil, true)).To(Equal("mp7-udn-vrf"),
+					"the published name must be preserved while the NADs are not annotated with the network ID yet")
+				Expect(clusterUDNVRFName(cudn, []netv1.NetworkAttachmentDefinition{nadWithReservedID}, nil, true)).To(Equal("mp7-udn-vrf"),
+					"an annotation carrying the reserved default-network ID must be treated as unknown, not published")
+				nadWithMalformedID := nadWithoutID
+				nadWithMalformedID.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: "not-a-number"}
+				Expect(clusterUDNVRFName(cudn, []netv1.NetworkAttachmentDefinition{nadWithMalformedID}, nil, true)).To(Equal("mp7-udn-vrf"),
+					"a malformed network-id annotation must be treated as unknown, not published")
+				nadWithOutOfRangeID := nadWithoutID
+				nadWithOutOfRangeID.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: fmt.Sprintf("%d", networkmanager.MaxNetworks)}
+				Expect(clusterUDNVRFName(cudn, []netv1.NetworkAttachmentDefinition{nadWithOutOfRangeID}, nil, true)).To(Equal("mp7-udn-vrf"),
+					"an annotation beyond the allocator's range must be treated as unknown, not published")
+				Expect(clusterUDNVRFName(cudn, nil, errors.New("sync failed"), true)).To(Equal("mp7-udn-vrf"),
+					"a failed sync must not clear the published name while NADs remain")
+				Expect(clusterUDNVRFName(cudn, nil, errors.New("sync failed"), false)).To(BeEmpty(),
+					"a sync that failed after deleting the last NAD must clear the name, since the released network ID may be reallocated")
+				Expect(clusterUDNVRFName(cudn, nil, nil, false)).To(BeEmpty(),
+					"the name must clear once a successful sync leaves no NADs, since the released network ID may be reallocated")
+
+				Expect(len(util.GetCUDNVRFName(cudn.Name, networkmanager.MaxNetworks-1))).To(BeNumerically("<=", ovntypes.MaxInterfaceNameLength),
+					"the highest allocatable network ID must derive a name within the device name length limit")
+
+				secondaryCUDN := testLayer2SecondaryClusterUDN("tenant-with-a-very-long-name")
+				Expect(clusterUDNVRFName(secondaryCUDN, []netv1.NetworkAttachmentDefinition{nadWithID}, nil, true)).To(BeEmpty(),
+					"the VRF name is published only for primary networks")
+			})
+
+			It("should not publish a VRF name for a secondary CUDN", func() {
+				nsName := "red"
+				cudn := testLayer2SecondaryClusterUDN("tenant-red", nsName)
+
+				c = newTestController(template.RenderNetAttachDefManifest, testNamespace(nsName), cudn)
+				Expect(c.Run()).To(Succeed())
+
+				Eventually(func() []metav1.Condition {
+					var err error
+					cudn, err = cs.UserDefinedNetworkClient.K8sV1().ClusterUserDefinedNetworks().Get(context.Background(), cudn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return normalizeConditions(filterTransportConditions(cudn.Status.Conditions))
+				}).Should(Equal([]metav1.Condition{{
+					Type:    "NetworkCreated",
+					Status:  "True",
+					Reason:  "NetworkAttachmentDefinitionCreated",
+					Message: "NetworkAttachmentDefinition has been created in following namespaces: [red]",
+				}}))
+				Expect(cudn.Status.VRFName).To(BeNil(), "the VRF name is published only for Uplink-attached CUDNs")
 			})
 
 			It("should allocate VID for EVPN network NAD", func() {

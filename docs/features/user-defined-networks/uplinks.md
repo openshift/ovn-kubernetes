@@ -334,6 +334,14 @@ their active node sets do not overlap. If more than one such CUDN becomes
 active on the same node, the Uplink bridge cannot be attached to both CUDN
 VRFs and OVN-Kubernetes reports `UplinkConfigurationConflict`.
 
+For every primary CUDN, OVN-Kubernetes publishes the name of the Linux VRF
+device it creates on every node where the network is present in the CUDN
+`status.vrfName` field. Consumers that must name the VRF explicitly, such as
+FRRConfiguration authors filling in the routers `vrf` field, should read this
+value instead of deriving it: the derivation rule (the CUDN name when it fits
+within the kernel's 15-character interface name limit, an ID-derived name
+otherwise) is an internal implementation detail that may change.
+
 Example RouteAdvertisements for VRF-Lite:
 
 ```yaml
