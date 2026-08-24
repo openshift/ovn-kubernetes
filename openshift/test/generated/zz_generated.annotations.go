@@ -2115,6 +2115,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation: no external containers Should reassign a stale egress IP allocation after rapid EgressIP delete/create cycles, while preserving genuine conflicts": "[Serial][Suite:openshift/conformance/serial]",
+
 	"e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name": "[Disabled:Unimplemented]",
 
 	"e2e egress firewall policy validation with external containers Should validate that egressfirewall supports DNS name in caps": "[Disabled:Unimplemented]",

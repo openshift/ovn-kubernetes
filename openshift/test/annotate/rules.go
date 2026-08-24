@@ -1,9 +1,26 @@
 package annotate
 
 import (
+	"strings"
+
 	// ensure all the ginkgo tests are loaded
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 )
+
+// OCPEnabledEgressIPTests are exempted from the blanket
+// [Feature:EgressIP] -> [Disabled:Unimplemented] annotation rule.
+var OCPEnabledEgressIPTests = []string{
+	"Should reassign a stale egress IP allocation after rapid EgressIP delete/create cycles, while preserving genuine conflicts",
+}
+
+func isOCPEnabledEgressIPTest(name string) bool {
+	for _, enabledTest := range OCPEnabledEgressIPTests {
+		if strings.Contains(name, enabledTest) {
+			return true
+		}
+	}
+	return false
+}
 
 var (
 	// LabelToLabelMaps label -> label (ginkgo label)
@@ -121,7 +138,9 @@ var (
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			"Should reassign a stale egress IP allocation after rapid EgressIP delete/create cycles, while preserving genuine conflicts",
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)
