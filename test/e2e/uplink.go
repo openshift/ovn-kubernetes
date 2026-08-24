@@ -15,11 +15,13 @@ import (
 	"strings"
 	"time"
 
+	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	raclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned"
 	uplinkv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1"
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
@@ -168,25 +170,11 @@ var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", featur
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		for i, networkName := range []string{"updefa" + testSuffix, "updefb" + testSuffix} {
-			bgpAlloc, err := allocators.AllocateBGP(f, ictx)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			networkSpec := uplinkLayer3NetworkSpec(ipFamilySet, bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6)
-			namespace, err := createUplinkNamespace(
-				f,
-				ictx,
-				"uplink-default",
-				networkName,
-			)
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(createUplinkCUDN(
-				f,
-				ictx,
-				namespace,
-				networkName,
-				networkSpec,
-				nil,
-				uplinkName,
-			)).To(gomega.Succeed())
+			namespace := setupUplinkLayer3CUDN(f, ictx, ipFamilySet, networkName, uplinkName)
+
+			ginkgo.By("verifying the derived VRF name is published on the CUDN status")
+			gomega.Expect(waitForCUDNVRFName(f, networkName)).To(gomega.Equal(networkName),
+				"expected the CUDN name to be used as the VRF name since it fits the device name length limit")
 
 			pod := createUplinkNetexecPod(
 				f,
@@ -203,7 +191,38 @@ var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", featur
 				gomega.Expect(expectedSourceIP).NotTo(gomega.BeEmpty())
 				uplinkPodToClientIPAndExpect(pod, serverIP, expectedSourceIP)
 			}
+
+			// the VRF device is checked on the node running the network's pod:
+			// with Dynamic UDN allocation the network is only rendered there
+			ginkgo.By("verifying the published VRF name matches a VRF device on the node running the network's pod")
+			gomega.Eventually(func() error {
+				return nodeVRFDeviceExists(pod.Spec.NodeName, networkName)
+			}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(gomega.Succeed(),
+				"expected VRF device %s on node %s", networkName, pod.Spec.NodeName)
 		}
+
+		ginkgo.By("creating a CUDN whose name exceeds the VRF device name length limit")
+		longNetworkName := "updef-with-a-long-name" + testSuffix
+		longNamespace := setupUplinkLayer3CUDN(f, ictx, ipFamilySet, longNetworkName, uplinkName)
+
+		ginkgo.By("verifying the ID-derived VRF name is published on the CUDN status")
+		vrfName := waitForCUDNVRFName(f, longNetworkName)
+		networkID := getNADNetworkID(f, longNamespace.Name, longNetworkName)
+		gomega.Expect(vrfName).To(gomega.Equal(
+			fmt.Sprintf("%s%s%s", ovntypes.UDNVRFDevicePrefix, networkID, ovntypes.UDNVRFDeviceSuffix)),
+			"expected the ID-derived VRF name since the CUDN name exceeds the device name length limit")
+
+		ginkgo.By("verifying the ID-derived VRF name matches a VRF device on the node running the network's pod")
+		longNamePod := createUplinkNetexecPod(
+			f,
+			longNamespace.Name,
+			"client-"+longNetworkName,
+			schedulableNodes.Items[0].Name,
+		)
+		gomega.Eventually(func() error {
+			return nodeVRFDeviceExists(longNamePod.Spec.NodeName, vrfName)
+		}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(gomega.Succeed(),
+			"expected VRF device %s on node %s", vrfName, longNamePod.Spec.NodeName)
 	})
 
 	ginkgo.It("recreates an UplinkState deleted out of band", func() {
@@ -392,25 +411,7 @@ func provisionUplinkWithActiveCUDN(
 
 	ginkgo.By("activating a CUDN on the Uplink so GatewayReady is published")
 	networkName := prefix + "net" + testSuffix
-	bgpAlloc, err := allocators.AllocateBGP(f, ictx)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	networkSpec := uplinkLayer3NetworkSpec(ipFamilySet, bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6)
-	namespace, err := createUplinkNamespace(
-		f,
-		ictx,
-		"uplink-default",
-		networkName,
-	)
-	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Expect(createUplinkCUDN(
-		f,
-		ictx,
-		namespace,
-		networkName,
-		networkSpec,
-		nil,
-		uplinkName,
-	)).To(gomega.Succeed())
+	namespace := setupUplinkLayer3CUDN(f, ictx, ipFamilySet, networkName, uplinkName)
 	createUplinkNetexecPod(f, namespace.Name, "client-"+networkName, node.Name)
 	waitForUplinkStateGatewayCondition(
 		f,
@@ -1731,20 +1732,38 @@ func runDPUUplinkVRFLiteRouteAdvertisements(
 	}
 	waitForCUDNUplinksReady(f, networkName)
 
-	// The pre-existing route was migrated into the host-side CUDN VRF on
-	// enslavement. With dynamic network allocation the network is only
+	// The published VRF name is the value FRRConfiguration authors put in the
+	// routers 'vrf' field; it must match the VRF the DPU-side bridge is
+	// enslaved to. With dynamic network allocation the network is only
 	// rendered on a node once a pod attached to it runs there, so this can
 	// only be asserted after the pods exist.
+	ginkgo.By("verifying the published VRF name matches the VRF enslaving the DPU-side bridge")
+	vrfName := waitForCUDNVRFName(f, networkName)
+	dpuBridgeName := os.Getenv(uplinkDPUExpectedBridgeEnv)
+	for _, node := range dpuHostNodes {
+		gomega.Eventually(func() (string, error) {
+			return getUplinkBridgeVRF(node.Name, dpuBridgeName)
+		}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
+			gomega.Equal(vrfName),
+			"expected the DPU-side bridge %s for host node %s to be enslaved to the published VRF %s",
+			dpuBridgeName,
+			node.Name,
+			vrfName,
+		)
+	}
+
+	// The pre-existing route was migrated into the host-side CUDN VRF on
+	// enslavement.
 	for _, node := range dpuHostNodes {
 		node := node
 		gomega.Eventually(func() error {
-			return uplinkRouteShownIn(node.Name, "vrf "+networkName, uplinkPreservedIPv4CIDR, preservedGateway)
+			return uplinkRouteShownIn(node.Name, "vrf "+vrfName, uplinkPreservedIPv4CIDR, preservedGateway)
 		}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
 			gomega.Succeed(),
 			"expected preserved route %s via %s in host-side CUDN VRF %s on node %s",
 			uplinkPreservedIPv4CIDR,
 			preservedGateway,
-			networkName,
+			vrfName,
 			node.Name,
 		)
 	}
@@ -1762,14 +1781,14 @@ func runDPUUplinkVRFLiteRouteAdvertisements(
 	gomega.Expect(serverCIDR).NotTo(gomega.BeEmpty())
 	for _, node := range dpuHostNodes {
 		gomega.Eventually(func() (bool, error) {
-			return hasRouteInDPUCUDNVRF(node, networkName, serverCIDR, frrIface.IPv4)
+			return hasRouteInDPUCUDNVRF(node, vrfName, serverCIDR, frrIface.IPv4)
 		}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
 			gomega.BeTrue(),
 			"expected DPU for host node %s to learn %s via %s in CUDN VRF %s",
 			node.Name,
 			serverCIDR,
 			frrIface.IPv4,
-			networkName,
+			vrfName,
 		)
 	}
 
@@ -2707,6 +2726,88 @@ func waitForCUDNUplinksCondition(
 	}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(gomega.Succeed())
 }
 
+// waitForCUDNVRFName waits until the CUDN publishes the derived VRF device
+// name on status.vrfName and returns it.
+func waitForCUDNVRFName(f *framework.Framework, cudnName string) string {
+	ginkgo.GinkgoHelper()
+
+	return waitForNetworkVRFName(f.DynamicClient.Resource(clusterUDNGVR), cudnName, uplinkTimeout, uplinkPoll)
+}
+
+// setupUplinkLayer3CUDN allocates a BGP subnet, creates a namespace and a
+// Layer3 primary CUDN named networkName attached to the given Uplink, and
+// returns the namespace.
+func setupUplinkLayer3CUDN(
+	f *framework.Framework,
+	ictx infraapi.Context,
+	ipFamilySet sets.Set[utilnet.IPFamily],
+	networkName string,
+	uplinkName string,
+) *corev1.Namespace {
+	ginkgo.GinkgoHelper()
+
+	bgpAlloc, err := allocators.AllocateBGP(f, ictx)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	namespace, err := createUplinkNamespace(
+		f,
+		ictx,
+		"uplink-default",
+		networkName,
+	)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	gomega.Expect(createUplinkCUDN(
+		f,
+		ictx,
+		namespace,
+		networkName,
+		uplinkLayer3NetworkSpec(ipFamilySet, bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6),
+		nil,
+		uplinkName,
+	)).To(gomega.Succeed())
+	return namespace
+}
+
+// getNADNetworkID returns the network ID annotated on the given
+// NetworkAttachmentDefinition, waiting for the annotation to be set.
+func getNADNetworkID(f *framework.Framework, namespace, nadName string) string {
+	ginkgo.GinkgoHelper()
+
+	nadClient, err := nadclient.NewForConfig(f.ClientConfig())
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	var networkID string
+	gomega.Eventually(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), uplinkShortTimeout)
+		defer cancel()
+		nad, err := nadClient.NetworkAttachmentDefinitions(namespace).Get(ctx, nadName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		networkID = nad.Annotations[ovntypes.OvnNetworkIDAnnotation]
+		if networkID == "" {
+			return fmt.Errorf("NAD %s/%s has no network-id annotation", namespace, nadName)
+		}
+		return nil
+	}).WithTimeout(uplinkShortTimeout).WithPolling(uplinkPoll).Should(gomega.Succeed(),
+		"expected NAD %s/%s to be annotated with a network ID", namespace, nadName)
+	return networkID
+}
+
+// nodeVRFDeviceExists verifies a VRF device with the given name exists on the node.
+func nodeVRFDeviceExists(nodeName, vrfName string) error {
+	out, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip", "-d", "-j", "link", "show", "dev", vrfName})
+	if err != nil {
+		return fmt.Errorf("failed to get device %s on node %s: %w", vrfName, nodeName, err)
+	}
+	link, err := parseSingleLink(out, vrfName)
+	if err != nil {
+		return err
+	}
+	if link.LinkInfo.InfoKind != "vrf" {
+		return fmt.Errorf("device %s on node %s is not a VRF; output: %s", vrfName, nodeName, out)
+	}
+	return nil
+}
+
 func createUplinkAdvertisedCUDN(
 	f *framework.Framework,
 	ictx infraapi.Context,
@@ -3039,17 +3140,32 @@ func getUplinkBridgeVRF(hostNodeName, bridgeName string) (string, error) {
 	return interfaceMaster(out, bridgeName)
 }
 
-func interfaceMaster(output, interfaceName string) (string, error) {
-	links := []struct {
-		Master string `json:"master"`
-	}{}
+// nodeLink is the subset of `ip -j link show` output the tests inspect; the
+// linkinfo details are only present when the dump is taken with `-d`.
+type nodeLink struct {
+	Master   string `json:"master"`
+	LinkInfo struct {
+		InfoKind string `json:"info_kind"`
+	} `json:"linkinfo"`
+}
+
+func parseSingleLink(output, interfaceName string) (*nodeLink, error) {
+	var links []nodeLink
 	if err := json.Unmarshal([]byte(output), &links); err != nil {
-		return "", fmt.Errorf("failed to parse interface %s: %w; output: %s", interfaceName, err, output)
+		return nil, fmt.Errorf("failed to parse interface %s: %w; output: %s", interfaceName, err, output)
 	}
 	if len(links) != 1 {
-		return "", fmt.Errorf("expected one link for interface %s, got %d; output: %s", interfaceName, len(links), output)
+		return nil, fmt.Errorf("expected one link for interface %s, got %d; output: %s", interfaceName, len(links), output)
 	}
-	return links[0].Master, nil
+	return &links[0], nil
+}
+
+func interfaceMaster(output, interfaceName string) (string, error) {
+	link, err := parseSingleLink(output, interfaceName)
+	if err != nil {
+		return "", err
+	}
+	return link.Master, nil
 }
 
 // bgpNextHopsForPeer returns the next hops a BGP route learned from the peer
@@ -3098,26 +3214,22 @@ func hasRouteInDefaultVRF(node corev1.Node, cidr string, nextHops ...string) (bo
 	return hasBGPRoute(routes, cidr, nextHops...), nil
 }
 
-func hasRouteInDPUCUDNVRF(hostNode corev1.Node, cudnName, cidr, nextHop string) (bool, error) {
-	if len(cudnName) > 15 {
-		return false, fmt.Errorf("CUDN name %q is too long to be used as the Linux VRF device name", cudnName)
-	}
-
+func hasRouteInDPUCUDNVRF(hostNode corev1.Node, vrfName, cidr, nextHop string) (bool, error) {
 	dpuNodeName, err := dpuNodeNameForHostNode(hostNode.Name)
 	if err != nil {
 		return false, err
 	}
 
-	routeCommand := []string{"ip", "--json", "route", "show", "vrf", cudnName, cidr}
+	routeCommand := []string{"ip", "--json", "route", "show", "vrf", vrfName, cidr}
 	if utilnet.IsIPv6CIDRString(cidr) {
-		routeCommand = []string{"ip", "-6", "--json", "route", "show", "vrf", cudnName, cidr}
+		routeCommand = []string{"ip", "-6", "--json", "route", "show", "vrf", vrfName, cidr}
 	}
 
 	out, err := ForContainer(dpuNodeName).Exec(routeCommand[0], routeCommand[1:]...)
 	if err != nil {
 		return false, fmt.Errorf(
 			"failed to get routes from CUDN VRF %s on DPU node %s for host node %s: %w, output: %s",
-			cudnName,
+			vrfName,
 			dpuNodeName,
 			hostNode.Name,
 			err,
@@ -3128,7 +3240,7 @@ func hasRouteInDPUCUDNVRF(hostNode corev1.Node, cudnName, cidr, nextHop string) 
 	if err := json.Unmarshal([]byte(out), &routes); err != nil {
 		return false, fmt.Errorf(
 			"failed to parse routes from CUDN VRF %s on DPU node %s for host node %s: %w; output: %s",
-			cudnName,
+			vrfName,
 			dpuNodeName,
 			hostNode.Name,
 			err,
@@ -3137,7 +3249,7 @@ func hasRouteInDPUCUDNVRF(hostNode corev1.Node, cudnName, cidr, nextHop string) 
 	}
 	framework.Logf(
 		"Routes in CUDN VRF %s on DPU node %s for host node %s and %s: %s",
-		cudnName,
+		vrfName,
 		dpuNodeName,
 		hostNode.Name,
 		cidr,
