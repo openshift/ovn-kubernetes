@@ -2899,6 +2899,8 @@ func createUplinkNodePortService(f *framework.Framework, namespace string, selec
 
 	service := e2eservice.CreateServiceSpec("server", "", false, selector)
 	service.Spec.Type = corev1.ServiceTypeNodePort
+	preferDualStack := corev1.IPFamilyPolicyPreferDualStack
+	service.Spec.IPFamilyPolicy = &preferDualStack
 	service.Spec.Ports[0].Port = netexecPort
 	service.Spec.Ports[0].TargetPort = intstr.FromInt32(netexecPort)
 	service, err := f.ClientSet.CoreV1().Services(namespace).Create(
