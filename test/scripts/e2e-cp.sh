@@ -139,11 +139,18 @@ if [[ "${WHAT}" != *"${DHCP_IPAM_TESTS}"* ]]; then
   skip_label "Feature:DHCPIPAM"
 fi
 
+# Select all Uplink tests by feature label. These tests span network
+# segmentation and route advertisement suites, with individual specs deciding
+# whether to use or skip DPU-specific behavior.
 # Only run network segmentation tests if they are explicitly requested. Route
 # advertisement lanes are the exception: allow tests in the intersection of
 # network segmentation and route advertisements when both features are enabled.
+UPLINK_TESTS="Uplink"
 NETWORK_SEGMENTATION_TESTS="Network Segmentation"
-if [[ "${WHAT}" = "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
+if [[ "${WHAT}" = "${UPLINK_TESTS}" ]]; then
+  require_label "Feature:Uplink"
+  shift # don't "focus" on Uplink since we filter by label
+elif [[ "${WHAT}" = "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
   require_label "Feature:NetworkSegmentation"
   shift # don't "focus" on Network Segmentation since we filter by label
 elif [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
