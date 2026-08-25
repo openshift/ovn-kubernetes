@@ -2454,6 +2454,18 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 		return fmt.Errorf("could not calculate the next hop for pod %s/%s when configuring egress IP %s"+
 			" IP %s", pod.Namespace, pod.Name, egressIPName, status.EgressIP)
 	}
+	policyOpsMark := ""
+	if ni.IsUserDefinedNetwork() {
+		if !mark.IsAvailable() {
+			return fmt.Errorf("egressIP %s object must contain a mark for user defined networks", egressIPName)
+		}
+		policyOpsMark = mark.String()
+	}
+	// For default network with secondary host interface, set egress ip secondary interface mark in reroute policy
+	if ni.IsDefault() && !isOVNNetwork && isLocalZoneEgressNode {
+		policyOpsMark = types.EgressIPSecondaryInterfaceMark
+	}
+
 	var ops []ovsdb.Operation
 	if loadedEgressNode && isLocalZoneEgressNode {
 		// create NATs for CDNs only
@@ -2468,7 +2480,7 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 
 			} else if ni.IsUserDefinedNetwork() && ni.TopologyType() == types.Layer3Topology {
 				// not required for L2 because we always have LRPs using reroute action to pkt mark
-				ops, err = e.createGWMarkPolicyOps(ni, ops, podIPs, status, mark, pod.Namespace, pod.Name, egressIPName)
+				ops, err = e.createGWMarkPolicyOps(ni, ops, podIPs, status, policyOpsMark, pod.Namespace, pod.Name, egressIPName)
 				if err != nil {
 					return fmt.Errorf("unable to create GW router LRP ops to packet mark pod %s/%s: %v", pod.Namespace, pod.Name, err)
 				}
@@ -2481,7 +2493,7 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 			if err != nil {
 				return err
 			}
-			ops, err = e.createReroutePolicyOps(ni, ops, podIPs, status, mark, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
+			ops, err = e.createReroutePolicyOps(ni, ops, podIPs, status, policyOpsMark, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
 			if err != nil {
 				return fmt.Errorf("unable to create logical router policy ops %v, err: %v", status, err)
 			}
@@ -2502,7 +2514,7 @@ func (e *EgressIPController) addPodEgressIPAssignment(ni util.NetInfo, egressIPN
 	// don't add a reroute policy if the egress node towards which we are adding this doesn't exist
 	if loadedEgressNode && loadedPodNode {
 		if isLocalZonePod || (isLocalZoneEgressNode && ni.IsUserDefinedNetwork() && ni.TopologyType() == types.Layer2Topology) {
-			ops, err = e.createReroutePolicyOps(ni, ops, podIPs, status, mark, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
+			ops, err = e.createReroutePolicyOps(ni, ops, podIPs, status, policyOpsMark, egressIPName, nextHopIP, routerName, pod.Namespace, pod.Name)
 			if err != nil {
 				return fmt.Errorf("unable to create logical router policy ops, err: %v", err)
 			}
@@ -2897,15 +2909,13 @@ func (e *EgressIPController) getNextHop(ni util.NetInfo, egressNodeName, egressI
 // enabled, the appropriate transit switch port.
 // This function should be called with lock on nodeZoneState cache key status.Node
 func (e *EgressIPController) createReroutePolicyOps(ni util.NetInfo, ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem,
-	mark util.EgressIPMark, egressIPName, nextHopIP, routerName, podNamespace, podName string) ([]ovsdb.Operation, error) {
+	mark, egressIPName, nextHopIP, routerName, podNamespace, podName string) ([]ovsdb.Operation, error) {
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	ipFamily := getEIPIPFamily(isEgressIPv6)
 	options := make(map[string]string)
-	if ni.IsUserDefinedNetwork() {
-		if !mark.IsAvailable() {
-			return nil, fmt.Errorf("egressIP %s object must contain a mark for user defined networks", egressIPName)
-		}
-		addPktMarkToLRPOptions(options, mark.String())
+
+	if mark != "" {
+		addPktMarkToLRPOptions(options, mark)
 	}
 	dbIDs := getEgressIPLRPReRouteDbIDs(egressIPName, podNamespace, podName, ipFamily, ni.GetNetworkName(), e.controllerName)
 	p := libovsdbops.GetPredicate[*nbdb.LogicalRouterPolicy](dbIDs, nil)
@@ -2967,15 +2977,14 @@ func (e *EgressIPController) deleteReroutePolicyOps(ni util.NetInfo, ops []ovsdb
 }
 
 func (e *EgressIPController) createGWMarkPolicyOps(ni util.NetInfo, ops []ovsdb.Operation, podIPNets []*net.IPNet, status egressipv1.EgressIPStatusItem,
-	mark util.EgressIPMark, podNamespace, podName, egressIPName string) ([]ovsdb.Operation, error) {
+	mark, podNamespace, podName, egressIPName string) ([]ovsdb.Operation, error) {
 	isEgressIPv6 := utilnet.IsIPv6String(status.EgressIP)
 	routerName := ni.GetNetworkScopedGWRouterName(status.Node)
 	options := make(map[string]string)
-	if !mark.IsAvailable() {
-		return nil, fmt.Errorf("egressIP object must contain a mark for user defined networks")
-	}
-	addPktMarkToLRPOptions(options, mark.String())
 	var err error
+	if mark != "" {
+		addPktMarkToLRPOptions(options, mark)
+	}
 	ovnIPFamilyName := ipFamilyName(isEgressIPv6)
 	ipFamilyValue := getEIPIPFamily(isEgressIPv6)
 	dbIDs := getEgressIPLRPSNATMarkDbIDs(egressIPName, podNamespace, podName, ipFamilyValue, ni.GetNetworkName(), e.controllerName)
