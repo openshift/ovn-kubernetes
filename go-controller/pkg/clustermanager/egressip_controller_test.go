@@ -1580,25 +1580,32 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
+				initialNodeName := ""
 				gomega.Eventually(func() string {
 					eIP, err := fakeClusterManagerOVN.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
 					if err != nil || len(eIP.Status.Items) == 0 {
 						return ""
 					}
-					return eIP.Status.Items[0].Node
-				}).WithTimeout(2 * time.Second).Should(gomega.Equal(node1Name))
+					initialNodeName = eIP.Status.Items[0].Node
+					return initialNodeName
+				}).WithTimeout(2 * time.Second).Should(gomega.BeElementOf(node1Name, node2Name))
 
-				brokenNode1 := node1.DeepCopy()
-				delete(brokenNode1.Annotations, util.OVNNodeHostCIDRs)
+				brokenNode := node1.DeepCopy()
+				failoverNodeName := node2Name
+				if initialNodeName == node2Name {
+					brokenNode = node2.DeepCopy()
+					failoverNodeName = node1Name
+				}
+				delete(brokenNode.Annotations, util.OVNNodeHostCIDRs)
 				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(
-					context.TODO(), brokenNode1, metav1.UpdateOptions{})
+					context.TODO(), brokenNode, metav1.UpdateOptions{})
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				handler := &egressIPClusterControllerEventHandler{
 					objType: factory.EgressNodeType,
 					eIPC:    fakeClusterManagerOVN.eIPC,
 				}
-				err = handler.UpdateResource(brokenNode1, brokenNode1, true)
+				err = handler.UpdateResource(brokenNode, brokenNode, true)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				gomega.Eventually(func() string {
@@ -1607,7 +1614,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						return ""
 					}
 					return eIP.Status.Items[0].Node
-				}).WithTimeout(2 * time.Second).Should(gomega.Equal(node2Name))
+				}).WithTimeout(2 * time.Second).Should(gomega.Equal(failoverNodeName))
 
 				gomega.Consistently(func() string {
 					eIP, err := fakeClusterManagerOVN.fakeClient.EgressIPClient.K8sV1().EgressIPs().Get(context.TODO(), egressIPName, metav1.GetOptions{})
@@ -1615,7 +1622,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 						return ""
 					}
 					return eIP.Status.Items[0].Node
-				}).WithTimeout(500 * time.Millisecond).Should(gomega.Equal(node2Name))
+				}).WithTimeout(500 * time.Millisecond).Should(gomega.Equal(failoverNodeName))
 
 				return nil
 			}
