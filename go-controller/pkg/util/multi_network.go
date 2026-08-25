@@ -2125,6 +2125,13 @@ func GetCUDNVRFName(cudnName string, networkID int) string {
 	if vrfDeviceName := cudnVRFDeviceName(cudnName); vrfDeviceName != "" {
 		return vrfDeviceName
 	}
+	return GetUDNVRFName(networkID)
+}
+
+// GetUDNVRFName returns the VRF device name for a namespaced UDN given its
+// network ID, or an empty string when the ID is not known yet (InvalidID):
+// the VRF name of a namespaced UDN is always ID-derived.
+func GetUDNVRFName(networkID int) string {
 	if networkID == types.InvalidID {
 		return ""
 	}

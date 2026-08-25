@@ -2950,3 +2950,11 @@ func TestGetCUDNVRFName(t *testing.T) {
 		})
 	}
 }
+
+func TestGetUDNVRFName(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(GetUDNVRFName(9)).To(gomega.Equal("mp9-udn-vrf"),
+		"the VRF name of a namespaced UDN is always ID-derived")
+	g.Expect(GetUDNVRFName(ovntypes.InvalidID)).To(gomega.BeEmpty(),
+		"the name can't be derived while the network ID is unknown")
+}

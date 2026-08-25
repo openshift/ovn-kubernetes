@@ -490,6 +490,72 @@ var _ = Describe("User Defined Network Controller", func() {
 				Expect(err).To(HaveOccurred())
 				Expect(apierrors.IsNotFound(err)).To(BeTrue())
 			})
+
+			It("should publish the ID-derived VRF name of a primary UDN", func() {
+				udn := testPrimaryUDN()
+				udn.Spec.Layer3.Subnets = []udnv1.Layer3Subnet{{CIDR: "10.20.0.0/16"}}
+
+				c = newTestController(template.RenderNetAttachDefManifest, udn, testNamespace(udn.Namespace))
+				Expect(c.Run()).To(Succeed())
+
+				Eventually(func() []metav1.Condition {
+					var err error
+					udn, err = cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return normalizeConditions(udn.Status.Conditions)
+				}).Should(Equal([]metav1.Condition{{
+					Type:    "NetworkCreated",
+					Status:  "True",
+					Reason:  "NetworkAttachmentDefinitionCreated",
+					Message: "NetworkAttachmentDefinition has been created",
+				}}))
+				Expect(udn.Status.VRFName).To(BeNil(),
+					"the VRF name depends on the network ID and must not be published before the NAD is annotated with it")
+
+				By("annotating the NAD with the network ID")
+				Eventually(func() error {
+					nad, err := cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+					if nad.Annotations == nil {
+						nad.Annotations = map[string]string{}
+					}
+					nad.Annotations[ovntypes.OvnNetworkIDAnnotation] = "9"
+					_, err = cs.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(udn.Namespace).Update(context.Background(), nad, metav1.UpdateOptions{})
+					return err
+				}).Should(Succeed())
+
+				Eventually(func() string {
+					var err error
+					udn, err = cs.UserDefinedNetworkClient.K8sV1().UserDefinedNetworks(udn.Namespace).Get(context.Background(), udn.Name, metav1.GetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					return ptr.Deref(udn.Status.VRFName, "")
+				}).Should(Equal("mp9-udn-vrf"), "status should expose the ID-derived VRF name once the network ID is known")
+			})
+
+			It("should derive the published VRF name from the UDN sync outcome", func() {
+				udn := testPrimaryUDN()
+				udn.Status.VRFName = ptr.To("mp9-udn-vrf")
+				nadWithoutID := testNAD()
+				nadWithID := testNAD()
+				nadWithID.Annotations = map[string]string{ovntypes.OvnNetworkIDAnnotation: "8"}
+
+				Expect(udnVRFName(udn, nadWithID, nil, true)).To(Equal("mp8-udn-vrf"),
+					"the annotated network ID must drive the published name")
+				Expect(udnVRFName(udn, nadWithoutID, nil, true)).To(Equal("mp9-udn-vrf"),
+					"the published name must be preserved while the NAD is not annotated with the network ID yet")
+				Expect(udnVRFName(udn, nil, errors.New("sync failed"), true)).To(Equal("mp9-udn-vrf"),
+					"a failed sync must not clear the published name while the NAD remains")
+				Expect(udnVRFName(udn, nil, errors.New("sync failed"), false)).To(BeEmpty(),
+					"a sync that failed after the NAD was deleted must clear the name, since the released network ID may be reallocated")
+				Expect(udnVRFName(udn, nil, nil, false)).To(BeEmpty(),
+					"the name must clear once the NAD is gone, since the released network ID may be reallocated")
+
+				udn.Spec.Layer3.Role = udnv1.NetworkRoleSecondary
+				Expect(udnVRFName(udn, nadWithID, nil, true)).To(BeEmpty(),
+					"the VRF name is published only for primary networks")
+			})
 		})
 
 		Context("reconcile CUDN CR", func() {
