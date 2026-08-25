@@ -139,13 +139,26 @@ if [[ "${WHAT}" != *"${DHCP_IPAM_TESTS}"* ]]; then
   skip_label "Feature:DHCPIPAM"
 fi
 
-# Only run network segmentation tests if they are explicitly requested
+# Select all Uplink tests by feature label. These tests span network
+# segmentation and route advertisement suites, with individual specs deciding
+# whether to use or skip DPU-specific behavior.
+# Only run network segmentation tests if they are explicitly requested. Route
+# advertisement lanes are the exception: allow tests in the intersection of
+# network segmentation and route advertisements when both features are enabled.
+UPLINK_TESTS="Uplink"
 NETWORK_SEGMENTATION_TESTS="Network Segmentation"
-if [[ "${WHAT}" = "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
+if [[ "${WHAT}" = "${UPLINK_TESTS}" ]]; then
+  require_label "Feature:Uplink"
+  shift # don't "focus" on Uplink since we filter by label
+elif [[ "${WHAT}" = "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
   require_label "Feature:NetworkSegmentation"
   shift # don't "focus" on Network Segmentation since we filter by label
 elif [[ "${WHAT}" != "${NETWORK_SEGMENTATION_TESTS}"* ]]; then
-  skip_label "Feature:NetworkSegmentation"
+  if [ "$ENABLE_NETWORK_SEGMENTATION" == true ] && [ "$ENABLE_ROUTE_ADVERTISEMENTS" == true ]; then
+    skip_label "Feature:NetworkSegmentation && !(Feature:RouteAdvertisements)"
+  else
+    skip_label "Feature:NetworkSegmentation"
+  fi
 fi
 
 # Network Segmentation suite selection uses a feature label and removes the
@@ -166,6 +179,10 @@ SERIAL_LABEL="Serial"
 if [[ "${WHAT}" = "$SERIAL_LABEL" ]]; then
   require_label "$SERIAL_LABEL"
   shift # don't "focus" on Serial since we filter by label
+fi
+
+if [ "$ENABLE_UPLINK" != true ]; then
+  skip_label "Feature:Uplink"
 fi
 
 if [ "$ENABLE_EVPN" != true ]; then

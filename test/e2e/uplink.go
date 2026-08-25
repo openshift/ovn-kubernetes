@@ -108,7 +108,7 @@ type dpuHostAddrAnnotation struct {
 	IPv6 string `json:"ipv6"`
 }
 
-var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", feature.NetworkSegmentation, func() {
+var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", feature.NetworkSegmentation, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-default")
 	f.SkipNamespaceCreation = true
 
@@ -429,7 +429,7 @@ func provisionUplinkWithActiveCUDN(
 	}
 }
 
-var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, func() {
+var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-bgp")
 	f.SkipNamespaceCreation = true
 
@@ -686,6 +686,17 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 			networkLabels,
 			uplinkName,
 		)).To(gomega.Succeed())
+		if isDynamicUDNEnabled() {
+			ginkgo.By("activating the dynamic CUDN on the nodes under test")
+			for i, node := range schedulableNodes.Items {
+				createUplinkNetexecPod(
+					f,
+					namespace.Name,
+					fmt.Sprintf("activate-%s-%d", networkName, i),
+					node.Name,
+				)
+			}
+		}
 		gomega.Expect(createRouteAdvertisements(
 			f,
 			ictx,
@@ -783,7 +794,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 	})
 })
 
-var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation", feature.RouteAdvertisementsDynamicUDN, func() {
+var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation", feature.RouteAdvertisementsDynamicUDN, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-dynamic-bgp")
 	f.SkipNamespaceCreation = true
 
@@ -983,7 +994,7 @@ var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation
 	})
 })
 
-var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, func() {
+var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feature.NetworkSegmentation, feature.RouteAdvertisements, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-bgp")
 	f.SkipNamespaceCreation = true
 
@@ -1058,6 +1069,12 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 			"client-"+networkName,
 			schedulableNodes.Items[0].Name,
 		)
+		cudnNodes := schedulableNodes.Items
+		if isDynamicUDNEnabled() {
+			// With dynamic UDN allocation, the CUDN and its VRF only exist on
+			// nodes running workloads attached to the network.
+			cudnNodes = []corev1.Node{schedulableNodes.Items[0]}
+		}
 
 		serverNetwork, err := infraprovider.Get().GetNetwork(serverNetworkName)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1097,6 +1114,8 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 					serverCIDR,
 					frrIP,
 				)
+			}
+			for _, node := range cudnNodes {
 				gomega.Eventually(func() (bool, error) {
 					return hasRouteInCUDNVRF(node, networkName, serverCIDR, bgpNextHopsForPeer(family, frrIface)...)
 				}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
@@ -1213,7 +1232,7 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 	})
 })
 
-var _ = ginkgo.Describe("Network Segmentation Uplink split DPU status conditions", feature.NetworkSegmentation, func() {
+var _ = ginkgo.Describe("Network Segmentation Uplink split DPU status conditions", feature.NetworkSegmentation, feature.Uplink, func() {
 	f := wrappedTestFramework("uplink-conditions")
 	f.SkipNamespaceCreation = true
 
@@ -2891,6 +2910,8 @@ func createUplinkNodePortService(f *framework.Framework, namespace string, selec
 
 	service := e2eservice.CreateServiceSpec("server", "", false, selector)
 	service.Spec.Type = corev1.ServiceTypeNodePort
+	preferDualStack := corev1.IPFamilyPolicyPreferDualStack
+	service.Spec.IPFamilyPolicy = &preferDualStack
 	service.Spec.Ports[0].Port = netexecPort
 	service.Spec.Ports[0].TargetPort = intstr.FromInt32(netexecPort)
 	service, err := f.ClientSet.CoreV1().Services(namespace).Create(
