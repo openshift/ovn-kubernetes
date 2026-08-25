@@ -686,6 +686,17 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 			networkLabels,
 			uplinkName,
 		)).To(gomega.Succeed())
+		if isDynamicUDNEnabled() {
+			ginkgo.By("activating the dynamic CUDN on the nodes under test")
+			for i, node := range schedulableNodes.Items {
+				createUplinkNetexecPod(
+					f,
+					namespace.Name,
+					fmt.Sprintf("activate-%s-%d", networkName, i),
+					node.Name,
+				)
+			}
+		}
 		gomega.Expect(createRouteAdvertisements(
 			f,
 			ictx,
