@@ -1929,3 +1929,10 @@ func startTcpdumpMonitorPodOnNode(f *framework.Framework, startupTimeout time.Du
 	err = e2epod.WaitTimeoutForPodRunningInNamespace(startupCtx, f.ClientSet, name, f.Namespace.Name, startupTimeout)
 	framework.ExpectNoError(err, fmt.Sprintf("traffic monitor pod %s did not become Running within %v", name, startupTimeout))
 }
+
+func setupUnderlay(f *framework.Framework, providerCtx infraapi.Context, underlay infraapi.Underlay) {
+	if !infraprovider.SupportsSetupUnderlay() {
+		ginkgo.Skip(fmt.Sprintf("infra provider %q does not support SetupUnderlay", infraprovider.Get().Name()))
+	}
+	gomega.Expect(providerCtx.SetupUnderlay(f, underlay)).To(gomega.Succeed())
+}
