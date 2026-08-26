@@ -33,11 +33,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -981,6 +983,40 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 }
 
 // used to inject OVN specific test actions
+// networkStatusVRFName returns the VRF device name published in the given
+// network's (UDN or CUDN) status.vrfName field, empty when unset.
+func networkStatusVRFName(network *unstructured.Unstructured) (string, error) {
+	vrfName, _, err := unstructured.NestedString(network.Object, "status", "vrfName")
+	return vrfName, err
+}
+
+// waitForNetworkVRFName waits until the network CR reachable through the
+// given client publishes a non-empty status.vrfName and returns it.
+func waitForNetworkVRFName(client dynamic.ResourceInterface, networkName string, timeout, poll time.Duration) string {
+	ginkgo.GinkgoHelper()
+
+	var vrfName string
+	gomega.Eventually(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		network, err := client.Get(ctx, networkName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		name, err := networkStatusVRFName(network)
+		if err != nil {
+			return err
+		}
+		if name == "" {
+			return fmt.Errorf("network %s has no VRF name in status", networkName)
+		}
+		vrfName = name
+		return nil
+	}).WithTimeout(timeout).WithPolling(poll).Should(gomega.Succeed(),
+		"expected network %s to publish its VRF name in status", networkName)
+	return vrfName
+}
+
 func wrappedTestFramework(basename string) *framework.Framework {
 	f := newPrivelegedTestFramework(basename)
 	ginkgo.JustAfterEach(func() {

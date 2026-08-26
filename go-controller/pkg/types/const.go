@@ -21,6 +21,13 @@ const (
 	// UDNVRFDevicePrefix vrf device prefix associated with every user
 	UDNVRFDevicePrefix = "mp"
 
+	// MaxInterfaceNameLength is the maximum length of a Linux network
+	// interface name: IFNAMSIZ - 1, where IFNAMSIZ (16) includes the NUL
+	// terminator. Kept as a literal rather than unix.IFNAMSIZ - 1 because
+	// this package also builds on Windows (hybrid-overlay), where
+	// golang.org/x/sys/unix is not available.
+	MaxInterfaceNameLength = 15
+
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = K8sMgmtIntfNamePrefix + "0"
 

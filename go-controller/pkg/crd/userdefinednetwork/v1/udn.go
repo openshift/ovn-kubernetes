@@ -56,6 +56,15 @@ type UserDefinedNetworkStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// VRFName is the name of the Linux VRF device that OVN-Kubernetes creates
+	// for this network on every node where the network is present. It is
+	// populated for primary networks. Consumers that must name the VRF, such
+	// as FRRConfiguration authors filling in the routers 'vrf' field, should
+	// read this value instead of deriving it.
+	// +kubebuilder:validation:MaxLength=15
+	// +optional
+	VRFName *string `json:"vrfName,omitempty"`
 }
 
 // UserDefinedNetworkList contains a list of UserDefinedNetwork.

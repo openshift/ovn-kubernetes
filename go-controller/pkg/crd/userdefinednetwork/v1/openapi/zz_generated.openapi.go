@@ -488,6 +488,13 @@ func schema_pkg_crd_userdefinednetwork_v1_ClusterUserDefinedNetworkStatus(ref co
 							},
 						},
 					},
+					"vrfName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "VRFName is the name of the Linux VRF device that OVN-Kubernetes creates for this network on every node where the network is present. It is populated for primary networks. Consumers that must name the VRF, such as FRRConfiguration authors filling in the routers 'vrf' field, should read this value instead of deriving it.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 			},
 		},
@@ -1124,6 +1131,13 @@ func schema_pkg_crd_userdefinednetwork_v1_UserDefinedNetworkStatus(ref common.Re
 									},
 								},
 							},
+						},
+					},
+					"vrfName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "VRFName is the name of the Linux VRF device that OVN-Kubernetes creates for this network on every node where the network is present. It is populated for primary networks. Consumers that must name the VRF, such as FRRConfiguration authors filling in the routers 'vrf' field, should read this value instead of deriving it.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 				},

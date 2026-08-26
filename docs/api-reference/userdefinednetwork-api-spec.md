@@ -118,6 +118,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#condition-v1-meta) array_ | Conditions slice of condition objects indicating details about ClusterUserDefineNetwork status. |  |  |
+| `vrfName` _string_ | VRFName is the name of the Linux VRF device that OVN-Kubernetes creates<br />for this network on every node where the network is present. It is<br />populated for primary networks. Consumers that must name the VRF, such<br />as FRRConfiguration authors filling in the routers 'vrf' field, should<br />read this value instead of deriving it. |  | MaxLength: 15 <br /> |
 
 
 #### DualStackCIDRs
@@ -552,6 +553,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `conditions` _[Condition](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#condition-v1-meta) array_ |  |  |  |
+| `vrfName` _string_ | VRFName is the name of the Linux VRF device that OVN-Kubernetes creates<br />for this network on every node where the network is present. It is<br />populated for primary networks. Consumers that must name the VRF, such<br />as FRRConfiguration authors filling in the routers 'vrf' field, should<br />read this value instead of deriving it. |  | MaxLength: 15 <br /> |
 
 
 #### VLANConfig

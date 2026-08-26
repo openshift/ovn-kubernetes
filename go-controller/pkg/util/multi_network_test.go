@@ -2829,3 +2829,132 @@ func TestGetNodeGatewayIP(t *testing.T) {
 		})
 	}
 }
+
+func TestGetNetworkVRFName(t *testing.T) {
+	tests := []struct {
+		desc        string
+		networkName string
+		networkID   int
+		expected    string
+	}{
+		{
+			desc:        "default network",
+			networkName: ovntypes.DefaultNetworkName,
+			networkID:   ovntypes.DefaultNetworkID,
+			expected:    ovntypes.DefaultNetworkName,
+		},
+		{
+			desc:        "CUDN with a name that fits the device name length limit",
+			networkName: "cluster_udn_tenant-red",
+			networkID:   3,
+			expected:    "tenant-red",
+		},
+		{
+			desc:        "CUDN with a 15-character name",
+			networkName: "cluster_udn_tenant-12345678",
+			networkID:   3,
+			expected:    "tenant-12345678",
+		},
+		{
+			desc:        "CUDN with a 16-character name",
+			networkName: "cluster_udn_tenant-123456789",
+			networkID:   7,
+			expected:    "mp7-udn-vrf",
+		},
+		{
+			desc:        "CUDN with a name longer than the device name length limit",
+			networkName: "cluster_udn_tenant-1234567890",
+			networkID:   7,
+			expected:    "mp7-udn-vrf",
+		},
+		{
+			desc:        "CUDN named default",
+			networkName: "cluster_udn_default",
+			networkID:   4,
+			expected:    "mp4-udn-vrf",
+		},
+		{
+			desc:        "namespaced UDN",
+			networkName: "ns_tenant-red",
+			networkID:   5,
+			expected:    "mp5-udn-vrf",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			var netInfo NetInfo = &DefaultNetInfo{}
+			if tc.networkName != ovntypes.DefaultNetworkName {
+				var err error
+				netInfo, err = NewNetInfo(&ovncnitypes.NetConf{
+					NetConf:  cnitypes.NetConf{Name: tc.networkName},
+					Topology: ovntypes.Layer2Topology,
+				})
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+			mutableNetInfo := NewMutableNetInfo(netInfo)
+			mutableNetInfo.SetNetworkID(tc.networkID)
+			g.Expect(GetNetworkVRFName(mutableNetInfo)).To(gomega.Equal(tc.expected))
+		})
+	}
+}
+
+func TestGetCUDNVRFName(t *testing.T) {
+	tests := []struct {
+		desc      string
+		cudnName  string
+		networkID int
+		expected  string
+	}{
+		{
+			desc:      "name that fits the device name length limit",
+			cudnName:  "tenant-red",
+			networkID: 3,
+			expected:  "tenant-red",
+		},
+		{
+			desc:      "name that fits the device name length limit, network ID unknown",
+			cudnName:  "tenant-red",
+			networkID: ovntypes.InvalidID,
+			expected:  "tenant-red",
+		},
+		{
+			desc:      "16-character name",
+			cudnName:  "tenant-123456789",
+			networkID: 7,
+			expected:  "mp7-udn-vrf",
+		},
+		{
+			desc:      "name longer than the device name length limit",
+			cudnName:  "tenant-1234567890",
+			networkID: 7,
+			expected:  "mp7-udn-vrf",
+		},
+		{
+			desc:      "name longer than the device name length limit, network ID unknown",
+			cudnName:  "tenant-1234567890",
+			networkID: ovntypes.InvalidID,
+			expected:  "",
+		},
+		{
+			desc:      "name is the default network name",
+			cudnName:  ovntypes.DefaultNetworkName,
+			networkID: 4,
+			expected:  "mp4-udn-vrf",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(GetCUDNVRFName(tc.cudnName, tc.networkID)).To(gomega.Equal(tc.expected))
+		})
+	}
+}
+
+func TestGetUDNVRFName(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(GetUDNVRFName(9)).To(gomega.Equal("mp9-udn-vrf"),
+		"the VRF name of a namespaced UDN is always ID-derived")
+	g.Expect(GetUDNVRFName(ovntypes.InvalidID)).To(gomega.BeEmpty(),
+		"the name can't be derived while the network ID is unknown")
+}
