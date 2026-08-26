@@ -409,7 +409,7 @@ func (o *ContainerOps) DeleteNetwork(network api.Network) error {
 	})
 }
 
-func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
+func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) (res api.ExternalContainer, retErr error) {
 	if valid, err := container.IsValidPreCreateContainer(); !valid {
 		return container, err
 	}
@@ -444,6 +444,20 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 	if err != nil {
 		return container, fmt.Errorf("failed to create external container %s: %s (%s)", container, err, stdOut)
 	}
+	// The container now exists on the host. If any subsequent step fails
+	// (IP-polling timeout, network interface discovery, or post-create
+	// validation), remove it before returning so a post-create failure does not
+	// leak a privileged container. Best-effort: the original error is preserved
+	// as retErr and DeleteExternalContainer already no-ops when the container is
+	// already gone.
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		if delErr := o.DeleteExternalContainer(container); delErr != nil {
+			framework.Logf("failed to remove external container %s after a create failure: %v (original create error: %v)", container.Name, delErr, retErr)
+		}
+	}()
 	// fetch IPs for the attached container network. Host networked and --network none containers do not expose IP information.
 	if container.Network != nil && !isHostNetworked(container.Network.Name()) {
 		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 360*time.Second, true, func(ctx context.Context) (done bool, err error) {
