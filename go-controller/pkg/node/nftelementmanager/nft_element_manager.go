@@ -28,22 +28,38 @@ type Controller struct {
 	// failedRetryPeriod is how long to wait after a failed reconcile before
 	// retrying. Zero uses nftFailedReconcileRetry. Tests may override.
 	failedRetryPeriod time.Duration
+	// retryCh is signaled when Add/Delete/OwnMaps reconcile fails so Run
+	// retries soon instead of waiting for the next full sync period.
+	retryCh chan struct{}
 }
 
 const nftFailedReconcileRetry = time.Second
+
+// getNFTablesHelper is overridden in tests to inject reconcile failures.
+var getNFTablesHelper = nodenft.GetNFTablesHelper
 
 func NewController() *Controller {
 	return &Controller{
 		elements:  make([]element, 0),
 		ownedMaps: sets.New[string](),
+		retryCh:   make(chan struct{}, 1),
+	}
+}
+
+func (c *Controller) scheduleRetry() {
+	if c.retryCh == nil {
+		return
+	}
+	select {
+	case c.retryCh <- struct{}{}:
+	default:
 	}
 }
 
 // Run periodically reconciles nftables elements, including owned-map cleanup.
 // Immediate Add/Delete already reconcile; this loop is a safety net. If a
-// reconcile fails, retry quickly instead of waiting for the next full period
-// (which is 6 minutes for EgressIP SNAT and caused multi-minute gaps in
-// OCPBUGS-113693).
+// reconcile fails (including Add/OwnMaps while the link or nftables is not
+// ready), retry quickly instead of waiting for the next full period.
 func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 	ticker := time.NewTicker(syncPeriod)
 	defer ticker.Stop()
@@ -55,6 +71,15 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 	retryTimer.Stop()
 	defer retryTimer.Stop()
 
+	stopRetryTimer := func() {
+		if !retryTimer.Stop() {
+			select {
+			case <-retryTimer.C:
+			default:
+			}
+		}
+	}
+
 	tryReconcile := func() {
 		c.mu.Lock()
 		err := c.fullReconcile()
@@ -64,11 +89,10 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 			retryTimer.Reset(retryAfter)
 			return
 		}
-		if !retryTimer.Stop() {
-			select {
-			case <-retryTimer.C:
-			default:
-			}
+		stopRetryTimer()
+		select {
+		case <-c.retryCh:
+		default:
 		}
 	}
 
@@ -80,6 +104,8 @@ func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 			tryReconcile()
 		case <-retryTimer.C:
 			tryReconcile()
+		case <-c.retryCh:
+			retryTimer.Reset(retryAfter)
 		}
 	}
 }
@@ -164,8 +190,9 @@ func (c *Controller) doReconcile(pruneOwnedMaps bool) error {
 		klog.V(5).Infof("Reconciling NFT elements took %v", time.Since(start))
 	}()
 
-	nft, err := nodenft.GetNFTablesHelper()
+	nft, err := getNFTablesHelper()
 	if err != nil {
+		c.scheduleRetry()
 		return err
 	}
 
@@ -189,6 +216,7 @@ func (c *Controller) doReconcile(pruneOwnedMaps bool) error {
 				if knftables.IsNotFound(err) {
 					continue
 				}
+				c.scheduleRetry()
 				return err
 			}
 			for _, existingElem := range existing {
@@ -202,6 +230,7 @@ func (c *Controller) doReconcile(pruneOwnedMaps bool) error {
 	}
 
 	if err := nft.Run(context.TODO(), tx); err != nil {
+		c.scheduleRetry()
 		return err
 	}
 	c.elements = elementsToKeep
