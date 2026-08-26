@@ -8,6 +8,7 @@ package nftelementmanager
 
 import (
 	"context"
+	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -266,6 +267,13 @@ var _ = ginkgo.Describe("NFT Element Manager", func() {
 
 			elems := listElements(fake, testMapV4)
 			gomega.Expect(elems).To(gomega.HaveLen(1))
+		})
+	})
+
+	ginkgo.Context("Run retry", func() {
+		ginkgo.It("uses a short retry period after reconcile failure instead of the full sync period", func() {
+			gomega.Expect(nftFailedReconcileRetry).To(gomega.BeNumerically("<", 6*time.Minute))
+			gomega.Expect(nftFailedReconcileRetry).To(gomega.Equal(time.Second))
 		})
 	})
 

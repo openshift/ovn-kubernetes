@@ -25,7 +25,12 @@ type Controller struct {
 	mu        sync.Mutex
 	elements  []element
 	ownedMaps sets.Set[string]
+	// failedRetryPeriod is how long to wait after a failed reconcile before
+	// retrying. Zero uses nftFailedReconcileRetry. Tests may override.
+	failedRetryPeriod time.Duration
 }
+
+const nftFailedReconcileRetry = time.Second
 
 func NewController() *Controller {
 	return &Controller{
@@ -34,21 +39,47 @@ func NewController() *Controller {
 	}
 }
 
-// Run periodically reconciles nftables elements, including owned-map cleanup
+// Run periodically reconciles nftables elements, including owned-map cleanup.
+// Immediate Add/Delete already reconcile; this loop is a safety net. If a
+// reconcile fails, retry quickly instead of waiting for the next full period
+// (which is 6 minutes for EgressIP SNAT and caused multi-minute gaps in
+// OCPBUGS-113693).
 func (c *Controller) Run(stopCh <-chan struct{}, syncPeriod time.Duration) {
 	ticker := time.NewTicker(syncPeriod)
 	defer ticker.Stop()
+	retryAfter := c.failedRetryPeriod
+	if retryAfter <= 0 {
+		retryAfter = nftFailedReconcileRetry
+	}
+	retryTimer := time.NewTimer(time.Hour)
+	retryTimer.Stop()
+	defer retryTimer.Stop()
+
+	tryReconcile := func() {
+		c.mu.Lock()
+		err := c.fullReconcile()
+		c.mu.Unlock()
+		if err != nil {
+			klog.Errorf("NFT element manager: failed to reconcile (retry in %s): %v", retryAfter, err)
+			retryTimer.Reset(retryAfter)
+			return
+		}
+		if !retryTimer.Stop() {
+			select {
+			case <-retryTimer.C:
+			default:
+			}
+		}
+	}
 
 	for {
 		select {
 		case <-stopCh:
 			return
 		case <-ticker.C:
-			c.mu.Lock()
-			if err := c.fullReconcile(); err != nil {
-				klog.Errorf("NFT element manager: failed to reconcile (retry in %s): %v", syncPeriod.String(), err)
-			}
-			c.mu.Unlock()
+			tryReconcile()
+		case <-retryTimer.C:
+			tryReconcile()
 		}
 	}
 }
