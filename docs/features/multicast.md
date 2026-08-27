@@ -129,15 +129,22 @@ lists is the switch that is configured to act as an IGMP querier - on OVN-K's
 case, the node's logical switches.
 
 For these membership requests to be allowed in the network, each node's logical
-switch's must declare themselves "multicast queriers", by using the
-`other_config:mcast_querier=true` option.
+switch must declare itself a "multicast querier" with
+`other_config:mcast_querier=true`.
 
-The `other_config:mcast_snoop=true` is also used so the logical switches can
-passively snoop IGMP query / report / leave packets transferred between the
-multicast hosts and switches to compute group membership.
+Snooping and the querier are separate knobs. `mcast_snoop=true` is what lets
+the switch watch IGMP query / report / leave packets and build group
+membership. The querier is the thing that *injects* those queries. We only
+set `mcast_querier=true` while at least one namespace has
+`k8s.ovn.org/multicast-enabled=true`. OpenShift always enables multicast
+support in ovn-kubernetes, so if we also leave the querier on all the time,
+ovn-controller keeps sending unused IGMP/MLD queries. Those get flooded to
+every local port on `br-int` and can exceed the OVS 4096 resubmit limit.
 
-Without these two options, multicast traffic would be treated as broadcast
-traffic, which forwards packets to all ports on the network.
+Without snooping, multicast is treated as broadcast and forwarded to every
+port. The snippets below are from a cluster that is actually using multicast
+(`mcast_querier=true`). If multicast support is on but no namespace has the
+annotation, you should see `mcast_querier=false`.
 
 Please refer to the following snippet featuring the node's logical swithes
 of a cluster with one control plane node, and two workers, to see these
