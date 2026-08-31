@@ -300,6 +300,91 @@ func TestParseNetconf(t *testing.T) {
 			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: IPAM key is not supported. Use OVN-K provided IPAM via the `subnets` attribute"),
 		},
 		{
+			desc: "valid attachment definition for a localnet topology with DHCP IPAM and no subnets",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "netAttachDefName": "ns1/nad1",
+            "ipam": {"type": "dhcp"}
+    }
+`,
+			expectedNetConf: &ovncnitypes.NetConf{
+				Topology: "localnet",
+				NADName:  "ns1/nad1",
+				MTU:      1400,
+				NetConf:  cnitypes.NetConf{Name: "tenantred", Type: "ovn-k8s-cni-overlay", IPAM: cnitypes.IPAM{Type: "dhcp"}},
+			},
+		},
+		{
+			desc: "attachment definition for a layer2 topology with DHCP IPAM",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+            "netAttachDefName": "ns1/nad1",
+            "ipam": {"type": "dhcp"}
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: ipam.type \"dhcp\" is only supported with localnet topology"),
+		},
+		{
+			desc: "attachment definition for a localnet topology with DHCP IPAM and persistent IPs",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "netAttachDefName": "ns1/nad1",
+            "allowPersistentIPs": true,
+            "ipam": {"type": "dhcp"}
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: allowPersistentIPs requires OVN-Kubernetes-managed IPAM (the subnets attribute must be set)"),
+		},
+		{
+			desc: "attachment definition with persistent IPs but no subnets (IPAM-less)",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer2",
+            "netAttachDefName": "ns1/nad1",
+            "allowPersistentIPs": true
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: allowPersistentIPs requires OVN-Kubernetes-managed IPAM (the subnets attribute must be set)"),
+		},
+		{
+			desc: "attachment definition for a localnet topology with DHCP IPAM and subnets",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "localnet",
+            "netAttachDefName": "ns1/nad1",
+            "subnets": "172.18.0.0/16",
+            "ipam": {"type": "dhcp"}
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: ipam.type \"dhcp\" cannot be used together with the subnets attribute; addresses are assigned by the external DHCP server"),
+		},
+		{
+			desc: "attachment definition for a layer3 topology with DHCP IPAM",
+			inputNetAttachDefConfigSpec: `
+    {
+            "name": "tenantred",
+            "type": "ovn-k8s-cni-overlay",
+            "topology": "layer3",
+            "netAttachDefName": "ns1/nad1",
+            "ipam": {"type": "dhcp"}
+    }
+`,
+			expectedError: fmt.Errorf("error parsing Network Attachment Definition ns1/nad1: ipam.type \"dhcp\" is only supported with localnet topology"),
+		},
+		{
 			desc: "attachment definition missing the NAD name attribute",
 			inputNetAttachDefConfigSpec: `
     {
@@ -676,6 +761,125 @@ func TestParseNetconf(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIPAMType(t *testing.T) {
+	t.Run("localnet network with DHCP IPAM", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		netInfo, err := NewNetInfo(&ovncnitypes.NetConf{
+			NetConf:  cnitypes.NetConf{Name: "localnet-network", IPAM: cnitypes.IPAM{Type: "dhcp"}},
+			Topology: ovntypes.LocalnetTopology,
+			NADName:  "ns1/nad1",
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		g.Expect(netInfo.IPAMType()).To(gomega.Equal("dhcp"))
+	})
+
+	t.Run("localnet network without IPAM", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		netInfo, err := NewNetInfo(&ovncnitypes.NetConf{
+			NetConf:  cnitypes.NetConf{Name: "localnet-network"},
+			Topology: ovntypes.LocalnetTopology,
+			NADName:  "ns1/nad1",
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		g.Expect(netInfo.IPAMType()).To(gomega.BeEmpty())
+	})
+
+	t.Run("default network", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect((&DefaultNetInfo{}).IPAMType()).To(gomega.BeEmpty())
+	})
+
+	t.Run("copy preserves the IPAM type", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		netInfo, err := NewNetInfo(&ovncnitypes.NetConf{
+			NetConf:  cnitypes.NetConf{Name: "localnet-network", IPAM: cnitypes.IPAM{Type: "dhcp"}},
+			Topology: ovntypes.LocalnetTopology,
+			NADName:  "ns1/nad1",
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		g.Expect(NewMutableNetInfo(netInfo).IPAMType()).To(gomega.Equal("dhcp"))
+	})
+}
+
+// TestIPModeForDHCPNetworks pins the address-family correction for subnet-less
+// DHCP networks: IPMode is derived from subnets, which a DHCP network has
+// none of, yet its pods carry IPv4 addresses assigned by the external server.
+// Without the correction every IPMode consumer (QoS and policy match strings,
+// selector address-set creation) sees "no families" and silently produces
+// nothing.
+func TestIPModeForDHCPNetworks(t *testing.T) {
+	t.Run("subnet-less localnet with DHCP IPAM is IPv4", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		netInfo, err := NewNetInfo(&ovncnitypes.NetConf{
+			NetConf:  cnitypes.NetConf{Name: "localnet-network", IPAM: cnitypes.IPAM{Type: "dhcp"}},
+			Topology: ovntypes.LocalnetTopology,
+			NADName:  "ns1/nad1",
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		v4, v6 := netInfo.IPMode()
+		g.Expect(v4).To(gomega.BeTrue(), "DHCP IPAM assigns IPv4 addresses")
+		g.Expect(v6).To(gomega.BeFalse(), "DHCP IPAM mode is IPv4-only")
+	})
+
+	t.Run("subnet-less localnet without IPAM has no families", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		netInfo, err := NewNetInfo(&ovncnitypes.NetConf{
+			NetConf:  cnitypes.NetConf{Name: "localnet-network"},
+			Topology: ovntypes.LocalnetTopology,
+			NADName:  "ns1/nad1",
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		v4, v6 := netInfo.IPMode()
+		g.Expect(v4).To(gomega.BeFalse())
+		g.Expect(v6).To(gomega.BeFalse())
+	})
+
+	t.Run("copy preserves the corrected mode", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		netInfo, err := NewNetInfo(&ovncnitypes.NetConf{
+			NetConf:  cnitypes.NetConf{Name: "localnet-network", IPAM: cnitypes.IPAM{Type: "dhcp"}},
+			Topology: ovntypes.LocalnetTopology,
+			NADName:  "ns1/nad1",
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		v4, v6 := NewMutableNetInfo(netInfo).IPMode()
+		g.Expect(v4).To(gomega.BeTrue())
+		g.Expect(v6).To(gomega.BeFalse())
+	})
+}
+
+func TestDoesNetworkHaveDiscoverablePodIPs(t *testing.T) {
+	newLocalnet := func(t *testing.T, ipamType, subnets string) NetInfo {
+		t.Helper()
+		g := gomega.NewWithT(t)
+		netInfo, err := NewNetInfo(&ovncnitypes.NetConf{
+			NetConf:  cnitypes.NetConf{Name: "localnet-network", IPAM: cnitypes.IPAM{Type: ipamType}},
+			Topology: ovntypes.LocalnetTopology,
+			NADName:  "ns1/nad1",
+			Subnets:  subnets,
+		})
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		return netInfo
+	}
+
+	t.Run("localnet with subnets (own IPAM)", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(DoesNetworkHaveDiscoverablePodIPs(newLocalnet(t, "", "10.10.0.0/16"))).To(gomega.BeTrue())
+	})
+
+	t.Run("subnet-less localnet with DHCP IPAM", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(DoesNetworkHaveDiscoverablePodIPs(newLocalnet(t, "dhcp", ""))).To(gomega.BeTrue(),
+			"DHCP-learned IPs are reported via the pod-networks annotation, so they are discoverable")
+	})
+
+	t.Run("subnet-less localnet without IPAM", func(t *testing.T) {
+		g := gomega.NewWithT(t)
+		g.Expect(DoesNetworkHaveDiscoverablePodIPs(newLocalnet(t, "", ""))).To(gomega.BeFalse(),
+			"pods configure their own IPs, invisible to ovnkube")
+	})
 }
 
 func TestJoinSubnets(t *testing.T) {
@@ -2035,6 +2239,20 @@ func TestAreNetworksCompatible(t *testing.T) {
 			expectedResult:         true,
 			expectationDescription: "networks with no EVPN config should be compatible",
 		},
+		{
+			desc:                   "ipam.type update (no IPAM to DHCP)",
+			aNetwork:               &userDefinedNetInfo{},
+			anotherNetwork:         &userDefinedNetInfo{ipamType: "dhcp"},
+			expectedResult:         false,
+			expectationDescription: "toggling ipam.type must recreate the network controller",
+		},
+		{
+			desc:                   "same dhcp ipam.type is compatible",
+			aNetwork:               &userDefinedNetInfo{ipamType: "dhcp"},
+			anotherNetwork:         &userDefinedNetInfo{ipamType: "dhcp"},
+			expectedResult:         true,
+			expectationDescription: "unchanged ipam.type must not force a recreate",
+		},
 	}
 
 	for _, test := range tests {
@@ -2610,4 +2828,133 @@ func TestGetNodeGatewayIP(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetNetworkVRFName(t *testing.T) {
+	tests := []struct {
+		desc        string
+		networkName string
+		networkID   int
+		expected    string
+	}{
+		{
+			desc:        "default network",
+			networkName: ovntypes.DefaultNetworkName,
+			networkID:   ovntypes.DefaultNetworkID,
+			expected:    ovntypes.DefaultNetworkName,
+		},
+		{
+			desc:        "CUDN with a name that fits the device name length limit",
+			networkName: "cluster_udn_tenant-red",
+			networkID:   3,
+			expected:    "tenant-red",
+		},
+		{
+			desc:        "CUDN with a 15-character name",
+			networkName: "cluster_udn_tenant-12345678",
+			networkID:   3,
+			expected:    "tenant-12345678",
+		},
+		{
+			desc:        "CUDN with a 16-character name",
+			networkName: "cluster_udn_tenant-123456789",
+			networkID:   7,
+			expected:    "mp7-udn-vrf",
+		},
+		{
+			desc:        "CUDN with a name longer than the device name length limit",
+			networkName: "cluster_udn_tenant-1234567890",
+			networkID:   7,
+			expected:    "mp7-udn-vrf",
+		},
+		{
+			desc:        "CUDN named default",
+			networkName: "cluster_udn_default",
+			networkID:   4,
+			expected:    "mp4-udn-vrf",
+		},
+		{
+			desc:        "namespaced UDN",
+			networkName: "ns_tenant-red",
+			networkID:   5,
+			expected:    "mp5-udn-vrf",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			var netInfo NetInfo = &DefaultNetInfo{}
+			if tc.networkName != ovntypes.DefaultNetworkName {
+				var err error
+				netInfo, err = NewNetInfo(&ovncnitypes.NetConf{
+					NetConf:  cnitypes.NetConf{Name: tc.networkName},
+					Topology: ovntypes.Layer2Topology,
+				})
+				g.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+			mutableNetInfo := NewMutableNetInfo(netInfo)
+			mutableNetInfo.SetNetworkID(tc.networkID)
+			g.Expect(GetNetworkVRFName(mutableNetInfo)).To(gomega.Equal(tc.expected))
+		})
+	}
+}
+
+func TestGetCUDNVRFName(t *testing.T) {
+	tests := []struct {
+		desc      string
+		cudnName  string
+		networkID int
+		expected  string
+	}{
+		{
+			desc:      "name that fits the device name length limit",
+			cudnName:  "tenant-red",
+			networkID: 3,
+			expected:  "tenant-red",
+		},
+		{
+			desc:      "name that fits the device name length limit, network ID unknown",
+			cudnName:  "tenant-red",
+			networkID: ovntypes.InvalidID,
+			expected:  "tenant-red",
+		},
+		{
+			desc:      "16-character name",
+			cudnName:  "tenant-123456789",
+			networkID: 7,
+			expected:  "mp7-udn-vrf",
+		},
+		{
+			desc:      "name longer than the device name length limit",
+			cudnName:  "tenant-1234567890",
+			networkID: 7,
+			expected:  "mp7-udn-vrf",
+		},
+		{
+			desc:      "name longer than the device name length limit, network ID unknown",
+			cudnName:  "tenant-1234567890",
+			networkID: ovntypes.InvalidID,
+			expected:  "",
+		},
+		{
+			desc:      "name is the default network name",
+			cudnName:  ovntypes.DefaultNetworkName,
+			networkID: 4,
+			expected:  "mp4-udn-vrf",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(GetCUDNVRFName(tc.cudnName, tc.networkID)).To(gomega.Equal(tc.expected))
+		})
+	}
+}
+
+func TestGetUDNVRFName(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(GetUDNVRFName(9)).To(gomega.Equal("mp9-udn-vrf"),
+		"the VRF name of a namespaced UDN is always ID-derived")
+	g.Expect(GetUDNVRFName(ovntypes.InvalidID)).To(gomega.BeEmpty(),
+		"the name can't be derived while the network ID is unknown")
 }
