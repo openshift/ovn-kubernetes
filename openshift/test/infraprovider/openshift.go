@@ -3,9 +3,11 @@ package infraprovider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -97,6 +99,18 @@ func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 		// satisfy this condition; otherwise, they will be skipped.
 		_ = os.Setenv("OVN_GATEWAY_MODE", "local")
 	}
+}
+
+// CheckForEgressIP checks if the cluster supports EgressIP tests.
+// On baremetal clusters with initialized infrastructure, EgressIP is available.
+// Also sets ENABLE_NETWORK_SEGMENTATION=true which is required by EgressIP
+// tests that guard on isNetworkSegmentationEnabled().
+func (o *OpenshiftInfraProvider) CheckForEgressIP() bool {
+	if o.clusterInfra != nil {
+		os.Setenv("ENABLE_NETWORK_SEGMENTATION", "true")
+		return true
+	}
+	return false
 }
 
 // CheckForEVPN checks all EVPN prerequisites
@@ -197,8 +211,38 @@ func (o *OpenshiftInfraProvider) GetK8HostPort() uint16 {
 	return o.hostPort.Allocate()
 }
 
-func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
-	panic("not implemented")
+func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(nodeName string, network api.Network) (api.NetworkInterface, error) {
+	v4Subnet, v6Subnet, err := network.IPv4IPv6Subnets()
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get network subnets: %w", err)
+	}
+
+	output, err := o.ExecK8NodeCommand(nodeName, []string{"ip", "-j", "addr"})
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get network interfaces from node %s: %w", nodeName, err)
+	}
+
+	jsonStart := strings.Index(output, "[")
+	if jsonStart < 0 {
+		return api.NetworkInterface{}, fmt.Errorf("no JSON array found in ip addr output from node %s", nodeName)
+	}
+	jsonEnd := strings.LastIndex(output, "]")
+	if jsonEnd < jsonStart {
+		return api.NetworkInterface{}, fmt.Errorf("no closing JSON array bracket found in ip addr output from node %s", nodeName)
+	}
+	output = output[jsonStart : jsonEnd+1]
+
+	var links []linkInfo
+	if err := json.Unmarshal([]byte(output), &links); err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to parse network interfaces from node %s: %w", nodeName, err)
+	}
+
+	for _, link := range links {
+		if netInfo := tryMatchLink(link, v4Subnet, v6Subnet); netInfo != nil {
+			return *netInfo, nil
+		}
+	}
+	return api.NetworkInterface{}, fmt.Errorf("no network interface found on node %s matching subnets v4=%s v6=%s", nodeName, v4Subnet, v6Subnet)
 }
 
 func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
