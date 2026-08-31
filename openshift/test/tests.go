@@ -61,6 +61,7 @@ var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:openshift/conformance/parallel]",
+	"[ovn-kubernetes-ote][sig-network] CUDN Localnet [JIRA:Networking][OTP][FdpOvnOvs] OCP-81190:Verify IP Block network policy with CUDN with localnet topology",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
