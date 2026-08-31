@@ -7,7 +7,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"net/http"
 	"regexp"
@@ -39,6 +41,7 @@ import (
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
@@ -432,9 +435,68 @@ func getPod(f *framework.Framework, podName string) *v1.Pod {
 }
 
 // Create a pod on the specified node using the agnostic host image
+// sanitizeDNSName converts an arbitrary string into a valid DNS-1123 subdomain
+// (lowercase alphanumeric plus '-', starting and ending with an alphanumeric,
+// at most 253 characters) so it can be used as a Kubernetes resource name. Cloud
+// node names frequently contain dots (e.g.
+// "ip-10-0-11-240.us-west-1.compute.internal") which are illegal in pod names.
+// Whenever sanitization alters the input, a short deterministic suffix derived
+// from the original is appended so that distinct inputs (e.g. "a.b-ep" and
+// "a-b-ep") cannot collapse onto the same name and collide on Create.
+func sanitizeDNSName(name string) string {
+	sanitized := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			return r
+		}
+		return '-'
+	}, strings.ToLower(name))
+	sanitized = strings.Trim(sanitized, "-")
+	if sanitized == "" {
+		sanitized = "default"
+	}
+
+	suffix := ""
+	if sanitized != name {
+		h := fnv.New32a()
+		_, _ = h.Write([]byte(name))
+		suffix = fmt.Sprintf("-%08x", h.Sum32())
+	}
+
+	if maxLen := 253 - len(suffix); len(sanitized) > maxLen {
+		sanitized = strings.TrimRight(sanitized[:maxLen], "-")
+	}
+	return sanitized + suffix
+}
+
+// skipIfExternalInfraUnavailable skips the test if external container infrastructure is not available.
+// This is used for tests that require bare-metal cluster infrastructure with external containers,
+// which are not available on cloud platforms.
+// Only skips for the specific "external infrastructure not available" error - other PrimaryNetwork
+// errors indicate a real provider failure and should fail the test.
+func skipIfExternalInfraUnavailable() {
+	_, err := infraprovider.Get().PrimaryNetwork()
+	if err != nil {
+		// Only skip if this is the known "infrastructure not configured" error.
+		// Other errors indicate a provider regression and should fail the test.
+		// Check using errors.Is() for typed error matching, with string fallback for compatibility.
+		if stderrors.Is(err, infraprovider.ErrExternalInfraUnavailable) ||
+			strings.Contains(err.Error(), "external container infrastructure not available") {
+			e2eskipper.Skipf("Skipping test - requires external container infrastructure: %v", err)
+		}
+		// If it's a different error, let it propagate as a test failure
+		framework.ExpectNoError(err, "PrimaryNetwork() failed with unexpected error")
+	}
+}
+
 func createPod(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string, options ...func(*v1.Pod)) (*v1.Pod, error) {
 
-	contName := fmt.Sprintf("%s-container", podName)
+	// Sanitize pod name to ensure it's a valid DNS-1123 subdomain
+	// Kubernetes container names cannot contain dots, but node names on cloud platforms often do
+	podName = sanitizeDNSName(podName)
+	// Use a fixed short container name instead of deriving from podName.
+	// Container names must be DNS labels (63 char max), and deriving from long node names
+	// can exceed this limit even after sanitization.
+	contName := "test-container"
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

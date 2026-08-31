@@ -3,9 +3,11 @@ package infraprovider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -16,8 +18,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	e2einfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
@@ -29,19 +31,29 @@ type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
-	hostPort                *portalloc.PortAllocator
+	hostPort                *randPortAllocator
 	clusterInfra            *baremetalInfra
 }
 
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
 	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
+	if os.Getenv("USER_PROVIDED_AGNHOST_IMAGE") == "" {
+		if err := os.Setenv("USER_PROVIDED_AGNHOST_IMAGE", "registry.k8s.io/e2e-test-images/agnhost:2.40"); err != nil {
+			return nil, fmt.Errorf("failed to set USER_PROVIDED_AGNHOST_IMAGE: %w", err)
+		}
+	}
 	clusterInfra, err := initializeClusterInfra(config)
 	if err != nil {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
-		hostPort:     portalloc.New(30000, 32767),
+		// Host ports must come from 9000-9999: it is the only range besides
+		// the NodePort range (30000-32767) that the installer's AWS security
+		// groups and GCP firewall rules open for node-to-node TCP and UDP
+		// traffic, and unlike the NodePort range it cannot conflict with
+		// NodePort allocations.
+		hostPort:     newRandPortAllocator(9000, 9999),
 		clusterInfra: clusterInfra,
 	}
 	if err = o.initClusterObjects(config); err != nil {
@@ -151,7 +163,7 @@ func isLocalGatewayMode(network *operv1.Network) bool {
 
 func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return api.NetworkInterface{}, fmt.Errorf("GetExternalContainerNetworkInterface: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetExternalContainerNetworkInterface(container, network)
 }
@@ -180,14 +192,14 @@ func (o *OpenshiftInfraProvider) Name() string {
 
 func (o *OpenshiftInfraProvider) PrimaryNetwork() (api.Network, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("PrimaryNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetNetwork(primaryNetworkName)
 }
 
 func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("GetNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetNetwork(name)
 
@@ -197,8 +209,69 @@ func (o *OpenshiftInfraProvider) GetK8HostPort() uint16 {
 	return o.hostPort.Allocate()
 }
 
+// GetK8NodeNetworkInterface returns the network interface on the given node whose
+// address falls within the provided network's IPv4/IPv6 subnets. It inspects the
+// node's links via "ip -json address show" (run through oc debug) and matches each
+// address against the network CIDRs.
 func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
-	panic("not implemented")
+	if network == nil {
+		return api.NetworkInterface{}, fmt.Errorf("network must not be nil")
+	}
+	v4Subnet, v6Subnet, err := network.IPv4IPv6Subnets()
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get subnets for network %s: %w", network.Name(), err)
+	}
+
+	result, err := o.ExecK8NodeCommand(instance, []string{"ip", "-json", "address", "show"})
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to retrieve network interfaces from node %s: %w", instance, err)
+	}
+
+	var links []linkInfo
+	if err := json.Unmarshal([]byte(result), &links); err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to parse network interfaces from node %s: %w", instance, err)
+	}
+
+	return findNetworkInterfaceForSubnets(links, v4Subnet, v6Subnet)
+}
+
+func findNetworkInterfaceForSubnets(links []linkInfo, v4Subnet, v6Subnet string) (api.NetworkInterface, error) {
+	for _, link := range links {
+		netInterface := api.NetworkInterface{
+			InfName: link.IfName,
+			MAC:     link.Mac,
+		}
+		for _, addr := range link.AddrInfo {
+			if v4Subnet != "" {
+				match, err := ipInCIDR(addr.Local, v4Subnet)
+				if err != nil {
+					return api.NetworkInterface{}, fmt.Errorf("failed to match address %q against IPv4 subnet %q: %w", addr.Local, v4Subnet, err)
+				}
+				if match {
+					netInterface.IPv4 = addr.Local
+					netInterface.IPv4Prefix = strconv.Itoa(addr.PrefixLen)
+				}
+			}
+			if v6Subnet != "" {
+				match, err := ipInCIDR(addr.Local, v6Subnet)
+				if err != nil {
+					return api.NetworkInterface{}, fmt.Errorf("failed to match address %q against IPv6 subnet %q: %w", addr.Local, v6Subnet, err)
+				}
+				if match {
+					netInterface.IPv6 = addr.Local
+					netInterface.IPv6Prefix = strconv.Itoa(addr.PrefixLen)
+				}
+			}
+		}
+
+		hasV4Match := v4Subnet == "" || netInterface.IPv4 != ""
+		hasV6Match := v6Subnet == "" || netInterface.IPv6 != ""
+		if hasV4Match && hasV6Match {
+			return netInterface, nil
+		}
+	}
+
+	return api.NetworkInterface{}, fmt.Errorf("no node network interface found matching subnets v4=%s v6=%s", v4Subnet, v6Subnet)
 }
 
 func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
@@ -223,35 +296,37 @@ func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string
 
 func (o *OpenshiftInfraProvider) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("ExecExternalContainerCommand: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.ExecExternalContainerCommand(container, cmd)
 }
 
 func (o *OpenshiftInfraProvider) ExternalContainerPrimaryInterfaceName() string {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		framework.Logf("WARNING: ExternalContainerPrimaryInterfaceName called but external infrastructure not initialized - returning empty string")
+		return ""
 	}
 	return o.clusterInfra.ExternalContainerPrimaryInterfaceName()
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("GetExternalContainerLogs: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.GetExternalContainerLogs(container)
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerPort() uint16 {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		framework.Logf("WARNING: GetExternalContainerPort called but external infrastructure not initialized - returning 0")
+		return 0
 	}
 	return o.clusterInfra.GetExternalContainerPort()
 }
 
 func (o *OpenshiftInfraProvider) ListNetworks() ([]string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("ListNetworks: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.clusterInfra.ListNetworks()
 }
@@ -275,42 +350,42 @@ type contextOpenshift struct {
 
 func (o *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return api.ExternalContainer{}, fmt.Errorf("CreateExternalContainer: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.CreateExternalContainer(container)
 }
 
 func (o *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DeleteExternalContainer: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DeleteExternalContainer(container)
 }
 
 func (o *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("CreateNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.CreateNetwork(name, subnets...)
 }
 
 func (o *contextOpenshift) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return api.NetworkInterface{}, fmt.Errorf("AttachNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.AttachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DetachNetwork(network api.Network, container string) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DetachNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DetachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DeleteNetwork: %w", e2einfraprovider.ErrExternalInfraUnavailable)
 	}
 	return o.externalContainerContextProvider.DeleteNetwork(network)
 }
