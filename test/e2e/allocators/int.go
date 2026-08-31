@@ -15,6 +15,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
@@ -38,7 +39,7 @@ const (
 // need to avoid collisions when running in parallel. This is useful when the
 // orchestration handling the parallelization does not provide any context where
 // this allocation can happen. De-allocate with DeallocateInt.
-func AllocateInt(f *framework.Framework, key string, max int) (int, error) {
+func AllocateInt(kubeClient kubernetes.Interface, key string, max int) (int, error) {
 	if max < 1 {
 		return 0, fmt.Errorf("max must be at least 1, got %d", max)
 	}
@@ -46,13 +47,13 @@ func AllocateInt(f *framework.Framework, key string, max int) (int, error) {
 	ctx := context.Background()
 
 	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: configMapNamespace}}
-	_, err := f.ClientSet.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	_, err := kubeClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return 0, fmt.Errorf("failed to ensure allocator namespace: %w", err)
 	}
 
 	cm := &v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: key}}
-	client := f.ClientSet.CoreV1().ConfigMaps(configMapNamespace)
+	client := kubeClient.CoreV1().ConfigMaps(configMapNamespace)
 
 	_, err = client.Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
@@ -103,9 +104,9 @@ func AllocateInt(f *framework.Framework, key string, max int) (int, error) {
 }
 
 // DeallocateInt deallocates an integer previously allocated with AllocateInt.
-func DeallocateInt(f *framework.Framework, key string, index int) error {
+func DeallocateInt(kubeClient kubernetes.Interface, key string, index int) error {
 	ctx := context.Background()
-	client := f.ClientSet.CoreV1().ConfigMaps(configMapNamespace)
+	client := kubeClient.CoreV1().ConfigMaps(configMapNamespace)
 
 	return retry.RetryOnConflict(allocatorBackoff, func() error {
 		cm, err := client.Get(ctx, key, metav1.GetOptions{})
