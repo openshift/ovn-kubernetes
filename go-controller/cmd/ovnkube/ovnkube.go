@@ -38,6 +38,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	ovnnode "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
@@ -499,6 +500,14 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 		isOVNKubeControllerSyncd = &atomic.Bool{}
 	}
 
+	var libovsdbOvnSBClient client.Client
+	if runMode.ovnkubeController || runMode.node {
+		dgwrp := types.GWRouterToExtSwitchPrefix + (&util.DefaultNetInfo{}).GetNetworkScopedGWRouterName(runMode.identity)
+		libovsdbOvnSBClient, err = libovsdb.NewSBClient(dgwrp, ctx.Done())
+		if err != nil {
+			controllerErr = fmt.Errorf("failed to initialize libovsdb SB client: %w", err)
+		}
+	}
 	if runMode.ovnkubeController {
 		wg.Add(1)
 		go func() {
@@ -508,12 +517,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			libovsdbOvnNBClient, err := libovsdb.NewNBClient(ctx.Done())
 			if err != nil {
 				controllerErr = fmt.Errorf("failed to initialize libovsdb NB client: %w", err)
-				return
-			}
-
-			libovsdbOvnSBClient, err := libovsdb.NewSBClient(ctx.Done())
-			if err != nil {
-				controllerErr = fmt.Errorf("failed to initialize libovsdb SB client: %w", err)
 				return
 			}
 
@@ -580,6 +583,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			nodeControllerManager, err := controllermanager.NewNodeControllerManager(
 				ovnClientset,
 				watchFactory,
+				libovsdbOvnSBClient,
 				runMode.identity,
 				wg,
 				eventRecorder,
