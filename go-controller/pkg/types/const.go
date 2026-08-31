@@ -21,6 +21,13 @@ const (
 	// UDNVRFDevicePrefix vrf device prefix associated with every user
 	UDNVRFDevicePrefix = "mp"
 
+	// MaxInterfaceNameLength is the maximum length of a Linux network
+	// interface name: IFNAMSIZ - 1, where IFNAMSIZ (16) includes the NUL
+	// terminator. Kept as a literal rather than unix.IFNAMSIZ - 1 because
+	// this package also builds on Windows (hybrid-overlay), where
+	// golang.org/x/sys/unix is not available.
+	MaxInterfaceNameLength = 15
+
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = K8sMgmtIntfNamePrefix + "0"
 
@@ -155,6 +162,16 @@ const (
 	// LabelUserDefinedServiceName label key used in mirrored EndpointSlices that contains the service name matching the EndpointSlice
 	LabelUserDefinedServiceName = "k8s.ovn.org/service-name"
 
+	// OVNKProtocol is the protocol value used to mark kernel networking
+	// objects as OVN-Kubernetes-managed. Value 85 is used instead of
+	// RTPROT_OVN (84) so we do not reuse a protocol identifier already
+	// owned by OVN.
+	OVNKProtocol = 85
+	// IFAProtOVNK is the IFA_PROTO value used to mark addresses as
+	// OVN-Kubernetes-managed. IFA_PROTO requires Linux kernel 5.18+; on
+	// older kernels the attribute is silently ignored.
+	IFAProtOVNK = OVNKProtocol
+
 	// Packet marking
 	EgressIPNodeConnectionMark         = "1008"
 	EgressIPReplyTrafficConnectionMark = 42
@@ -214,7 +231,6 @@ const (
 	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
 	OvnRouteAdvertisementsKey = OvnK8sPrefix + "/route-advertisements"
-	OvnDPUHostNodeLabel       = OvnK8sPrefix + "/dpu-host"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"
@@ -292,6 +308,12 @@ const (
 	Layer2Topology   = "layer2"
 	LocalnetTopology = "localnet"
 
+	// IPAMTypeDHCP is the NAD "ipam.type" value that hands IP address
+	// management on a localnet network over to an external DHCP server:
+	// OVN-Kubernetes allocates no addresses on such networks and only
+	// reports the DHCP-assigned ones.
+	IPAMTypeDHCP = "dhcp"
+
 	// different types of network roles
 	// defined in CNI netconf as a user-defined network
 	NetworkRolePrimary   = "primary"
@@ -317,8 +339,6 @@ const (
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
 	PrimaryIDKey = OvnK8sPrefix + "/id"
-
-	OvnDefaultZone = "global"
 
 	// EgressService "reserved" hosts - when set on an EgressService they have a special meaning
 
@@ -398,6 +418,14 @@ const (
 	// NFTNoOverlaySNATExemptV6 is a set used for no-overlay mode with outbound SNAT enabled.
 	// Contains cluster CIDRs + local node IPv6 addresses that should be exempted from SNAT.
 	NFTNoOverlaySNATExemptV6 = "no-overlay-snat-exempt-v6"
+
+	// NFTEgressIPARPBlockV4 is a set in the dedicated ovn-kubernetes-egressip-ipv4 ARP table
+	// used during application restart to block ARP responses for IPv4 egress IPs
+	NFTEgressIPARPBlockV4 = "egressip-v4"
+
+	// NFTEgressIPNDPBlockV6 is a set in the dedicated ovn-kubernetes-egressip-ipv6 inet table
+	// used during application restart to block NDP responses for IPv6 egress IPs
+	NFTEgressIPNDPBlockV6 = "egressip-v6"
 
 	// Metrics
 	MetricOvnkubeNamespace               = "ovnkube"

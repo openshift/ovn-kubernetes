@@ -167,6 +167,8 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
 
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type CUDN EVPN overlapping subnet shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
+
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
@@ -302,6 +304,8 @@ var AppendedAnnotations = map[string]string{
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type CUDN EVPN overlapping subnet shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
@@ -506,6 +510,8 @@ var AppendedAnnotations = map[string]string{
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:openshift/conformance/parallel]",
+
+	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type CUDN EVPN overlapping subnet shared VTEP Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:openshift/conformance/parallel]",
 
@@ -1265,6 +1271,14 @@ var AppendedAnnotations = map[string]string{
 
 	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when named targetPorts are used and ETP=local": "[Disabled:Unimplemented]",
 
+	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology applies NetworkQoS DSCP marking to VM traffic on the DHCP localnet": "[Suite:openshift/conformance/parallel]",
+
+	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology assigns DHCP addresses to VMs and reports them in the pod annotation": "[Suite:openshift/conformance/parallel]",
+
+	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology assigns a regular pod its address via the delegated dhcp IPAM plugin": "[Suite:openshift/conformance/parallel]",
+
+	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology enforces MultiNetworkPolicy with pod selector peers on DHCP-assigned addresses": "[Suite:openshift/conformance/parallel]",
+
 	"Multi Homing A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
 
 	"Multi Homing A pod with multiple attachments to the same secondary NAD features multiple different IPs and connectivity redundancy L2 secondary NAD": "[Disabled:Unimplemented]",
@@ -1465,6 +1479,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation Uplink default-VRF egress recreates an UplinkState deleted out of band": "[Suite:openshift/conformance/parallel]",
 
+	"Network Segmentation Uplink route advertisements preserves pre-existing Uplink interface routes across VRF enslavement and release": "[Suite:openshift/conformance/parallel]",
+
 	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation Uplink route advertisements uses the default VRF as the BGP peering path": "[Suite:openshift/conformance/parallel]",
@@ -1472,6 +1488,8 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation Uplink split DPU status conditions keeps one writer per condition and recovers a missing host interface": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation Uplink split DPU status conditions recreates an UplinkState deleted out of band": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation Uplink split DPU status conditions resolves the bridge by host function and falls back to host MAC": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network pod connected to UserDefinedNetwork cannot be deleted when being used": "[Suite:openshift/conformance/parallel]",
 
@@ -1606,6 +1624,8 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation pod2Egress on a user defined primary network created using UserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Disabled:Unimplemented]",
 
 	"Network Segmentation should set NO_FLOOD on CUDN patch ports, direct node-IP ARP to default GR (p12 flow), and fan out external GARP to all GRs (p11 flow)": "[Suite:openshift/conformance/parallel]",
+
+	"Network Segmentation status.vrfName validation accepts a 15-character vrfName and rejects a 16-character one": "[Suite:openshift/conformance/parallel]",
 
 	"Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready": "[Suite:openshift/conformance/parallel]",
 
@@ -1807,9 +1827,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
 
-	"Status manager validation Should validate the egress firewall status when adding a new zone": "[Disabled:Unimplemented]",
-
-	"Status manager validation Should validate the egress firewall status when adding an unknown zone": "[Disabled:Unimplemented]",
+	"Status manager validation Should validate the egress firewall status when adding a new node zone": "[Disabled:Unimplemented]",
 
 	"Unidling Should generate a NeedPods event for traffic destined to idled services": "[Disabled:Unimplemented]",
 
@@ -1899,6 +1917,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation on network of type Cluster Default Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type Cluster Default Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented]",
@@ -1937,6 +1957,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type Cluster Default of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation on network of type Cluster Default should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
@@ -1944,6 +1966,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
@@ -1983,6 +2007,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation on network of type IPv4 L2 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
@@ -1990,6 +2016,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
@@ -2029,6 +2057,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation on network of type IPv4 L3 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
@@ -2036,6 +2066,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
@@ -2075,6 +2107,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
+	"e2e egress IP validation on network of type IPv6 L2 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented]",
+
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented]",
@@ -2082,6 +2116,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented]",
 
@@ -2120,6 +2156,8 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
+
+	"e2e egress IP validation on network of type IPv6 L3 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented]",
 
 	"e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name": "[Disabled:Unimplemented]",
 
