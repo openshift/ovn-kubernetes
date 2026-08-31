@@ -113,10 +113,17 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		newLabels := newNode.GetLabels()
 		_, oldHadEgressLabel := oldLabels[nodeEgressLabel]
 		_, newHasEgressLabel := newLabels[nodeEgressLabel]
+		bridgeEIPAnnotChanged := nodeBridgeEgressIPsAnnotationChanged(oldNode, newNode)
+		secondaryEIPAnnotChanged := nodeSecondaryHostEgressIPsAnnotationChanged(oldNode, newNode)
 		// If the node is not labeled for egress assignment, just return
 		// directly, we don't really need to set the ready / reachable
 		// status on this node if the user doesn't care about using it.
+		// Still react to bridge/secondary-host EIP annotation cleanup so
+		// pending bare-metal reassignments can proceed (OCPBUGS-105420).
 		if !oldHadEgressLabel && !newHasEgressLabel {
+			if bridgeEIPAnnotChanged || secondaryEIPAnnotChanged {
+				return h.eIPC.reconcilePendingBareMetalCleanups()
+			}
 			return nil
 		}
 		h.eIPC.setNodeEgressAssignable(newNode.Name, newHasEgressLabel)

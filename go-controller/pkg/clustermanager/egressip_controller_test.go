@@ -1720,6 +1720,225 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("should clear EgressIP status before reassignment and wait for node annotation cleanup", func() {
+			// OCPBUGS-105420: on label removal, cluster-manager must not assign
+			// the EIP to a new node while the old node still lists it in
+			// k8s.ovn.org/bridge-egress-ips (dual ARP window).
+			app.Action = func(*cli.Context) error {
+				egressIP := "192.168.126.101"
+				node1IPv4 := "192.168.126.12/24"
+				node2IPv4 := "192.168.126.51/24"
+
+				node1 := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Conditions: []corev1.NodeCondition{
+							{
+								Type:   corev1.NodeReady,
+								Status: corev1.ConditionTrue,
+							},
+						},
+					},
+				}
+				node2 := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node2IPv4),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Conditions: []corev1.NodeCondition{
+							{
+								Type:   corev1.NodeReady,
+								Status: corev1.ConditionTrue,
+							},
+						},
+					},
+				}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+					},
+				}
+
+				// Start with only node1 so the EIP is guaranteed to land there.
+				fakeClusterManagerOVN.start(
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&corev1.NodeList{
+						Items: []corev1.Node{node1},
+					})
+
+				_, err := fakeClusterManagerOVN.eIPC.WatchEgressNodes()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+				egressIPs, nodes := getEgressIPStatus(egressIPName)
+				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
+				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
+
+				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
+				gomega.Eventually(isEgressAssignableNode(node2.Name)).Should(gomega.BeTrue())
+
+				// Simulate ovnkube-node still hosting the EIP on br-ex.
+				updatedNode1, err := fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				updatedNode1.Annotations[util.OVNNodeBridgeEgressIPs] = fmt.Sprintf("[\"%s\"]", egressIP)
+				delete(updatedNode1.Labels, "k8s.ovn.org/egress-assignable")
+				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), updatedNode1, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Phase 1: status cleared; Phase 2 blocked while annotation remains.
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
+				gomega.Consistently(getEgressIPStatusLen(egressIPName), "2s").Should(gomega.Equal(0))
+
+				updatedNode1, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				delete(updatedNode1.Annotations, util.OVNNodeBridgeEgressIPs)
+				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), updatedNode1, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				// Wait until the informer reflects the annotation removal.
+				gomega.Eventually(func() bool {
+					n, err := fakeClusterManagerOVN.eIPC.watchFactory.GetNode(node1.Name)
+					if err != nil {
+						return false
+					}
+					return !util.IsNodeBridgeEgressIPsAnnotationSet(n)
+				}).Should(gomega.BeTrue())
+
+				gomega.Eventually(getEgressIPStatusLen(egressIPName), "5s").Should(gomega.Equal(1))
+				egressIPs, nodes = getEgressIPStatus(egressIPName)
+				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
+				gomega.Expect(nodes[0]).To(gomega.Equal(node2.Name))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
+		ginkgo.It("should fail-open and reassign EgressIP after node annotation cleanup timeout", func() {
+			app.Action = func(*cli.Context) error {
+				egressIP := "192.168.126.102"
+				node1IPv4 := "192.168.126.12/24"
+				node2IPv4 := "192.168.126.51/24"
+
+				node1 := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node1IPv4),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node1IPv4),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Conditions: []corev1.NodeCondition{
+							{
+								Type:   corev1.NodeReady,
+								Status: corev1.ConditionTrue,
+							},
+						},
+					},
+				}
+				node2 := corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2Name,
+						Annotations: map[string]string{
+							"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": \"%s\"}", node2IPv4),
+							"k8s.ovn.org/node-subnets":        fmt.Sprintf("{\"default\":\"%s\"}", v4NodeSubnet),
+							util.OVNNodeHostCIDRs:             fmt.Sprintf("[\"%s\"]", node2IPv4),
+						},
+						Labels: map[string]string{
+							"k8s.ovn.org/egress-assignable": "",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Conditions: []corev1.NodeCondition{
+							{
+								Type:   corev1.NodeReady,
+								Status: corev1.ConditionTrue,
+							},
+						},
+					},
+				}
+
+				eIP := egressipv1.EgressIP{
+					ObjectMeta: newEgressIPMeta(egressIPName),
+					Spec: egressipv1.EgressIPSpec{
+						EgressIPs: []string{egressIP},
+					},
+				}
+
+				fakeClusterManagerOVN.start(
+					&egressipv1.EgressIPList{
+						Items: []egressipv1.EgressIP{eIP},
+					},
+					&corev1.NodeList{
+						Items: []corev1.Node{node1},
+					})
+
+				fakeClusterManagerOVN.eIPC.nodeCleanupTimeout = 50 * time.Millisecond
+
+				_, err := fakeClusterManagerOVN.eIPC.WatchEgressNodes()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(1))
+				_, nodes := getEgressIPStatus(egressIPName)
+				gomega.Expect(nodes[0]).To(gomega.Equal(node1.Name))
+
+				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Create(context.TODO(), &node2, metav1.CreateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Eventually(getEgressIPAllocatorSizeSafely).Should(gomega.Equal(2))
+
+				updatedNode1, err := fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), node1.Name, metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				updatedNode1.Annotations[util.OVNNodeBridgeEgressIPs] = fmt.Sprintf("[\"%s\"]", egressIP)
+				delete(updatedNode1.Labels, "k8s.ovn.org/egress-assignable")
+				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().Update(context.TODO(), updatedNode1, metav1.UpdateOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				gomega.Eventually(getEgressIPStatusLen(egressIPName)).Should(gomega.Equal(0))
+				// Annotation never cleared; after timeout, fail-open reassigns to node2.
+				gomega.Eventually(getEgressIPStatusLen(egressIPName), "5s").Should(gomega.Equal(1))
+				egressIPs, nodes := getEgressIPStatus(egressIPName)
+				gomega.Expect(egressIPs[0]).To(gomega.Equal(egressIP))
+				gomega.Expect(nodes[0]).To(gomega.Equal(node2.Name))
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("egress node update should not mark the node as reachable if there was no label/readiness change", func() {
 			// When an egress node becomes reachable during a node update event and there is no changes to node labels/readiness
 			// unassigned egress IP should be eventually added by the periodic reachability check.
