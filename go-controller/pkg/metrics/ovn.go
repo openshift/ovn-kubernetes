@@ -102,6 +102,31 @@ var metricOVNControllerSBDBConnection = prometheus.NewGauge(prometheus.GaugeOpts
 	Help:      "Specifies if OVN controller is connected to OVN southbound database (1) or not (0)",
 })
 
+// integration_bridge_openflow_total is a point-in-time flow count, not a
+// monotonic counter; modeled as a gauge. The name keeps the _total suffix for
+// backward compatibility with existing dashboards/alerts.
+var metricIntegrationBridgeOpenFlowTotal = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
+	Name:      "integration_bridge_openflow_total",
+	Help:      "The total number of OpenFlow flows in the integration bridge.",
+})
+
+var metricIntegrationBridgePatchPorts = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
+	Name:      "integration_bridge_patch_ports",
+	Help: "Captures the number of patch ports that connect br-int OVS " +
+		"bridge to physical OVS bridge and br-local OVS bridge.",
+})
+
+var metricIntegrationBridgeGenevePorts = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: types.MetricOvnNamespace,
+	Subsystem: types.MetricOvnSubsystemController,
+	Name:      "integration_bridge_geneve_ports",
+	Help:      "Captures the number of geneve ports that are on br-int OVS bridge.",
+})
+
 var metricUDNNBDBProgrammedDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 	Namespace: types.MetricOvnkubeNamespace,
 	Subsystem: types.MetricOvnkubeSubsystemController,
@@ -294,7 +319,10 @@ func setOvnControllerConfigurationMetrics(ovsDBClient libovsdbclient.Client) (er
 	}
 	metricMonitorAll.Set(ovnMonitorValue)
 
-	// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value
+	// To update not only values but also labels for metrics, we use Reset() to delete previous labels+value.
+	// Notice: Reset()+Set() is not atomic, so a scrape landing in the sub-ms gap sees the series briefly
+	// missing. Acceptable for these always-1 info metrics (self-heals next scrape); revisit with a custom
+	// collector only if a snapshot-consistent view of the label value is ever required.
 	encapIPValue := openvSwitch.ExternalIDs["ovn-encap-ip"]
 	metricEncapIP.Reset()
 	metricEncapIP.WithLabelValues(encapIPValue).Set(1)
@@ -346,6 +374,31 @@ func getPortCount(ovsDBClient libovsdbclient.Client, portType string) float64 {
 	return portCount
 }
 
+// getIntegrationBridgeOpenFlowCount returns the OpenFlow flow count of br-int.
+func getIntegrationBridgeOpenFlowCount() float64 {
+	stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", "br-int")
+	if err != nil {
+		klog.Errorf("Failed to get flow count for br-int, stderr(%s): (%v)", stderr, err)
+		return 0
+	}
+	for _, kvPair := range strings.Fields(stdout) {
+		if strings.HasPrefix(kvPair, "flow_count=") {
+			value := strings.Split(kvPair, "=")[1]
+			return parseMetricToFloat(types.MetricOvnSubsystemController, "integration_bridge_openflow_total", value)
+		}
+	}
+	return 0
+}
+
+// updateOvnControllerIntegrationBridgeMetrics refreshes the br-int flow/port
+// metrics. Called from the background collection loop so the ovs-ofctl exec and
+// OVSDB queries never run on the scrape path.
+func updateOvnControllerIntegrationBridgeMetrics(ovsDBClient libovsdbclient.Client) {
+	metricIntegrationBridgeOpenFlowTotal.Set(getIntegrationBridgeOpenFlowCount())
+	metricIntegrationBridgePatchPorts.Set(getPortCount(ovsDBClient, "patch"))
+	metricIntegrationBridgeGenevePorts.Set(getPortCount(ovsDBClient, "geneve"))
+}
+
 // updateSBDBConnectionMetric updates the connection status with southbound database
 func updateSBDBConnectionMetric(ovsAppctl ovsClient) {
 	// NOTE: This metric had a retry logic, which is removed because metrics should reflect the reality.
@@ -376,7 +429,7 @@ func updateSBDBConnectionMetric(ovsAppctl ovsClient) {
 }
 
 // RegisterOvnControllerMetrics registers the ovn-controller metrics
-func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client, ovnRegistry prometheus.Registerer) {
+func RegisterOvnControllerMetrics(ovnRegistry prometheus.Registerer) {
 	getOvnControllerVersionInfo()
 	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{
@@ -398,49 +451,9 @@ func RegisterOvnControllerMetrics(ovsDBClient libovsdbclient.Client, ovnRegistry
 	if config.Metrics.EnableScaleMetrics {
 		ovnRegistry.MustRegister(metricUDNNBDBProgrammedDuration)
 	}
-	ovnRegistry.MustRegister(prometheus.NewCounterFunc(
-		prometheus.CounterOpts{
-			Namespace: types.MetricOvnNamespace,
-			Subsystem: types.MetricOvnSubsystemController,
-			Name:      "integration_bridge_openflow_total",
-			Help:      "The total number of OpenFlow flows in the integration bridge.",
-		}, func() float64 {
-			stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", "br-int")
-			if err != nil {
-				klog.Errorf("Failed to get flow count for br-int, stderr(%s): (%v)",
-					stderr, err)
-				return 0
-			}
-			for _, kvPair := range strings.Fields(stdout) {
-				if strings.HasPrefix(kvPair, "flow_count=") {
-					value := strings.Split(kvPair, "=")[1]
-					return parseMetricToFloat(types.MetricOvnSubsystemController, "integration_bridge_openflow_total",
-						value)
-				}
-			}
-			return 0
-		}))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Namespace: types.MetricOvnNamespace,
-			Subsystem: types.MetricOvnSubsystemController,
-			Name:      "integration_bridge_patch_ports",
-			Help: "Captures the number of patch ports that connect br-int OVS " +
-				"bridge to physical OVS bridge and br-local OVS bridge.",
-		},
-		func() float64 {
-			return getPortCount(ovsDBClient, "patch")
-		}))
-	ovnRegistry.MustRegister(prometheus.NewGaugeFunc(
-		prometheus.GaugeOpts{
-			Namespace: types.MetricOvnNamespace,
-			Subsystem: types.MetricOvnSubsystemController,
-			Name:      "integration_bridge_geneve_ports",
-			Help:      "Captures the number of geneve ports that are on br-int OVS bridge.",
-		},
-		func() float64 {
-			return getPortCount(ovsDBClient, "geneve")
-		}))
+	ovnRegistry.MustRegister(metricIntegrationBridgeOpenFlowTotal)
+	ovnRegistry.MustRegister(metricIntegrationBridgePatchPorts)
+	ovnRegistry.MustRegister(metricIntegrationBridgeGenevePorts)
 
 	// register ovn-controller configuration metrics
 	ovnRegistry.MustRegister(metricRemoteProbeInterval)
