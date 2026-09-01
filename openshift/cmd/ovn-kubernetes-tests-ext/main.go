@@ -12,6 +12,7 @@ import (
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -20,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	kclientset "k8s.io/client-go/kubernetes"
 
 	// ensure providers are initialised for configuring infra
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/aws"
@@ -126,6 +128,14 @@ func main() {
 			panic(infraErr)
 		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
+			panic(err)
+		}
+		// Mirrors e2e_suite_test.go's BeforeSuite to avoid a nil-panic in ipalloc.NewPrimaryIPv4/6().
+		client, err := kclientset.NewForConfig(cfg)
+		if err != nil {
+			panic(err)
+		}
+		if err := ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
 			panic(err)
 		}
 	})
