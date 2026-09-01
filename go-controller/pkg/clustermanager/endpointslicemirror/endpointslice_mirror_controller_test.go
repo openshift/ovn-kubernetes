@@ -536,10 +536,8 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		newVirtLauncherPod := func(namespace, name string, creationTime time.Time, podIP, vmIP string) *corev1.Pod {
 			pod := testing.NewPodWithPrimaryNADIP(namespace, name, "", podIP, "l2-network", vmIP)
 			pod.CreationTimestamp = metav1.NewTime(creationTime)
-			pod.Labels = map[string]string{
-				kubevirtv1.AppLabel:                "virt-launcher",
-				kubevirtv1.VirtualMachineNameLabel: vmName,
-			}
+			pod.Labels[kubevirtv1.AppLabel] = "virt-launcher"
+			pod.Labels[kubevirtv1.VirtualMachineNameLabel] = vmName
 			// Note no AllowPodBridgeNetworkLiveMigrationAnnotation: VMs on a
 			// primary user defined network do not carry it.
 			pod.Annotations[kubevirtv1.DomainAnnotation] = vmName
@@ -573,22 +571,22 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 		eligible := endpointConditions{ready: true, serving: true}
 		ineligible := endpointConditions{ready: false, serving: false}
 
-		expectMirroredEndpoints := func(namespace, defaultEndpointSliceName, vmIP string, expected []endpointConditions) {
+		expectMirroredEndpoints := func(namespace, defaultNetworkEndpointSliceName, vmIP string, expected []endpointConditions) {
 			ginkgo.GinkgoHelper()
 			gomega.Eventually(func(g gomega.Gomega) {
-				mirroredEndpointSlices, err := util.GetMirroredEndpointSlices(types.EndpointSliceMirrorControllerName, defaultEndpointSliceName, namespace, controller.endpointSliceLister)
+				mirroredEndpointSlices, err := util.GetMirroredEndpointSlices(types.EndpointSliceMirrorControllerName, defaultNetworkEndpointSliceName, namespace, controller.endpointSliceLister)
 				g.Expect(err).NotTo(gomega.HaveOccurred())
 				g.Expect(mirroredEndpointSlices).To(gomega.HaveLen(1), "should have one mirrored EndpointSlice")
 				endpoints := mirroredEndpointSlices[0].Endpoints
 				g.Expect(endpoints).To(gomega.HaveLen(len(expected)), "should have the expected len")
-				for i, expectedConditions := range expected {
+				for i, expectedCondition := range expected {
 					endpoint := endpoints[i]
 					g.Expect(endpoint.Addresses).To(gomega.Equal([]string{vmIP}), "should have VM ip")
-					g.Expect(endpoint).To(gomega.WithTransform(util.IsEndpointReady, gomega.Equal(expectedConditions.ready)), "should match expected ready condition state")
+					g.Expect(endpoint).To(gomega.WithTransform(util.IsEndpointReady, gomega.Equal(expectedCondition.ready)), "should match expected ready condition state")
 
-					g.Expect(endpoint).To(gomega.WithTransform(util.IsEndpointServing, gomega.Equal(expectedConditions.serving)), "should match expected serving condition state")
+					g.Expect(endpoint).To(gomega.WithTransform(util.IsEndpointServing, gomega.Equal(expectedCondition.serving)), "should match expected serving condition state")
 
-					if expectedConditions.ready {
+					if expectedCondition.ready {
 						g.Expect(endpoint).To(gomega.WithTransform(util.IsEndpointTerminating, gomega.BeFalse()), "should not be reported as terminating if the endpoint is ready")
 					}
 				}
@@ -620,6 +618,10 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 
 		ginkgo.DescribeTable("should preserve the endpoints of the migrating VM to prevent the reset of established connections",
 			func(addressType discovery.AddressType, subnets, podIP, vmIP string) {
+				// Enable dual stack so the table can exercise both IP families.
+				config.IPv4Mode = true
+				config.IPv6Mode = true
+
 				app.Action = func(*cli.Context) error {
 					namespaceT := *util.NewNamespace("testns")
 					namespaceT.Labels[types.RequiredUDNNamespaceLabel] = ""
@@ -627,22 +629,17 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 					// not ready while the VM keeps serving on its IP.
 					sourcePod := newVirtLauncherPod(namespaceT.Name, "virt-launcher-source", time.Now().Add(-time.Minute), podIP, vmIP)
 					targetPod := newVirtLauncherPod(namespaceT.Name, "virt-launcher-target", time.Now(), podIP, vmIP)
-					defaultEndpointSlice := newDefaultEndpointSlice(namespaceT.Name, addressType,
+					defaultNetworkEndpointSlice := newDefaultEndpointSlice(namespaceT.Name, addressType,
 						notReadyEndpoint(namespaceT.Name, sourcePod.Name, podIP),
 						notReadyEndpoint(namespaceT.Name, targetPod.Name, podIP))
-
-					// Activate dual stack cluster so we can use test all the
-					// ip families configurations
-					config.IPv4Mode = true
-					config.IPv6Mode = true
 
 					startWithNAD(subnets,
 						&corev1.PodList{Items: []corev1.Pod{*sourcePod, *targetPod}},
 						&corev1.NamespaceList{Items: []corev1.Namespace{namespaceT}},
-						&discovery.EndpointSliceList{Items: []discovery.EndpointSlice{defaultEndpointSlice}},
+						&discovery.EndpointSliceList{Items: []discovery.EndpointSlice{defaultNetworkEndpointSlice}},
 					)
 
-					expectMirroredEndpoints(namespaceT.Name, defaultEndpointSlice.Name, vmIP, []endpointConditions{eligible, eligible})
+					expectMirroredEndpoints(namespaceT.Name, defaultNetworkEndpointSlice.Name, vmIP, []endpointConditions{eligible, eligible})
 					return nil
 				}
 
@@ -661,62 +658,62 @@ var _ = ginkgo.Describe("Cluster manager EndpointSlice mirror controller", func(
 				now := time.Now()
 				sourcePod := newVirtLauncherPod(namespaceT.Name, "virt-launcher-source", now.Add(-time.Minute), podIPv4, vmIPv4)
 				targetPod := newVirtLauncherPod(namespaceT.Name, "virt-launcher-target", now, podIPv4, vmIPv4)
-				defaultEndpointSlice := newDefaultEndpointSlice(namespaceT.Name, discovery.AddressTypeIPv4,
+				defaultNetworkEndpointSlice := newDefaultEndpointSlice(namespaceT.Name, discovery.AddressTypeIPv4,
 					terminatingEndpoint(namespaceT.Name, sourcePod.Name, podIPv4),
 					notReadyEndpoint(namespaceT.Name, targetPod.Name, podIPv4))
 
 				startWithNAD(subnetsIPv4,
 					&corev1.PodList{Items: []corev1.Pod{*sourcePod, *targetPod}},
 					&corev1.NamespaceList{Items: []corev1.Namespace{namespaceT}},
-					&discovery.EndpointSliceList{Items: []discovery.EndpointSlice{defaultEndpointSlice}},
+					&discovery.EndpointSliceList{Items: []discovery.EndpointSlice{defaultNetworkEndpointSlice}},
 				)
 
-				expectMirroredEndpoints(namespaceT.Name, defaultEndpointSlice.Name, vmIPv4, []endpointConditions{eligible, eligible})
+				expectMirroredEndpoints(namespaceT.Name, defaultNetworkEndpointSlice.Name, vmIPv4, []endpointConditions{eligible, eligible})
 				return nil
 			}
 
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 		})
 
-		ginkgo.It("should not preserve endpoint availability when the VM live migration failed", func() {
+		ginkgo.It("should leave endpoint conditions unchanged when the VM live migration failed", func() {
 			app.Action = func(*cli.Context) error {
 				namespaceT := *util.NewNamespace("testns")
 				namespaceT.Labels[types.RequiredUDNNamespaceLabel] = ""
 				sourcePod := newVirtLauncherPod(namespaceT.Name, "virt-launcher-source", time.Now().Add(-time.Minute), podIPv4, vmIPv4)
 				targetPod := newVirtLauncherPod(namespaceT.Name, "virt-launcher-target", time.Now(), podIPv4, vmIPv4)
 				targetPod.Status.Phase = corev1.PodFailed
-				defaultEndpointSlice := newDefaultEndpointSlice(namespaceT.Name, discovery.AddressTypeIPv4,
+				defaultNetworkEndpointSlice := newDefaultEndpointSlice(namespaceT.Name, discovery.AddressTypeIPv4,
 					notReadyEndpoint(namespaceT.Name, sourcePod.Name, podIPv4),
 					notReadyEndpoint(namespaceT.Name, targetPod.Name, podIPv4))
 
 				startWithNAD(subnetsIPv4,
 					&corev1.PodList{Items: []corev1.Pod{*sourcePod, *targetPod}},
 					&corev1.NamespaceList{Items: []corev1.Namespace{namespaceT}},
-					&discovery.EndpointSliceList{Items: []discovery.EndpointSlice{defaultEndpointSlice}},
+					&discovery.EndpointSliceList{Items: []discovery.EndpointSlice{defaultNetworkEndpointSlice}},
 				)
 
-				expectMirroredEndpoints(namespaceT.Name, defaultEndpointSlice.Name, vmIPv4, []endpointConditions{ineligible, ineligible})
+				expectMirroredEndpoints(namespaceT.Name, defaultNetworkEndpointSlice.Name, vmIPv4, []endpointConditions{ineligible, ineligible})
 				return nil
 			}
 
 			gomega.Expect(app.Run([]string{app.Name})).To(gomega.Succeed())
 		})
 
-		ginkgo.It("should not preserve endpoint availability of non-kubevirt VM pods", func() {
+		ginkgo.It("should leave endpoint conditions unchanged for non-KubeVirt pods", func() {
 			app.Action = func(*cli.Context) error {
 				namespaceT := *util.NewNamespace("testns")
 				namespaceT.Labels[types.RequiredUDNNamespaceLabel] = ""
 				pod := testing.NewPodWithPrimaryNADIP(namespaceT.Name, "test-pod", "", podIPv4, "l2-network", vmIPv4)
-				defaultEndpointSlice := newDefaultEndpointSlice(namespaceT.Name, discovery.AddressTypeIPv4,
+				defaultNetworkEndpointSlice := newDefaultEndpointSlice(namespaceT.Name, discovery.AddressTypeIPv4,
 					notReadyEndpoint(namespaceT.Name, pod.Name, podIPv4))
 
 				startWithNAD(subnetsIPv4,
 					&corev1.PodList{Items: []corev1.Pod{*pod}},
 					&corev1.NamespaceList{Items: []corev1.Namespace{namespaceT}},
-					&discovery.EndpointSliceList{Items: []discovery.EndpointSlice{defaultEndpointSlice}},
+					&discovery.EndpointSliceList{Items: []discovery.EndpointSlice{defaultNetworkEndpointSlice}},
 				)
 
-				expectMirroredEndpoints(namespaceT.Name, defaultEndpointSlice.Name, vmIPv4, []endpointConditions{ineligible})
+				expectMirroredEndpoints(namespaceT.Name, defaultNetworkEndpointSlice.Name, vmIPv4, []endpointConditions{ineligible})
 				return nil
 			}
 
