@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-openshift-dns
+spec:
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: openshift-dns
+    ports:
+    - port: 5353
+      protocol: TCP
+    - port: 5353
+      protocol: UDP
+  podSelector: {}
+  policyTypes:
+  - Egress
+
