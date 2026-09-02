@@ -71,6 +71,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
+	// If platform infra node (hypervisor node for baremetal, bastion host
+	// for cloud platforms) doesn't exist, then ignore running EgressIP tests.
+	if !ocpInfra.HasPlatformInfra() && spec.Labels.Has(featureLabelEgressIP) {
+		return false
+	}
 	// secondary-host-eip tests: only include on platforms with a
 	// pre-configured secondary network (currently baremetal only)
 	if strings.Contains(spec.Name, EIPSecondaryNetworkTestPrefix) && !ocpInfra.HasSecondaryHostEIPSupport() {
