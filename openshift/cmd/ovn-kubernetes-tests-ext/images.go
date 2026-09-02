@@ -24,6 +24,12 @@ func init() {
 		index:    int(imageutils.Agnhost),
 	}
 	requiredImages = append(requiredImages, agnhostImage)
+
+	helloSDNImage := requiredImage{
+		pullSpec: "quay.io/openshifttest/hello-sdn:1.2.0",
+		index:    -1,
+	}
+	requiredImages = append(requiredImages, helloSDNImage)
 }
 
 // registerTestImages advertises OVN-Kubernetes e2e images to the openshift-tests
