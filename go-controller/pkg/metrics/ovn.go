@@ -349,7 +349,7 @@ func setOvnControllerConfigurationMetrics(ovsDBClient libovsdbclient.Client) (er
 	return nil
 }
 
-func getPortCount(ovsDBClient libovsdbclient.Client, portType string) float64 {
+func getPortCount(ovsDBClient libovsdbclient.Client, portType string) (float64, error) {
 	var portCount float64
 	p := func(item *vswitchd.Interface) bool {
 		return item.Type == portType
@@ -358,7 +358,7 @@ func getPortCount(ovsDBClient libovsdbclient.Client, portType string) float64 {
 	intfList, err := ovsops.FindInterfacesWithPredicate(ovsDBClient, p)
 	if err != nil {
 		klog.Errorf("Failed to get %s interface count: %v", portType, err)
-		return 0
+		return 0, err
 	}
 	if portType == "patch" {
 		for _, intf := range intfList {
@@ -371,32 +371,43 @@ func getPortCount(ovsDBClient libovsdbclient.Client, portType string) float64 {
 		portCount = float64(len(intfList))
 	}
 
-	return portCount
+	return portCount, nil
 }
 
 // getIntegrationBridgeOpenFlowCount returns the OpenFlow flow count of br-int.
-func getIntegrationBridgeOpenFlowCount() float64 {
+func getIntegrationBridgeOpenFlowCount() (float64, error) {
 	stdout, stderr, err := util.RunOVSOfctl("-t", "5", "dump-aggregate", "br-int")
 	if err != nil {
 		klog.Errorf("Failed to get flow count for br-int, stderr(%s): (%v)", stderr, err)
-		return 0
+		return 0, err
 	}
 	for _, kvPair := range strings.Fields(stdout) {
 		if strings.HasPrefix(kvPair, "flow_count=") {
 			value := strings.Split(kvPair, "=")[1]
-			return parseMetricToFloat(types.MetricOvnSubsystemController, "integration_bridge_openflow_total", value)
+			return parseMetricToFloat(types.MetricOvnSubsystemController, "integration_bridge_openflow_total", value), nil
 		}
 	}
-	return 0
+	return 0, nil
 }
 
 // updateOvnControllerIntegrationBridgeMetrics refreshes the br-int flow/port
 // metrics. Called from the background collection loop so the ovs-ofctl exec and
 // OVSDB queries never run on the scrape path.
+// Metrics are conditionally updated upon extraction success, otherwise
+// maintained with the previous value, this makes the zero value representative.
 func updateOvnControllerIntegrationBridgeMetrics(ovsDBClient libovsdbclient.Client) {
-	metricIntegrationBridgeOpenFlowTotal.Set(getIntegrationBridgeOpenFlowCount())
-	metricIntegrationBridgePatchPorts.Set(getPortCount(ovsDBClient, "patch"))
-	metricIntegrationBridgeGenevePorts.Set(getPortCount(ovsDBClient, "geneve"))
+	bridgeofCount, err := getIntegrationBridgeOpenFlowCount()
+	if err == nil {
+		metricIntegrationBridgeOpenFlowTotal.Set(bridgeofCount)
+	}
+	portCountPatch, err := getPortCount(ovsDBClient, "patch")
+	if err == nil {
+		metricIntegrationBridgePatchPorts.Set(portCountPatch)
+	}
+	portCountGeneve, err := getPortCount(ovsDBClient, "geneve")
+	if err == nil {
+		metricIntegrationBridgeGenevePorts.Set(portCountGeneve)
+	}
 }
 
 // updateSBDBConnectionMetric updates the connection status with southbound database
