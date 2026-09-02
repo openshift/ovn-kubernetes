@@ -424,7 +424,7 @@ type egressIPs struct {
 	Items []egressIP `json:"items"`
 }
 
-var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
+var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, ginkgo.Serial, func() {
 	ginkgo.DescribeTableSubtree("on network of type", func(netConfigParams networkAttachmentConfigParams) {
 		//FIXME: tests for CDN are designed for single stack clusters (IPv4 or IPv6) and must choose a single IP family for dual stack clusters.
 		// Remove this restriction and allow the tests to detect if an IP family support is available.
