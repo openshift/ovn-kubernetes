@@ -139,6 +139,10 @@ func (o *OpenshiftInfraProvider) HasSecondaryHostEIPSupport() bool {
 	return bm.secondaryNetwork != nil
 }
 
+func (o *OpenshiftInfraProvider) HasPlatformInfra() bool {
+	return o.clusterInfra != nil
+}
+
 // CheckForEVPN checks all EVPN prerequisites
 func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
 	if o.operNetwork == nil {

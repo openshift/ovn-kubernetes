@@ -43,6 +43,7 @@ const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+	featureLabelEgressIP            = "Feature:EgressIP"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -68,6 +69,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
+	// If platform infra node (hypervisor node for baremetal, bastion host
+	// for cloud platforms) doesn't exist, then ignore running EgressIP tests.
+	if !ocpInfra.HasPlatformInfra() && spec.Labels.Has(featureLabelEgressIP) {
+		return false
+	}
 	// secondary-host-eip tests: only include on platforms with a
 	// pre-configured secondary network (currently baremetal only)
 	if strings.Contains(spec.Name, "secondary-host-eip") && !ocpInfra.HasSecondaryHostEIPSupport() {
