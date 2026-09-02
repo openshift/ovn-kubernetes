@@ -12,6 +12,7 @@ package test
 // InformingTests lists tests that generally pass but are not considered stable
 // and should not block CI jobs if they fail.
 var InformingTests = []string{
+	"[Feature:EgressIP][ovn-kubernetes-ote][sig-network] e2e egress IP validation: no external containers Should reassign a stale egress IP allocation after rapid EgressIP delete/create cycles, while preserving genuine conflicts [Serial][Suite:openshift/conformance/serial]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN with custom network [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L3 primary UDN [Suite:openshift/conformance/parallel]",

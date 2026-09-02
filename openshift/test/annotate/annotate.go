@@ -196,6 +196,9 @@ func (r *labelAppender) generate(name string, node types.TestSpec) {
 			}
 
 			if isLabelRequired {
+				if label == "[Disabled:Unimplemented]" && isOCPEnabledEgressIPTest(name) {
+					continue
+				}
 				count++
 				newLabels += label
 				newName += label
