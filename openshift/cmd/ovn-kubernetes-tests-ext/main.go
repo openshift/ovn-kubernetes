@@ -6,7 +6,7 @@ import (
 
 	exutil "github.com/openshift/origin/test/extended/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
-	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
 
@@ -14,6 +14,7 @@ import (
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	// import OTP migrated tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/otp"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -80,7 +81,12 @@ func main() {
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
 	ovnTestsExtension := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
-	// TODO: register test images using tests extension
+	ovnTestsExtension.RegisterImage(extension.Image{
+		Index:    -1,
+		Registry: "quay.io",
+		Name:     "openshifttest/hello-sdn",
+		Version:  "1.2.0",
+	})
 	// add ovn-kubernetes test suites into openshift suites
 	// by default, we treat all tests as parallel and only expose tests as Serial if the appropriate label is added - "Serial"
 	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
@@ -117,6 +123,7 @@ func main() {
 		} else {
 			ocpInfra = infra
 			infraprovider.Set(ocpInfra)
+			deploymentconfig.Set(ocpdeploymentconfig.New())
 		}
 	}
 
