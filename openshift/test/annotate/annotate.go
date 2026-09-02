@@ -212,13 +212,13 @@ func (r *labelAppender) generate(name string, node types.TestSpec) {
 		isConformance := strings.Contains(newName, "[Conformance]")
 		switch {
 		case isSerial && isConformance:
-			newLabels += "[Suite:openshift/conformance/serial/minimal]"
+			newLabels += "[Suite:ovn-kubernetes/conformance/serial/minimal]"
 		case isSerial:
-			newLabels += "[Suite:openshift/conformance/serial]"
+			newLabels += "[Suite:ovn-kubernetes/conformance/serial]"
 		case isConformance:
-			newLabels += "[Suite:openshift/conformance/parallel/minimal]"
+			newLabels += "[Suite:ovn-kubernetes/conformance/parallel/minimal]"
 		default:
-			newLabels += "[Suite:openshift/conformance/parallel]"
+			newLabels += "[Suite:ovn-kubernetes/conformance/parallel]"
 		}
 	}
 

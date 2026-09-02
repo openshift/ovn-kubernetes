@@ -4,19 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
-
-var deploymentConfig api.DeploymentConfig
-
-func init() {
-	deploymentConfig = openshift{}
-	deploymentconfig.Set(deploymentConfig)
-}
 
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -39,7 +31,7 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 type openshift struct{}
 
 func New() api.DeploymentConfig {
-	return deploymentConfig
+	return openshift{}
 }
 
 func (m openshift) OVNKubernetesNamespace() string {
