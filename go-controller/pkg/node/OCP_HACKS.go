@@ -23,7 +23,8 @@ const (
 )
 
 // cleanupLegacyMCSBlockIptRules best-effort deletes leftover host iptables MCS REJECT
-// rules from before the nftables migration (both --syn and legacy non--syn variants).
+// rules from before the nftables migration. Only the --syn variant is handled; the older
+// non--syn variant predates any OCP version we could still be upgrading from.
 func cleanupLegacyMCSBlockIptRules() {
 	var delRules []nodeipt.Rule
 	for _, protocol := range []iptables.Protocol{iptables.ProtocolIPv4, iptables.ProtocolIPv6} {
@@ -40,12 +41,6 @@ func cleanupLegacyMCSBlockIptRules() {
 						Table:    "filter",
 						Chain:    chain,
 						Args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "--syn", "-j", "REJECT"},
-						Protocol: protocol,
-					},
-					nodeipt.Rule{
-						Table:    "filter",
-						Chain:    chain,
-						Args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "-j", "REJECT"},
 						Protocol: protocol,
 					},
 				)
