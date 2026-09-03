@@ -33,11 +33,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -52,8 +54,6 @@ import (
 
 const (
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
-	// ovnNodeZoneNameAnnotation is the node annotation name to store the node zone name.
-	ovnNodeZoneNameAnnotation = "k8s.ovn.org/zone-name"
 	// ovnGatewayMTUSupport annotation determines if options:gateway_mtu shall be set for a node's gateway router
 	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
@@ -354,10 +354,7 @@ func pokeEndpointViaPod(f *framework.Framework, namespace, podName, targetHost s
 	return stdOut
 }
 
-// pokeEndpointViaNode leverages a k8 node running the netexec command to send a "request" to a target running
-// netexec on the given target host / protocol / port.
-// Returns the response based on the provided "request".
-func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targetPort uint16, request string) string {
+func tryPokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targetPort uint16, request string) (string, error) {
 	ipPort := net.JoinHostPort("localhost", fmt.Sprintf("%d", localPort))
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
 	curlCommand := []string{"curl", "-g", "-q", "-s", fmt.Sprintf("http://%s/dial?request=%s&protocol=%s&host=%s&port=%d&tries=1",
@@ -367,14 +364,23 @@ func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targe
 		targetHost,
 		targetPort)}
 	res, err := infraprovider.Get().ExecK8NodeCommand(nodeName, curlCommand)
-	framework.ExpectNoError(err, "failed to run command within pod")
+	if err != nil {
+		return "", err
+	}
 	response, err := parseNetexecResponse(res)
 	if err != nil {
 		framework.Logf("FAILED Command was %s", curlCommand)
 		framework.Logf("FAILED Response was %v", res)
-		return ""
 	}
-	framework.ExpectNoError(err)
+	return response, err
+}
+
+// pokeEndpointViaNode leverages a k8 node running the netexec command to send a "request" to a target running
+// netexec on the given target host / protocol / port.
+// Returns the response based on the provided "request".
+func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targetPort uint16, request string) string {
+	response, err := tryPokeEndpointViaNode(nodeName, protocol, targetHost, localPort, targetPort, request)
+	framework.ExpectNoError(err, "failed to run command on node %q", nodeName)
 	return response
 }
 
@@ -983,6 +989,40 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 }
 
 // used to inject OVN specific test actions
+// networkStatusVRFName returns the VRF device name published in the given
+// network's (UDN or CUDN) status.vrfName field, empty when unset.
+func networkStatusVRFName(network *unstructured.Unstructured) (string, error) {
+	vrfName, _, err := unstructured.NestedString(network.Object, "status", "vrfName")
+	return vrfName, err
+}
+
+// waitForNetworkVRFName waits until the network CR reachable through the
+// given client publishes a non-empty status.vrfName and returns it.
+func waitForNetworkVRFName(client dynamic.ResourceInterface, networkName string, timeout, poll time.Duration) string {
+	ginkgo.GinkgoHelper()
+
+	var vrfName string
+	gomega.Eventually(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		network, err := client.Get(ctx, networkName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		name, err := networkStatusVRFName(network)
+		if err != nil {
+			return err
+		}
+		if name == "" {
+			return fmt.Errorf("network %s has no VRF name in status", networkName)
+		}
+		vrfName = name
+		return nil
+	}).WithTimeout(timeout).WithPolling(poll).Should(gomega.Succeed(),
+		"expected network %s to publish its VRF name in status", networkName)
+	return vrfName
+}
+
 func wrappedTestFramework(basename string) *framework.Framework {
 	f := newPrivelegedTestFramework(basename)
 	ginkgo.JustAfterEach(func() {
@@ -1279,16 +1319,6 @@ func isPreConfiguredUdnAddressesEnabled() bool {
 
 func getNodeContainerName() string {
 	return "ovnkube-controller"
-}
-
-// getNodeZone returns the node's zone
-func getNodeZone(node *v1.Node) (string, error) {
-	nodeZone, ok := node.Annotations[ovnNodeZoneNameAnnotation]
-	if !ok {
-		return "", fmt.Errorf("zone for the node %s not set in the annotation %s", node.Name, ovnNodeZoneNameAnnotation)
-	}
-
-	return nodeZone, nil
 }
 
 // adds route to a docker node with a full mask
@@ -1861,12 +1891,13 @@ func firstSubnetOf(subnet string, subnetSize int) string {
 	return fmt.Sprintf("%s/%d", ipNet.IP, subnetSize)
 }
 
-// monitorTcpdumpOnNode creates a privileged host-network pod on the given node that runs
-// tcpdump on the specified interface with the provided filter. It blocks until ctx is
-// cancelled, then fetches the pod logs and deletes the monitor pod. Returns all captured
-// tcpdump output.
-func monitorTcpdumpOnNode(ctx context.Context, f *framework.Framework,
-	name, nodeName, nodeIface, options, filter string) (string, error) {
+// startTcpdumpMonitorPodOnNode creates a privileged host-network pod on the given node that
+// runs tcpdump on the specified interface with the provided filter, and waits up to
+// startupTimeout for the pod to be Running. Returning means the capture is active, so callers
+// can start generating traffic. It fails the spec if the pod cannot be created or does not
+// become Running within startupTimeout.
+func startTcpdumpMonitorPodOnNode(f *framework.Framework, startupTimeout time.Duration,
+	name, nodeName, nodeIface, options, filter string) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -1895,15 +1926,12 @@ func monitorTcpdumpOnNode(ctx context.Context, f *framework.Framework,
 		},
 	}
 
-	createdPod, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(ctx, pod, metav1.CreateOptions{})
-	framework.ExpectNoError(err, "Failed to create traffic monitor pod")
-	err = e2epod.WaitForPodRunningInNamespace(ctx, f.ClientSet, createdPod)
-	framework.ExpectNoError(err, "Monitor pod failed to start")
+	// Bound pod creation and the readiness wait by a single startupTimeout budget.
+	startupCtx, cancel := context.WithTimeout(context.Background(), startupTimeout)
+	defer cancel()
 
-	<-ctx.Done()
-	logs, err := e2ekubectl.RunKubectl(f.Namespace.Name, "logs", name)
-	if err != nil {
-		return "", err
-	}
-	return logs, nil
+	_, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(startupCtx, pod, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "Failed to create traffic monitor pod")
+	err = e2epod.WaitTimeoutForPodRunningInNamespace(startupCtx, f.ClientSet, name, f.Namespace.Name, startupTimeout)
+	framework.ExpectNoError(err, fmt.Sprintf("traffic monitor pod %s did not become Running within %v", name, startupTimeout))
 }

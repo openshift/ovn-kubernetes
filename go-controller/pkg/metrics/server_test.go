@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/mock"
+
+	kexec "k8s.io/utils/exec"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
@@ -79,8 +82,9 @@ var _ = Describe("MetricServer", func() {
 			})
 
 			It(fmt.Sprintf("should handle %s metrics", desc), func() {
-				var response string
-
+				// Extraction runs out of band, so some GaugeVec series only appear
+				// after the background loop's first collect() has Set() them. Retry
+				// the whole fetch+compare until the registry has converged.
 				Eventually(func(g Gomega) {
 					// Make actual HTTP request to the /metrics endpoint
 					metricsURL := fmt.Sprintf("http://%s/metrics", t.opts.BindAddress)
@@ -93,22 +97,22 @@ var _ = Describe("MetricServer", func() {
 					body, err := io.ReadAll(resp.Body)
 					g.Expect(err).NotTo(HaveOccurred())
 
-					response = string(body)
+					response := string(body)
 					g.Expect(response).NotTo(BeEmpty())
-				}).Within(5 * time.Second).Should(Succeed())
 
-				gotMetrics := []string{}
-				for _, line := range strings.Split(response, "\n") {
-					if strings.HasPrefix(line, "# TYPE ") {
-						m := strings.Split(line, " ")[2]
-						gotMetrics = append(gotMetrics, m)
+					gotMetrics := []string{}
+					for _, line := range strings.Split(response, "\n") {
+						if strings.HasPrefix(line, "# TYPE ") {
+							m := strings.Split(line, " ")[2]
+							gotMetrics = append(gotMetrics, m)
+						}
 					}
-				}
 
-				diff := cmp.Diff(gotMetrics, tc.expectedMetrics, cmpopts.SortSlices(func(x, y string) bool {
-					return x < y
-				}))
-				Expect(diff).To(BeEmpty(), "metrics mismatch (-got +want):\n%s", diff)
+					diff := cmp.Diff(gotMetrics, tc.expectedMetrics, cmpopts.SortSlices(func(x, y string) bool {
+						return x < y
+					}))
+					g.Expect(diff).To(BeEmpty(), "metrics mismatch (-got +want):\n%s", diff)
+				}).Within(5 * time.Second).Should(Succeed())
 			})
 		},
 
@@ -266,6 +270,123 @@ var _ = Describe("MetricServer", func() {
 	})
 })
 
+// blockingExecRunner blocks the collection commands (coverage/show,
+// stopwatch/show) on the release channel to simulate a saturated daemon that
+// cannot answer, while returning immediately for every other command. It lets a
+// background collection cycle stall so we can prove a scrape still returns
+// promptly instead of waiting on extraction.
+type blockingExecRunner struct {
+	release chan struct{}
+}
+
+func (r *blockingExecRunner) RunCmd(_ kexec.Cmd, _ string, _ []string, args ...string) (*bytes.Buffer, *bytes.Buffer, error) {
+	for _, a := range args {
+		switch a {
+		case "coverage/show", "stopwatch/show":
+			<-r.release
+		}
+	}
+	return bytes.NewBuffer(nil), bytes.NewBuffer(nil), nil
+}
+
+var _ = Describe("scrape decoupled from extraction", func() {
+	It("serves the registry promptly while a collection cycle is stalled", func() {
+		savedRunner := util.RunCmdExecRunner
+		DeferCleanup(func() { util.RunCmdExecRunner = savedRunner })
+
+		setupAppFs()
+
+		// Minimal OVS DB so the ovn-controller registration/config metrics resolve.
+		ovsVersion := "2.17.0"
+		br := vswitchd.Bridge{Name: "br-int", UUID: buildUUID()}
+		testDB := []libovsdbtest.TestData{
+			&vswitchd.Bridge{UUID: br.UUID, Name: br.Name},
+			&vswitchd.OpenvSwitch{
+				UUID:       buildUUID(),
+				OVSVersion: &ovsVersion,
+				Bridges:    []string{br.UUID},
+				ExternalIDs: map[string]string{
+					"ovn-remote": "unix:/var/run/ovn/ovnsb_db.sock",
+				},
+			},
+		}
+		ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: testDB})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(cleanup.Cleanup)
+
+		// Build a mock kexec interface so the appctl wrappers can construct a Cmd;
+		// the actual exec is intercepted by blockingExecRunner below.
+		mockCmd := new(mock_k8s_io_utils_exec.Cmd)
+		mockKexecIface := new(mock_k8s_io_utils_exec.Interface)
+		for _, n := range []int{3, 4, 5, 6} {
+			anys := make([]interface{}, n)
+			for i := range anys {
+				anys[i] = mock.Anything
+			}
+			mockKexecIface.Mock.On("Command", anys...).Maybe().Return(mockCmd)
+		}
+		_ = util.SetSpecificExec(mockKexecIface)
+		DeferCleanup(util.ResetRunner)
+
+		// The collection path (coverage/show) blocks until released; everything
+		// else returns immediately.
+		runner := &blockingExecRunner{release: make(chan struct{})}
+		util.RunCmdExecRunner = runner
+
+		opts := MetricServerOptions{
+			EnableOVNControllerMetrics: true,
+			OVSDBClient:                ovsClient,
+			Registerer:                 prometheus.NewRegistry(),
+		}
+		server := NewMetricServer(opts)
+		server.registerMetrics()
+
+		// Start the background collection loop; its first cycle stalls on
+		// coverage/show and never completes until released.
+		stop := make(chan struct{})
+		loopDone := make(chan struct{})
+		go func() {
+			server.runCollectionLoop(stop)
+			close(loopDone)
+		}()
+
+		ts := httptest.NewServer(server.mux)
+		DeferCleanup(ts.Close)
+
+		// Even though extraction is stuck, the scrape only serializes the registry,
+		// so it must return promptly rather than waiting on the stalled cycle.
+		start := time.Now()
+		resp, err := http.Get(ts.URL + "/metrics")
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		elapsed := time.Since(start)
+
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		Expect(body).NotTo(BeEmpty())
+		Expect(elapsed).To(BeNumerically("<", time.Second),
+			"scrape blocked on stalled extraction instead of serving the registry")
+
+		// Release the stalled cycle and let the loop stop before the DeferCleanups
+		// restore the process-global exec runner, otherwise cleanup races the loop.
+		close(runner.release)
+		close(stop)
+		Eventually(loopDone).Within(5 * time.Second).Should(BeClosed())
+	})
+})
+
+var _ = Describe("resolveCollectionInterval", func() {
+	It("clamps non-positive intervals to the default", func() {
+		Expect(resolveCollectionInterval(0)).To(Equal(defaultCollectionInterval))
+		Expect(resolveCollectionInterval(-5 * time.Second)).To(Equal(defaultCollectionInterval))
+	})
+	It("keeps a positive interval as configured", func() {
+		Expect(resolveCollectionInterval(10 * time.Second)).To(Equal(10 * time.Second))
+	})
+})
+
 type metricsTestDriver struct {
 	libovsdbCleanup *libovsdbtest.Context
 	opts            MetricServerOptions
@@ -358,12 +479,25 @@ func newMetricsTestDriver() *metricsTestDriver {
 			close(serverDone)
 		}()
 
+		// Extraction runs out of band from scraping (as in production). The loop
+		// does one synchronous collect then ticks; the test's Eventually on
+		// /metrics waits for that first collect to populate the registry.
+		collectionDone := make(chan struct{})
+		go func() {
+			server.runCollectionLoop(ctx.Done())
+			close(collectionDone)
+		}()
+
 		DeferCleanup(func() {
 			shutdownStart := time.Now()
 			cancel()
 
 			// Wait for server to stop with timeout
 			Eventually(serverDone, 10*time.Second).Should(BeClosed())
+
+			// Wait for the collection loop to stop before later DeferCleanups
+			// restore the process-global exec runner.
+			Eventually(collectionDone, 10*time.Second).Should(BeClosed())
 
 			// Validate shutdown was reasonably fast (should be under 6 seconds, allowing for 5s grace period)
 			Expect(time.Since(shutdownStart)).To(BeNumerically("<", 6*time.Second))
@@ -456,28 +590,28 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "dpctl/dump-dps"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "dpctl/dump-dps"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("system@ovs-system")), bytes.NewBuffer([]byte("")), nil},
 			},
 			// dpctl/show
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "dpctl/show", "system@ovs-system"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "dpctl/show", "system@ovs-system"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(dpctlShowOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 			// memory/show
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "memory/show"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "memory/show"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(ovsMemoryShowOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 			// coverage/show
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "coverage/show"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "coverage/show"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(coverageShowOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 			// ovs-ofctl dump-aggregate br-int
@@ -586,13 +720,6 @@ var (
 					mock.AnythingOfType("[]string"), "get-schema-version", mock.AnythingOfType("string"), "OVN_Southbound"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("20.41.0")), bytes.NewBuffer([]byte("")), nil},
 			},
-			// ovs-appctl  -t /var/run/openvswitch/ovnnb_db.ctl cluster/status OVN_Northbound
-			{
-				OnCallMethodName: "RunCmd",
-				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), mock.AnythingOfType("string"), "cluster/status", "OVN_Northbound"},
-				RetArgList: []interface{}{bytes.NewBuffer([]byte("")), bytes.NewBuffer([]byte(`"cluster/status" is not a valid command`)), fmt.Errorf("server returned an error")},
-			},
 			// ovs-appctl  -t /var/run/openvswitch/ovnnb_db.ctl memory/show
 			{
 				OnCallMethodName: "RunCmd",
@@ -634,7 +761,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "coverage/show"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "coverage/show"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte(ovnControllercoverageShowOutput)), bytes.NewBuffer([]byte("")), nil},
 			},
 			// ovs-appctl -t  /var/run/openvswitch/ovn-controller.113.ctl version
@@ -648,7 +775,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "connection-status"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "connection-status"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("connected")), bytes.NewBuffer([]byte("")), nil},
 			},
 		},
@@ -761,7 +888,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "status"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "status"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("Status: standby")), bytes.NewBuffer([]byte("")), nil},
 				CallTimes:  2,
 			},
@@ -769,7 +896,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "sb-connection-status"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "sb-connection-status"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("connected")), bytes.NewBuffer([]byte("")), nil},
 				CallTimes:  2,
 			},
@@ -777,7 +904,7 @@ var (
 			{
 				OnCallMethodName: "RunCmd",
 				OnCallMethodArgs: []interface{}{mock.AnythingOfType("*mocks.Cmd"), mock.AnythingOfType("string"),
-					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "nb-connection-status"},
+					mock.AnythingOfType("[]string"), "-t", mock.AnythingOfType("string"), "--timeout=2", "nb-connection-status"},
 				RetArgList: []interface{}{bytes.NewBuffer([]byte("connected")), bytes.NewBuffer([]byte("")), nil},
 				CallTimes:  2,
 			},
@@ -1010,7 +1137,7 @@ nln_changed                0.0/sec     0.000/sec        0.0000/sec   total: 230
 NXST_AGGREGATE reply (xid=0x4): packet_count=12345 byte_count=67890 flow_count=18000
 `
 
-	ovnDBMemoryShowOutput = `atoms:324341 cells:307671 monitors:2 n-weak-refs:5627 raft-connections:4 raft-log:3403 sessions:12 txn-history:100 txn-history-atoms:52811`
+	ovnDBMemoryShowOutput = `atoms:324341 cells:307671 monitors:2 n-weak-refs:5627 sessions:12 txn-history:100 txn-history-atoms:52811`
 
 	ovnControllerDumpAggregateOutput = `NXST_AGGREGATE reply (xid=0x4): packet_count=9945601440 byte_count=33370900148508 flow_count=12062`
 	ovnControllercoverageShowOutput  = `Event coverage, avg rate over last: 5 seconds, last minute, last hour,  hash=7a3e39bf:

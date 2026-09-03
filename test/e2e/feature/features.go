@@ -18,6 +18,9 @@ var (
 	EgressService         = New("EgressService")
 	EgressFirewall        = New("EgressFirewall")
 	EgressQos             = New("EgressQos")
+	// DHCPIPAM covers localnet networks with ipam.mode=DHCP; these tests need
+	// the dhcp CNI plugin binary on the nodes (kind.sh --install-cni-plugins).
+	DHCPIPAM              = New("DHCPIPAM")
 	EVPN                  = New("EVPN")
 	ExternalGateway       = New("ExternalGateway")
 	DisablePacketMTUCheck = New("DisablePacketMTUCheck")
@@ -33,9 +36,11 @@ var (
 	// is specific to dynamic UDN allocation; these tests require clusters
 	// with both route advertisements and dynamic UDN allocation enabled.
 	RouteAdvertisementsDynamicUDN = New("RouteAdvertisementsDynamicUDN")
+	Uplink                        = New("Uplink")
 	Unidle                        = New("Unidle")
 	NetworkQos                    = New("NetworkQos")
 	NetworkConnect                = New("NetworkConnect")
+	Metrics                       = New("Metrics")
 )
 
 func New(name string) ginkgo.Labels {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"runtime/debug"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -29,6 +30,12 @@ import (
 type MetricServerOptions struct {
 	// Server configuration
 	BindAddress string
+
+	// CollectionInterval is how often the background loop extracts OVS/OVN metric
+	// values into the registry. Scrapes only serialize the registry, so scrape
+	// latency is independent of extraction latency. Non-positive falls back to
+	// defaultCollectionInterval.
+	CollectionInterval time.Duration
 
 	// TLS configuration
 	CertFile        string
@@ -51,7 +58,6 @@ type MetricServerOptions struct {
 	// Prometheus plumbing
 	Registerer prometheus.Registerer
 
-	dbIsClustered  bool
 	dbFoundViaPath bool
 }
 
@@ -86,13 +92,12 @@ func NewMetricServer(opts MetricServerOptions) *MetricServer {
 	tg := prometheus.ToTransactionalGatherer(server.registerer.(prometheus.Gatherer))
 	metricsHandler := promhttp.HandlerForTransactional(tg, promhttp.HandlerOpts{})
 
+	// The scrape path only serializes the registry. Metric values are refreshed
+	// out of band by runCollectionLoop, so scrape latency is independent of how
+	// expensive extraction is.
 	server.mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
 		server.registerer,
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Update metrics in the registry before emitting them.
-			server.handleMetrics(r)
-			metricsHandler.ServeHTTP(w, r)
-		}),
+		metricsHandler,
 	))
 
 	if opts.EnablePprof {
@@ -117,11 +122,11 @@ func (s *MetricServer) registerMetrics() {
 	}
 	if s.opts.EnableOVNDBMetrics {
 		klog.Infof("MetricServer registers OVN DB metrics")
-		s.ovsDbProperties, s.opts.dbIsClustered, s.opts.dbFoundViaPath = RegisterOvnDBMetrics(s.registerer)
+		s.ovsDbProperties, s.opts.dbFoundViaPath = RegisterOvnDBMetrics(s.registerer)
 	}
 	if s.opts.EnableOVNControllerMetrics {
 		klog.Infof("MetricServer registers OVN Controller metrics")
-		RegisterOvnControllerMetrics(s.opts.OVSDBClient, s.registerer)
+		RegisterOvnControllerMetrics(s.registerer)
 	}
 	if s.opts.EnableOVNNorthdMetrics {
 		klog.Infof("MetricServer registers OVN Northd metrics")
@@ -138,7 +143,9 @@ func (s *MetricServer) updateOvsMetrics() {
 	if err := updateOvsInterfaceMetrics(s.opts.OVSDBClient); err != nil {
 		klog.Errorf("Updating ovs interface metrics failed: %s", err.Error())
 	}
-	if err := setOvsMemoryMetrics(util.RunOvsVswitchdAppCtl); err != nil {
+	if err := setOvsMemoryMetrics(func(args ...string) (string, string, error) {
+		return util.RunOvsVswitchdAppCtlWithTimeout(metricsAppctlTimeout, args...)
+	}); err != nil {
 		klog.Errorf("Updating ovs memory metrics failed: %s", err.Error())
 	}
 	if err := setOvsHwOffloadMetrics(s.opts.OVSDBClient); err != nil {
@@ -153,32 +160,25 @@ func (s *MetricServer) updateOvnControllerMetrics() {
 		klog.Errorf("Setting ovn controller config metrics failed: %s", err.Error())
 	}
 
+	updateOvnControllerIntegrationBridgeMetrics(s.opts.OVSDBClient)
 	coverageShowMetricsUpdate(ovnController)
 	stopwatchShowMetricsUpdate(ovnController)
-	updateSBDBConnectionMetric(util.RunOVNControllerAppCtl)
+	updateSBDBConnectionMetric(func(args ...string) (string, string, error) {
+		return util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, args...)
+	})
 
 }
 
 // updateOvnNorthdMetrics updates the OVN Northd metrics
 func (s *MetricServer) updateOvnNorthdMetrics() {
+	updateOvnNorthdStatusMetrics()
 	coverageShowMetricsUpdate(ovnNorthd)
 	stopwatchShowMetricsUpdate(ovnNorthd)
 }
 
 // updateOvnDBMetrics updates the OVN DB metrics
 func (s *MetricServer) updateOvnDBMetrics() {
-	if s.opts.dbIsClustered {
-		resetOvnDbClusterMetrics()
-	}
-	if s.opts.dbFoundViaPath {
-		resetOvnDbSizeMetric()
-	}
-	resetOvnDbMemoryMetrics()
-
 	for _, dbProperty := range s.ovsDbProperties {
-		if s.opts.dbIsClustered {
-			ovnDBClusterStatusMetricsUpdater(dbProperty)
-		}
 		if s.opts.dbFoundViaPath {
 			updateOvnDBSizeMetrics(dbProperty)
 		}
@@ -186,9 +186,17 @@ func (s *MetricServer) updateOvnDBMetrics() {
 	}
 }
 
-// handleMetrics handles the /metrics request
-func (s *MetricServer) handleMetrics(r *http.Request) {
-	klog.V(5).Infof("MetricServer starts to handle metrics request from %s", r.RemoteAddr)
+// collect refreshes all enabled OVS/OVN metric values in the registry. It execs
+// ovs-appctl/ovn-appctl subprocesses (each bounded by metricsAppctlTimeout) and
+// queries OVSDB. It runs off the scrape path, driven by runCollectionLoop, so a
+// slow daemon never blocks a scrape. A panic in any metric path only fails the
+// current cycle rather than crashing the process.
+func (s *MetricServer) collect() {
+	defer func() {
+		if r := recover(); r != nil {
+			klog.Errorf("MetricServer recovered from panic during metric collection: %v\n%s", r, debug.Stack())
+		}
+	}()
 
 	if s.opts.EnableOVSMetrics {
 		s.updateOvsMetrics()
@@ -201,6 +209,37 @@ func (s *MetricServer) handleMetrics(r *http.Request) {
 	}
 	if s.opts.EnableOVNNorthdMetrics {
 		s.updateOvnNorthdMetrics()
+	}
+}
+
+// resolveCollectionInterval clamps a non-positive configured interval to
+// defaultCollectionInterval so a missing or invalid flag still ticks.
+func resolveCollectionInterval(d time.Duration) time.Duration {
+	if d <= 0 {
+		return defaultCollectionInterval
+	}
+	return d
+}
+
+// runCollectionLoop refreshes the registry once synchronously (so the first
+// scrape has data) and then on every CollectionInterval tick until stopChan is
+// closed. A plain ticker loop serializes cycles: an over-running collect just
+// delays the next one, so cycles never overlap and no locking is needed.
+func (s *MetricServer) runCollectionLoop(stopChan <-chan struct{}) {
+	interval := resolveCollectionInterval(s.opts.CollectionInterval)
+	klog.Infof("MetricServer collection loop running every %s", interval)
+
+	s.collect()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.collect()
+		case <-stopChan:
+			return
+		}
 	}
 }
 

@@ -232,7 +232,6 @@ type egressIPNamespace struct{}
 type egressNode struct{}
 
 // types for handlers in use by ovn-k node
-type namespaceExGw struct{}
 type endpointSliceForStaleConntrackRemoval struct{}
 type serviceForGateway struct{}
 type endpointSliceForGateway struct{}
@@ -267,7 +266,6 @@ var (
 	NetworkQoSType                  reflect.Type = reflect.TypeOf(&networkqosapi.NetworkQoS{})
 	ClusterNetworkConnectType       reflect.Type = reflect.TypeOf(&networkconnectapi.ClusterNetworkConnect{})
 	// Resource types used in ovnk node
-	NamespaceExGwType                         reflect.Type = reflect.TypeOf(&namespaceExGw{})
 	EndpointSliceForStaleConntrackRemovalType reflect.Type = reflect.TypeOf(&endpointSliceForStaleConntrackRemoval{})
 	ServiceForGatewayType                     reflect.Type = reflect.TypeOf(&serviceForGateway{})
 	EndpointSliceForGatewayType               reflect.Type = reflect.TypeOf(&endpointSliceForGateway{})
@@ -1399,7 +1397,7 @@ func (wf *WatchFactory) GetHandlerPriority(objType reflect.Type) (priority int) 
 func (wf *WatchFactory) GetResourceHandlerFunc(objType reflect.Type) (AddHandlerFuncType, error) {
 	priority := wf.GetHandlerPriority(objType)
 	switch objType {
-	case NamespaceType, NamespaceExGwType:
+	case NamespaceType:
 		return func(_ string, _ labels.Selector, funcs cache.ResourceEventHandler, processExisting func([]interface{}) error) (*Handler, error) {
 			return wf.AddNamespaceHandler(funcs, processExisting)
 		}, nil
@@ -1779,6 +1777,12 @@ func (wf *WatchFactory) GetService(namespace, name string) (*corev1.Service, err
 func (wf *WatchFactory) GetServices() ([]*corev1.Service, error) {
 	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
 	return serviceLister.List(labels.Everything())
+}
+
+// GetServicesByNamespace returns all services in the given namespace
+func (wf *WatchFactory) GetServicesByNamespace(namespace string) ([]*corev1.Service, error) {
+	serviceLister := wf.informers[ServiceType].lister.(listers.ServiceLister)
+	return serviceLister.Services(namespace).List(labels.Everything())
 }
 
 func (wf *WatchFactory) GetCloudPrivateIPConfig(name string) (*ocpcloudnetworkapi.CloudPrivateIPConfig, error) {
