@@ -1155,14 +1155,14 @@ spec:
 			})
 
 			hostNetPort := infraprovider.Get().GetK8HostPort()
+			hostNetPodName := "egress-host-net-pod"
 			otherHostNetPodIP := node{
-				name:   egress2Node.name + "-host-net-pod",
+				name:   hostNetPodName,
 				nodeIP: otherDst,
 				port:   hostNetPort,
 			}
 
 			ginkgo.By("2. Creating host-networked pod, on non-egress node acting as \"another node\"")
-			hostNetPodName := egress2Node.name + "-host-net-pod"
 			p, err := createPod(f, hostNetPodName, egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
 				p.Spec.HostNetwork = true
 				p.Spec.Containers[0].Image = images.AgnHost()
@@ -1179,7 +1179,7 @@ spec:
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "pod must be fully deleted within 60 seconds")
 			}()
 			hostNetPod := node{
-				name:   egress2Node.name + "-host-net-pod",
+				name:   hostNetPodName,
 				nodeIP: egress2Node.nodeIP,
 				port:   hostNetPort,
 			}
