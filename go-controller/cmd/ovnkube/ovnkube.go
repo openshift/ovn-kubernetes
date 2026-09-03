@@ -628,6 +628,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				EnableOVNDBMetrics:         true,
 				OVSDBClient:                ovsClient,
 				ApplyTLSOptions:            config.TLS.ApplyOptions,
+				CollectionInterval:         time.Duration(config.Metrics.CollectionInterval) * time.Second,
 			}
 
 			if combineMetricsEndpoints(runMode) {
