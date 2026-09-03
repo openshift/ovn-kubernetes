@@ -284,11 +284,12 @@ var _ = g.Describe("[OTP] UDN Port Isolation", func() {
 			o.Expect(err).NotTo(o.HaveOccurred())
 			for _, net := range networks {
 				if name, ok := net["name"].(string); ok {
-					if name == testNS+"/bridge-isolated-ports" {
+					switch name {
+					case testNS + "/bridge-isolated-ports":
 						if ips, ok := net["ips"].([]interface{}); ok && len(ips) > 0 {
 							pod1IsolatedIP = ips[0].(string)
 						}
-					} else if name == testNS+"/bridge-isolated-false-ports" {
+					case testNS + "/bridge-isolated-false-ports":
 						if ips, ok := net["ips"].([]interface{}); ok && len(ips) > 0 {
 							pod1NonIsolatedIP = ips[0].(string)
 						}
@@ -305,11 +306,12 @@ var _ = g.Describe("[OTP] UDN Port Isolation", func() {
 			o.Expect(err).NotTo(o.HaveOccurred())
 			for _, net := range networks {
 				if name, ok := net["name"].(string); ok {
-					if name == testNS+"/bridge-isolated-ports" {
+					switch name {
+					case testNS + "/bridge-isolated-ports":
 						if ips, ok := net["ips"].([]interface{}); ok && len(ips) > 0 {
 							pod2IsolatedIP = ips[0].(string)
 						}
-					} else if name == testNS+"/bridge-isolated-false-ports" {
+					case testNS + "/bridge-isolated-false-ports":
 						if ips, ok := net["ips"].([]interface{}); ok && len(ips) > 0 {
 							pod2NonIsolatedIP = ips[0].(string)
 						}
@@ -621,11 +623,12 @@ var _ = g.Describe("[OTP] UDN Port Isolation", func() {
 			o.Expect(err).NotTo(o.HaveOccurred())
 			for _, net := range networks {
 				if name, ok := net["name"].(string); ok {
-					if name == testNS+"/bridge-isolated-ports" {
+					switch name {
+					case testNS + "/bridge-isolated-ports":
 						if ips, ok := net["ips"].([]interface{}); ok && len(ips) > 0 {
 							pod1IsolatedIP = ips[0].(string)
 						}
-					} else if name == testNS+"/bridge-whereabouts" {
+					case testNS + "/bridge-whereabouts":
 						if ips, ok := net["ips"].([]interface{}); ok && len(ips) > 0 {
 							pod1NonIsolatedIP = ips[0].(string)
 						}
@@ -642,11 +645,12 @@ var _ = g.Describe("[OTP] UDN Port Isolation", func() {
 			o.Expect(err).NotTo(o.HaveOccurred())
 			for _, net := range networks {
 				if name, ok := net["name"].(string); ok {
-					if name == testNS+"/bridge-isolated-ports" {
+					switch name {
+					case testNS + "/bridge-isolated-ports":
 						if ips, ok := net["ips"].([]interface{}); ok && len(ips) > 0 {
 							pod2IsolatedIP = ips[0].(string)
 						}
-					} else if name == testNS+"/bridge-whereabouts" {
+					case testNS + "/bridge-whereabouts":
 						if ips, ok := net["ips"].([]interface{}); ok && len(ips) > 0 {
 							pod2NonIsolatedIP = ips[0].(string)
 						}
