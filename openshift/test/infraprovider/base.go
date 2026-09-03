@@ -24,6 +24,18 @@ const (
 	bastionSSHPort            = "22"
 )
 
+// sudoRunner wraps a Runner and prepends "sudo" to every command.
+// On bastion hosts (AWS, GCP, Azure) the SSH user is unprivileged (core),
+// so rootless podman containers exit when the SSH session terminates.
+// Running podman under sudo avoids this.
+type sudoRunner struct {
+	inner api.Runner
+}
+
+func (s *sudoRunner) Run(command string, args ...string) (string, error) {
+	return s.inner.Run("sudo", append([]string{command}, args...)...)
+}
+
 // baseInfra provides shared infrastructure for platforms that manage
 // external containers on a remote host via SSH + podman (e.g., baremetal, AWS).
 type baseInfra struct {
@@ -270,10 +282,13 @@ func initializeBastionInfra() (*baseInfra, error) {
 		return nil, fmt.Errorf("failed connectivity check with bastion host: %w", err)
 	}
 
+	// Wrap runner with sudo: the bastion SSH user (core) is unprivileged,
+	// and rootless podman containers exit when the SSH session ends.
+	podmanRunner := &sudoRunner{inner: sshRunner}
 	h := &baseInfra{
-		runner:             sshRunner,
+		runner:             podmanRunner,
 		externalContainers: make(map[string]api.ExternalContainer),
-		engine:             container.NewEngine("podman", sshRunner),
+		engine:             container.NewEngine("podman", podmanRunner),
 		primaryNetworkName: primaryNetworkName,
 	}
 
