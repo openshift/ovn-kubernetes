@@ -13,6 +13,9 @@ import (
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
+	// import OTP (OpenShift Tests Private) migration tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/otp"
+
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
@@ -40,6 +43,14 @@ const (
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
+
+// isOTPBlocking checks if an OTP test should be marked as blocking.
+// Per reviewer feedback (anuragthehatter), all OTP tests are [informing] for initial rollout.
+// To promote a test to blocking, return true when name contains its title substring, e.g.:
+// "should not expose API tokens in ovnkube-node logs", "should execute ovn-db-run-command script successfully"
+func isOTPBlocking(_ string) bool {
+	return false
+}
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
 // and test labels. When ocpInfra is nil (no cluster access), all tests are included.
@@ -134,8 +145,12 @@ func main() {
 	blockingTests := sets.New(test.BlockingTests...)
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
-		for _, label := range getTestExtensionLabels() {
-			spec.Labels.Insert(label)
+		isOTP := strings.Contains(spec.Name, "[OTP]")
+
+		if !isOTP {
+			for _, label := range getTestExtensionLabels() {
+				spec.Labels.Insert(label)
+			}
 		}
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
@@ -153,9 +168,15 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		if !isOTP {
+			spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		}
 
 		switch {
+		case isOTP && isOTPBlocking(spec.Name):
+			spec.Lifecycle = extensiontests.LifecycleBlocking
+		case isOTP:
+			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case blockingTests.Has(spec.Name):
