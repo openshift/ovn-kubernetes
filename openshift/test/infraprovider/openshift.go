@@ -82,8 +82,8 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 		}
 		o.clusterFeatureGate = nil
 	}
-	// check ovn gateway mode and export required env variable
-	o.configureOVNGatewayMode()
+	// configure environment variables required by upstream E2E tests
+	o.configureTestEnvs()
 	if bm, ok := o.clusterInfra.(*baremetalInfra); ok {
 		// check for frr external container availability
 		frrContainer := api.ExternalContainer{Name: externalFRRContainerName}
@@ -110,19 +110,19 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 	return nil
 }
 
-// configureOVNGatewayMode detects and configures the OVN gateway mode for tests
-func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
-	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
-		return
-	}
-
-	if o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
+// configureTestEnvs sets environment variables required by upstream E2E tests.
+func (o *OpenshiftInfraProvider) configureTestEnvs() {
+	if o.operNetwork != nil && o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig != nil &&
+		o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
 		o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost {
 		// The E2E utility method isLocalGWModeEnabled depends on the
 		// OVN_GATEWAY_MODE environment variable. All EVPN tests must
 		// satisfy this condition; otherwise, they will be skipped.
 		_ = os.Setenv("OVN_GATEWAY_MODE", "local")
 	}
+	// OpenShift always supports network segmentation (UDN). The EgressIP
+	// E2Es check this env variable to decide whether to run UDN tests.
+	_ = os.Setenv("ENABLE_NETWORK_SEGMENTATION", "true")
 }
 
 // HasSecondaryHostEIPSupport checks if the platform supports secondary-host-eip
