@@ -79,6 +79,12 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, "secondary-host-eip") && !ocpInfra.HasSecondaryHostEIPSupport() {
 		return false
 	}
+	// Egress firewall tests require distinct IPs for "allowed" and "denied"
+	// external containers. On bastion-based platforms both containers share
+	// the host IP, making CIDR-based firewall rules ineffective.
+	if strings.Contains(spec.Name, "egress firewall applied") && ocpInfra.IsBastionBasedPlatform() {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
