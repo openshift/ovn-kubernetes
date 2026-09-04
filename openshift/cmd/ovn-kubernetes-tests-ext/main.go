@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -12,6 +13,9 @@ import (
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
+
+	kclientset "k8s.io/client-go/kubernetes"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -39,6 +43,7 @@ const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+	featureLabelEgressIP            = "Feature:EgressIP"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -64,7 +69,22 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Future feature-based filters can be added here
+	// If platform infra node (hypervisor node for baremetal, bastion host
+	// for cloud platforms) doesn't exist, then ignore running EgressIP tests.
+	if !ocpInfra.HasPlatformInfra() && spec.Labels.Has(featureLabelEgressIP) {
+		return false
+	}
+	// secondary-host-eip tests: only include on platforms with a
+	// pre-configured secondary network (currently baremetal only)
+	if strings.Contains(spec.Name, "secondary-host-eip") && !ocpInfra.HasSecondaryHostEIPSupport() {
+		return false
+	}
+	// Egress firewall tests require distinct IPs for "allowed" and "denied"
+	// external containers. On bastion-based platforms both containers share
+	// the host IP, making CIDR-based firewall rules ineffective.
+	if strings.Contains(spec.Name, "egress firewall applied") && ocpInfra.IsBastionBasedPlatform() {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
@@ -80,19 +100,15 @@ func main() {
 	// TODO: register test images using tests extension
 	// add ovn-kubernetes test suites into openshift suites
 	// by default, we treat all tests as parallel and only expose tests as Serial if the appropriate label is added - "Serial"
+	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
+	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name: "ovn-kubernetes/conformance/serial",
-		Parents: []string{
-			"openshift/conformance/serial",
-		},
+		Name:       "ovn-kubernetes/conformance/serial",
 		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name: "ovn-kubernetes/conformance/parallel",
-		Parents: []string{
-			"openshift/conformance/parallel",
-		},
+		Name:       "ovn-kubernetes/conformance/parallel",
 		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
 	})
 
@@ -127,6 +143,13 @@ func main() {
 		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
+		}
+		client, err := kclientset.NewForConfig(cfg)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
+		}
+		if err := ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
 	})
 
