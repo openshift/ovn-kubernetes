@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/onsi/ginkgo/v2"
@@ -21,6 +22,7 @@ import (
 
 	deploymentkind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/configs/kind"
 	infraproviderkind "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/providers/kind"
+	infraproviderssh "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/providers/ssh"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -68,13 +70,57 @@ func TestMain(m *testing.M) {
 	handleFlags()
 	ProcessTestContextAndSetupLogging()
 
-	// Set up infrastructure provider and deployment config
-	// Upstream currently uses KinD as its preferred platform infra
-	// So TestMain is expected to run only there.
-	infraprovider.Set(infraproviderkind.New())
+	// Set up infrastructure provider and deployment config.
+	// Upstream defaults to KinD as its preferred platform infra. Setting
+	// OVN_TEST_INFRA_PROVIDER=ssh selects the generic SSH provider, which drives
+	// the container runtime on a remote host over SSH (see
+	// test/e2e/infraprovider/providers/ssh). The deployment config stays KinD:
+	// the guardrail runs the SSH provider against a KinD cluster.
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OVN_TEST_INFRA_PROVIDER"))) {
+	case "", "kind":
+		infraprovider.Set(infraproviderkind.New())
+	case "ssh":
+		cfg, err := infraproviderssh.ConfigFromEnv()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to configure ssh infra provider: %v\n", err)
+			os.Exit(1)
+		}
+		// When the ssh provider runs against a KinD cluster (the upstream
+		// guardrail), reuse KinD's image preload (local pull + `kind load`) so
+		// required images reach the node image stores; the ssh provider does not
+		// load images itself. This wiring supplies the kind dependency so the
+		// generic ssh package stays vendor-neutral. For a non-KinD target the
+		// preloader is left unset (images are expected to be present).
+		if infraprovider.IsKind() {
+			kindForPreload := infraproviderkind.New()
+			cfg.ImagePreloader = func(images []string) error {
+				kindForPreload.PreloadImages(images)
+				return nil
+			}
+		}
+		sshProvider, err := infraproviderssh.New(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to create ssh infra provider: %v\n", err)
+			os.Exit(1)
+		}
+		infraprovider.Set(sshProvider)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown OVN_TEST_INFRA_PROVIDER %q (expected \"kind\" or \"ssh\")\n",
+			os.Getenv("OVN_TEST_INFRA_PROVIDER"))
+		os.Exit(1)
+	}
 	deploymentconfig.Set(deploymentkind.New())
 
-	os.Exit(m.Run())
+	code := m.Run()
+	// Best-effort teardown: close providers that hold long-lived connections
+	// (e.g. the ssh provider's cached SSH client) before exiting, preserving the
+	// test exit code.
+	if closer, ok := infraprovider.Get().(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "infra provider close: %v\n", err)
+		}
+	}
+	os.Exit(code)
 }
 
 func TestE2E(t *testing.T) {
