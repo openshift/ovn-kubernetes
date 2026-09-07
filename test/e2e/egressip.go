@@ -581,7 +581,8 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 					}
 					return nil
 				})
-			} else {
+			} else if getNodeStatus(node) != string(corev1.ConditionTrue) {
+				// Skip starting kubelet if the node is already ready.
 				_, err := infraprovider.Get().ExecK8NodeCommand(node, []string{"systemctl", "start", "kubelet.service"})
 				if err != nil {
 					framework.Failf("failed to start kubelet on node: %s, err: %v", node, err)
