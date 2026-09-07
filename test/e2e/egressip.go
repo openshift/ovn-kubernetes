@@ -436,8 +436,8 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, ginkgo.Ser
 			targetNodeName          string = "egressTargetNode-allowed"
 			deniedTargetNodeName    string = "egressTargetNode-denied"
 			targetSecondaryNodeName string = "egressSecondaryTargetNode-allowed"
-			egressIPYaml            string = "egressip.yaml"
-			egressFirewallYaml      string = "egressfirewall.yaml"
+			egressIPYaml            string = "/tmp/egressip.yaml"
+			egressFirewallYaml      string = "/tmp/egressfirewall.yaml"
 			retryTimeout                   = 3 * retryTimeout // Boost the retryTimeout for EgressIP tests.
 		)
 
