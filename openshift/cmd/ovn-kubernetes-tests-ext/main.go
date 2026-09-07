@@ -79,6 +79,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, "secondary-host-eip") && !ocpInfra.HasSecondaryHostEIPSupport() {
 		return false
 	}
+	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
+	// which is not yet configured on bastion-based platforms.
+	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsBastionBasedPlatform() {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
