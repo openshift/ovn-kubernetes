@@ -159,6 +159,16 @@ func (o *OpenshiftInfraProvider) EnableSecondaryForwarding(clientset kubernetes.
 	return bm.enableSecondaryForwarding(nodeNames, o.ExecK8NodeCommand)
 }
 
+// IsCloudPlatform returns true for cloud platforms (AWS, GCP, Azure)
+// where external containers run on a bastion host with host networking.
+func (o *OpenshiftInfraProvider) IsCloudPlatform() bool {
+	if o.clusterInfra == nil {
+		return false
+	}
+	_, isBM := o.clusterInfra.(*baremetalInfra)
+	return !isBM
+}
+
 // CheckForEVPN checks all EVPN prerequisites
 func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
 	if o.operNetwork == nil {
