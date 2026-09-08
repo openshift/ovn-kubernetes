@@ -9,41 +9,41 @@ import (
 var AppendedAnnotations = map[string]string{
 	"ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPolicy the ANP ACL logs have the expected log level": "[Disabled:Unimplemented]",
 
-	"ACL Logging for EgressFirewall when an invalid value is provided to the allow rule when the allowed destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when an invalid value is provided to the allow rule when the allowed destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when an invalid value is provided to the allow rule when the denied destination is poked the logs should have the expected log level": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when an invalid value is provided to the allow rule when the denied destination is poked the logs should have the expected log level": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when both the namespace's ACL logging deny and allow annotation are set to \"\" when the allowed destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when both the namespace's ACL logging deny and allow annotation are set to \"\" when the allowed destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when both the namespace's ACL logging deny and allow annotation are set to \"\" when the denied destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when both the namespace's ACL logging deny and allow annotation are set to \"\" when the denied destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when both the namespace's ACL logging deny and allow annotation are set to \"invalid\" when the allowed destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when both the namespace's ACL logging deny and allow annotation are set to \"invalid\" when the allowed destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when both the namespace's ACL logging deny and allow annotation are set to \"invalid\" when the denied destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when both the namespace's ACL logging deny and allow annotation are set to \"invalid\" when the denied destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace is brought up with the initial ACL log severity when the allowed destination is poked the logs should have the expected log level": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace is brought up with the initial ACL log severity when the allowed destination is poked the logs should have the expected log level": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace is brought up with the initial ACL log severity when the denied destination is poked the logs should have the expected log level": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace is brought up with the initial ACL log severity when the denied destination is poked the logs should have the expected log level": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's ACL logging allow annotation is removed when the allowed destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's ACL logging allow annotation is removed when the allowed destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's ACL logging allow annotation is removed when the denied destination is poked the logs should have the expected log level": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's ACL logging allow annotation is removed when the denied destination is poked the logs should have the expected log level": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's ACL logging annotation cannot be parsed when the allowed destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's ACL logging annotation cannot be parsed when the allowed destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's ACL logging annotation cannot be parsed when the denied destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's ACL logging annotation cannot be parsed when the denied destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's ACL logging annotation is updated when the allowed destination is poked the logs should have the expected log level": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's ACL logging annotation is updated when the allowed destination is poked the logs should have the expected log level": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's ACL logging annotation is updated when the denied destination is poked the logs should have the expected log level": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's ACL logging annotation is updated when the denied destination is poked the logs should have the expected log level": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is removed when the allowed destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is removed when the allowed destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is removed when the denied destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is removed when the denied destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is set to {} when the allowed destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is set to {} when the allowed destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is set to {} when the denied destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
+	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is set to {} when the denied destination is poked there should be no trace in the ACL logs": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"ACL Logging for NetworkPolicy the logs have the expected log level": "[Disabled:Unimplemented]",
 
@@ -1807,9 +1807,9 @@ var AppendedAnnotations = map[string]string{
 
 	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
 
-	"Status manager validation Should validate the egress firewall status when adding a new zone": "[Disabled:Unimplemented]",
+	"Status manager validation Should validate the egress firewall status when adding a new zone": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Status manager validation Should validate the egress firewall status when adding an unknown zone": "[Disabled:Unimplemented]",
+	"Status manager validation Should validate the egress firewall status when adding an unknown zone": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Unidling Should generate a NeedPods event for traffic destined to idled services": "[Disabled:Unimplemented]",
 
@@ -2121,17 +2121,17 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented]",
 
-	"e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name": "[Disabled:Unimplemented]",
+	"e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"e2e egress firewall policy validation with external containers Should validate that egressfirewall supports DNS name in caps": "[Disabled:Unimplemented]",
+	"e2e egress firewall policy validation with external containers Should validate that egressfirewall supports DNS name in caps": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"e2e egress firewall policy validation with external containers Should validate the egress firewall allows inbound connections": "[Disabled:Unimplemented]",
+	"e2e egress firewall policy validation with external containers Should validate the egress firewall allows inbound connections": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"e2e egress firewall policy validation with external containers Should validate the egress firewall doesn't affect internal connections": "[Disabled:Unimplemented]",
+	"e2e egress firewall policy validation with external containers Should validate the egress firewall doesn't affect internal connections": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"e2e egress firewall policy validation with external containers Should validate the egress firewall policy functionality for allowed CIDR and port": "[Disabled:Unimplemented]",
+	"e2e egress firewall policy validation with external containers Should validate the egress firewall policy functionality for allowed CIDR and port": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"e2e egress firewall policy validation with external containers Should validate the egress firewall policy functionality for allowed IP": "[Disabled:Unimplemented]",
+	"e2e egress firewall policy validation with external containers Should validate the egress firewall policy functionality for allowed IP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"e2e ingress to host-networked pods traffic validation Validating ingress traffic to Host Networked pods with externalTrafficPolicy=local Should be allowed to node local host-networked endpoints by nodeport services": "[Disabled:Unimplemented]",
 

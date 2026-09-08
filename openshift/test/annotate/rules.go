@@ -16,7 +16,6 @@ var (
 			`[Feature:BaselineNetworkPolicy]`,
 			`[Feature:EgressIP]`,
 			`[Feature:EgressService]`,
-			`[Feature:EgressFirewall]`,
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
