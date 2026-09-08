@@ -1,0 +1,10 @@
+# References:
+# https://docs.snyk.io/scan-applications/snyk-code/using-snyk-code-from-the-cli/excluding-directories-and-files-from-the-snyk-code-cli-test
+# https://docs.snyk.io/snyk-cli/commands/ignore
+exclude:
+  global:
+    - "go-controller/vendor/**" # Upstream dependencies (not project code)
+    - "openshift/test/**" # Test utilities - CORENET-7226 (path traversal in annotate.go), CORENET-7227 (info disclosure in namespace.go)
+    - "go-controller/pkg/ovnwebhook/*_test.go" # Test fixtures with hardcoded credentials - CORENET-7225
+    - "go-controller/cmd/ovnkube-identity/webhook/*_test.go" # Test fixtures with InsecureSkipVerify (permissive TrustManager) - CORENET-7295
+    - "contrib/perf/**" # Dev/perf tools - CORENET-7226 (path traversal in generate_perf_report.py)

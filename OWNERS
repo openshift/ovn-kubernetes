@@ -1,0 +1,14 @@
+reviewers:
+  - jcaamano
+  - kyrtapz
+  - tssurya
+approvers:
+  - abhat
+  - jcaamano
+  - kyrtapz
+  - knobunc
+  - tssurya
+
+# Bugzilla info
+component: Networking
+subcomponent: ovn-kubernetes
