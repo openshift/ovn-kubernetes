@@ -206,6 +206,16 @@ func nodeSubnetCIDR(n *corev1.Node, isIPv6 bool) string {
 	return fmt.Sprintf("%s/%d", parsed.V4.IP, ones)
 }
 
+// sameSubnet returns true if two node subnet CIDRs share the same network prefix.
+func sameSubnet(cidr1, cidr2 string) bool {
+	_, net1, err1 := net.ParseCIDR(cidr1)
+	_, net2, err2 := net.ParseCIDR(cidr2)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return net1.String() == net2.String()
+}
+
 func getLastLogLine(data string) string {
 	data = strings.TrimSuffix(data, "\n")
 	logLines := strings.Split(data, "\n")
@@ -1131,6 +1141,9 @@ spec:
 		   20. Check connectivity from second pod to another node (egress2Node) secondary IP and verify that the srcIP is the expected nodeIP (this verifies SNAT's towards nodeIP are not deleted for pods unless pod is on its own egressNode)
 		*/
 		ginkgo.It("[OVN network] Should validate the egress IP SNAT functionality against host-networked pods", func() {
+			if !sameSubnet(egress1Node.nodeSubnet, egress2Node.nodeSubnet) {
+				ginkgo.Skip("Test requires egress nodes in the same subnet for EgressIP failover")
+			}
 			ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
 			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
 			framework.Logf("Added egress-assignable label to node %s", egress1Node.name)
@@ -1440,6 +1453,9 @@ spec:
 		ginkgo.It("Should validate egress IP logic when one pod is managed by more than one egressIP object", func() {
 			if isUserDefinedNetwork(netConfigParams) {
 				ginkgo.Skip("Unsupported for UDNs")
+			}
+			if !sameSubnet(egress1Node.nodeSubnet, egress2Node.nodeSubnet) {
+				ginkgo.Skip("Test requires egress nodes in the same subnet for EgressIP failover")
 			}
 			ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to egress1Node node")
 			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
@@ -1771,6 +1787,9 @@ spec:
 		   27. Check connectivity from pod to an external "node" and verify that the IP is the egress IP
 		*/
 		ginkgo.It("Should re-assign egress IPs when node readiness / reachability goes down/up", func() {
+			if !sameSubnet(egress1Node.nodeSubnet, egress2Node.nodeSubnet) {
+				ginkgo.Skip("Test requires egress nodes in the same subnet for EgressIP failover")
+			}
 
 			ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to two nodes")
 			e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
