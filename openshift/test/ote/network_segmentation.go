@@ -85,10 +85,16 @@ var _ = Describe("CUDN Localnet", func() {
 	// The test will automatically:
 	// - Enable MultiNetworkPolicy support via cluster network operator (if not already enabled)
 	// - Create and cleanup all test resources (namespaces, CUDN, policies, pods, etc.)
-	It("[JIRA:Networking][OTP] 81190 Verify IP Block network policy with CUDN with localnet topology", func() {
+	// Serial: this spec mutates cluster-global state that cannot be isolated by
+	// resource naming — it toggles the cluster-wide network.operator
+	// useMultiNetworkPolicy setting and applies a NodeNetworkConfigurationPolicy
+	// that maps a localnet onto br-ex on every worker node. It must not run
+	// concurrently with other specs that touch this shared state.
+	It("[JIRA:Networking][OTP] 81190 Verify IP Block network policy with CUDN with localnet topology", Serial, func() {
 		var (
 			buildPruningBaseDir        = testdata.FixturePath("networking")
 			nncpFile                   = filepath.Join(buildPruningBaseDir, "cudn/nncp-bridge-mapping.yaml")
+			nncpAbsentFile             = filepath.Join(buildPruningBaseDir, "cudn/nncp-bridge-mapping-absent.yaml")
 			cudnFile                   = filepath.Join(buildPruningBaseDir, "cudn/cluster-udn-localnet.yaml")
 			statefulsetFile            = filepath.Join(buildPruningBaseDir, "cudn/statefulset-hello-cudn.yaml")
 			multiNetPolIngressTemplate = filepath.Join(buildPruningBaseDir, "networkpolicy/cudn/multi-networkpolicy-ingress-ipblock-template.yaml")
@@ -121,11 +127,16 @@ var _ = Describe("CUDN Localnet", func() {
 
 			// Register cleanup to restore MultiNetworkPolicy setting
 			DeferCleanup(func() {
-				if originalMultiNetPolSetting != "" && originalMultiNetPolSetting != "true" {
-					By("Cleanup: Restoring original MultiNetworkPolicy setting")
-					patchValue := fmt.Sprintf(`{"spec":{"useMultiNetworkPolicy":%s}}`, originalMultiNetPolSetting)
-					_ = oc.AsAdmin().WithoutNamespace().Run("patch").Args("network.operator.openshift.io", "cluster", "--type=merge", "-p", patchValue).Execute()
+				By("Cleanup: Restoring original MultiNetworkPolicy setting")
+				var patchValue string
+				if originalMultiNetPolSetting == "" {
+					// The field was originally absent; remove it to revert to default.
+					patchValue = `{"spec":{"useMultiNetworkPolicy":null}}`
+				} else {
+					// The field was originally present; restore its value.
+					patchValue = fmt.Sprintf(`{"spec":{"useMultiNetworkPolicy":%s}}`, originalMultiNetPolSetting)
 				}
+				_ = oc.AsAdmin().WithoutNamespace().Run("patch").Args("network.operator.openshift.io", "cluster", "--type=merge", "-p", patchValue).Execute()
 			})
 		}
 
@@ -133,6 +144,20 @@ var _ = Describe("CUDN Localnet", func() {
 		err = oc.AsAdmin().WithoutNamespace().Run("apply").Args("-f", nncpFile).Execute()
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() {
+			By("Cleanup - Remove bridge-mapping from worker nodes by applying state: absent")
+			// Deleting the NNCP does not roll back the applied desiredState, so first
+			// reconcile the mapping to state: absent and wait for it to take effect,
+			// then delete the policy object.
+			if err := oc.AsAdmin().WithoutNamespace().Run("apply").Args("-f", nncpAbsentFile).Execute(); err == nil {
+				_ = wait.PollImmediate(5*time.Second, 3*time.Minute, func() (bool, error) {
+					output, err := oc.AsAdmin().WithoutNamespace().Run("get").Args("nncp", "bridge-mapping", "-o", "jsonpath={.status.conditions[?(@.type=='Available')].status}").Output()
+					if err != nil {
+						return false, nil
+					}
+					return strings.Contains(output, "True"), nil
+				})
+			}
+
 			By("Cleanup - Delete NNCP")
 			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("nncp", "bridge-mapping", "--ignore-not-found=true").Execute()
 		})
@@ -522,10 +547,14 @@ func getCUDNPodIPs(oc *exutil.CLI, namespace, podName string) ([]string, error) 
 		return nil, err
 	}
 
-	// Unmarshal the network-status JSON
+	// Unmarshal the network-status JSON. An empty or unparseable annotation
+	// (e.g. the CNI has not populated it yet) is treated as "no matching entry"
+	// so we fall through to the ip-addr fallback below rather than failing.
 	var networkStatuses []nettypes.NetworkStatus
-	if err := json.Unmarshal([]byte(output), &networkStatuses); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal network-status annotation: %v", err)
+	if strings.TrimSpace(output) != "" {
+		if err := json.Unmarshal([]byte(output), &networkStatuses); err != nil {
+			networkStatuses = nil
+		}
 	}
 
 	// Find the sec-localnet-net-ipblock network entry with ovn-udn2 interface
