@@ -41,6 +41,7 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	testutils "k8s.io/kubernetes/test/utils"
+	"k8s.io/kubernetes/test/utils/image"
 	kexec "k8s.io/utils/exec"
 	utilnet "k8s.io/utils/net"
 )
@@ -473,7 +474,7 @@ func createPod(f *framework.Framework, podName, nodeSelector, namespace string, 
 			Containers: []v1.Container{
 				{
 					Name:    contName,
-					Image:   images.AgnHost(),
+					Image:   image.GetE2EImage(image.Agnhost),
 					Command: command,
 				},
 			},
