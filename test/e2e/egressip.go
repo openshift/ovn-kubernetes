@@ -205,12 +205,14 @@ func getLastLogLine(data string) string {
 }
 
 // checks if the given IP is found. If there are multiple lines, only consider the last line.
+// The last line is expected to be in host:port format (e.g. "172.18.0.200:38137" or "[fc00::c8]:38137").
 func containsIPInLastEntry(data, ip string) bool {
-	if strings.Contains(getLastLogLine(data), ip) {
-
-		return true
+	lastLine := getLastLogLine(data)
+	host, _, err := net.SplitHostPort(lastLine)
+	if err != nil {
+		return false
 	}
-	return false
+	return host == ip
 }
 
 // support for agnhost image is limited to netexec command
@@ -1729,7 +1731,7 @@ spec:
 			if err != nil {
 				framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
 			}
-			if !strings.Contains(snats, statuses[0].EgressIP) || strings.Contains(snats, egressIP3.String()) {
+			if !strings.Contains(snats, "\""+statuses[0].EgressIP+"\"") || strings.Contains(snats, "\""+egressIP3.String()+"\"") {
 				framework.Failf("Step 7. Check the OVN DB to ensure no SNATs are added for the standby egressIP, failed")
 			}
 
@@ -1793,7 +1795,7 @@ spec:
 			if err != nil {
 				framework.Failf("Error: Check the OVN DB to ensure SNATs are added for only the standby egressIP, err: %v", err)
 			}
-			if !strings.Contains(snats, egressIP3.String()) || strings.Contains(snats, egressIP1.String()) || strings.Contains(snats, egressIP2.String()) || strings.Contains(snats, egress1Node.nodeIP) {
+			if !strings.Contains(snats, "\""+egressIP3.String()+"\"") || strings.Contains(snats, "\""+egressIP1.String()+"\"") || strings.Contains(snats, "\""+egressIP2.String()+"\"") || strings.Contains(snats, "\""+egress1Node.nodeIP+"\"") {
 				framework.Failf("Step 12. Check the OVN DB to ensure SNATs are added for only the standby egressIP, failed")
 			}
 
@@ -1839,11 +1841,11 @@ spec:
 			if err != nil {
 				framework.Failf("Error: Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, err: %v", err)
 			}
-			if !(strings.Contains(snats, egressIP3.String()) || strings.Contains(snats, toKeepEIP)) {
+			if !(strings.Contains(snats, "\""+egressIP3.String()+"\"") || strings.Contains(snats, "\""+toKeepEIP+"\"")) {
 				framework.Failf("Step 15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, failed")
 			}
 			var toDelete, unassignedEIP string
-			if strings.Contains(snats, egressIP3.String()) {
+			if strings.Contains(snats, "\""+egressIP3.String()+"\"") {
 				assignedEIP = egressIP3.String()
 				unassignedEIP = toKeepEIP
 				toDelete = egressIPName2
