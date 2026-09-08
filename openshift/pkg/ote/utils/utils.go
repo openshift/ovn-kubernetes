@@ -1,4 +1,4 @@
-package otputils
+package oteutils
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	g "github.com/onsi/ginkgo/v2"
 	o "github.com/onsi/gomega"
 	exutil "github.com/openshift/origin/test/extended/util"
-	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/otp/testdata"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/ote/testdata"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	e2e "k8s.io/kubernetes/test/e2e/framework"

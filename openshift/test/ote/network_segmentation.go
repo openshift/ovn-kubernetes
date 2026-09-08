@@ -1,4 +1,4 @@
-package otp
+package ote
 
 import (
 	"context"
@@ -9,14 +9,14 @@ import (
 	"strings"
 	"time"
 
+	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	nettypes "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
 	exutil "github.com/openshift/origin/test/extended/util"
 
-	otputils "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/otp/utils"
-	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/otp/testdata"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/ote/testdata"
+	oteutils "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/ote/utils"
 
 	"k8s.io/apimachinery/pkg/util/wait"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -36,13 +36,41 @@ func isIPInCIDR(ipStr, cidr string) bool {
 	return ipNet.Contains(ip)
 }
 
-var _ = Describe("Network Segmentation", func() {
+// isIPv4 reports whether ipStr is an IPv4 address.
+func isIPv4(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	return ip != nil && ip.To4() != nil
+}
+
+// hostCIDR returns the single-host CIDR (/32 for IPv4, /128 for IPv6) that
+// contains exactly the given IP. This lets the test build a policy CIDR that
+// deterministically includes one chosen pod IP and excludes every other pod IP,
+// regardless of how IPAM assigned addresses from the CUDN subnet.
+func hostCIDR(ipStr string) string {
+	if isIPv4(ipStr) {
+		return ipStr + "/32"
+	}
+	return ipStr + "/128"
+}
+
+// firstIPByFamily returns the first IPv4 (wantIPv4=true) or IPv6 (wantIPv4=false)
+// address found in ips, or "" if none is present.
+func firstIPByFamily(ips []string, wantIPv4 bool) string {
+	for _, ip := range ips {
+		if isIPv4(ip) == wantIPv4 {
+			return ip
+		}
+	}
+	return ""
+}
+
+var _ = Describe("CUDN Localnet", func() {
 	defer GinkgoRecover()
 
 	var oc = exutil.NewCLI("network-segmentation")
 
 	BeforeEach(func() {
-		networkType := otputils.CheckNetworkType(oc)
+		networkType := oteutils.CheckNetworkType(oc)
 		if !strings.Contains(networkType, "ovn") {
 			Skip("Skip testing on non-ovn cluster!!!")
 		}
@@ -57,15 +85,15 @@ var _ = Describe("Network Segmentation", func() {
 	// The test will automatically:
 	// - Enable MultiNetworkPolicy support via cluster network operator (if not already enabled)
 	// - Create and cleanup all test resources (namespaces, CUDN, policies, pods, etc.)
-	It("[JIRA:Networking][OTP][sig-network] 81190 Verify IP Block network policy with CUDN with localnet topology", func() {
+	It("[JIRA:Networking][OTP] 81190 Verify IP Block network policy with CUDN with localnet topology", func() {
 		var (
-			buildPruningBaseDir          = testdata.FixturePath("networking")
-			nncpFile                     = filepath.Join(buildPruningBaseDir, "cudn/nncp-bridge-mapping.yaml")
-			cudnFile                     = filepath.Join(buildPruningBaseDir, "cudn/cluster-udn-localnet.yaml")
-			statefulsetFile              = filepath.Join(buildPruningBaseDir, "cudn/statefulset-hello-cudn.yaml")
-			multiNetPolIngressTemplate   = filepath.Join(buildPruningBaseDir, "networkpolicy/cudn/multi-networkpolicy-ingress-ipblock-template.yaml")
-			multiNetPolEgressTemplate    = filepath.Join(buildPruningBaseDir, "networkpolicy/cudn/multi-networkpolicy-egress-ipblock-template.yaml")
-			originalMultiNetPolSetting   string
+			buildPruningBaseDir        = testdata.FixturePath("networking")
+			nncpFile                   = filepath.Join(buildPruningBaseDir, "cudn/nncp-bridge-mapping.yaml")
+			cudnFile                   = filepath.Join(buildPruningBaseDir, "cudn/cluster-udn-localnet.yaml")
+			statefulsetFile            = filepath.Join(buildPruningBaseDir, "cudn/statefulset-hello-cudn.yaml")
+			multiNetPolIngressTemplate = filepath.Join(buildPruningBaseDir, "networkpolicy/cudn/multi-networkpolicy-ingress-ipblock-template.yaml")
+			multiNetPolEgressTemplate  = filepath.Join(buildPruningBaseDir, "networkpolicy/cudn/multi-networkpolicy-egress-ipblock-template.yaml")
+			originalMultiNetPolSetting string
 		)
 
 		nodeList, err := e2enode.GetReadySchedulableNodes(context.TODO(), oc.KubeFramework().ClientSet)
@@ -141,8 +169,21 @@ var _ = Describe("Network Segmentation", func() {
 		err = oc.AsAdmin().WithoutNamespace().Run("apply").Args("-f", cudnFile).Execute()
 		Expect(err).NotTo(HaveOccurred())
 		DeferCleanup(func() {
+			// Teardown ordering matters. The CUDN owns a NetworkAttachmentDefinition in each
+			// namespace, and that NAD carries the k8s.ovn.org/user-defined-network-protection
+			// finalizer. That finalizer is only released once nothing consumes the network, so
+			// the running pods (the hello StatefulSet) must be deleted first. If the CUDN (or
+			// the namespaces) is deleted while pods still reference the NAD, the finalizer never
+			// clears and deletion deadlocks until the pods happen to go away.
+			//
+			// Correct order: pods/StatefulSets -> CUDN (finalizer clears) -> namespaces.
+			By("Cleanup - Delete StatefulSets so the CUDN network is no longer in use")
+			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("statefulset", "--all", "-n", "a1", "--ignore-not-found=true", "--wait=true").Execute()
+			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("statefulset", "--all", "-n", "a2", "--ignore-not-found=true", "--wait=true").Execute()
 			By("Cleanup - Delete ClusterUserDefinedNetwork")
-			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("clusteruserdefinednetwork", "sec-localnet-net-ipblock", "--ignore-not-found=true").Execute()
+			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("clusteruserdefinednetwork", "sec-localnet-net-ipblock", "--ignore-not-found=true", "--wait=true").Execute()
+			By("Cleanup - Delete namespaces")
+			_ = oc.AsAdmin().WithoutNamespace().Run("delete").Args("namespace", "a1", "a2", "--ignore-not-found=true", "--wait=true").Execute()
 		})
 
 		By("Wait for ClusterUserDefinedNetwork to be ready")
@@ -167,19 +208,19 @@ var _ = Describe("Network Segmentation", func() {
 		Expect(err).NotTo(HaveOccurred(), "ClusterUserDefinedNetwork did not become ready")
 
 		By("Step 5: Deploy StatefulSet with 3 pods in namespace a1")
-		otputils.CreateResourceFromFile(oc, ns1, statefulsetFile)
-		err = otputils.WaitForPodWithLabelReady(oc, ns1, "app=hello")
+		oteutils.CreateResourceFromFile(oc, ns1, statefulsetFile)
+		err = oteutils.WaitForPodWithLabelReady(oc, ns1, "app=hello")
 		Expect(err).NotTo(HaveOccurred(), "StatefulSet pods not ready in namespace a1")
 
-		helloPodNamesNs1 := otputils.GetPodName(oc, ns1, "app=hello")
+		helloPodNamesNs1 := oteutils.GetPodName(oc, ns1, "app=hello")
 		Expect(len(helloPodNamesNs1)).To(Equal(3), "Expected 3 pods in namespace a1")
 
 		By("Step 6: Deploy StatefulSet with 3 pods in namespace a2")
-		otputils.CreateResourceFromFile(oc, ns2, statefulsetFile)
-		err = otputils.WaitForPodWithLabelReady(oc, ns2, "app=hello")
+		oteutils.CreateResourceFromFile(oc, ns2, statefulsetFile)
+		err = oteutils.WaitForPodWithLabelReady(oc, ns2, "app=hello")
 		Expect(err).NotTo(HaveOccurred(), "StatefulSet pods not ready in namespace a2")
 
-		helloPodNamesNs2 := otputils.GetPodName(oc, ns2, "app=hello")
+		helloPodNamesNs2 := oteutils.GetPodName(oc, ns2, "app=hello")
 		Expect(len(helloPodNamesNs2)).To(Equal(3), "Expected 3 pods in namespace a2")
 
 		By("Step 7: Get CUDN IP addresses and node locations for all pods")
@@ -233,6 +274,26 @@ var _ = Describe("Network Segmentation", func() {
 		Expect(len(sameNodePairs)).To(BeNumerically(">=", 2), "Need at least 2 same-node pod pairs for testing")
 		By(fmt.Sprintf("Found %d same-node pod pairs for connectivity testing", len(sameNodePairs)))
 
+		// Derive the IPBlock policy CIDRs from the actually-assigned pod IPs instead of
+		// hardcoding them. IPAM assigns pod addresses dynamically from the CUDN subnet, so a
+		// fixed CIDR (e.g. 192.168.100.0/30) is not guaranteed to contain any of the pods that
+		// happen to land on the same node. By anchoring the CIDR to a specific same-node pod's
+		// IP as a single-host CIDR (/32 or /128), that pod is guaranteed to be in-range while
+		// every other pod is guaranteed to be out-of-range, making the allow/deny checks
+		// deterministic. sameNodePairs[0].ns2Pod is the in-range source for ingress; every
+		// other pod (including sameNodePairs[1]) is out-of-range.
+		ipv4CIDR := ""
+		if ip := firstIPByFamily(sameNodePairs[0].ns2IPs, true); ip != "" {
+			ipv4CIDR = hostCIDR(ip)
+		}
+		Expect(ipv4CIDR).NotTo(BeEmpty(), "no IPv4 address found on same-node source pod to build policy CIDR")
+
+		ipv6CIDR := ""
+		if ip := firstIPByFamily(sameNodePairs[0].ns2IPs, false); ip != "" {
+			ipv6CIDR = hostCIDR(ip)
+		}
+		By(fmt.Sprintf("Derived policy CIDRs from pod IPs: IPv4=%q IPv6=%q", ipv4CIDR, ipv6CIDR))
+
 		By("Step 8: Verify all pods can communicate before applying NetworkPolicy")
 		// Use same-node pod pairs for localnet topology (cross-node traffic requires physical network configuration)
 		verifyCurlSuccess(oc, ns1, sameNodePairs[0].ns1Pod, sameNodePairs[0].ns2IPs[0],
@@ -243,12 +304,13 @@ var _ = Describe("Network Segmentation", func() {
 			fmt.Sprintf("Before policy: %s to %s (same node)", sameNodePairs[0].ns2Pod, sameNodePairs[0].ns1Pod))
 
 		By("Step 9: Create Ingress IPBlock MultiNetworkPolicy in namespace a1")
-		// Allow ingress only from 192.168.100.0/30 (IPs: .0, .1, .2, .3) and fd00:192:168:100::/126
-		ingressPolicyNs1 := otputils.IpBlockCIDRsSingle{
+		// Allow ingress only from the derived single-host CIDRs (the sameNodePairs[0].ns2Pod
+		// IPs). This guarantees that pod is an in-range source and all others are out-of-range.
+		ingressPolicyNs1 := oteutils.IpBlockCIDRsSingle{
 			Name:      "ingress-ipblock",
 			Template:  multiNetPolIngressTemplate,
-			Cidr:      "192.168.100.0/30",
-			Cidr2:     "fd00:192:168:100::/126",
+			Cidr:      ipv4CIDR,
+			Cidr2:     ipv6CIDR,
 			Namespace: ns1,
 		}
 		ingressPolicyNs1.CreateipBlockCIDRObjectSingle(oc)
@@ -274,23 +336,33 @@ var _ = Describe("Network Segmentation", func() {
 			}
 
 			By(fmt.Sprintf("Testing ingress policy for %s CIDR: %s", cidrTest.ipFamily, cidrTest.cidr))
+			wantIPv4 := cidrTest.ipFamily == "IPv4"
 			var inRangePair, outRangePair *PodPair
 
 			for i := range sameNodePairs {
 				pair := &sameNodePairs[i]
-				// Check each IP in ns2IPs array
+				// The destination (an a1 pod) must be reached over the same IP family the
+				// policy is filtering, since curl over ovn-udn2 has to use a matching address.
+				destIP := firstIPByFamily(pair.ns1IPs, wantIPv4)
+				if destIP == "" {
+					continue // No destination address of this family on this pair
+				}
+				// Check each source IP of the current family in ns2IPs.
 				for _, ns2IP := range pair.ns2IPs {
+					if isIPv4(ns2IP) != wantIPv4 {
+						continue
+					}
 					if isIPInCIDR(ns2IP, cidrTest.cidr) {
 						if inRangePair == nil {
 							inRangePair = pair
-							verifyCurlSuccess(oc, ns2, pair.ns2Pod, pair.ns1IPs[0],
+							verifyCurlSuccess(oc, ns2, pair.ns2Pod, destIP,
 								fmt.Sprintf("Ingress allowed (%s): %s (IP %s) to %s (source in range, same node)",
 									cidrTest.ipFamily, pair.ns2Pod, ns2IP, pair.ns1Pod))
 						}
 					} else {
 						if outRangePair == nil {
 							outRangePair = pair
-							verifyCurlFailure(oc, ns2, pair.ns2Pod, pair.ns1IPs[0],
+							verifyCurlFailure(oc, ns2, pair.ns2Pod, destIP,
 								fmt.Sprintf("Ingress blocked (%s): %s (IP %s) to %s (source outside range, same node)",
 									cidrTest.ipFamily, pair.ns2Pod, ns2IP, pair.ns1Pod))
 						}
@@ -303,6 +375,13 @@ var _ = Describe("Network Segmentation", func() {
 					break
 				}
 			}
+
+			// Ensure the topology actually exercised both the allowed and blocked paths.
+			// Without this, the test could pass while only verifying one side of the policy.
+			Expect(inRangePair).NotTo(BeNil(),
+				fmt.Sprintf("no in-range source found to verify ingress-allowed for %s CIDR %s", cidrTest.ipFamily, cidrTest.cidr))
+			Expect(outRangePair).NotTo(BeNil(),
+				fmt.Sprintf("no out-of-range source found to verify ingress-blocked for %s CIDR %s", cidrTest.ipFamily, cidrTest.cidr))
 		}
 
 		By("Step 11: Delete Ingress policy and verify connectivity is restored")
@@ -314,21 +393,23 @@ var _ = Describe("Network Segmentation", func() {
 			fmt.Sprintf("After ingress policy deletion: %s to %s (same node)", sameNodePairs[0].ns2Pod, sameNodePairs[0].ns1Pod))
 
 		By("Step 12: Create Egress IPBlock MultiNetworkPolicy in both namespaces")
-		// Allow egress only to 192.168.100.0/30 and fd00:192:168:100::/126
-		egressPolicyNs1 := otputils.IpBlockCIDRsSingle{
+		// Allow egress only to the derived single-host CIDRs. sameNodePairs[0].ns2Pod is the
+		// in-range destination; every other pod IP is out-of-range, so both the allowed and
+		// blocked egress paths are guaranteed to be exercised in Step 13.
+		egressPolicyNs1 := oteutils.IpBlockCIDRsSingle{
 			Name:      "egress-ipblock",
 			Template:  multiNetPolEgressTemplate,
-			Cidr:      "192.168.100.0/30",
-			Cidr2:     "fd00:192:168:100::/126",
+			Cidr:      ipv4CIDR,
+			Cidr2:     ipv6CIDR,
 			Namespace: ns1,
 		}
 		egressPolicyNs1.CreateipBlockCIDRObjectSingle(oc)
 
-		egressPolicyNs2 := otputils.IpBlockCIDRsSingle{
+		egressPolicyNs2 := oteutils.IpBlockCIDRsSingle{
 			Name:      "egress-ipblock",
 			Template:  multiNetPolEgressTemplate,
-			Cidr:      "192.168.100.0/30",
-			Cidr2:     "fd00:192:168:100::/126",
+			Cidr:      ipv4CIDR,
+			Cidr2:     ipv6CIDR,
 			Namespace: ns2,
 		}
 		egressPolicyNs2.CreateipBlockCIDRObjectSingle(oc)
@@ -358,18 +439,27 @@ var _ = Describe("Network Segmentation", func() {
 			}
 
 			By(fmt.Sprintf("Testing egress policy for %s CIDR: %s", cidrTest.ipFamily, cidrTest.cidr))
+			wantIPv4 := cidrTest.ipFamily == "IPv4"
 
 			type EgressTest struct {
 				srcNamespace, srcPod, destPod, destIP string
 			}
 			var allowedTests, blockedTests []EgressTest
 
-			// Check all same-node pairs, testing both ns1→ns2 and ns2→ns1 traffic
+			// Check all same-node pairs, testing both ns1→ns2 and ns2→ns1 traffic.
+			// Only consider destination IPs of the family this CIDR filters: the egress
+			// policy has a separate ipBlock rule per family (Cidr / Cidr2), so a dest of the
+			// other family is governed by the other rule and would give a misleading result
+			// (e.g. an IPv6 dest that is out of the IPv4 /32 but explicitly allowed by the
+			// IPv6 /128 rule would be classified "blocked" yet actually succeed).
 			for i := range sameNodePairs {
 				pair := &sameNodePairs[i]
 
-				// Check ns1→ns2 traffic for each ns2 IP
+				// Check ns1→ns2 traffic for each ns2 IP of the current family
 				for _, ns2IP := range pair.ns2IPs {
+					if isIPv4(ns2IP) != wantIPv4 {
+						continue
+					}
 					if isIPInCIDR(ns2IP, cidrTest.cidr) {
 						allowedTests = append(allowedTests, EgressTest{ns1, pair.ns1Pod, pair.ns2Pod, ns2IP})
 					} else {
@@ -377,8 +467,11 @@ var _ = Describe("Network Segmentation", func() {
 					}
 				}
 
-				// Check ns2→ns1 traffic for each ns1 IP
+				// Check ns2→ns1 traffic for each ns1 IP of the current family
 				for _, ns1IP := range pair.ns1IPs {
+					if isIPv4(ns1IP) != wantIPv4 {
+						continue
+					}
 					if isIPInCIDR(ns1IP, cidrTest.cidr) {
 						allowedTests = append(allowedTests, EgressTest{ns2, pair.ns2Pod, pair.ns1Pod, ns1IP})
 					} else {
@@ -387,21 +480,24 @@ var _ = Describe("Network Segmentation", func() {
 				}
 			}
 
-			// Run at least one test for allowed traffic if available
-			if len(allowedTests) > 0 {
-				test := allowedTests[0]
-				verifyCurlSuccess(oc, test.srcNamespace, test.srcPod, test.destIP,
-					fmt.Sprintf("Egress allowed (%s): %s to %s (IP %s, dest in range, same node)",
-						cidrTest.ipFamily, test.srcPod, test.destPod, test.destIP))
-			}
+			// Ensure the topology actually exercised both the allowed and blocked paths.
+			// Without this, the test could pass while only verifying one side of the policy.
+			Expect(allowedTests).NotTo(BeEmpty(),
+				fmt.Sprintf("no in-range destination found to verify egress-allowed for %s CIDR %s", cidrTest.ipFamily, cidrTest.cidr))
+			Expect(blockedTests).NotTo(BeEmpty(),
+				fmt.Sprintf("no out-of-range destination found to verify egress-blocked for %s CIDR %s", cidrTest.ipFamily, cidrTest.cidr))
 
-			// Run at least one test for blocked traffic if available
-			if len(blockedTests) > 0 {
-				test := blockedTests[0]
-				verifyCurlFailure(oc, test.srcNamespace, test.srcPod, test.destIP,
-					fmt.Sprintf("Egress blocked (%s): %s to %s (IP %s, dest outside range, same node)",
-						cidrTest.ipFamily, test.srcPod, test.destPod, test.destIP))
-			}
+			// Run at least one test for allowed traffic
+			allowed := allowedTests[0]
+			verifyCurlSuccess(oc, allowed.srcNamespace, allowed.srcPod, allowed.destIP,
+				fmt.Sprintf("Egress allowed (%s): %s to %s (IP %s, dest in range, same node)",
+					cidrTest.ipFamily, allowed.srcPod, allowed.destPod, allowed.destIP))
+
+			// Run at least one test for blocked traffic
+			blocked := blockedTests[0]
+			verifyCurlFailure(oc, blocked.srcNamespace, blocked.srcPod, blocked.destIP,
+				fmt.Sprintf("Egress blocked (%s): %s to %s (IP %s, dest outside range, same node)",
+					cidrTest.ipFamily, blocked.srcPod, blocked.destPod, blocked.destIP))
 		}
 
 		By("Step 14: Cleanup - Delete Egress policies")
@@ -468,22 +564,18 @@ func getCUDNPodIPs(oc *exutil.CLI, namespace, podName string) ([]string, error) 
 	return nil, fmt.Errorf("no IP addresses found on interface ovn-udn2 for pod %s", podName)
 }
 
-// getCUDNPodIP extracts the primary CUDN IP address (backward compatibility)
-func getCUDNPodIP(oc *exutil.CLI, namespace, podName string) (string, error) {
-	ips, err := getCUDNPodIPs(oc, namespace, podName)
-	if err != nil {
-		return "", err
+// formatIPPort formats an IP:port string, wrapping IPv6 addresses in brackets
+func formatIPPort(ip string, port int) string {
+	if net.ParseIP(ip).To4() == nil {
+		return fmt.Sprintf("[%s]:%d", ip, port)
 	}
-	if len(ips) > 0 {
-		return ips[0], nil
-	}
-	return "", fmt.Errorf("no IP address found on interface ovn-udn2 for pod %s", podName)
+	return fmt.Sprintf("%s:%d", ip, port)
 }
 
 // verifyCurlSuccess verifies that curl succeeds
 func verifyCurlSuccess(oc *exutil.CLI, namespace, podName, targetIP, description string) {
 	By(description)
-	output, err := e2eoutput.RunHostCmd(namespace, podName, fmt.Sprintf("curl --interface ovn-udn2 %s:8080 --connect-timeout 5", targetIP))
+	output, err := e2eoutput.RunHostCmd(namespace, podName, fmt.Sprintf("curl --interface ovn-udn2 %s --connect-timeout 5", formatIPPort(targetIP, 8080)))
 	Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Expected curl to succeed: %s", description))
 	Expect(output).Should(ContainSubstring("Hello OpenShift"))
 }
@@ -491,7 +583,7 @@ func verifyCurlSuccess(oc *exutil.CLI, namespace, podName, targetIP, description
 // verifyCurlFailure verifies that curl fails with timeout
 func verifyCurlFailure(oc *exutil.CLI, namespace, podName, targetIP, description string) {
 	By(description)
-	_, err := e2eoutput.RunHostCmd(namespace, podName, fmt.Sprintf("curl --interface ovn-udn2 %s:8080 --connect-timeout 5", targetIP))
+	_, err := e2eoutput.RunHostCmd(namespace, podName, fmt.Sprintf("curl --interface ovn-udn2 %s --connect-timeout 5", formatIPPort(targetIP, 8080)))
 	Expect(err).To(HaveOccurred(), fmt.Sprintf("Expected curl to fail: %s", description))
 	Expect(err.Error()).Should(ContainSubstring("exit status 28"), "Expected connection timeout")
 }
