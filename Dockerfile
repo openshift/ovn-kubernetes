@@ -62,6 +62,14 @@ LABEL io.k8s.display-name="ovn kubernetes" \
       io.openshift.tags="openshift,networking" \
       maintainer="Tim Rozet <trozet@redhat.com>"
 
+RUN mkdir -p /root/fdp/
+COPY ovn26.03*.rpm /root/fdp/
+RUN dnf install -y dnf && \
+    dnf makecache && \
+	dnf install -y /root/fdp/*.rpm && \
+    dnf clean all && \
+    rm -rf /root/fdp/
+
 WORKDIR /root
 ENTRYPOINT /root/ovnkube.sh
 
