@@ -1,0 +1,48 @@
+#
+# This is the OpenShift ovn overlay network image.
+# it provides an overlay network using ovs/ovn/ovn-kube
+#
+# The standard name for this image is ovn-kubernetes-base
+
+# build base image shared by both OpenShift and MicroShift
+FROM registry.ci.openshift.org/ocp/5.0:base-rhel9
+
+# install selinux-policy first to avoid a race
+RUN dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs \
+	selinux-policy procps-ng && \
+	dnf clean all
+
+ARG ovsver=3.5
+ARG ovnver=26.03
+# NOTE: Ensure that the versions of OVS and OVN are overriden for OKD in each of the subsequent layers.
+# Centos and RHEL releases for ovn are built out of sync, so please make sure to bump for OKD with
+# the corresponding Centos version when updating the OCP version.
+ARG ovsver_okd=3.5
+ARG ovnver_okd=26.03
+
+RUN INSTALL_PKGS="iptables nftables" && \
+    source /etc/os-release && \
+    [ "${ID}" == "centos" ] && ovsver=$ovsver_okd && ovnver=$ovnver_okd; \
+	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
+	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
+	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn$ovnver" "ovn$ovnver-central" "ovn$ovnver-host" && \
+	dnf clean all && rm -rf /var/cache/* && \
+	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver-vtep%" > /more-pkgs
+
+RUN mkdir -p /var/run/openvswitch && \
+    mkdir -p /var/run/ovn && \
+    mkdir -p /etc/cni/net.d && \
+    mkdir -p /opt/cni/bin && \
+    mkdir -p /usr/libexec/cni/ && \
+    mkdir -p /root/windows/
+
+# copy git commit number into image
+COPY .git/HEAD /root/.git/HEAD
+COPY .git/refs/heads/ /root/.git/refs/heads/
+
+# ovnkube.sh is the entry point. This script examines environment
+# variables to direct operation and configure ovn
+COPY dist/images/ovnkube.sh /root/
+
+WORKDIR /root
+ENTRYPOINT /root/ovnkube.sh
