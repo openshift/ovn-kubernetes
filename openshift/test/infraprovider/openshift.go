@@ -46,12 +46,13 @@ type OpenshiftInfraProvider struct {
 	hostPort                *portalloc.PortAllocator
 	clusterInfra            platformInfra
 	initialized             bool // true when New() was called with cluster access
+	platformType            configv1.PlatformType
 }
 
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
 	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
-	clusterInfra, err := initializePlatformInfra(config)
+	clusterInfra, platformType, err := initializePlatformInfra(config)
 	if err != nil {
 		return nil, err
 	}
@@ -59,6 +60,7 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
 		initialized:  true,
+		platformType: platformType,
 	}
 	if err = o.initClusterObjects(config); err != nil {
 		return nil, err
@@ -159,14 +161,17 @@ func (o *OpenshiftInfraProvider) EnableSecondaryForwarding(clientset kubernetes.
 	return bm.enableSecondaryForwarding(nodeNames, o.ExecK8NodeCommand)
 }
 
+// IsGCPPlatform returns true if the cluster is running on GCP.
+func (o *OpenshiftInfraProvider) IsGCPPlatform() bool {
+	return o.platformType == configv1.GCPPlatformType
+}
+
 // IsCloudPlatform returns true for cloud platforms (AWS, GCP, Azure)
 // where external containers run on a bastion host with host networking.
 func (o *OpenshiftInfraProvider) IsCloudPlatform() bool {
-	if o.clusterInfra == nil {
-		return false
-	}
-	_, isBM := o.clusterInfra.(*baremetalInfra)
-	return !isBM
+	return o.platformType == configv1.AWSPlatformType ||
+		o.platformType == configv1.AzurePlatformType ||
+		o.platformType == configv1.GCPPlatformType
 }
 
 // CheckForEVPN checks all EVPN prerequisites
@@ -460,29 +465,30 @@ func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Un
 // initializePlatformInfra fetches the cluster infrastructure object, checks the
 // platform type, and dispatches to the appropriate platform initializer.
 // Returns nil when no platform-specific infra is needed.
-func initializePlatformInfra(config *rest.Config) (platformInfra, error) {
+func initializePlatformInfra(config *rest.Config) (platformInfra, configv1.PlatformType, error) {
 	configClient, err := configclient.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve config client: %w", err)
+		return nil, "", fmt.Errorf("failed to retrieve config client: %w", err)
 	}
 	infra, err := configClient.ConfigV1().Infrastructures().Get(context.Background(), "cluster", metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve cluster infrastructure object: %w", err)
+		return nil, "", fmt.Errorf("failed to retrieve cluster infrastructure object: %w", err)
 	}
-	switch infra.Spec.PlatformSpec.Type {
+	platformType := infra.Spec.PlatformSpec.Type
+	switch platformType {
 	case configv1.BareMetalPlatformType:
 		bm, err := initializeBaremetalInfra(infra)
 		if err != nil || bm == nil {
-			return nil, err
+			return nil, platformType, err
 		}
-		return bm, nil
+		return bm, platformType, nil
 	case configv1.AWSPlatformType, configv1.AzurePlatformType, configv1.GCPPlatformType:
 		bi, err := initializeCloudInfra()
 		if err != nil || bi == nil {
-			return nil, err
+			return nil, platformType, err
 		}
-		return bi, nil
+		return bi, platformType, nil
 	default:
-		return nil, nil
+		return nil, platformType, nil
 	}
 }
