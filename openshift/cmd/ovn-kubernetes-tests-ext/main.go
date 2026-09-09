@@ -86,6 +86,18 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsCloudPlatform() {
 		return false
 	}
+	// On GCP, nodes have a /32 primary interface address
+	// (k8s.ovn.org/node-primary-ifaddr: {"ipv4":"10.0.128.x/32"}), so
+	// isOVNNetworkIP returns false for any EgressIP because no IP other
+	// than the node's own can fall within a /32 network. This causes
+	// BridgeEIPAddrManager to skip assigning the EIP to the bridge
+	// interface, breaking IFA_PROTO verification and UDN EgressIP tests.
+	// Tracking via https://redhat.atlassian.net/browse/OCPBUGS-122016.
+	if ocpInfra.IsGCPPlatform() && spec.Labels.Has(featureLabelEgressIP) &&
+		(spec.Labels.Has(featureLabelNetworkSegmentation) || strings.Contains(spec.Name, "Primary UDN") ||
+			strings.Contains(spec.Name, "disabling egress nodes with egress-assignable label")) {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
