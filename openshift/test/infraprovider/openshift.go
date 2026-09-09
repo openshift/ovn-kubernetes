@@ -294,18 +294,18 @@ func (o *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Ne
 	return o.externalContainerContextProvider.CreateNetwork(name, subnets...)
 }
 
-func (o *contextOpenshift) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
+func (o *contextOpenshift) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
 	if o.externalContainerContextProvider == nil {
 		panic("not implemented")
 	}
-	return o.externalContainerContextProvider.AttachNetwork(network, container)
+	return o.externalContainerContextProvider.AttachNetwork(network, instance)
 }
 
-func (o *contextOpenshift) DetachNetwork(network api.Network, container string) error {
+func (o *contextOpenshift) DetachNetwork(network api.Network, instance string) error {
 	if o.externalContainerContextProvider == nil {
 		panic("not implemented")
 	}
-	return o.externalContainerContextProvider.DetachNetwork(network, container)
+	return o.externalContainerContextProvider.DetachNetwork(network, instance)
 }
 
 func (o *contextOpenshift) DeleteNetwork(network api.Network) error {

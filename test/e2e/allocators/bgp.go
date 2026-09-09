@@ -73,13 +73,13 @@ func AllocateBGP(f *framework.Framework, cleanup infraapi.ContextCleanUp) (BGPAl
 		(vniMax-vniOffset+1)/2,
 	)
 
-	n, err := AllocateInt(f, bgpKey, maxUsable)
+	n, err := AllocateInt(f.ClientSet, bgpKey, maxUsable)
 	if err != nil {
 		return BGPAllocation{}, err
 	}
 
 	cleanup.AddCleanUpFn(func() error {
-		return DeallocateInt(f, bgpKey, n)
+		return DeallocateInt(f.ClientSet, bgpKey, n)
 	})
 
 	bgpV4Idx := bgpPeer4.nthFree(n)
