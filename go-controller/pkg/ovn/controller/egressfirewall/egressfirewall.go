@@ -761,7 +761,10 @@ func (oc *EFController) addEgressFirewallRules(ef *egressFirewall, pgName string
 		if rule.access == egressfirewallapi.EgressFirewallRuleAllow {
 			action = nbdb.ACLActionAllow
 		} else {
-			action = nbdb.ACLActionDrop
+			// Reject denied traffic so the initiating pod gets an immediate TCP RST
+			// (or ICMP unreachable for non-TCP) instead of waiting for a timeout
+			// on a silently dropped packet.
+			action = nbdb.ACLActionReject
 		}
 		if len(rule.to.nodeAddrs) > 0 {
 			// sort node ips to ensure the same order when no changes are present
