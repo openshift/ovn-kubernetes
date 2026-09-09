@@ -46,7 +46,6 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
-	imageutils "k8s.io/kubernetes/test/utils/image"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 	"k8s.io/utils/ptr"
@@ -186,7 +185,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		targetPort := infraprovider.Get().GetK8HostPort()
 		config := testutils.RCConfig{
 			Client:               cs,
-			Image:                imageutils.GetE2EImage(imageutils.Agnhost),
+			Image:                images.AgnHost(),
 			Command:              []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", targetPort)},
 			Name:                 "backend",
 			Labels:               jig.Labels,
@@ -1673,7 +1672,7 @@ spec:
 						Containers: []v1.Container{
 							{
 								Name:    "agnhost",
-								Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+								Image:   images.AgnHost(),
 								Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", oldTargetPort)},
 								Ports: []v1.ContainerPort{
 									{
@@ -1974,7 +1973,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", port1)},
 						Ports: []v1.ContainerPort{
 							{
@@ -2001,7 +2000,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", port2)},
 						Ports: []v1.ContainerPort{
 							{
@@ -2137,7 +2136,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port1), "--udp-port=-1"},
 						Ports: []v1.ContainerPort{
 							{
@@ -2166,7 +2165,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port2), "--udp-port=-1"},
 						Ports: []v1.ContainerPort{
 							{
@@ -2311,7 +2310,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port1), "--udp-port=-1"},
 						Ports: []v1.ContainerPort{
 							{
@@ -2340,7 +2339,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port2), "--udp-port=-1"},
 						Ports: []v1.ContainerPort{
 							{
@@ -2618,12 +2617,6 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 	})
 
 })
-
-func init() {
-	if os.Getenv("KIND_INSTALL_METALLB") == "true" {
-		images.Add(images.Nginx(), images.MetalLBLBService(), images.UDPServerSrcIPPrinter())
-	}
-}
 
 var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", feature.Service, func() {
 
