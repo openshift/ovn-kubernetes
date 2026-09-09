@@ -84,6 +84,13 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsBastionBasedPlatform() {
 		return false
 	}
+	// EgressIP for UDN pod is broken for GCP platform.
+	// Tracking it via https://redhat.atlassian.net/browse/OCPBUGS-122016.
+	// Restore these tests once it's fixed.
+	if ocpInfra.IsGCPPlatform() && spec.Labels.Has(featureLabelEgressIP) &&
+		(spec.Labels.Has(featureLabelNetworkSegmentation) || strings.Contains(spec.Name, "Primary UDN")) {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
