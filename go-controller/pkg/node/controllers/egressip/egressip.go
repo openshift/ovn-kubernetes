@@ -362,13 +362,19 @@ func (c *Controller) onEIPUpdate(oldObj, newObj interface{}) {
 		utilruntime.HandleError(errors.New("invalid Egress IP policy to onEIPUpdate()"))
 		return
 	}
-	if oldEIP.Generation == newEIP.Generation ||
-		!newEIP.GetDeletionTimestamp().IsZero() {
+	if !newEIP.GetDeletionTimestamp().IsZero() {
+		return
+	}
+	// Generation is unchanged for status-only patches (node assignment). Skipping
+	// those delayed SNAT programming until an unrelated pod/namespace event
+	// (OCPBUGS-113693). Spec changes still bump Generation and are handled here.
+	if oldEIP.Generation == newEIP.Generation && reflect.DeepEqual(oldEIP.Status.Items, newEIP.Status.Items) {
 		return
 	}
 	key, err := cache.MetaNamespaceKeyFunc(newObj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", newObj, err))
+		return
 	}
 	c.eIPQueue.Add(key)
 }
@@ -524,7 +530,13 @@ func (c *Controller) processEIP(eip *eipv1.EgressIP) (*eIPConfig, sets.Set[strin
 				fmt.Errorf("failed to find a network to host EgressIP %s IP %s: %v", eip.Name, status.EgressIP, err)
 		}
 		if !found {
-			continue
+			// Do not treat a missing host network as success: the EIP is already
+			// assigned to this node. Returning nil previously dropped the work
+			// item with no retry, so SNAT waited for an unrelated event or the
+			// 6-minute nftables/iptables safety-net sync (OCPBUGS-113693).
+			return nil, selectedNamespaces, selectedPods, selectedNamespacesPodIPs,
+				fmt.Errorf("no host network found to host EgressIP %s IP %s on node %s; will retry",
+					eip.Name, status.EgressIP, c.nodeName)
 		}
 		// namespace selector is mandatory for EIP
 		namespaces, err := c.listNamespacesBySelector(&eip.Spec.NamespaceSelector)

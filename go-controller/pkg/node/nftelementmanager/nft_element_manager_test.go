@@ -8,6 +8,9 @@ package nftelementmanager
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
+	"time"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
@@ -266,6 +269,45 @@ var _ = ginkgo.Describe("NFT Element Manager", func() {
 
 			elems := listElements(fake, testMapV4)
 			gomega.Expect(elems).To(gomega.HaveLen(1))
+		})
+	})
+
+	ginkgo.Context("Run retry", func() {
+		ginkgo.It("uses a short retry period after reconcile failure instead of the full sync period", func() {
+			gomega.Expect(nftFailedReconcileRetry).To(gomega.BeNumerically("<", 6*time.Minute))
+			gomega.Expect(nftFailedReconcileRetry).To(gomega.Equal(time.Second))
+		})
+
+		ginkgo.It("retries a failed Add from Run without waiting for the full sync period", func() {
+			orig := getNFTablesHelper
+			defer func() { getNFTablesHelper = orig }()
+
+			var fail atomic.Bool
+			fail.Store(true)
+			getNFTablesHelper = func() (knftables.Interface, error) {
+				if fail.Load() {
+					return nil, fmt.Errorf("nft temporarily unavailable")
+				}
+				return orig()
+			}
+
+			ctrl.failedRetryPeriod = 20 * time.Millisecond
+			stop := make(chan struct{})
+			defer close(stop)
+			go ctrl.Run(stop, time.Hour)
+
+			elem := &knftables.Element{
+				Map:   testMapV4,
+				Key:   []string{"10.0.0.1", "eth0"},
+				Value: []string{"192.168.1.1"},
+			}
+			gomega.Expect(ctrl.Add(elem)).To(gomega.HaveOccurred())
+			gomega.Expect(listElements(fake, testMapV4)).To(gomega.BeEmpty())
+
+			fail.Store(false)
+			gomega.Eventually(func() bool {
+				return hasElement(listElements(fake, testMapV4), testMapV4, []string{"10.0.0.1", "eth0"}, []string{"192.168.1.1"})
+			}, 2*time.Second, 20*time.Millisecond).Should(gomega.BeTrue())
 		})
 	})
 
