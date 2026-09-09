@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/client-go/tools/reference"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -52,7 +54,9 @@ import (
 	vteplister "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1/apis/listers/vtep/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utiludn "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/udn"
 )
 
 const (
@@ -823,7 +827,11 @@ func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.Us
 	networkCreatedCondition := newNetworkCreatedCondition(nad, syncError)
 
 	updated := meta.SetStatusCondition(&udn.Status.Conditions, *networkCreatedCondition)
-	if !updated {
+
+	vrfName := udnVRFName(udn, nad, syncError, nad != nil || c.nadStillExists(udn.Namespace, udn.Name))
+	vrfNameUpdated := vrfName != ptr.Deref(udn.Status.VRFName, "")
+
+	if !updated && !vrfNameUpdated {
 		return nil
 	}
 
@@ -838,9 +846,13 @@ func (c *Controller) updateUserDefinedNetworkStatus(udn *userdefinednetworkv1.Us
 			Message:            &condition.Message,
 		}
 	}
+	statusApply := udnapplyconfkv1.UserDefinedNetworkStatus().
+		WithConditions(conditionsApply...)
+	if vrfName != "" {
+		statusApply = statusApply.WithVRFName(vrfName)
+	}
 	udnApplyConf := udnapplyconfkv1.UserDefinedNetwork(udn.Name, udn.Namespace).
-		WithStatus(udnapplyconfkv1.UserDefinedNetworkStatus().
-			WithConditions(conditionsApply...))
+		WithStatus(statusApply)
 	opts := metav1.ApplyOptions{FieldManager: "user-defined-network-controller"}
 	udn, err = c.udnClient.K8sV1().UserDefinedNetworks(udn.Namespace).ApplyStatus(context.Background(), udnApplyConf, opts)
 	if err != nil {
@@ -1102,8 +1114,11 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 
 	networkCreatedOrUpdated := meta.SetStatusCondition(&cudn.Status.Conditions, networkCreatedCondition)
 
-	// Apply status if either NetworkCreated or TransportAccepted condition changed
-	if !networkCreatedOrUpdated && !transportUpdated {
+	vrfName := clusterUDNVRFName(cudn, nads, syncError, c.hasTrackedNamespaces(cudn.Name))
+	vrfNameUpdated := vrfName != ptr.Deref(cudn.Status.VRFName, "")
+
+	// Apply status if the VRF name, the NetworkCreated condition or the TransportAccepted condition changed
+	if !networkCreatedOrUpdated && !transportUpdated && !vrfNameUpdated {
 		// Record the metric from the existing API-confirmed conditions so it is
 		// populated after controller restarts, where the informer fires synthetic
 		// creates for all CUDNs but the conditions haven't changed.
@@ -1120,10 +1135,14 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 			Message:            &condition.Message,
 		}
 	}
+	statusApply := udnapplyconfkv1.ClusterUserDefinedNetworkStatus().
+		WithConditions(conditionsApply...)
+	if vrfName != "" {
+		statusApply = statusApply.WithVRFName(vrfName)
+	}
 	var err error
 	applyConf := udnapplyconfkv1.ClusterUserDefinedNetwork(cudn.Name).
-		WithStatus(udnapplyconfkv1.ClusterUserDefinedNetworkStatus().
-			WithConditions(conditionsApply...))
+		WithStatus(statusApply)
 	opts := metav1.ApplyOptions{FieldManager: "user-defined-network-controller"}
 	cudnName := cudn.Name
 	cudn, err = c.udnClient.K8sV1().ClusterUserDefinedNetworks().ApplyStatus(context.Background(), applyConf, opts)
@@ -1137,6 +1156,114 @@ func (c *Controller) updateClusterUDNStatus(cudn *userdefinednetworkv1.ClusterUs
 	recordCUDNConditionMetrics(cudn)
 
 	return nil
+}
+
+// clusterUDNVRFName returns the VRF device name to publish on the CUDN
+// status, or an empty string when no name should be published. Only primary
+// CUDNs publish a name, since those are the networks that get a VRF device on
+// the nodes and whose VRF external consumers (e.g. FRRConfiguration authors)
+// must name. nads are the NADs the last sync returned for the CUDN: they
+// carry the network-id annotation the ID-derived fallback name is built from.
+// nadsRemain reports whether any NAD is known to still exist when the sync
+// returned none, distinguishing a sync that failed before determining the
+// NADs (the published name is preserved) from one that ran after the last NAD
+// was deleted (the name is cleared, since the released network ID may be
+// reallocated). The name states how the VRF is named, not whether the network
+// is ready: readiness is what the conditions report.
+func clusterUDNVRFName(cudn *userdefinednetworkv1.ClusterUserDefinedNetwork, nads []netv1.NetworkAttachmentDefinition, syncError error, nadsRemain bool) string {
+	if !utiludn.IsPrimaryNetwork(&cudn.Spec.Network) {
+		return ""
+	}
+	if len(nads) == 0 {
+		if syncError != nil && nadsRemain {
+			// the sync failed but NADs are known to remain: keep the published
+			// name rather than clearing it on incomplete information
+			return ptr.Deref(cudn.Status.VRFName, "")
+		}
+		// no NAD is left, whether the sync fully succeeded or failed after
+		// deleting the last one: the network is gone and its released network
+		// ID may be reallocated to another network, so a stale name could
+		// point consumers at that network's VRF; clear it
+		return ""
+	}
+	vrfName := util.GetCUDNVRFName(cudn.Name, networkIDFromNADs(nads))
+	if vrfName == "" {
+		// the name needs the network ID and the NADs are not annotated with
+		// it yet: keep the published name; the NAD update that adds the
+		// annotation triggers another reconcile
+		return ptr.Deref(cudn.Status.VRFName, "")
+	}
+	return vrfName
+}
+
+// udnVRFName returns the VRF device name to publish on the UDN status, given
+// the NAD and the error the last sync returned, and whether the NAD is known
+// to still exist, or an empty string when no name should be published. Only
+// primary UDNs publish a name, since those are the networks that get a VRF
+// device on the nodes. The name of a namespaced UDN is always ID-derived, so
+// it needs the network ID that the NAD controller annotates on the NAD
+// asynchronously; the lifecycle mirrors clusterUDNVRFName: preserve the
+// published name while the NAD exists without the annotation or while a sync
+// fails with the NAD still in place, clear it once the NAD is gone.
+func udnVRFName(udn *userdefinednetworkv1.UserDefinedNetwork, nad *netv1.NetworkAttachmentDefinition, syncError error, nadExists bool) string {
+	if !utiludn.IsPrimaryNetwork(&udn.Spec) {
+		return ""
+	}
+	if nad == nil {
+		if syncError != nil && nadExists {
+			// the sync failed but the NAD is known to remain: keep the
+			// published name rather than clearing it on incomplete information
+			return ptr.Deref(udn.Status.VRFName, "")
+		}
+		// the NAD is gone, whether the sync fully succeeded or failed after
+		// deleting it (e.g. on the finalizer removal): the network ID is
+		// released and may be reallocated to another network; clear the name
+		return ""
+	}
+	vrfName := util.GetUDNVRFName(networkIDFromNADs([]netv1.NetworkAttachmentDefinition{*nad}))
+	if vrfName == "" {
+		// the NAD is not annotated with the network ID yet: keep the
+		// published name; the NAD update that adds the annotation triggers
+		// another reconcile
+		return ptr.Deref(udn.Status.VRFName, "")
+	}
+	return vrfName
+}
+
+// nadStillExists reports whether the UDN's NAD is still present in the
+// informer cache; only a NotFound answer establishes known absence, any
+// other lookup failure counts as unknown, hence as still existing.
+func (c *Controller) nadStillExists(namespace, name string) bool {
+	_, err := c.nadLister.NetworkAttachmentDefinitions(namespace).Get(name)
+	return !apierrors.IsNotFound(err)
+}
+
+// hasTrackedNamespaces reports whether any NAD is known to remain for the
+// given CUDN. The namespace tracker is maintained per NAD operation, so after
+// a partial sync it reflects what actually survived it.
+func (c *Controller) hasTrackedNamespaces(cudnName string) bool {
+	c.namespaceTrackerLock.RLock()
+	defer c.namespaceTrackerLock.RUnlock()
+	return c.namespaceTracker[cudnName].Len() > 0
+}
+
+// networkIDFromNADs returns the network ID annotated on any of the given NADs,
+// or InvalidID when none of them carries a network-id annotation that the
+// allocator could have assigned to a CUDN: DefaultNetworkID is reserved for
+// the default network and MaxNetworks bounds the allocator.
+func networkIDFromNADs(nads []netv1.NetworkAttachmentDefinition) int {
+	for i := range nads {
+		annotation := nads[i].Annotations[ovntypes.OvnNetworkIDAnnotation]
+		if annotation == "" {
+			continue
+		}
+		if id, err := strconv.Atoi(annotation); err == nil && id > ovntypes.DefaultNetworkID && id < networkmanager.MaxNetworks {
+			return id
+		}
+		klog.Warningf("Ignoring invalid network-id annotation %q on NetworkAttachmentDefinition %s/%s",
+			annotation, nads[i].Namespace, nads[i].Name)
+	}
+	return ovntypes.InvalidID
 }
 
 func newClusterNetworkCreatedCondition(nads []netv1.NetworkAttachmentDefinition, syncError error) metav1.Condition {

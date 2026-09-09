@@ -1008,6 +1008,9 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 								vrfName = udnName
 							}
 
+							By("waiting for the derived VRF name to be published on the network status")
+							expectNetworkVRFNameStatus(f.DynamicClient, networkName, vrfName)
+
 							if isDynamicUDNEnabled() {
 								nodeList, err := e2enode.GetReadySchedulableNodes(context.TODO(), cs)
 								Expect(err).NotTo(HaveOccurred())
@@ -3209,6 +3212,22 @@ var udnGVR = schema.GroupVersionResource{
 	Resource: "userdefinednetworks",
 }
 
+// expectNetworkVRFNameStatus waits until the UDN or CUDN identified by the
+// given network name publishes the expected VRF device name in its
+// status.vrfName field.
+func expectNetworkVRFNameStatus(client dynamic.Interface, networkName, expectedVRFName string) {
+	GinkgoHelper()
+
+	udnNamespace, udnName := ovnkubeutil.ParseNetworkName(networkName)
+	gvr := clusterUDNGVR
+	if udnNamespace != "" {
+		gvr = udnGVR
+	}
+	vrfName := waitForNetworkVRFName(client.Resource(gvr).Namespace(udnNamespace), udnName, 30*time.Second, time.Second)
+	Expect(vrfName).To(Equal(expectedVRFName),
+		"expected network %s to publish VRF name %s in its status", networkName, expectedVRFName)
+}
+
 // getConditions extracts metav1 conditions from .status.conditions of an unstructured object
 func getConditions(uns *unstructured.Unstructured) ([]metav1.Condition, error) {
 	var conditions []metav1.Condition
@@ -3617,3 +3636,82 @@ func getNodeSubnetAssignments(cs clientset.Interface, networkName string) (map[s
 	}
 	return nodeSubnetMapV4, nodeSubnetMapV6, nil
 }
+
+var _ = Describe("Network Segmentation status.vrfName validation", feature.NetworkSegmentation, func() {
+	f := wrappedTestFramework("udn-vrfname-validation")
+
+	// The 15-character bound mirrors the Linux interface name length limit:
+	// verify the API server enforces it on the status subresource of both
+	// network CRDs, so a manifest regression dropping the constraint is caught.
+	It("accepts a 15-character vrfName and rejects a 16-character one", func() {
+		cudnName := randomNetworkMetaName()
+		cudn := &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "k8s.ovn.org/v1",
+			"kind":       "ClusterUserDefinedNetwork",
+			"metadata":   map[string]interface{}{"name": cudnName},
+			"spec": map[string]interface{}{
+				// select no namespace: the network stays NAD-less and deletes cleanly
+				"namespaceSelector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{"vrfname-validation-e2e": "none"},
+				},
+				"network": map[string]interface{}{
+					"topology": "Layer2",
+					"layer2": map[string]interface{}{
+						"role":    "Secondary",
+						"subnets": []interface{}{"10.99.0.0/24"},
+					},
+				},
+			},
+		}}
+		createCtx, createCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer createCancel()
+		_, err := f.DynamicClient.Resource(clusterUDNGVR).Create(createCtx, cudn, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		DeferCleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_ = f.DynamicClient.Resource(clusterUDNGVR).Delete(ctx, cudnName, metav1.DeleteOptions{})
+		})
+
+		udn := &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "k8s.ovn.org/v1",
+			"kind":       "UserDefinedNetwork",
+			"metadata":   map[string]interface{}{"name": "vrfname-validation", "namespace": f.Namespace.Name},
+			"spec": map[string]interface{}{
+				"topology": "Layer2",
+				"layer2": map[string]interface{}{
+					"role":    "Secondary",
+					"subnets": []interface{}{"10.98.0.0/24"},
+				},
+			},
+		}}
+		_, err = f.DynamicClient.Resource(udnGVR).Namespace(f.Namespace.Name).Create(createCtx, udn, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, network := range []struct {
+			kind   string
+			client dynamic.ResourceInterface
+			name   string
+		}{
+			{"ClusterUserDefinedNetwork", f.DynamicClient.Resource(clusterUDNGVR), cudnName},
+			{"UserDefinedNetwork", f.DynamicClient.Resource(udnGVR).Namespace(f.Namespace.Name), "vrfname-validation"},
+		} {
+			patchStatusVRFName := func(vrfName string) error {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_, err := network.client.Patch(ctx, network.name, types.MergePatchType,
+					[]byte(fmt.Sprintf(`{"status":{"vrfName":%q}}`, vrfName)), metav1.PatchOptions{}, "status")
+				return err
+			}
+
+			By(fmt.Sprintf("patching the %s status with a 15-character vrfName", network.kind))
+			Expect(patchStatusVRFName("a23456789012345")).NotTo(HaveOccurred(),
+				"a vrfName within the interface name length limit must be accepted on the %s status", network.kind)
+
+			By(fmt.Sprintf("patching the %s status with a 16-character vrfName", network.kind))
+			err := patchStatusVRFName("a234567890123456")
+			Expect(kerrors.IsInvalid(err)).To(BeTrue(),
+				"a vrfName beyond the interface name length limit must be rejected on the %s status, got: %v", network.kind, err)
+		}
+	})
+})

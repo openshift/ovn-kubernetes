@@ -206,10 +206,10 @@ gateway router of the associated CUDN and hence will be used for the egress
 traffic of the pods on that network.
 
 > [!NOTE]
-> As long as the name of the CUDN is less than 16 characters, the corresponding
-> VRF name for the network will have the same name. Otherwise the name will be
-> pseudo-randomly generated and not easy to predict. Future enhancements will
-> allow for the VRF name to be configurable.
+> For CUDN names of 15 characters or fewer, the corresponding network VRF has
+> the same name. For longer CUDN names, the VRF name is derived from the network
+> ID. Read the actual VRF name from the CUDN `status.vrfName` field instead of
+> deriving it.
 
 > [!NOTE]
 > If you export routes for a CUDN over the default VRF as detailed on the next
