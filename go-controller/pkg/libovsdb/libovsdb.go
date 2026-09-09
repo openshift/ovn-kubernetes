@@ -22,6 +22,7 @@ import (
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
@@ -103,13 +104,13 @@ func newClient(endpoint string, dbModel model.ClientDBModel, opts ...client.Opti
 
 // NewSBClient creates a new OVN Southbound Database client connected to the
 // local OVN SB DB.
-func NewSBClient(stopCh <-chan struct{}) (client.Client, error) {
-	return NewSBClientWithEndpoint(config.OvnSouth.GetURL(), prometheus.DefaultRegisterer, stopCh)
+func NewSBClient(defaultGWRouterPortName string, stopCh <-chan struct{}) (client.Client, error) {
+	return NewSBClientWithEndpoint(defaultGWRouterPortName, config.OvnSouth.GetURL(), prometheus.DefaultRegisterer, stopCh)
 }
 
 // NewSBClientWithEndpoint creates a new OVN Southbound Database client connected
 // to the given unix-socket endpoint (e.g. "unix:/var/run/ovn/ovnsb_db.sock").
-func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer, stopCh <-chan struct{}) (client.Client, error) {
+func NewSBClientWithEndpoint(defaultGWRouterPortName, endpoint string, promRegistry prometheus.Registerer, stopCh <-chan struct{}) (client.Client, error) {
 	dbModel, err := sbdb.FullDatabaseModel()
 	if err != nil {
 		return nil, err
@@ -133,6 +134,7 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 	// Only Monitor Required SBDB tables to reduce memory overhead
 	chassisPrivate := sbdb.ChassisPrivate{}
 	igmpGroup := sbdb.IGMPGroup{}
+	mb := sbdb.MACBinding{}
 	_, err = c.Monitor(ctx,
 		c.NewMonitor(
 			// used by unidling controller
@@ -149,6 +151,16 @@ func NewSBClientWithEndpoint(endpoint string, promRegistry prometheus.Registerer
 			client.WithTable(&sbdb.SBGlobal{}),
 			// used for metrics
 			client.WithTable(&sbdb.PortBinding{}),
+			// used by mac binding controller
+			client.WithConditionalTable(&mb,
+				[]model.Condition{
+					{
+						Field:    &mb.LogicalPort,
+						Function: ovsdb.ConditionEqual,
+						Value:    defaultGWRouterPortName,
+					},
+				},
+				&mb.LogicalPort, &mb.IP, &mb.MAC, &mb.Timestamp),
 		),
 	)
 	if err != nil {
