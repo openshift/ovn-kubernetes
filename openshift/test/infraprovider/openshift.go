@@ -21,28 +21,39 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
+
+// platformInfra abstracts the platform-specific infrastructure (baremetal, AWS, etc.)
+// for managing external containers and networks.
+type platformInfra interface {
+	api.ExternalContainerProvider
+	PrimaryNetwork() (api.Network, error)
+	GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider
+}
 
 type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
 	hostPort                *portalloc.PortAllocator
-	clusterInfra            *baremetalInfra
+	clusterInfra            platformInfra
+	platformType            configv1.PlatformType
 }
 
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
 	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
-	clusterInfra, err := initializeClusterInfra(config)
+	clusterInfra, platformType, err := initializePlatformInfra(config)
 	if err != nil {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
 		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
+		platformType: platformType,
 	}
 	if err = o.initClusterObjects(config); err != nil {
 		return nil, err
@@ -73,30 +84,78 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 		}
 		o.clusterFeatureGate = nil
 	}
-	// check ovn gateway mode and export required env variable
-	o.configureOVNGatewayMode()
-	if o.clusterInfra != nil {
+	// configure environment variables required by upstream E2E tests
+	o.configureTestEnvs()
+	if bm, ok := o.clusterInfra.(*baremetalInfra); ok {
 		// check for frr external container availability
 		frrContainer := api.ExternalContainer{Name: externalFRRContainerName}
-		output, _ := o.clusterInfra.ExecExternalContainerCommand(frrContainer, []string{"hostname"})
+		output, _ := bm.ExecExternalContainerCommand(frrContainer, []string{"hostname"})
 		o.hasFRRExternalContainer = output != ""
+
+		// Enable IP forwarding on secondary network interfaces of cluster nodes.
+		clientset, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			return fmt.Errorf("failed to create kubernetes clientset: %w", err)
+		}
+		nodes, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list cluster nodes: %w", err)
+		}
+		var nodeNames []string
+		for _, node := range nodes.Items {
+			nodeNames = append(nodeNames, node.Name)
+		}
+		if err := bm.enableSecondaryForwarding(nodeNames, o.ExecK8NodeCommand); err != nil {
+			return fmt.Errorf("failed to enable secondary network forwarding: %w", err)
+		}
 	}
 	return nil
 }
 
-// configureOVNGatewayMode detects and configures the OVN gateway mode for tests
-func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
-	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
-		return
-	}
-
-	if o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
+// configureTestEnvs sets environment variables required by upstream E2E tests.
+func (o *OpenshiftInfraProvider) configureTestEnvs() {
+	if o.operNetwork != nil && o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig != nil &&
+		o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
 		o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost {
 		// The E2E utility method isLocalGWModeEnabled depends on the
 		// OVN_GATEWAY_MODE environment variable. All EVPN tests must
 		// satisfy this condition; otherwise, they will be skipped.
 		_ = os.Setenv("OVN_GATEWAY_MODE", "local")
 	}
+	// OpenShift always supports network segmentation (UDN). The EgressIP
+	// E2Es check this env variable to decide whether to run UDN tests.
+	_ = os.Setenv("ENABLE_NETWORK_SEGMENTATION", "true")
+}
+
+// HasSecondaryHostEIPSupport checks if the platform supports secondary-host-eip
+// tests (i.e., has a pre-configured secondary network for EgressIP on secondary
+// host interfaces). Currently only baremetal with a discovered secondary network.
+func (o *OpenshiftInfraProvider) HasSecondaryHostEIPSupport() bool {
+	if o.clusterInfra == nil {
+		return false
+	}
+	bm, ok := o.clusterInfra.(*baremetalInfra)
+	if !ok {
+		return false
+	}
+	return bm.secondaryNetwork != nil
+}
+
+func (o *OpenshiftInfraProvider) HasPlatformInfra() bool {
+	return o.clusterInfra != nil
+}
+
+// IsGCPPlatform returns true if the cluster is running on GCP.
+func (o *OpenshiftInfraProvider) IsGCPPlatform() bool {
+	return o.platformType == configv1.GCPPlatformType
+}
+
+// IsBastionBasedPlatform returns true for cloud platforms (AWS, GCP, Azure)
+// where external containers run on a bastion host with host networking.
+func (o *OpenshiftInfraProvider) IsBastionBasedPlatform() bool {
+	return o.platformType == configv1.AWSPlatformType ||
+		o.platformType == configv1.AzurePlatformType ||
+		o.platformType == configv1.GCPPlatformType
 }
 
 // CheckForEVPN checks all EVPN prerequisites
@@ -182,7 +241,7 @@ func (o *OpenshiftInfraProvider) PrimaryNetwork() (api.Network, error) {
 	if o.clusterInfra == nil {
 		panic("not implemented")
 	}
-	return o.clusterInfra.GetNetwork(primaryNetworkName)
+	return o.clusterInfra.PrimaryNetwork()
 }
 
 func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
@@ -317,4 +376,35 @@ func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 
 func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
 	panic("not implemented")
+}
+
+// initializePlatformInfra fetches the cluster infrastructure object, checks the
+// platform type, and dispatches to the appropriate platform initializer.
+// Returns nil when no platform-specific infra is needed.
+func initializePlatformInfra(config *rest.Config) (platformInfra, configv1.PlatformType, error) {
+	configClient, err := configclient.NewForConfig(config)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to retrieve config client: %w", err)
+	}
+	infra, err := configClient.ConfigV1().Infrastructures().Get(context.Background(), "cluster", metav1.GetOptions{})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to retrieve cluster infrastructure object: %w", err)
+	}
+	platformType := infra.Spec.PlatformSpec.Type
+	switch platformType {
+	case configv1.BareMetalPlatformType:
+		bm, err := initializeClusterInfra(infra)
+		if err != nil || bm == nil {
+			return nil, platformType, err
+		}
+		return bm, platformType, nil
+	case configv1.AWSPlatformType, configv1.AzurePlatformType, configv1.GCPPlatformType:
+		bi, err := initializeBastionInfra()
+		if err != nil || bi == nil {
+			return nil, platformType, err
+		}
+		return bi, platformType, nil
+	default:
+		return nil, platformType, nil
+	}
 }

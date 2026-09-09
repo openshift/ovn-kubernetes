@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -12,6 +13,9 @@ import (
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
+
+	kclientset "k8s.io/client-go/kubernetes"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -39,6 +43,7 @@ const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+	featureLabelEgressIP            = "Feature:EgressIP"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -64,7 +69,28 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Future feature-based filters can be added here
+	// If platform infra node (hypervisor node for baremetal, bastion host
+	// for cloud platforms) doesn't exist, then ignore running EgressIP tests.
+	if !ocpInfra.HasPlatformInfra() && spec.Labels.Has(featureLabelEgressIP) {
+		return false
+	}
+	// secondary-host-eip tests: only include on platforms with a
+	// pre-configured secondary network (currently baremetal only)
+	if strings.Contains(spec.Name, "secondary-host-eip") && !ocpInfra.HasSecondaryHostEIPSupport() {
+		return false
+	}
+	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
+	// which is not yet configured on bastion-based platforms.
+	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsBastionBasedPlatform() {
+		return false
+	}
+	// EgressIP for UDN pod is broken for GCP platform.
+	// Tracking it via https://redhat.atlassian.net/browse/OCPBUGS-122016.
+	// Restore these tests once it's fixed.
+	if ocpInfra.IsGCPPlatform() && spec.Labels.Has(featureLabelEgressIP) &&
+		(spec.Labels.Has(featureLabelNetworkSegmentation) || strings.Contains(spec.Name, "Primary UDN")) {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
@@ -126,6 +152,13 @@ func main() {
 		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
+		}
+		client, err := kclientset.NewForConfig(cfg)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
+		}
+		if err := ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
 	})
 
