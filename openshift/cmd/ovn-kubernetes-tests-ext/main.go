@@ -44,14 +44,6 @@ const (
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
 
-// isOTPBlocking checks if an OTP test should be marked as blocking.
-// Per reviewer feedback (anuragthehatter), all OTP tests are [informing] for initial rollout.
-// To promote a test to blocking, return true when name contains its title substring, e.g.:
-// "should not expose API tokens in ovnkube-node logs", "should execute ovn-db-run-command script successfully"
-func isOTPBlocking(_ string) bool {
-	return false
-}
-
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
 // and test labels. When ocpInfra is nil (no cluster access), all tests are included.
 func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
@@ -162,18 +154,20 @@ func main() {
 			spec.Name += " " + annotations
 		}
 
-		// prepend other labels by matching on existing spec labels
-		for _, label := range getPrependLabels(spec.Labels) {
-			spec.Labels.Insert(label)
-		}
+		if isOTP {
+			if spec.Labels.Has("Level0") {
+				spec.Name = "[Level0] " + spec.Name
+			}
+		} else {
+			// prepend other labels by matching on existing spec labels
+			for _, label := range getPrependLabels(spec.Labels) {
+				spec.Labels.Insert(label)
+			}
 
-		if !isOTP {
-			spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+			spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name
 		}
 
 		switch {
-		case isOTP && isOTPBlocking(spec.Name):
-			spec.Lifecycle = extensiontests.LifecycleBlocking
 		case isOTP:
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
