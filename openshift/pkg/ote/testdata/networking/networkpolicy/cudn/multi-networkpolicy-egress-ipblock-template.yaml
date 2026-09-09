@@ -1,0 +1,28 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: multiNetworkPolicyEgressIPBlock_template
+objects:
+- apiVersion: k8s.cni.cncf.io/v1beta1
+  kind: MultiNetworkPolicy
+  metadata:
+    name: "${NAME}"
+    namespace: "${NAMESPACE}"
+    annotations:
+      k8s.v1.cni.cncf.io/policy-for: sec-localnet-net-ipblock
+  spec:
+    podSelector: {}
+    policyTypes:
+    - Egress
+    egress:
+    - to:
+      - ipBlock:
+          cidr: "${CIDR}"
+      - ipBlock:
+          cidr: "${CIDR2}"
+parameters:
+- name: NAME
+- name: CIDR
+- name: CIDR2
+  value: ""
+- name: NAMESPACE
