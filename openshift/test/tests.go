@@ -61,6 +61,7 @@ var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:AdminNetworkPolicy][Feature:BaselineNetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPolicy the ANP ACL logs have the expected log level [Suite:ovn-kubernetes/conformance/parallel]",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
