@@ -18,6 +18,7 @@ import (
 	current "github.com/containernetworking/cni/pkg/types/100"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	apimachinerytypes "k8s.io/apimachinery/pkg/types"
@@ -1025,7 +1026,7 @@ var _ = Describe("updateDHCPAndDPUAnnotations pod identity guard", func() {
 		pr := &PodRequest{PodNamespace: podNamespace, PodName: podName, PodUID: "uid-a", nadKey: nadKey, Netns: newTestNetns()}
 
 		err := pr.updateDHCPAndDPUAnnotations(cs, kubecli, stalePod, newDHCPEntry(), nil)
-		Expect(err).To(MatchError(ContainSubstring("was replaced while staging CNI annotations")))
+		Expect(err).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
 
 		got, err := cs.kclient.CoreV1().Pods(podNamespace).Get(context.Background(), podName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
