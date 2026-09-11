@@ -44,6 +44,11 @@ import (
 
 const (
 	egressIPReachabilityCheckInterval = 5 * time.Second
+	// egressIPNodeCleanupTimeout is how long cluster-manager waits for an old
+	// egress node to remove an EgressIP from its node annotations (bridge /
+	// secondary-host) before re-assigning the IP. Avoids dual ARP answers
+	// during live failover (OCPBUGS-105420). Fail-open after this duration.
+	egressIPNodeCleanupTimeout = 30 * time.Second
 )
 
 type egressIPHealthcheckClientAllocator struct{}
@@ -400,6 +405,12 @@ type egressIPClusterController struct {
 	egressIPHandler *factory.Handler
 	// cloudPrivateIPConfig events factory handler
 	cloudPrivateIPConfigHandler *factory.Handler
+	// pendingBareMetalCleanup tracks when we started waiting for a node to clear
+	// an EgressIP from its bridge/secondary-host annotations before reassignment.
+	// Keyed by "egressIPName/ip". Accessed only while holding egressIPAssignmentMutex.
+	pendingBareMetalCleanup map[string]time.Time
+	// nodeCleanupTimeout overrides egressIPNodeCleanupTimeout in tests when non-zero.
+	nodeCleanupTimeout time.Duration
 }
 
 func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *factory.WatchFactory, recorder record.EventRecorder) *egressIPClusterController {
@@ -425,6 +436,7 @@ func newEgressIPController(ovnClient *util.OVNClusterManagerClientset, wf *facto
 		reachabilityCheckInterval:         egressIPReachabilityCheckInterval,
 		egressIPNodeHealthCheckPort:       config.OVNKubernetesFeature.EgressIPNodeHealthCheckPort,
 		stopChan:                          make(chan struct{}),
+		pendingBareMetalCleanup:           make(map[string]time.Time),
 	}
 	eIPC.initRetryFramework()
 	return eIPC
@@ -967,6 +979,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		}
 	} else {
 		eIPC.deallocMark(name)
+		eIPC.clearPendingBareMetalCleanupForEIP(name)
 	}
 
 	// Validate the spec and use only the valid egress IPs when performing any
@@ -1014,30 +1027,18 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	}
 
 	if ipsToRemove.Len() > 0 {
-		// The following is added as to ensure that we only add after having
-		// successfully removed egress IPs. This case is not very important on
-		// bare-metal (since we execute the add after the remove below, and
-		// hence have full control of the execution - barring its success), but
-		// on a cloud: we patch all validStatsuses below, we wait for the status
-		// on the CloudPrivateIPConfig(s) we create to be set before executing
-		// anything in the OVN DB (Note that the status will be set by this
-		// controller in cluster-manager and asynchronously the ovnkube-controller
-		// will read the CRD change and do the necessary plumbing (ADD/UPDATE/DELETE)
-		// in the OVN DB).
-		// So, we need to make sure that we delete and
-		// then add, mainly because if EIP1 is added to nodeX and then EIP2 is
-		// removed from nodeX, we might remove the setup made for EIP1. The
-		// add/delete ordering of events is not guaranteed on the cloud where we
-		// depend on other controllers to execute the work for us however. By
-		// comparing the spec to the status and applying the following truth
-		// table we can ensure that order of events.
-
+		// Ensure we only add after having successfully removed egress IPs.
+		// On cloud we wait for CloudPrivateIPConfig; on bare-metal we remove
+		// from status first, then wait for node annotation cleanup before
+		// re-assigning (see below). By comparing the spec to the status and
+		// applying the following truth table we can ensure that order of events.
+		//
 		// case ID    |    Egress IP to add    |    Egress IP to remove    |    ipsToAssign
 		// 1          |    e1                  |    e1                     |    e1
 		// 2          |    e2                  |    e1                     |    -
 		// 3          |    e2                  |    -                      |    e2
 		// 4          |    -                   |    e1                     |    -
-
+		//
 		// Case 1 handles updates. Case 2 and 3 makes sure we don't add until we
 		// successfully delete. Case 4 just shows an example of what would
 		// happen if we don't have anything to add
@@ -1045,23 +1046,53 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	}
 
 	if !util.PlatformTypeIsEgressIPCloudProvider() {
+		// Bare-metal: remove invalid status first, then assign on a later
+		// reconcile only after the previous node has cleared the IP from its
+		// bridge/secondary-host annotations. A single-shot status replace
+		// (remove+add) lets the new node GARP while the old node still owns
+		// the address, causing dual ARP / MAC conflicts (OCPBUGS-105420).
 		if len(statusToRemove) > 0 {
-			// Delete the statusToRemove from the allocator cache. If we don't
-			// do this we will occupy assignment positions for the ipsToAssign,
-			// even though statusToRemove will be removed afterwards
 			eIPC.deleteAllocatorEgressIPAssignments(statusToRemove)
+			eIPC.addAllocatorEgressIPAssignments(name, statusToKeep)
+			if new != nil {
+				if err := eIPC.patchEgressIP(name, eIPC.generateEgressIPPatches(name, new.Annotations, statusToKeep)...); err != nil {
+					return err
+				}
+			}
+			// Track IPs that remain in the spec so the next reconcile waits for
+			// node annotation cleanup before re-assigning them.
+			now := time.Now()
+			for _, st := range statusToRemove {
+				if validSpecIPs.Has(st.EgressIP) {
+					key := pendingBareMetalCleanupKey(name, st.EgressIP)
+					if _, exists := eIPC.pendingBareMetalCleanup[key]; !exists {
+						eIPC.pendingBareMetalCleanup[key] = now
+					}
+				} else {
+					eIPC.clearPendingBareMetalCleanup(name, st.EgressIP)
+				}
+			}
+			metrics.RecordEgressIPCount(eIPC.getAllocationTotalCount())
+			return nil
 		}
 		if len(ipsToAssign) > 0 {
-			statusToAdd = eIPC.assignEgressIPs(name, ipsToAssign.UnsortedList())
+			readyIPs, err := eIPC.egressIPsReadyForAssignment(name, ipsToAssign)
+			if err != nil {
+				return err
+			}
+			if readyIPs.Len() == 0 {
+				// Still waiting for previous node annotation cleanup. Do not
+				// return an error (that would burn retry attempts); schedule a
+				// follow-up reconcile instead.
+				eIPC.schedulePendingCleanupRetry(name)
+				metrics.RecordEgressIPCount(eIPC.getAllocationTotalCount())
+				return nil
+			}
+			statusToAdd = eIPC.assignEgressIPs(name, readyIPs.UnsortedList())
 			statusToKeep = append(statusToKeep, statusToAdd...)
 		}
-		// Add all assignments which are to be kept to the allocator cache,
-		// allowing us to track all assignments which have been performed and
-		// avoid incorrect future assignments due to a de-synchronized cache.
 		eIPC.addAllocatorEgressIPAssignments(name, statusToKeep)
-		// Update the object only on an ADD/UPDATE. If we are processing a
-		// DELETE, new will be nil and we should not update the object.
-		if len(statusToAdd) > 0 || (len(statusToRemove) > 0 && new != nil) {
+		if len(statusToAdd) > 0 && new != nil {
 			if err := eIPC.patchEgressIP(name, eIPC.generateEgressIPPatches(name, new.Annotations, statusToKeep)...); err != nil {
 				return err
 			}
@@ -1136,6 +1167,165 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	// Record the egress IP allocator count
 	metrics.RecordEgressIPCount(eIPC.getAllocationTotalCount())
 	return nil
+}
+
+func pendingBareMetalCleanupKey(egressIPName, ip string) string {
+	return egressIPName + "/" + ip
+}
+
+func (eIPC *egressIPClusterController) getNodeCleanupTimeout() time.Duration {
+	if eIPC.nodeCleanupTimeout > 0 {
+		return eIPC.nodeCleanupTimeout
+	}
+	return egressIPNodeCleanupTimeout
+}
+
+func (eIPC *egressIPClusterController) clearPendingBareMetalCleanup(egressIPName, ip string) {
+	delete(eIPC.pendingBareMetalCleanup, pendingBareMetalCleanupKey(egressIPName, ip))
+}
+
+func (eIPC *egressIPClusterController) clearPendingBareMetalCleanupForEIP(egressIPName string) {
+	prefix := egressIPName + "/"
+	for key := range eIPC.pendingBareMetalCleanup {
+		if strings.HasPrefix(key, prefix) {
+			delete(eIPC.pendingBareMetalCleanup, key)
+		}
+	}
+}
+
+// findNodeStillHostingEgressIP returns the name of a node that still lists ip in
+// its bridge-egress-ips or secondary-host-egress-ips annotation.
+func (eIPC *egressIPClusterController) findNodeStillHostingEgressIP(ip string) (string, error) {
+	nodes, err := eIPC.watchFactory.GetNodes()
+	if err != nil {
+		return "", err
+	}
+	for _, node := range nodes {
+		if util.IsNodeBridgeEgressIPsAnnotationSet(node) {
+			bridgeIPs, err := util.ParseNodeBridgeEgressIPsAnnotation(node)
+			if err != nil && !util.IsAnnotationNotSetError(err) {
+				return "", fmt.Errorf("failed to parse %s on node %s: %w", util.OVNNodeBridgeEgressIPs, node.Name, err)
+			}
+			for _, bridgeIP := range bridgeIPs {
+				if bridgeIP == ip {
+					return node.Name, nil
+				}
+			}
+		}
+		if util.IsNodeSecondaryHostEgressIPsAnnotationSet(node) {
+			secondaryIPs, err := util.ParseNodeSecondaryHostEgressIPsAnnotation(node)
+			if err != nil && !util.IsAnnotationNotSetError(err) {
+				return "", fmt.Errorf("failed to parse %s on node %s: %w", util.OVNNodeSecondaryHostEgressIPs, node.Name, err)
+			}
+			if secondaryIPs.Has(ip) {
+				return node.Name, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// egressIPsReadyForAssignment returns the subset of ips that are safe to assign.
+// IPs with a pending bare-metal cleanup entry remain blocked until the previous
+// node's annotation no longer lists them, or nodeCleanupTimeout elapses.
+func (eIPC *egressIPClusterController) egressIPsReadyForAssignment(egressIPName string, ips sets.Set[string]) (sets.Set[string], error) {
+	timeout := eIPC.getNodeCleanupTimeout()
+	ready := sets.New[string]()
+	for _, ip := range ips.UnsortedList() {
+		key := pendingBareMetalCleanupKey(egressIPName, ip)
+		start, pending := eIPC.pendingBareMetalCleanup[key]
+		if !pending {
+			ready.Insert(ip)
+			continue
+		}
+		nodeName, err := eIPC.findNodeStillHostingEgressIP(ip)
+		if err != nil {
+			return nil, err
+		}
+		if nodeName == "" {
+			eIPC.clearPendingBareMetalCleanup(egressIPName, ip)
+			ready.Insert(ip)
+			continue
+		}
+		if time.Since(start) >= timeout {
+			klog.Warningf("Timed out waiting %v for EgressIP %s address %s cleanup on node %s; assigning anyway",
+				timeout, egressIPName, ip, nodeName)
+			eIPC.clearPendingBareMetalCleanup(egressIPName, ip)
+			ready.Insert(ip)
+			continue
+		}
+		klog.V(4).Infof("Waiting for EgressIP %s address %s to be removed from node %s annotation before reassignment",
+			egressIPName, ip, nodeName)
+	}
+	return ready, nil
+}
+
+// schedulePendingCleanupRetry triggers a follow-up reconcile so assignment can
+// proceed after node annotation cleanup or cleanup timeout (fail-open).
+func (eIPC *egressIPClusterController) schedulePendingCleanupRetry(eipName string) {
+	delay := time.Second
+	if timeout := eIPC.getNodeCleanupTimeout(); timeout < delay {
+		delay = timeout / 2
+		if delay < 10*time.Millisecond {
+			delay = 10 * time.Millisecond
+		}
+	}
+	go func() {
+		select {
+		case <-time.After(delay):
+		case <-eIPC.stopChan:
+			return
+		}
+		eip, err := eIPC.watchFactory.GetEgressIP(eipName)
+		if err != nil {
+			klog.V(5).Infof("Skipping pending EgressIP cleanup retry for %s: %v", eipName, err)
+			return
+		}
+		if err := eIPC.reconcileEgressIP(nil, eip); err != nil {
+			klog.Errorf("Failed pending EgressIP cleanup retry for %s: %v", eipName, err)
+		}
+	}()
+}
+
+// reconcilePendingBareMetalCleanups re-runs reconcile for EgressIPs waiting on
+// node annotation cleanup. Called when bridge/secondary-host EIP annotations change.
+func (eIPC *egressIPClusterController) reconcilePendingBareMetalCleanups() error {
+	eIPC.egressIPAssignmentMutex.Lock()
+	eipNames := sets.New[string]()
+	for key := range eIPC.pendingBareMetalCleanup {
+		name, _, ok := strings.Cut(key, "/")
+		if ok {
+			eipNames.Insert(name)
+		}
+	}
+	eIPC.egressIPAssignmentMutex.Unlock()
+	if eipNames.Len() == 0 {
+		return nil
+	}
+	var errs []error
+	for name := range eipNames {
+		eip, err := eIPC.watchFactory.GetEgressIP(name)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("get EgressIP %s: %w", name, err))
+			continue
+		}
+		if err := eIPC.reconcileEgressIP(nil, eip); err != nil {
+			errs = append(errs, fmt.Errorf("reconcile EgressIP %s: %w", name, err))
+		}
+	}
+	return utilerrors.Join(errs...)
+}
+
+func nodeBridgeEgressIPsAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	oldVal, oldOK := oldNode.Annotations[util.OVNNodeBridgeEgressIPs]
+	newVal, newOK := newNode.Annotations[util.OVNNodeBridgeEgressIPs]
+	return oldOK != newOK || oldVal != newVal
+}
+
+func nodeSecondaryHostEgressIPsAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	oldVal, oldOK := oldNode.Annotations[util.OVNNodeSecondaryHostEgressIPs]
+	newVal, newOK := newNode.Annotations[util.OVNNodeSecondaryHostEgressIPs]
+	return oldOK != newOK || oldVal != newVal
 }
 
 // syncCloudPrivateIPConfigs reconciles stale data in the EgressIP status
