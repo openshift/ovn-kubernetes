@@ -673,6 +673,7 @@ routing-table-id-start=2002
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.BeTrue())
 			gomega.Expect(Metrics.EnableScaleMetrics).To(gomega.BeTrue())
+			gomega.Expect(Metrics.CollectionInterval).To(gomega.Equal(15))
 
 			gomega.Expect(TLS.MinVersion).To(gomega.Equal("VersionTLS13"))
 			gomega.Expect(TLS.ParseCipherSuites()).To(gomega.Equal([]string{
@@ -768,6 +769,7 @@ routing-table-id-start=2002
 			"-metrics-enable-pprof=false",
 			"-ofctrl-wait-before-clear=5000",
 			"-metrics-enable-config-duration=true",
+			"-metrics-collection-interval=15",
 			"-tls-min-version=VersionTLS13",
 			"-tls-cipher-suites=TLS_AES_128_GCM_SHA256,TLS_AES_256_GCM_SHA384",
 			"-egressip-reachability-total-timeout=5",
@@ -2180,5 +2182,112 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 			err = validateManagedBGPConfig()
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
+	})
+})
+
+var _ = Describe("completeOvnKubeNodeConfig", func() {
+	AfterEach(func() {
+		OvnKubeNode.KubeletCgroupPath = ""
+	})
+
+	DescribeTable("normalizes the kubelet cgroup path",
+		func(configured, expected string) {
+			OvnKubeNode.KubeletCgroupPath = configured
+
+			gomega.Expect(completeOvnKubeNodeConfig()).To(gomega.Succeed())
+			gomega.Expect(OvnKubeNode.KubeletCgroupPath).To(gomega.Equal(expected))
+		},
+		Entry("unset", "", ""),
+		Entry("relative path", "kubelet.slice/kubelet.service", "kubelet.slice/kubelet.service"),
+		Entry("leading slash is trimmed", "/podruntime/kubelet", "podruntime/kubelet"),
+		// a leftover leading slash would be counted as another level by the nftables
+		// match, producing a rule that never matches.
+		Entry("repeated leading slashes are trimmed", "//podruntime/kubelet", "podruntime/kubelet"),
+		Entry("duplicate separators are cleaned", "podruntime//kubelet", "podruntime/kubelet"),
+		Entry("trailing slash is cleaned", "podruntime/kubelet/", "podruntime/kubelet"),
+		Entry("single component", "kubelet.slice", "kubelet.slice"),
+	)
+
+	DescribeTable("rejects a kubelet cgroup path that cannot be matched safely",
+		func(configured, expectedError string) {
+			OvnKubeNode.KubeletCgroupPath = configured
+
+			gomega.Expect(completeOvnKubeNodeConfig()).To(gomega.MatchError(gomega.ContainSubstring(expectedError)))
+		},
+		// the cgroup root holds every host process, so matching on it would let all of
+		// them reach primary UDN pods.
+		Entry("cgroup root", "/", "must not be the cgroup root"),
+		Entry("cgroup root as dot", ".", "must not be the cgroup root"),
+		Entry("escapes further down", "kubelet.slice/../..", `must not contain ".."`),
+		// cleaning would resolve this to "/etc" and hide the escape, so ".." has to be
+		// rejected before the path is cleaned.
+		Entry("escape that cleaning would resolve", "../../etc", `must not contain ".."`),
+	)
+})
+
+var _ = Describe("kubelet cgroup path config", func() {
+	var app *cli.App
+
+	BeforeEach(func() {
+		gomega.Expect(PrepareTestConfig()).To(gomega.Succeed())
+		app = cli.NewApp()
+		app.Name = "test"
+		app.Flags = Flags
+	})
+
+	It("is read from the config file", func() {
+		cfgFile, err := os.CreateTemp("", "config-*.conf")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer os.Remove(cfgFile.Name())
+		_, err = cfgFile.WriteString("[ovnkubenode]\nkubelet-cgroup-path=/podruntime/kubelet\n")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(cfgFile.Close()).To(gomega.Succeed())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.KubeletCgroupPath).To(gomega.Equal("podruntime/kubelet"))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})).To(gomega.Succeed())
+	})
+
+	It("is read from the command line", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.KubeletCgroupPath).To(gomega.Equal("kubelet.slice/kubelet.service"))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name, "-kubelet-cgroup-path=kubelet.slice/kubelet.service"})).To(gomega.Succeed())
+	})
+
+	It("prefers the command line over the config file", func() {
+		cfgFile, err := os.CreateTemp("", "config-*.conf")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer os.Remove(cfgFile.Name())
+		_, err = cfgFile.WriteString("[ovnkubenode]\nkubelet-cgroup-path=from-file/kubelet\n")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(cfgFile.Close()).To(gomega.Succeed())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.KubeletCgroupPath).To(gomega.Equal("from-cli/kubelet"))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-kubelet-cgroup-path=from-cli/kubelet",
+		})).To(gomega.Succeed())
+	})
+
+	It("rejects the cgroup root", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("must not be the cgroup root")))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name, "-kubelet-cgroup-path=/"})).To(gomega.Succeed())
 	})
 })
