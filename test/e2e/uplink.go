@@ -2214,6 +2214,122 @@ var _ = ginkgo.Describe("Network Segmentation Uplink split DPU status conditions
 			}
 		}
 	})
+
+	ginkgo.It("discovers a default gateway that appears in the host-side CUDN VRF after enslavement", func(ctx ginkgo.SpecContext) {
+		if !ipFamilySet.Has(utilnet.IPv4) {
+			e2eskipper.Skipf("DPU Uplink e2e requires IPv4 on the DPU simulator gateway network")
+		}
+		schedulableNodes, err := e2enode.GetReadySchedulableNodes(ctx, f.ClientSet)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		dpuHostNodes := filterNodesByLabel(schedulableNodes.Items, uplinkDPUHostNodeLabel)
+		gomega.Expect(dpuHostNodes).NotTo(gomega.BeEmpty(), "expected at least one ready schedulable DPU host node")
+		nodeIfaces := collectDPUHostUplinkInterfaces(dpuHostNodes)
+
+		ginkgo.By("ensuring the host interfaces carry no default routes")
+		for _, node := range dpuHostNodes {
+			gomega.Expect(removeNodeInterfaceDefaultRoutes(ictx, node.Name, nodeIfaces[node.Name].InfName)).
+				To(gomega.Succeed())
+		}
+
+		ginkgo.By("resolving an Uplink that discovers no default gateways")
+		uplinkName := "uplate" + testSuffix
+		createUplink(f, ictx, uplinkName, dpuHostNodes, nodeIfaces, "")
+		waitForUplinkStatesResolved(f, uplinkName, os.Getenv(uplinkDPUExpectedBridgeEnv), dpuHostNodes)
+		waitForUplinkStatesNoDefaultGateways(f, uplinkName, dpuHostNodes)
+
+		ginkgo.By("running a targetVRF auto advertised CUDN on the Uplink on every DPU host node")
+		// Only networks advertised to a non-default VRF enslave the host
+		// interface into the host-side CUDN VRF, hence the advertisement. A
+		// pod per node renders the network there.
+		networkName := uplinkName
+		dpuGatewayNetwork, err := infraprovider.Get().GetNetwork(os.Getenv(uplinkDPUGatewayNetworkEnv))
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		frrIface, err := infraprovider.Get().GetExternalContainerNetworkInterface(
+			infraapi.ExternalContainer{Name: routerContainerName},
+			dpuGatewayNetwork,
+		)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(frrIface.IPv4).NotTo(gomega.BeEmpty())
+		applyUplinkFRRK8sConfiguration(
+			ictx,
+			networkName,
+			[]string{frrIface.IPv4},
+			[]string{envOrDefault(uplinkBGPServerIPv4CIDREnv, uplinkDefaultBGPServerIPv4CIDR)},
+		)
+		bgpAlloc, err := allocators.AllocateBGP(f, ictx)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		networkSpec := uplinkLayer3NetworkSpec(ipFamilySet, bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6)
+		namespace, err := createUplinkAdvertisedCUDN(
+			f,
+			ictx,
+			networkName,
+			networkSpec,
+			uplinkName,
+			"auto",
+		)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		for i, node := range dpuHostNodes {
+			createUplinkNetexecPod(f, namespace.Name, fmt.Sprintf("client-%s-%d", networkName, i), node.Name)
+		}
+		waitForCUDNUplinksReady(f, networkName)
+
+		ginkgo.By("waiting for the host interfaces to be enslaved to the CUDN VRF")
+		vrfName := waitForCUDNVRFName(f, networkName)
+		for _, node := range dpuHostNodes {
+			node := node
+			gomega.Eventually(func() (string, error) {
+				return getNodeInterfaceVRF(node.Name, nodeIfaces[node.Name].InfName)
+			}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
+				gomega.Equal(vrfName),
+				"expected host interface %s on node %s to be enslaved to VRF %s",
+				nodeIfaces[node.Name].InfName,
+				node.Name,
+				vrfName,
+			)
+		}
+		waitForUplinkStatesNoDefaultGateways(f, uplinkName, dpuHostNodes)
+
+		ginkgo.By("adding default routes explicitly to the host-side CUDN VRF routing table")
+		// The enslaved interface keeps its routes in the VRF table, so the
+		// late default gateway must be discovered there and reach the OVN
+		// gateway router that the DPU programs for the host node.
+		for _, node := range dpuHostNodes {
+			node := node
+			gateways, err := nodeInterfaceDefaultGateways(node.Name, nodeIfaces[node.Name].InfName)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(gateways).NotTo(gomega.BeEmpty(),
+				"expected the host interface of node %s to carry addresses to derive default gateways from", node.Name)
+			for family, gateway := range gateways {
+				cidr := defaultRouteCIDR(family)
+				gomega.Expect(dpuCUDNGatewayRouterHasDefaultRoute(node.Name, networkName, cidr, gateway)).To(gomega.BeFalse(),
+					"expected no default route via %s on the gateway router of CUDN %s for node %s before discovery",
+					gateway, networkName, node.Name)
+				gomega.Expect(configureUplinkStaticRoute(
+					ictx,
+					nodeIfaces[node.Name].InfName,
+					[]string{node.Name},
+					cidr,
+					gateway,
+					false,
+					vrfName,
+				)).To(gomega.Succeed())
+				gomega.Expect(uplinkRouteShownIn(node.Name, "vrf "+vrfName, cidr, gateway)).To(gomega.Succeed(),
+					"expected the added default route via %s in host-side CUDN VRF %s on node %s",
+					gateway, vrfName, node.Name)
+			}
+
+			waitForUplinkStatesDefaultGateways(f, uplinkName, []corev1.Node{node}, sets.KeySet(gateways))
+			for family, gateway := range gateways {
+				gomega.Eventually(func() (bool, error) {
+					return dpuCUDNGatewayRouterHasDefaultRoute(node.Name, networkName, defaultRouteCIDR(family), gateway)
+				}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(gomega.BeTrue(),
+					"expected the gateway router of CUDN %s for node %s to acquire a default route via %s",
+					networkName, node.Name, gateway)
+			}
+			waitForUplinkStateGatewayCondition(f, uplinkName, node.Name,
+				metav1.ConditionTrue, uplinkv1alpha1.UplinkStateReasonGatewayConfigured)
+		}
+	})
 })
 
 // removeNodeInterfaceDefaultRoutes removes the default routes of the node
