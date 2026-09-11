@@ -15,6 +15,12 @@ import (
 // UserDefinedNetworkStatus contains the observed status of the UserDefinedNetwork.
 type UserDefinedNetworkStatusApplyConfiguration struct {
 	Conditions []metav1.ConditionApplyConfiguration `json:"conditions,omitempty"`
+	// VRFName is the name of the Linux VRF device that OVN-Kubernetes creates
+	// for this network on every node where the network is present. It is
+	// populated for primary networks. Consumers that must name the VRF, such
+	// as FRRConfiguration authors filling in the routers 'vrf' field, should
+	// read this value instead of deriving it.
+	VRFName *string `json:"vrfName,omitempty"`
 }
 
 // UserDefinedNetworkStatusApplyConfiguration constructs a declarative configuration of the UserDefinedNetworkStatus type for use with
@@ -33,5 +39,13 @@ func (b *UserDefinedNetworkStatusApplyConfiguration) WithConditions(values ...*m
 		}
 		b.Conditions = append(b.Conditions, *values[i])
 	}
+	return b
+}
+
+// WithVRFName sets the VRFName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the VRFName field is set to the value of the last call.
+func (b *UserDefinedNetworkStatusApplyConfiguration) WithVRFName(value string) *UserDefinedNetworkStatusApplyConfiguration {
+	b.VRFName = &value
 	return b
 }

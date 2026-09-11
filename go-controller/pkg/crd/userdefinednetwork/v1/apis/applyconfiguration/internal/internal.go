@@ -82,6 +82,9 @@ var schemaYAML = typed.YAMLObject(`types:
           elementRelationship: associative
           keys:
           - type
+    - name: vrfName
+      type:
+        scalar: string
 - name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.EVPNConfig
   map:
     fields:
@@ -313,6 +316,9 @@ var schemaYAML = typed.YAMLObject(`types:
           elementRelationship: associative
           keys:
           - type
+    - name: vrfName
+      type:
+        scalar: string
 - name: com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.VLANConfig
   map:
     fields:

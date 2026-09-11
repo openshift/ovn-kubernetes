@@ -123,6 +123,11 @@ func (in *ClusterUserDefinedNetworkStatus) DeepCopyInto(out *ClusterUserDefinedN
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.VRFName != nil {
+		in, out := &in.VRFName, &out.VRFName
+		*out = new(string)
+		**out = **in
+	}
 	return
 }
 
@@ -495,6 +500,11 @@ func (in *UserDefinedNetworkStatus) DeepCopyInto(out *UserDefinedNetworkStatus) 
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.VRFName != nil {
+		in, out := &in.VRFName, &out.VRFName
+		*out = new(string)
+		**out = **in
 	}
 	return
 }
