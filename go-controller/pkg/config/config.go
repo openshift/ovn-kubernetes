@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -91,7 +92,7 @@ var (
 	// ovn-kubernetes build date
 	BuildDate = ""
 	// ovn-kubernetes version, to be changed with every release
-	Version = "1.3.0"
+	Version = "1.4.0"
 	// version of the go runtime used to compile ovn-kubernetes
 	GoVersion = runtime.Version()
 	// os and architecture used to build ovn-kubernetes
@@ -481,6 +482,11 @@ type KubernetesConfig struct {
 	DNSServiceName      string `gcfg:"dns-service-name"`
 }
 
+// DefaultMetricsCollectionInterval is the default interval, in seconds, at which
+// OVS/OVN metric values are extracted into the registry when
+// MetricsConfig.CollectionInterval is unset or non-positive.
+const DefaultMetricsCollectionInterval = 30 * time.Second
+
 // MetricsConfig holds Prometheus metrics-related parameters.
 type MetricsConfig struct {
 	BindAddress           string `gcfg:"bind-address"`
@@ -493,6 +499,10 @@ type MetricsConfig struct {
 	// configuration duration and optionally, its application to all nodes
 	EnableConfigDuration bool `gcfg:"enable-config-duration"`
 	EnableScaleMetrics   bool `gcfg:"enable-scale-metrics"`
+	// CollectionInterval is how often (in seconds) OVS/OVN metric values are
+	// extracted into the registry, independent of Prometheus scrapes. A
+	// non-positive value uses DefaultMetricsCollectionInterval.
+	CollectionInterval int `gcfg:"collection-interval"`
 }
 
 // TLSConfig holds TLS-related configuration parameters.
@@ -703,6 +713,9 @@ type OvnKubeNodeConfig struct {
 	SimulateDPU               bool   `gcfg:"simulate-dpu"`
 	// RoutingTableIDStart is added to interface indexes to derive OVN-managed Linux route table IDs.
 	RoutingTableIDStart int `gcfg:"routing-table-id-start"`
+	// KubeletCgroupPath is the cgroup v2 path kubelet runs under, relative to
+	// /sys/fs/cgroup. When empty, the kubelet.service cgroup is looked up instead.
+	KubeletCgroupPath string `gcfg:"kubelet-cgroup-path"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -1575,6 +1588,13 @@ var MetricsFlags = []cli.Flag{
 		Usage:       "Enables metrics related to scaling",
 		Destination: &cliConfig.Metrics.EnableScaleMetrics,
 	},
+	&cli.IntFlag{
+		Name: "metrics-collection-interval",
+		Usage: fmt.Sprintf("Interval in seconds at which OVS/OVN metric values are extracted "+
+			"into the registry, independent of Prometheus scrapes. Non-positive uses the "+
+			"default (%fs).", DefaultMetricsCollectionInterval.Seconds()),
+		Destination: &cliConfig.Metrics.CollectionInterval,
+	},
 }
 
 // TLSFlags capture TLS-related options
@@ -1856,6 +1876,17 @@ var OvnKubeNodeFlags = []cli.Flag{
 			"and used to allow host network services and pods to access k8s pod and service networks. ",
 		Value:       OvnKubeNode.MgmtPortDPResourceName,
 		Destination: &cliConfig.OvnKubeNode.MgmtPortDPResourceName,
+	},
+	&cli.StringFlag{
+		Name: "kubelet-cgroup-path",
+		Usage: "The cgroup v2 path kubelet runs under, relative to /sys/fs/cgroup, for example " +
+			"\"kubelet.slice/kubelet.service\". Used by UDN host isolation to allow kubelet probes to " +
+			"primary UDN pods. Every process in this cgroup is allowed to reach them, so it should be " +
+			"the cgroup of kubelet itself rather than a parent it shares with other workloads. " +
+			"When unset, the kubelet.service cgroup is looked up instead, which requires kubelet to be " +
+			"managed by systemd. Only used when enable-network-segmentation is set",
+		Value:       OvnKubeNode.KubeletCgroupPath,
+		Destination: &cliConfig.OvnKubeNode.KubeletCgroupPath,
 	},
 	&cli.IntFlag{
 		Name:        "dpu-node-lease-renew-interval",
@@ -2973,8 +3004,36 @@ func initConfigWithPath(ctx *cli.Context, exec kexec.Interface, saPath string, d
 	return retConfigFile, nil
 }
 
+// completeOvnKubeNodeConfig normalizes and validates the ovnkube-node configuration.
+func completeOvnKubeNodeConfig() error {
+	if OvnKubeNode.KubeletCgroupPath == "" {
+		return nil
+	}
+	// cgroup paths are slash separated whatever the host, so they are not file paths.
+	// ".." is rejected before cleaning, which would resolve it away.
+	for _, element := range strings.Split(OvnKubeNode.KubeletCgroupPath, "/") {
+		if element == ".." {
+			return fmt.Errorf("kubelet cgroup path %q must not contain %q elements",
+				OvnKubeNode.KubeletCgroupPath, "..")
+		}
+	}
+	cgroupPath := strings.TrimPrefix(path.Clean("/"+OvnKubeNode.KubeletCgroupPath), "/")
+	if cgroupPath == "" {
+		// the cgroup root holds every process on the host, so matching on it would
+		// let all of them reach primary UDN pods.
+		return fmt.Errorf("kubelet cgroup path %q must not be the cgroup root",
+			OvnKubeNode.KubeletCgroupPath)
+	}
+	OvnKubeNode.KubeletCgroupPath = cgroupPath
+	return nil
+}
+
 func completeConfig() error {
 	allSubnets := NewConfigSubnets()
+
+	if err := completeOvnKubeNodeConfig(); err != nil {
+		return err
+	}
 
 	if err := completeKubernetesConfig(allSubnets); err != nil {
 		return err

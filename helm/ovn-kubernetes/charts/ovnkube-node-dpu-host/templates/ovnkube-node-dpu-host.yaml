@@ -93,10 +93,12 @@ spec:
         - mountPath: /var/run/netns
           name: host-netns
           mountPropagation: Bidirectional
+        {{- if not .Values.global.noSystemd }}
         - mountPath: /run/systemd/private
           name: run-systemd
           subPath: private
           readOnly: true
+        {{- end }}
         # ovnkube-node dpu-host mounts
         - mountPath: /var/run/ovn
           name: var-run-ovn
@@ -123,7 +125,7 @@ spec:
           value: "crash"
         {{ end -}}
         - name: OVN_DAEMONSET_VERSION
-          value: "1.3.0"
+          value: "1.4.0"
         - name: OVNKUBE_LOGLEVEL
           value: {{ default 4 .Values.logLevel | quote }}
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -297,9 +299,11 @@ spec:
       - name: host-netns
         hostPath:
           path: /var/run/netns
+      {{- if not .Values.global.noSystemd }}
       - name: run-systemd
         hostPath:
           path: /run/systemd
+      {{- end }}
       - name: var-run-ovn
         emptyDir: {}
       - name: ovnkube-config
