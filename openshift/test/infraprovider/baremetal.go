@@ -12,10 +12,10 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container/network"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/runner"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/providers/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -33,16 +33,22 @@ const (
 	externalFRRContainerName   = "frr"
 )
 
+// baremetalInfra drives the external-container/network operations for the
+// OpenShift baremetal OTE lane. It delegates the generic surface to a shared
+// ssh.RemoteContainerInfra (podman on the hypervisor over SSH, the same code path
+// exercised by the upstream SSH infra provider guardrail) and layers the
+// OpenShift-specific behavior on top: the "kind" -> primary network alias, the
+// synthetic machine network, and the frr container's static primary-network IPs.
 type baremetalInfra struct {
-	engine               *container.Engine
-	machineNetwork       api.Network           // contains subnet details about cluster machine network
-	machineNetworkGwInfo *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	remote               *ssh.RemoteContainerInfra // shared SSH-backed container substrate
+	machineNetwork       api.Network               // contains subnet details about cluster machine network
+	machineNetworkGwInfo *api.NetworkInterface     // contains interface info about hypervisor node machine network interface
 }
 
 func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	// Initialize command runner for executing commands on hypervisor
 	// (optional, may not be available)
-	sshRunner, err := hypervisorSshCmdRunner()
+	sshRunner, hypervisorIP, sshKeyPath, err := hypervisorSshCmdRunner()
 	if err != nil {
 		return nil, err
 	}
@@ -67,8 +73,24 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if _, err := sshRunner.Run("echo", "connection test"); err != nil {
 		return nil, fmt.Errorf("failed to check frr container status, connectivity check failed with hypervisor: %w", err)
 	}
-	// Initialize podman container engine
-	ci.engine = container.NewEngine("podman", sshRunner)
+	// Drive podman on the hypervisor over SSH through the shared
+	// ssh.RemoteContainerInfra substrate. The runner is already built above, so
+	// NewRemoteContainerInfra only validates/uses the Runtime; the remaining
+	// connection fields are supplied for clarity. PrimaryNetwork mirrors the
+	// downstream primary network name, though the primary is resolved locally via
+	// getNetwork/machineNetwork below.
+	remote, err := ssh.NewRemoteContainerInfra(ssh.Config{
+		Host:           hypervisorIP,
+		User:           hypervisorNodeUser,
+		Port:           hypervisorSshport,
+		PrivateKeyPath: sshKeyPath,
+		Runtime:        "podman",
+		PrimaryNetwork: primaryNetworkName,
+	}, sshRunner)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize remote container infra: %w", err)
+	}
+	ci.remote = remote
 	// just mimic machine network with ContainerEngineNetwork to make it
 	// compatibile with api.Network API.
 	machineNetwork := &network.ContainerEngineNetwork{NetName: primaryNetworkName}
@@ -107,27 +129,27 @@ func (ci *baremetalInfra) getNetwork(name string) (api.Network, error) {
 		return ci.machineNetwork, nil
 	}
 	// fall back into container networks.
-	return ci.engine.GetNetwork(name)
+	return ci.remote.GetNetwork(name)
 }
 
 func (ci *baremetalInfra) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
-	return ci.engine.ExecExternalContainerCommand(container, cmd)
+	return ci.remote.ExecExternalContainerCommand(container, cmd)
 }
 
 func (ci *baremetalInfra) ExternalContainerPrimaryInterfaceName() string {
-	return ci.engine.ExternalContainerPrimaryInterfaceName()
+	return ci.remote.ExternalContainerPrimaryInterfaceName()
 }
 
 func (ci *baremetalInfra) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
-	return ci.engine.GetExternalContainerLogs(container)
+	return ci.remote.GetExternalContainerLogs(container)
 }
 
 func (ci *baremetalInfra) GetExternalContainerPort() uint16 {
-	return ci.engine.GetExternalContainerPort()
+	return ci.remote.GetExternalContainerPort()
 }
 
 func (ci *baremetalInfra) ListNetworks() ([]string, error) {
-	return ci.engine.ListNetworks()
+	return ci.remote.ListNetworks()
 }
 
 func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
@@ -148,64 +170,47 @@ func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.Ext
 				IPv6Prefix:  ci.machineNetworkGwInfo.IPv6Prefix},
 			nil
 	}
-	return ci.engine.GetNetworkInterface(container.Name, network.Name())
+	return ci.remote.GetExternalContainerNetworkInterface(container, network)
 }
 
+// GetExternalContainerContextProvider returns a per-test-scoped view of the
+// external-container operations backed by the shared substrate. Its cleanup is
+// registered on the supplied TestContext. The generic create/delete/attach/detach
+// operations carry no OpenShift-specific behavior, so RemoteContainerContext
+// serves them directly.
 func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
-	ciWithTestContext := &baremetalInfra{
-		engine: ci.engine.WithTestContext(context)}
-	return ciWithTestContext
+	return ci.remote.NewExternalContainerContext(context)
 }
 
-func (ci *baremetalInfra) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	return ci.engine.CreateExternalContainer(container)
-}
-
-func (ci *baremetalInfra) DeleteExternalContainer(container api.ExternalContainer) error {
-	return ci.engine.DeleteExternalContainer(container)
-}
-
-func (ci *baremetalInfra) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	return ci.engine.CreateNetwork(name, subnets...)
-}
-
-func (ci *baremetalInfra) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
-	return ci.engine.AttachNetwork(network, container)
-}
-
-func (ci *baremetalInfra) DetachNetwork(network api.Network, container string) error {
-	return ci.engine.DetachNetwork(network, container)
-}
-
-func (ci *baremetalInfra) DeleteNetwork(network api.Network) error {
-	return ci.engine.DeleteNetwork(network)
-}
-
-func hypervisorSshCmdRunner() (api.Runner, error) {
+// hypervisorSshCmdRunner builds the SSH runner for the hypervisor along with the
+// connection details used to construct the remote container infra. It returns a
+// nil runner (and no error) when the hypervisor is not configured (missing
+// SHARED_DIR/server-ip or the ssh key), and an error only when misconfigured.
+func hypervisorSshCmdRunner() (api.Runner, string, string, error) {
 	// Read hypervisor IP from shared directory
 	ip, err := readHypervisorIP()
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 	if ip == "" {
-		return nil, nil // Not configured
+		return nil, "", "", nil // Not configured
 	}
 
 	// Find SSH key for hypervisor access
 	sshKeyPath, err := findSSHKeyPath()
 	if err != nil {
-		return nil, err
+		return nil, "", "", err
 	}
 	if sshKeyPath == "" {
-		return nil, nil // Not configured
+		return nil, "", "", nil // Not configured
 	}
 
 	sshRunner, err := runner.NewSSHRunner(ip, hypervisorNodeUser, hypervisorSshport, sshKeyPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create ssh runner for hypervisor: %w", err)
+		return nil, "", "", fmt.Errorf("failed to create ssh runner for hypervisor: %w", err)
 	}
 
-	return sshRunner, nil
+	return sshRunner, ip, sshKeyPath, nil
 }
 
 // readHypervisorIP reads the hypervisor IP from the SHARED_DIR/server-ip file.

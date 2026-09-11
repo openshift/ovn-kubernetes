@@ -95,6 +95,23 @@ func (s *sshRunner) getSSHClient() (*ssh.Client, error) {
 	return s.client, nil
 }
 
+// Close closes the cached SSH client, if any, and is safe to call multiple times.
+// It only tears down the cached transport; it is NOT command cancellation. A Run
+// executing concurrently may already hold a session, in which case that command
+// simply fails if Close races it (normal shutdown behavior); the struct's fields
+// stay mutex-protected. Callers holding an api.Runner reach this via a type
+// assertion to interface{ Close() error }.
+func (s *sshRunner) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client == nil {
+		return nil
+	}
+	err := s.client.Close()
+	s.client = nil
+	return err
+}
+
 // result holds the execution result of SSH command
 type result struct {
 	user   string
