@@ -7,7 +7,7 @@ import (
 )
 
 var AppendedAnnotations = map[string]string{
-	"ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPolicy the ANP ACL logs have the expected log level": "[Disabled:Unimplemented]",
+	"ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPolicy the ANP ACL logs have the expected log level": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"ACL Logging for EgressFirewall when an invalid value is provided to the allow rule when the allowed destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
 
