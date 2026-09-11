@@ -34,9 +34,9 @@ require (
 	github.com/urfave/cli/v2 v2.2.0
 	github.com/vishvananda/netlink v1.2.1-beta.2.0.20230206183746-70ca0345eede
 	golang.org/x/exp v0.0.0-20240525044651-4c93da0ed11d
-	golang.org/x/net v0.22.0
-	golang.org/x/sync v0.7.0
-	golang.org/x/sys v0.18.0
+	golang.org/x/net v0.25.0
+	golang.org/x/sync v0.11.0
+	golang.org/x/sys v0.30.0
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.57.2
 	google.golang.org/grpc/security/advancedtls v0.0.0-20230718210946-d524b409462c
@@ -100,10 +100,10 @@ require (
 	github.com/stretchr/objx v0.4.0 // indirect
 	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f // indirect
 	go.opencensus.io v0.23.0 // indirect
-	golang.org/x/crypto v0.21.0 // indirect
+	golang.org/x/crypto v0.33.0 // indirect
 	golang.org/x/oauth2 v0.14.0 // indirect
-	golang.org/x/term v0.18.0 // indirect
-	golang.org/x/text v0.14.0 // indirect
+	golang.org/x/term v0.29.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.2.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
@@ -151,3 +151,5 @@ replace (
 	k8s.io/mount-utils => k8s.io/mount-utils v0.26.0
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.26.0
 )
+
+replace golang.org/x/net => github.com/openshift-sustaining/net v0.35.0-sec.3
