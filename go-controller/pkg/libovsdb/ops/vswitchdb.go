@@ -163,6 +163,39 @@ func GetPortBridge(ovsClient libovsdbclient.Client, portName string) (*vswitchd.
 	return nil, fmt.Errorf("no bridge contains port %q: %w", portName, libovsdbclient.ErrNotFound)
 }
 
+// FindPortsForPortOrInterface returns the Ports that carry name: the Port
+// named name, and any Port holding an Interface of that name under another
+// Port name (e.g. a bond member). Unlike GetPortBridge, it makes no
+// port-to-br judgment: callers decide what bridge membership of the returned
+// ports means.
+func FindPortsForPortOrInterface(ovsClient libovsdbclient.Client, name string) ([]*vswitchd.Port, error) {
+	interfaces, err := FindInterfacesWithPredicate(ovsClient, func(iface *vswitchd.Interface) bool {
+		return iface.Name == name
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up OVS interface %s: %w", name, err)
+	}
+	interfaceIDs := make(map[string]struct{}, len(interfaces))
+	for _, iface := range interfaces {
+		interfaceIDs[iface.UUID] = struct{}{}
+	}
+	ports, err := FindOVSPortsWithPredicate(ovsClient, func(port *vswitchd.Port) bool {
+		if port.Name == name {
+			return true
+		}
+		for _, interfaceID := range port.Interfaces {
+			if _, ok := interfaceIDs[interfaceID]; ok {
+				return true
+			}
+		}
+		return false
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up OVS port for %s: %w", name, err)
+	}
+	return ports, nil
+}
+
 // CreateOrUpdateNicBridge creates (or reconfigures) an OVS bridge for an
 // uplink NIC. It sets fail-mode=standalone, the supplied hardware address,
 // and external_ids bridge-id/bridge-uplink on the bridge; attaches the
@@ -642,14 +675,10 @@ func DeletePortWithInterfacesOps(ovsClient libovsdbclient.Client, ops []ovsdb.Op
 
 	m := newModelClient(ovsClient)
 	if len(port.Interfaces) > 0 {
-		interfaceUUIDs := make(map[string]struct{}, len(port.Interfaces))
-		for _, ifaceUUID := range port.Interfaces {
-			interfaceUUIDs[ifaceUUID] = struct{}{}
-		}
-		interfaces, err := FindInterfacesWithPredicate(ovsClient, func(iface *vswitchd.Interface) bool {
-			_, ok := interfaceUUIDs[iface.UUID]
-			return ok
-		})
+		ctx, cancel := context.WithTimeout(context.Background(), types.OVSDBTimeout)
+		defer cancel()
+		interfaces := []*vswitchd.Interface{}
+		err := ovsClient.WhereCacheByUUIDs(func(*vswitchd.Interface) bool { return true }, port.Interfaces...).List(ctx, &interfaces)
 		if err != nil {
 			return nil, fmt.Errorf("failed to find interfaces for port %q: %w", port.Name, err)
 		}

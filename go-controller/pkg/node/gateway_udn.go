@@ -204,6 +204,9 @@ type resolvedUplinkGateway struct {
 	macAddress        net.HardwareAddr
 	ipAddresses       []*net.IPNet
 	defaultGateways   []net.IP
+	// hostFunction identifies the host PCI function backing the host
+	// interface; nil when the DPU-host could not resolve it.
+	hostFunction *uplinkv1alpha1.HostFunction
 }
 
 func (udng *UserDefinedNetworkGateway) ensureUplinkGateway() (*bridgeconfig.BridgeConfiguration, error) {
@@ -253,6 +256,7 @@ func (udng *UserDefinedNetworkGateway) ensureUplinkGateway() (*bridgeconfig.Brid
 		physicalNetworkName(udng.NetInfo),
 		resolved.ipAddresses,
 		resolved.macAddress,
+		resolved.hostFunction,
 	)
 	if err != nil {
 		return nil, newUplinkGatewayError(
@@ -382,6 +386,7 @@ func parseResolvedUplinkGateway(state *uplinkv1alpha1.UplinkState) (*resolvedUpl
 		macAddress:        macAddress,
 		ipAddresses:       ipAddresses,
 		defaultGateways:   defaultGateways,
+		hostFunction:      state.Status.HostFunction.DeepCopy(),
 	}, nil
 }
 
@@ -598,7 +603,7 @@ func (udng *UserDefinedNetworkGateway) addNetwork() error {
 			return true, nil
 		}
 		postFunc := func() error {
-			if err := udng.gateway.Reconcile(); err != nil {
+			if err := udng.gateway.ReconcileNetwork(udng.NetInfo); err != nil {
 				return fmt.Errorf("failed to reconcile flows on bridge for network %s; error: %v", udng.GetNetworkName(), err)
 			}
 			if udng.Uplink() != "" {
@@ -613,7 +618,7 @@ func (udng *UserDefinedNetworkGateway) addNetwork() error {
 			return newUplinkGatewayError(uplinkv1alpha1.UplinkStateReasonBridgeMappingFailed, err)
 		}
 	} else {
-		if err := udng.gateway.Reconcile(); err != nil {
+		if err := udng.gateway.ReconcileNetwork(udng.NetInfo); err != nil {
 			return fmt.Errorf("failed to reconcile flows on bridge for network %s; error: %v", udng.GetNetworkName(), err)
 		}
 	}
@@ -684,7 +689,8 @@ func (udng *UserDefinedNetworkGateway) delNetwork() error {
 		}
 	}
 	if udng.openflowManager != nil || config.IsModeDPUHost() {
-		if err := udng.gateway.Reconcile(); err != nil {
+		// Network config already removed: regenerate the shared bridge flows without it.
+		if err := udng.gateway.ReconcileNetworkRemoval(); err != nil {
 			errs = append(errs, fmt.Errorf("failed to reconcile default gateway for network %s, err: %v", udng.GetNetworkName(), err))
 		}
 	}
@@ -1234,6 +1240,10 @@ func (udng *UserDefinedNetworkGateway) run() {
 	}()
 }
 
+// Reconcile signals doReconcile for advertised-state updates (VRF, isolation,
+// DEFAULT OpenFlow). It does not implement Gateway.Reconcile: the signature has
+// no error, and it must not be confused with the embedded *gateway.Reconcile
+// which resyncs services.
 func (udng *UserDefinedNetworkGateway) Reconcile() {
 	select {
 	case udng.reconcile <- struct{}{}:
