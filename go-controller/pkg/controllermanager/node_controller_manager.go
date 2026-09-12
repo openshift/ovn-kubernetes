@@ -515,7 +515,11 @@ waitForControllerSyncLoop:
 
 	// Cleanup stale nftables from previous shutdown. Critical for container restarts where
 	// nftables state persists and would block ARP responses for reassigned egress IPs.
+<<<<<<< HEAD
 	if err := node.CleanupEgressIPARPBlockNFT(ctx); err != nil {
+=======
+	if err := node.CleanupEgressIPARPBlockNFTTable(ctx); err != nil {
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 		return fmt.Errorf("failed to cleanup egress IP ARP/NDP block table: %v", err)
 	}
 
@@ -643,8 +647,12 @@ func (ncm *NodeControllerManager) getAssignedEgressIPs() ([]string, error) {
 				} else {
 					klog.Warningf("Invalid Egress IP format in status: %s", status.EgressIP)
 				}
+<<<<<<< HEAD
 				// one object can only have one IP assigned to a given node at a time, so its safe to break here
 				break
+=======
+				break // Move to next EgressIP resource
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 			}
 		}
 	}
@@ -656,11 +664,24 @@ func (ncm *NodeControllerManager) getAssignedEgressIPs() ([]string, error) {
 // addEgressIPARPBlockRules adds nftables rules to block ARP/NDP requests for egress IPs
 // during graceful shutdown. This prevents duplicate MAC responses during migration.
 func (ncm *NodeControllerManager) addEgressIPARPBlockRules(egressIPs []string) error {
+<<<<<<< HEAD
 	klog.Infof("Adding nftables ARP/NDP block rules for %d egress IPs during shutdown", len(egressIPs))
 
 	uplinkName := ncm.defaultNodeNetworkController.Gateway.GetUplinkName()
 	if err := node.SetupEgressIPARPBlockNFT(egressIPs, uplinkName); err != nil {
 		return fmt.Errorf("failed to setup egress IP ARP block nftables %s: %w", nodenft.OVNKubernetesEgressIPNFTablesName, err)
+=======
+	if len(egressIPs) == 0 {
+		klog.V(5).Info("No egress IPs to add ARP block rules for")
+		return nil
+	}
+
+	klog.Infof("Adding nftables ARP/NDP block rules for %d egress IPs during shutdown", len(egressIPs))
+
+	uplinkName := ncm.defaultNodeNetworkController.Gateway.GetUplinkName()
+	if err := node.SetupEgressIPARPBlockNFTables(egressIPs, uplinkName); err != nil {
+		return fmt.Errorf("failed to setup egress IP ARP block nftables: %w", err)
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 	}
 
 	klog.Infof("Successfully added nftables ARP/NDP block rules for %d egress IPs", len(egressIPs))

@@ -433,9 +433,15 @@ func checkForDuplicateMAC(externalContainer infraapi.ExternalContainer, interfac
 		if err != nil {
 			framework.Logf("Check %d/%d: %s command returned error: %v; output: %s", i+1, maxChecks, toolName, err, output)
 		}
+<<<<<<< HEAD
 		matches := macRegex.FindAllStringSubmatch(output, -1)
 		for _, match := range matches {
 			respondingMAC := strings.ToLower(strings.TrimSpace(match[1]))
+=======
+		matches := macRegex.FindStringSubmatch(output)
+		if len(matches) >= 2 {
+			respondingMAC := strings.ToLower(strings.TrimSpace(matches[1]))
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 			if respondingMAC == oldMAC {
 				return fmt.Errorf("DUPLICATE MAC DETECTED on check %d: Old node MAC %s responded to %s for egress IP %s after migration. "+
 					"The nftables drop rules should have prevented this response", i+1, oldMAC, toolName, egressIP)
@@ -3931,6 +3937,7 @@ spec:
 			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("The \"k8s.ovn.org/egressip-mark\" annotation cannot be modified or removed once set. This annotation is managed by the system.")))
 		})
 
+<<<<<<< HEAD
 		ginkgo.It("Should skip orphaned nodes and assign EgressIPs to valid nodes", func() {
 			if isUserDefinedNetwork(netConfigParams) {
 				ginkgo.Skip("Unsupported for UDNs")
@@ -4101,6 +4108,8 @@ spec:
 				"EgressIPs must not be assigned to node %s while its host-cidrs annotation is missing", nodeToOrphan)
 		})
 
+=======
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 		ginkgo.It("should prevent duplicate MAC responses when egress node is rebooted", func() {
 			if !isNetworkSegmentationEnabled() {
 				ginkgo.Skip("network segmentation is disabled")
