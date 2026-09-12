@@ -19,7 +19,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestSetupEgressIPARPBlockNFTables(t *testing.T) {
+func TestSetupEgressIPARPBlockNFT(t *testing.T) {
 	const testUplinkName = "eth0"
 
 	tests := []struct {
@@ -143,7 +143,7 @@ func TestSetupEgressIPARPBlockNFTables(t *testing.T) {
 
 			nft := nodenft.SetFakeEgressIPNFTablesHelper()
 
-			err := SetupEgressIPARPBlockNFTables(tt.egressIPs, tt.uplinkName)
+			err := SetupEgressIPARPBlockNFT(tt.egressIPs, tt.uplinkName)
 
 			if tt.expectError != "" {
 				g.Expect(err).To(HaveOccurred())
@@ -186,7 +186,7 @@ func TestSetupEgressIPARPBlockNFTables(t *testing.T) {
 	}
 }
 
-func TestCleanupEgressIPARPBlockNFTTable(t *testing.T) {
+func TestCleanupEgressIPARPBlockNFT(t *testing.T) {
 	const testUplinkName = "eth0"
 
 	tests := []struct {
@@ -244,8 +244,8 @@ func TestCleanupEgressIPARPBlockNFTTable(t *testing.T) {
 			nft := nodenft.SetFakeEgressIPNFTablesHelper()
 
 			if tt.setupTable {
-				// Create the table first by calling SetupEgressIPARPBlockNFTables
-				err := SetupEgressIPARPBlockNFTables(tt.egressIPs, tt.uplinkName)
+				// Create the table first by calling SetupEgressIPARPBlockNFT
+				err := SetupEgressIPARPBlockNFT(tt.egressIPs, tt.uplinkName)
 				g.Expect(err).NotTo(HaveOccurred())
 				rules, err := nft.ListRules(context.TODO(), nftEgressIPDropChain)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -253,7 +253,7 @@ func TestCleanupEgressIPARPBlockNFTTable(t *testing.T) {
 			}
 
 			// Call the cleanup function
-			err := CleanupEgressIPARPBlockNFTTable(context.TODO())
+			err := CleanupEgressIPARPBlockNFT(context.TODO())
 
 			if tt.expectError != "" {
 				g.Expect(err).To(HaveOccurred())

@@ -128,15 +128,9 @@ func (oc *DefaultNetworkController) nodeGatewayConfig(node *corev1.Node) (*Gatew
 
 	gwLRPIPs, err := udn.GetGWRouterIPs(node, oc.GetNetInfo())
 	if err != nil {
-		if util.IsAnnotationNotSetError(err) {
-			// FIXME(tssurya): This is present for backwards compatibility
-			// Remove me a few months from now
-			var err1 error
-			gwLRPIPs, err1 = util.ParseNodeGatewayRouterLRPAddrs(node)
-			if err1 != nil {
-				return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %v/%v", node.Name, err, err1)
-			}
-		}
+		// The join address has to be derived from the node id alone so that
+		// the local and the remote view of it agree.
+		return nil, fmt.Errorf("failed to get join switch port IP address for node %s: %w", node.Name, err)
 	}
 
 	return &GatewayConfig{
@@ -280,17 +274,17 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 		return
 	}
 
-	localZoneNodes := make([]*corev1.Node, 0, len(kNodes))
+	var localNode *corev1.Node
 	remoteZoneNodes := make([]*corev1.Node, 0, len(kNodes))
 	for i := range kNodes {
-		if oc.isLocalZoneNode(kNodes[i]) {
-			localZoneNodes = append(localZoneNodes, kNodes[i])
+		if oc.isLocalNode(kNodes[i]) {
+			localNode = kNodes[i]
 		} else {
 			remoteZoneNodes = append(remoteZoneNodes, kNodes[i])
 		}
 	}
 
-	if err := oc.syncChassis(localZoneNodes, remoteZoneNodes); err != nil {
+	if err := oc.syncChassis(localNode, remoteZoneNodes); err != nil {
 		klog.Errorf("Failed to sync chassis: error: %v", err)
 	}
 
@@ -310,7 +304,7 @@ func (oc *DefaultNetworkController) syncNodesPeriodic() {
 // do not want to delete.
 func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 	foundNodes := sets.New[string]()
-	localZoneNodes := make([]*corev1.Node, 0, len(kNodes))
+	var localNode *corev1.Node
 	remoteZoneNodes := make([]*corev1.Node, 0, len(kNodes))
 	for _, tmp := range kNodes {
 		node, ok := tmp.(*corev1.Node)
@@ -322,11 +316,10 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 			continue
 		}
 
-		// Add the node to the foundNodes only if it belongs to the local zone.
-		if oc.isLocalZoneNode(node) {
+		// Add the node to foundNodes only if it is managed by this controller.
+		if oc.isLocalNode(node) {
 			foundNodes.Insert(node.Name)
-			oc.localZoneNodes.Store(node.Name, true)
-			localZoneNodes = append(localZoneNodes, node)
+			localNode = node
 		} else {
 			remoteZoneNodes = append(remoteZoneNodes, node)
 		}
@@ -391,7 +384,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 		}
 	}
 
-	if err := oc.syncChassis(localZoneNodes, remoteZoneNodes); err != nil {
+	if err := oc.syncChassis(localNode, remoteZoneNodes); err != nil {
 		return fmt.Errorf("failed to sync chassis: error: %v", err)
 	}
 
@@ -419,7 +412,7 @@ func (oc *DefaultNetworkController) syncNodes(kNodes []interface{}) error {
 
 // Cleanup stale chassis and chassis template variables with no
 // corresponding nodes.
-func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes []*corev1.Node) error {
+func (oc *DefaultNetworkController) syncChassis(localNode *corev1.Node, remoteZoneNodes []*corev1.Node) error {
 	chassisList, err := libovsdbops.ListChassis(oc.sbClient)
 	if err != nil {
 		return fmt.Errorf("failed to get chassis list: error: %v", err)
@@ -461,17 +454,17 @@ func (oc *DefaultNetworkController) syncChassis(localZoneNodes, remoteZoneNodes 
 		templateChassisMap[templateVar.Chassis] = templateVar
 	}
 
-	// Delete existing nodes from the chassis map.
-	// Also delete existing templateVars from the template map.
-	for _, node := range localZoneNodes {
-		chassisID, err := util.ParseNodeChassisIDAnnotation(node)
+	// Delete the local node from the chassis map.
+	// Also delete its templateVars from the template map.
+	if localNode != nil {
+		chassisID, err := util.ParseNodeChassisIDAnnotation(localNode)
 		if err != nil {
 			klog.Warningf("Unable to parse local node %s chassis-id annotation. Chassis may be removed during sync",
-				node.Name)
-			continue
+				localNode.Name)
+		} else {
+			delete(chassisNameMap, chassisID)
+			delete(templateChassisMap, chassisID)
 		}
-		delete(chassisNameMap, chassisID)
-		delete(templateChassisMap, chassisID)
 	}
 
 	// Delete existing remote zone nodes from the chassis map, but not from the templateVars
@@ -534,9 +527,6 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 	var hostSubnets []*net.IPNet
 	var errs []error
 	var err error
-
-	_, _ = oc.localZoneNodes.LoadOrStore(node.Name, true)
-
 	if noHostSubnet := util.NoHostSubnet(node); noHostSubnet {
 		err := oc.lsManager.AddNoHostSubnetSwitch(node.Name)
 		if err != nil {
@@ -645,6 +635,28 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 		}
 	}
 
+	// Sync no-overlay SNAT exemption address set before gateway sync. Gateway
+	// NAT creation needs the address set UUID to avoid creating a plain SNAT
+	// that must be fixed by a later reconciliation.
+	if util.IsNoOverlaySNATExemptionNeeded(oc) && (nSyncs.syncNode || nSyncs.syncGw) {
+		var addressSetErr error
+		hostAddrs, err := util.GetNodeHostAddrs(node)
+		if err != nil {
+			addressSetErr = fmt.Errorf("failed to get host addresses for node %s: %w", node.Name, err)
+		} else if err := syncNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName, hostAddrs); err != nil {
+			addressSetErr = fmt.Errorf("failed to sync no-overlay SNAT exemption address set for node %s: %w", node.Name, err)
+		}
+		if addressSetErr != nil {
+			errs = append(errs, addressSetErr)
+			if nSyncs.syncGw {
+				// don't sync the gateway without the address set; mark it failed
+				// so that gateway sync is retried on the next event
+				nSyncs.syncGw = false
+				oc.gatewaysFailed.Store(node.Name, true)
+			}
+		}
+	}
+
 	if nSyncs.syncGw {
 		err := oc.syncNodeGateway(node)
 		if err != nil {
@@ -695,21 +707,6 @@ func (oc *DefaultNetworkController) addUpdateLocalNodeEvent(node *corev1.Node, n
 		}
 	}
 
-	// Sync no-overlay SNAT exemption address set for no-overlay mode with outbound SNAT enabled in SGW mode.
-	// The address set contains cluster CIDRs + local zone node IPs and is used in SNAT
-	// exemption rules to prevent SNATing pod-to-pod and pod-to-local-node traffic.
-	// In LGW mode, nftables sets are used instead.
-	if util.IsNoOverlaySNATExemptionNeeded(oc) && (nSyncs.syncNode || nSyncs.syncGw) {
-		hostAddrs, err := util.GetNodeHostAddrs(node)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("failed to get host addresses for node %s: %w", node.Name, err))
-		} else {
-			if err := syncNoOverlaySNATExemptionAddressSet(oc.addressSetFactory, oc.GetNetInfo(), oc.controllerName, hostAddrs); err != nil {
-				errs = append(errs, fmt.Errorf("failed to sync no-overlay SNAT exemption address set: %w", err))
-			}
-		}
-	}
-
 	return utilerrors.Join(errs...)
 }
 
@@ -719,19 +716,6 @@ func (oc *DefaultNetworkController) addUpdateRemoteNodeEvent(node *corev1.Node, 
 		return nil
 	}
 	start := time.Now()
-	// Check if the remote node is present in the local zone nodes.  If its present
-	// it means it moved from this controller zone to other remote zone. Cleanup the node
-	// from the local zone cache.
-	_, present := oc.localZoneNodes.Load(node.Name)
-
-	if present {
-		klog.Infof("Node %q moved from the local zone %s to a remote zone %s. Cleaning the node resources", node.Name, oc.zone, util.GetNodeZone(node))
-		if err := oc.cleanupNodeResources(node.Name); err != nil {
-			return fmt.Errorf("error cleaning up the local resources for the remote node %s, err : %w", node.Name, err)
-		}
-		oc.localZoneNodes.Delete(node.Name)
-	}
-
 	var err error
 	if syncZoneIC {
 		// Always create remote chassis entry with geneve encapsulation.
@@ -791,7 +775,7 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *corev1.Node) error 
 	if err := oc.zoneICHandler.DeleteNode(node); err != nil {
 		return err
 	}
-	if !oc.isLocalZoneNode(node) {
+	if !oc.isLocalNode(node) {
 		if err := oc.zoneChassisHandler.DeleteRemoteZoneNode(node); err != nil {
 			return err
 		}
@@ -803,8 +787,6 @@ func (oc *DefaultNetworkController) deleteOVNNodeEvent(node *corev1.Node) error 
 	oc.mgmtPortFailed.Delete(node.Name)
 	oc.gatewaysFailed.Delete(node.Name)
 	oc.nodeClusterRouterPortFailed.Delete(node.Name)
-	oc.localZoneNodes.Delete(node.Name)
-
 	return nil
 }
 
@@ -837,7 +819,7 @@ func (oc *DefaultNetworkController) addUpdateHoNodeEvent(node *corev1.Node) erro
 	for _, node := range nodes {
 		node := *node
 		// reconcile hybrid overlay subnets for local zone nodes.
-		if !util.NoHostSubnet(&node) && oc.isLocalZoneNode(&node) {
+		if !util.NoHostSubnet(&node) && oc.isLocalNode(&node) {
 			if err := oc.handleHybridOverlayPort(&node, annotator); err != nil {
 				return err
 			}

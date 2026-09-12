@@ -14,6 +14,7 @@ import (
 	"github.com/gaissmai/cidrtree"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 
@@ -21,6 +22,15 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 )
+
+// IsNodeAnnotationPatchRetryable returns true for errors that should trigger a
+// relist-and-retry when patching node annotations via JSON Patch.
+//
+// JSON Patch "test" failures from the apiserver are surfaced as Invalid rather
+// than Conflict, so this retry path needs to handle both.
+func IsNodeAnnotationPatchRetryable(err error) bool {
+	return apierrors.IsConflict(err) || apierrors.IsInvalid(err)
+}
 
 // This handles the annotations used by the node to pass information about its local
 // network configuration to the ovnkube controller:
@@ -76,12 +86,6 @@ const (
 	// OvnNodeIfAddr is the CIDR form representation of primary network interface's attached IP address (i.e: 192.168.126.31/24 or 0:0:0:0:0:feff:c0a8:8e0c/64)
 	OvnNodeIfAddr = "k8s.ovn.org/node-primary-ifaddr"
 
-	// ovnNodeGRLRPAddr is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.5/24)
-	// DEPRECATED; use ovnNodeGRLRPAddrs moving forward
-	// FIXME(tssurya): Remove this a few months from now; needed for backwards
-	// compatbility during upgrades while updating to use the new annotation "ovnNodeGRLRPAddrs"
-	ovnNodeGRLRPAddr = "k8s.ovn.org/node-gateway-router-lrp-ifaddr"
-
 	// ovnNodeGRLRPAddrs is the CIDR form representation of Gate Router LRP IP address to join switch (i.e: 100.64.0.4/16)
 	// for all the networks keyed by the network-name and ipFamily.
 	// "k8s.ovn.org/node-gateway-router-lrp-ifaddrs": "{
@@ -101,7 +105,8 @@ const (
 	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
 	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
 
-	// OVNNodePrimaryDPUHostAddr is used to track the primary DPU host address on the node
+	// OVNNodePrimaryDPUHostAddr tracks the primary DPU host address on the node.
+	// Its presence identifies a node whose host-side ovnkube-node runs in DPU-host mode.
 	OVNNodePrimaryDPUHostAddr = "k8s.ovn.org/primary-dpu-host-addr"
 
 	// OVNNodeSecondaryHostEgressIPs contains EgressIP addresses that aren't managed by OVN. The EIP addresses are assigned to
@@ -116,8 +121,9 @@ const (
 	// openshift/cloud-network-config-controller
 	cloudEgressIPConfigAnnotationKey = "cloud.network.openshift.io/egress-ipconfig"
 
-	// OvnNodeZoneName is the zone to which the node belongs to. It is set by ovnkube-node.
-	// ovnkube-node gets the node's zone from the OVN Southbound database.
+	// OvnNodeZoneName is retained only so the admission webhook can allow
+	// updates from older ovnkube-node versions during a rolling upgrade.
+	// Deprecated: new code must not write or consume this annotation.
 	OvnNodeZoneName = "k8s.ovn.org/zone-name"
 
 	// OvnTransitSwitchPortAddr is the annotation to store the node Transit switch port ips.
@@ -125,6 +131,9 @@ const (
 	OvnTransitSwitchPortAddr = "k8s.ovn.org/node-transit-switch-port-ifaddr"
 
 	// OvnNodeID is the id (of type integer) of a node. It is set by cluster-manager.
+	// Controllers derive the gateway router join switch port address from this value
+	// so that the local and remote views of the address agree. The deprecated
+	// k8s.ovn.org/node-gateway-router-lrp-ifaddr annotation is not used as a fallback.
 	OvnNodeID = "k8s.ovn.org/node-id"
 
 	// InvalidNodeID indicates an invalid node id
@@ -696,27 +705,6 @@ func ParseNodePrimaryIfAddr(node *corev1.Node) (*ParsedNodeEgressIPConfiguration
 	return parsedEgressIPConfig, nil
 }
 
-// ParseNodeGatewayRouterLRPAddr returns the IPv4 / IPv6 values for the node's gateway router
-// DEPRECATED; kept for backwards compatibility
-func ParseNodeGatewayRouterLRPAddr(node *corev1.Node) (net.IP, error) {
-	nodeIfAddrAnnotation, ok := node.Annotations[ovnNodeGRLRPAddr]
-	if !ok {
-		return nil, newAnnotationNotSetError("%s annotation not found for node %q", ovnNodeGRLRPAddr, node.Name)
-	}
-	nodeIfAddr := PrimaryIfAddrAnnotation{}
-	if err := json.Unmarshal([]byte(nodeIfAddrAnnotation), &nodeIfAddr); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal annotation: %s for node %q, err: %v", ovnNodeGRLRPAddr, node.Name, err)
-	}
-	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
-		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
-	}
-	ip, _, err := net.ParseCIDR(nodeIfAddr.IPv4)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse annotation: %s for node %q, err: %v", ovnNodeGRLRPAddr, node.Name, err)
-	}
-	return ip, nil
-}
-
 // parsePrimaryIfAddrAnnotation unmarshals the IPv4 / IPv6 values in the
 // primaryIfAddrAnnotation format from the nodeAnnotation map with the
 // provided 'annotationName' as key and returns the addresses.
@@ -746,6 +734,9 @@ func convertPrimaryIfAddrAnnotationToIPNet(ifAddr PrimaryIfAddrAnnotation) ([]*n
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse IPv4 address %s, err: %w", ifAddr.IPv4, err)
 		}
+		if ip.To4() == nil {
+			return nil, fmt.Errorf("IPv4 address field contains non-IPv4 CIDR %s", ifAddr.IPv4)
+		}
 		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
 
@@ -754,15 +745,12 @@ func convertPrimaryIfAddrAnnotationToIPNet(ifAddr PrimaryIfAddrAnnotation) ([]*n
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse IPv6 address %s, err: %w", ifAddr.IPv6, err)
 		}
+		if ip.To4() != nil {
+			return nil, fmt.Errorf("IPv6 address field contains non-IPv6 CIDR %s", ifAddr.IPv6)
+		}
 		ipAddrs = append(ipAddrs, &net.IPNet{IP: ip, Mask: ipNet.Mask})
 	}
 	return ipAddrs, nil
-}
-
-// ParseNodeGatewayRouterLRPAddrs returns the IPv4 and/or IPv6 addresses for the node's gateway router port
-// stored in the 'ovnNodeGRLRPAddr' annotation
-func ParseNodeGatewayRouterLRPAddrs(node *corev1.Node) ([]*net.IPNet, error) {
-	return parsePrimaryIfAddrAnnotation(node, ovnNodeGRLRPAddr)
 }
 
 // ParseNodeTransitSwitchPortAddrs returns the IPv4 and/or IPv6 addresses for the node's transit switch port
@@ -884,6 +872,14 @@ func SetNodeHostCIDRs(nodeAnnotator kube.Annotator, cidrs sets.Set[string]) erro
 
 func NodeHostCIDRsAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OVNNodeHostCIDRs] != newNode.Annotations[OVNNodeHostCIDRs]
+}
+
+// CloudEgressIPConfigAnnotationChanged returns true if the cloud egress IP
+// configuration annotation changed between oldNode and newNode. This annotation
+// is managed by cloud-network-config-controller and carries the IPv4/IPv6
+// subnets and capacity for egress IP assignment on cloud platforms.
+func CloudEgressIPConfigAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[cloudEgressIPConfigAnnotationKey] != newNode.Annotations[cloudEgressIPConfigAnnotationKey]
 }
 
 // ParseNodeHostCIDRs returns the parsed host CIDRS living on a node
@@ -1159,27 +1155,6 @@ func NodeIDAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OvnNodeID] != newNode.Annotations[OvnNodeID]
 }
 
-// SetNodeZone sets the node's zone in the 'ovnNodeZoneName' node annotation.
-func SetNodeZone(nodeAnnotator kube.Annotator, zoneName string) error {
-	return nodeAnnotator.Set(OvnNodeZoneName, zoneName)
-}
-
-// GetNodeZone returns the zone of the node set in the 'ovnNodeZoneName' node annotation.
-// If the annotation is not set, it returns the 'default' zone name.
-func GetNodeZone(node *corev1.Node) string {
-	zoneName, ok := node.Annotations[OvnNodeZoneName]
-	if !ok {
-		return types.OvnDefaultZone
-	}
-
-	return zoneName
-}
-
-// NodeZoneAnnotationChanged returns true if the ovnNodeZoneName in the corev1.Nodes doesn't match
-func NodeZoneAnnotationChanged(oldNode, newNode *corev1.Node) bool {
-	return oldNode.Annotations[OvnNodeZoneName] != newNode.Annotations[OvnNodeZoneName]
-}
-
 // parseNetworkMapAnnotation parses the provided network aware annotation  which is in map format
 // and returns the corresponding value.
 func parseNetworkMapAnnotation(nodeAnnotations map[string]string, annotationName string) (map[string]string, error) {
@@ -1389,6 +1364,12 @@ func GetNodePrimaryDPUHostAddrAnnotation(node *corev1.Node) (*ifAddr, error) {
 	}
 	if nodeIfAddr.IPv4 == "" && nodeIfAddr.IPv6 == "" {
 		return nil, fmt.Errorf("node: %q does not have any IP information set", node.Name)
+	}
+	if _, err := convertPrimaryIfAddrAnnotationToIPNet(PrimaryIfAddrAnnotation{
+		IPv4: nodeIfAddr.IPv4,
+		IPv6: nodeIfAddr.IPv6,
+	}); err != nil {
+		return nil, fmt.Errorf("failed to parse annotation: %s for node %q, err: %w", OVNNodePrimaryDPUHostAddr, node.Name, err)
 	}
 	return nodeIfAddr, nil
 }

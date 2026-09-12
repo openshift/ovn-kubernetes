@@ -15,6 +15,10 @@ import (
 const OVNKubernetesNFTablesName = "ovn-kubernetes"
 const OVNKubernetesEgressIPNFTablesName = "ovn-kubernetes-egressip"
 
+// OVNKubernetesEgressIPNFTablesName is a netdev table required for dropping
+// incoming ARP requests for an EgressIP during node or ovnkube-controller restart.
+const OVNKubernetesEgressIPNFTablesName = "ovn-kubernetes-egressip"
+
 var nftHelper knftables.Interface
 var nftEgressIPHelper knftables.Interface
 

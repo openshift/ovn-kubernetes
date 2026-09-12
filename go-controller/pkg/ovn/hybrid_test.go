@@ -152,7 +152,6 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 	ginkgo.BeforeEach(func() {
 		// Restore global default values before each testcase
 		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
-
 		app = cli.NewApp()
 		app.Name = "test"
 		app.Flags = config.Flags
@@ -204,7 +203,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				EgressQoSClient:      egressQoSFakeClient,
 			}
 
-			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset())
+			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset(), "test-node")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -226,6 +225,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				nil,
 				NewPortCache(stopChan),
 				nil,
+				"node1",
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			c, cancel := context.WithCancel(ctx.Context)
@@ -339,7 +339,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset())
+			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset(), "test-node")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -391,6 +391,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				nil,
 				NewPortCache(stopChan),
 				nil,
+				"node1",
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -641,7 +642,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset())
+			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset(), "test-node")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -743,6 +744,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				nil,
 				NewPortCache(stopChan),
 				nil,
+				"node1",
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -870,7 +872,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset())
+			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset(), "test-node")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -922,6 +924,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				nil,
 				NewPortCache(stopChan),
 				nil,
+				"node1",
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1188,7 +1191,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode1.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset())
+			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset(), "test-node")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1237,6 +1240,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				nil,
 				NewPortCache(stopChan),
 				nil,
+				"node1",
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1396,7 +1400,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 			updatedNode, err := fakeClient.KubeClient.CoreV1().Nodes().Get(context.TODO(), testNode.Name, metav1.GetOptions{})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset())
+			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient.GetOVNKubeControllerClientset(), "test-node")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1445,6 +1449,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				nil,
 				NewPortCache(stopChan),
 				nil,
+				"node1",
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -1595,7 +1600,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient)
+			f, err = factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			err = f.Start()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1659,6 +1664,7 @@ var _ = ginkgo.Describe("Hybrid SDN Master Operations", func() {
 				nil,
 				NewPortCache(stopChan),
 				nil,
+				"node1",
 			)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 

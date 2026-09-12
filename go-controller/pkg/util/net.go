@@ -4,6 +4,7 @@
 package util
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
@@ -372,6 +373,13 @@ func ParseIPNets[T ~string](strs []T) ([]*net.IPNet, error) {
 	return ipnets, nil
 }
 
+// IsUsableEthernetMAC reports whether mac can serve as a unicast interface
+// MAC, mirroring the kernel's is_valid_ether_addr: a 6-byte Ethernet address
+// that is neither all-zero nor multicast.
+func IsUsableEthernetMAC(mac net.HardwareAddr) bool {
+	return len(mac) == 6 && mac[0]&1 == 0 && !bytes.Equal(mac, make(net.HardwareAddr, 6))
+}
+
 // GenerateRandMAC generates a random unicast and locally administered MAC address.
 // LOOTED FROM https://github.com/cilium/cilium/blob/v1.12.6/pkg/mac/mac.go#L106
 func GenerateRandMAC() (net.HardwareAddr, error) {
@@ -411,6 +419,23 @@ func isIPNetEqual(ipn1, ipn2 *net.IPNet) bool {
 	m1, _ := ipn1.Mask.Size()
 	m2, _ := ipn2.Mask.Size()
 	return m1 == m2 && ipn1.IP.Equal(ipn2.IP)
+}
+
+// IsIPsEqual returns true if both IP slices contain the same addresses,
+// regardless of order.
+func IsIPsEqual(ips1, ips2 []net.IP) bool {
+	if len(ips1) != len(ips2) {
+		return false
+	}
+	s1 := make([]string, len(ips1))
+	s2 := make([]string, len(ips2))
+	for i := range ips1 {
+		s1[i] = ips1[i].String()
+		s2[i] = ips2[i].String()
+	}
+	slices.Sort(s1)
+	slices.Sort(s2)
+	return slices.Equal(s1, s2)
 }
 
 // IsIPNetsEqual returns true if both IPNet slices are equal in length and values, regardless of order.

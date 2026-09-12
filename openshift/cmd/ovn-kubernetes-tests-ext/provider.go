@@ -10,14 +10,10 @@ import (
 
 	ocphacke2e "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 
-	"github.com/onsi/ginkgo/v2"
-	"github.com/onsi/ginkgo/v2/reporters"
-	"github.com/onsi/ginkgo/v2/types"
 	"github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	kclientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
@@ -63,7 +59,7 @@ func initializeTestFramework(provider string, cfg *rest.Config) error {
 	//TODO: do we really need the file systems?
 	framework.TestContext.KubectlPath = "oc"
 	if ad := os.Getenv("ARTIFACT_DIR"); len(strings.TrimSpace(ad)) == 0 {
-		os.Setenv("ARTIFACT_DIR", filepath.Join(os.TempDir(), "artifacts"))
+		_ = os.Setenv("ARTIFACT_DIR", filepath.Join(os.TempDir(), "artifacts"))
 	}
 	// "debian" is used when not set. At least GlusterFS tests need "custom".
 	// (There is no option for "rhel" or "centos".)
@@ -80,30 +76,7 @@ func initializeTestFramework(provider string, cfg *rest.Config) error {
 	return nil
 }
 
-// WriteJUnitReport generates a JUnit file that is shorter than the one
-// normally written by `ginkgo --junit-report`. This is needed because the full
-// report can become too large for tools like Spyglass
-// (https://github.com/kubernetes/kubernetes/issues/111510).
-func writeJUnitReport(report ginkgo.Report, filename string) error {
-	config := reporters.JunitReportConfig{
-		// Remove details for specs where we don't care.
-		OmitTimelinesForSpecState: types.SpecStatePassed | types.SpecStateSkipped,
-
-		// Don't write <failure message="summary">. The same text is
-		// also in the full text for the failure. If we were to write
-		// both, then tools like kettle and spyglass would concatenate
-		// the two strings and thus show duplicated information.
-		OmitFailureMessageAttr: true,
-
-		// All labels are also part of the spec texts in inline [] tags,
-		// so we don't need to write them separately.
-		OmitSpecLabels: true,
-	}
-
-	return reporters.GenerateJUnitReportWithConfig(report, filename, config)
-}
-
-func getKubeConfig() (*restclient.Config, error) {
+func getKubeConfig() (*rest.Config, error) {
 	kubeConfig := os.Getenv("KUBECONFIG")
 	if kubeConfig == "" {
 		return nil, fmt.Errorf("KUBECONFIG env variable not set")

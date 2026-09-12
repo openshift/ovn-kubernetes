@@ -378,8 +378,10 @@ func (na *NodeAllocator) syncNodeNetworkAnnotations(node *corev1.Node) error {
 			updatedSubnetsMap[networkName] = validExistingSubnets
 		}
 	}
+	// TunnelID annotation is set in node only if Layer2UsesTransitRouter is disabled.
+	// Given that tunnelID only is used by `createGWRouterPeerSwitchPort`.
 	newTunnelID := types.NoTunnelID
-	if util.IsNetworkSegmentationSupportEnabled() && na.netInfo.IsPrimaryNetwork() && util.DoesNetworkRequireTunnelIDs(na.netInfo) {
+	if na.HasNodeTunnelIDAllocation() {
 		existingTunnelID, err := util.ParseUDNLayer2NodeGRLRPTunnelIDs(node, networkName)
 		if err != nil && !util.IsAnnotationNotSetError(err) {
 			return fmt.Errorf("failed to fetch tunnelID annotation from the node %s for network %s, err: %v",
@@ -536,7 +538,7 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 	// Retry if it fails because of potential conflict which is transient. Return error in the
 	// case of other errors (say temporary API server down), and it will be taken care of by the
 	// retry mechanism.
-	resultErr := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+	resultErr := retry.OnError(retry.DefaultBackoff, util.IsNodeAnnotationPatchRetryable, func() error {
 		// Informer cache should not be mutated, so get a copy of the object
 		node, err := na.nodeLister.Get(nodeName)
 		if err != nil {
@@ -568,9 +570,10 @@ func (na *NodeAllocator) updateNodeNetworkAnnotationsWithRetry(nodeName string, 
 					node.Name, tunnelID, networkName, err)
 			}
 		}
-		// It is possible to update the node annotations using status subresource
-		// because changes to metadata via status subresource are not restricted for nodes.
-		return na.kube.UpdateNodeStatus(cnode)
+		// Patch only the changed annotations via the status subresource instead
+		// of a full status update, which would overwrite fields trimmed by the
+		// informer transform (e.g. Images, VolumesAttached).
+		return na.kube.PatchNodeStatusAnnotations(node, cnode)
 	})
 	if resultErr != nil {
 		return fmt.Errorf("failed to update node %s annotation: %w", nodeName, resultErr)
@@ -731,7 +734,8 @@ func (na *NodeAllocator) HasNodeSubnetAllocation() bool {
 func (na *NodeAllocator) HasNodeTunnelIDAllocation() bool {
 	return util.IsNetworkSegmentationSupportEnabled() &&
 		na.netInfo.IsPrimaryNetwork() &&
-		util.DoesNetworkRequireTunnelIDs(na.netInfo)
+		util.DoesNetworkRequireTunnelIDs(na.netInfo) &&
+		!config.Layer2UsesTransitRouter
 }
 
 func (na *NodeAllocator) markAllocatedNetworksForUnmanagedHONode(node *corev1.Node) error {

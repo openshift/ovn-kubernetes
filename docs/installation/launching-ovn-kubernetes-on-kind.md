@@ -124,7 +124,6 @@ configuration options when deploying. Use `./kind.sh -h` to see the latest optio
 usage: kind-helm.sh [--delete]
        [ -cf  | --config-file <file> ]
        [ -kt  | --keep-taint ]
-       [ -ha  | --ha-enabled ]
        [ -me  | --multicast-enabled ]
        [ -ho  | --hybrid-enabled ]
        [ -el  | --ovn-empty-lb-events ]
@@ -186,7 +185,6 @@ usage: kind-helm.sh [--delete]
 --disable-ovnkube-identity                    Disable per-node cert and ovnkube-identity webhook. DEFAULT: Enabled
 -dgb | --dummy-gateway-bridge                 Use a dummy instead of a real gateway bridge. DEFAULT: Disabled
 -gm  | --gateway-mode                         Configure the cluster gateway mode (local|shared). DEFAULT: shared
--ha  | --ha-enabled                           Enable high availability. DEFAULT: HA Disabled
 -n4  | --no-ipv4                              Disable IPv4. DEFAULT: IPv4 Enabled.
 -i6  | --ipv6                                 Enable IPv6. DEFAULT: IPv6 Disabled.
 -wk  | --num-workers                          Number of worker nodes. DEFAULT: 2 workers
@@ -429,7 +427,7 @@ sudo ln -s /usr/bin/kubectl-v1.17.3 /usr/bin/kubectl
 Download and install latest version of `kubectl`:
 
 ```
-$ K8S_VERSION=v1.35.0
+$ K8S_VERSION=v1.36.2
 $ curl -LO https://storage.googleapis.com/kubernetes-release/release/$K8S_VERSION/bin/linux/amd64/kubectl
 $ chmod +x kubectl
 $ sudo mv kubectl /usr/bin/kubectl-$K8S_VERSION
@@ -485,7 +483,7 @@ $ cd ../dist/images/
 $ make fedora-image
 
 $ cd ../../contrib/
-$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.35.0 ./kind.sh
+$ PLATFORM_IPV4_SUPPORT=true PLATFORM_IPV6_SUPPORT=true K8S_VERSION=v1.36.2 ./kind.sh
 ```
 
 Once `kind.sh` completes, setup kube config file:
@@ -511,7 +509,7 @@ one (or both of) the following variables:
 
 ```
 $ cd ../../contrib/
-$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.35.0 ./kind.sh
+$ KIND_IMAGE=example.com/kindest/node K8S_VERSION=v1.36.2 ./kind.sh
 ```
 
 ### Using kind local registry to deploy non ovn-k containers

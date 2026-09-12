@@ -1430,14 +1430,21 @@ var _ = ginkgo.Describe("BGP: When an advertised CUDN network is dynamically all
 
 var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 	ginkgo.DescribeTableSubtree("between advertised networks", func(cudnATemplate, cudnBTemplate *udnv1.ClusterUserDefinedNetwork) {
-		const curlConnectionTimeoutCode = "28"
-		// match the whole phrase: a bare "7" is always contained in the curl
-		// error output, if only in the target address
-		const curlConnectionRefusedCode = "exit code 7"
 		const nodePortBackendLabel = "nodeport-backend"
 		const clientNodeBackend = "client-node"
 		const remoteNodeBackend = "remote-node"
 		const nodePortNodeBackend = "nodeport-node"
+
+		// The pod-to-X tests use e2epodoutput.RunHostCmdWithFullOutput(), which
+		// returns output like "exit code 28" on error, while the host-to-X tests
+		// use infraprovider.Get().ExecK8NodeCommand()), which returns output like
+		// "exit status 28" ("status" rather than "code"). We just look for just
+		// "28" (and hope there are no false positives).
+		const curlConnectionTimeoutCode = "28"
+
+		// Currently only pod-to-X tests ever expect "connection refused", so we
+		// can match the longer error string.
+		const curlConnectionRefusedCode = "exit code 7"
 
 		f := wrappedTestFramework("bgp-network-isolation")
 		f.SkipNamespaceCreation = true
@@ -2122,7 +2129,7 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(hostNetworkPort)) + "/clientip", clientNodeIP, false
 					}),
 				ginkgo.Entry("[ETP=Cluster] UDN pod to the same node nodeport service in default network should not work",
-					// FIXME: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5410
+					// FIXME: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5419
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
 						clientPod := podsNetA[0]
 						// podsNetA[0] is on nodes[0]. We need the same node. Let's hit the nodeport on nodes[0].
@@ -2135,7 +2142,16 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 						}
 						nodePort := svcNodePortNetDefault.Spec.Ports[0].NodePort
 
-						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", curlConnectionTimeoutCode, true
+						// Because of the difference in IPv4 vs IPv6 "fib daddr type local" (see #5419, above),
+						// forbidden IPv4 NodePort connections do not match the nftables rule, don't get DNATted,
+						// and then get rejected by the host, while forbidden IPv6 NodePort connections do get
+						// DNATted but then get dropped by OVN ACLs.
+						expectedOutput = curlConnectionRefusedCode
+						if ipFamily == utilnet.IPv6 {
+							expectedOutput = curlConnectionTimeoutCode
+						}
+
+						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", expectedOutput, true
 					}),
 				ginkgo.Entry("[ETP=Cluster] UDN pod to a different node nodeport service in default network should work",
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
@@ -2190,17 +2206,32 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 						target := nodePortServiceTarget(ipFamily, nodes.Items[2].Name, svcNodePortNetARemoteNodeBackend)
 						return clientPod.Name, clientPod.Namespace, target, podsNetA[2].Name, false
 					}),
-				ginkgo.Entry("[ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should not work",
-					// FIXME: This test should work: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5419
-					// This traffic flow is expected to work eventually but doesn't work today on Layer3 (v4 and v6) and Layer2 (v4 and v6) networks.
-					// Reason it doesn't work today is because UDN networks don't have MAC bindings for masqueradeIPs of other networks.
-					// Traffic flow: UDN pod in network A -> samenode nodeIP:nodePort service of networkB
-					// UDN pod in networkA -> ovn-switch -> ovn-cluster-router (SNAT to masqueradeIP of networkA) -> mpX interface ->
-					// enters the host and hits IPTables rules to DNAT to clusterIP:Port of service of networkB.
-					// Then it hits the pkt_mark flows on breth0 and get's sent into networkB's patchport where it hits the GR.
-					// On the GR we DNAT to backend pod and SNAT to joinIP.
-					// Reply: Pod replies and now OVN in networkB tries to ARP for the masqueradeIP of networkA which is the source and simply
-					// fails as it doesn't know how to reach this masqueradeIP.
+				ginkgo.Entry("[ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6",
+					// FIXME: IPv4 should also work: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5419
+					//
+					// Cross-UDN same-node nodeport traffic goes through the management port in both
+					// local and shared gateway modes (the priority 1004 LRP on the cluster router
+					// reroutes traffic destined for the local node's IP to the management port):
+					// UDN pod in networkA -> ovn-switch -> ovn-cluster-router (SNAT to masqueradeIP)
+					// -> mpX interface -> host nftables (DNAT nodePort->clusterIP) -> breth0 table 0 -> table 2
+					//
+					// IPv6 works: nftables "fib daddr type local" succeeds for IPv6 regardless of
+					// incoming interface, so the pkt_mark is set and breth0 table 2 dispatches the
+					// packet to networkB's patch port. The mask narrowing (/112 -> /128) on the GR
+					// external port makes the static route (fd69::/112 -> fd69::4) take effect for
+					// the reply, routing it back through the management port to networkA.
+					//
+					// IPv4 fails: the kernel's IPv4 FIB lookup in "fib daddr type local" is
+					// interface-aware. Since the node IP (e.g. 172.18.0.2) is local on breth0, not
+					// on ovn-k8s-mpX, the lookup fails and the pkt_mark is never set:
+					//   $ ip route get 172.18.0.2 iif ovn-k8s-mp7
+					//   RTNETLINK answers: Invalid argument
+					//   $ ip -6 route get fc00:f853:ccd:e793::2 iif ovn-k8s-mp7
+					//   local fc00:f853:ccd:e793::2 ... iif ovn-k8s-mp7 pref medium
+					// Without the mark, the packet hits the priority=200 drop flow in breth0 table 2
+					// (nw_src=masqueradeIP -> drop).
+					// The original pkt_mark design (PR#4792) was intended for external clients hitting
+					// the node IP, not for cross-UDN traffic arriving on a UDN management port.
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
 						clientPod := podsNetA[0]
 						node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), nodes.Items[0].Name, metav1.GetOptions{})
@@ -2211,15 +2242,16 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 							nodeIP = nodeIPv6
 						}
 						nodePort := svcNodePortNetB.Spec.Ports[0].NodePort
-						// sourceIP will be joinSubnetIP for nodeports, so only using hostname endpoint
-						expectedOut := curlConnectionTimeoutCode
-						if isDynamicUDNEnabled() && cudnBTemplate.Spec.Network.Topology == udnv1.NetworkTopologyLayer3 {
-							// network B is not active on the client's node: for L3
-							// networks the connection is rejected instead of timing
-							// out, for both IP families
-							expectedOut = curlConnectionRefusedCode
+						expectErr = ipFamily == utilnet.IPv4
+						if isDynamicUDNEnabled() {
+							// network B is not active on the client's node: the
+							// nodeport is unreachable for both families
+							expectErr = true
 						}
-						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", expectedOut, true
+						if expectErr {
+							expectedOutput = curlConnectionRefusedCode
+						}
+						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePort)) + "/hostname", expectedOutput, expectErr
 					}),
 				ginkgo.Entry("[ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work",
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
@@ -2296,9 +2328,20 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePortA)) + "/hostname", "", false
 					}),
 
-				ginkgo.Entry("[ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should not work",
+				ginkgo.Entry("[ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW",
+					// FIXME: IPv4 should also work: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5419
+					// Shared Gateway (SGW):
+					//   IPv4 fails because nftables "fib daddr type local" does not match when the
+					//   packet arrives on ovn-k8s-mpX (kernel IPv4 FIB lookup is interface-aware).
+					//   Without the pkt_mark, the packet is dropped by breth0 table 2 isolation flows.
+					//   IPv6 works because "fib daddr type local" succeeds for IPv6 regardless of
+					//   incoming interface, so pkt_mark is set and breth0 dispatches the packet correctly.
+					// Local Gateway (LGW):
+					//   Both IPv4 and IPv6 fail. ETP=Local DNATs to the host masquerade IP (fd69::3 /
+					//   169.254.0.3), which routes back to the UDN management port (each UDN routing
+					//   table has a route for the masquerade IP pointing to its own mp), creating a
+					//   routing loop between the management port and OVN.
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
-						// FIXME: This test should work: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5419
 						clientPod := podNetB
 						node, err := f.ClientSet.CoreV1().Nodes().Get(context.TODO(), clientPod.Spec.NodeName, metav1.GetOptions{})
 						framework.ExpectNoError(err)
@@ -2308,7 +2351,18 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 							nodeIP = nodeIPv6
 						}
 						nodePortA := svcNodePortETPLocalNetA.Spec.Ports[0].NodePort
-						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePortA)) + "/hostname", curlConnectionTimeoutCode, true
+						expectErr = ipFamily == utilnet.IPv4 || IsGatewayModeLocal(f.ClientSet)
+						if expectErr {
+							// Because of the difference in IPv4 vs IPv6 "fib daddr type local" (see #5419, above),
+							// forbidden IPv4 NodePort connections do not match the nftables rule, don't get DNATted,
+							// and then get rejected by the host, while forbidden IPv6 NodePort connections do get
+							// DNATted but then get dropped by OVN ACLs.
+							expectedOutput = curlConnectionRefusedCode
+							if ipFamily == utilnet.IPv6 {
+								expectedOutput = curlConnectionTimeoutCode
+							}
+						}
+						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePortA)) + "/hostname", expectedOutput, expectErr
 					}),
 				ginkgo.Entry("[ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work",
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
@@ -2335,7 +2389,16 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 							nodeIP = nodeIPv6
 						}
 						nodePortB := svcNodePortETPLocalDefault.Spec.Ports[0].NodePort
-						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePortB)) + "/hostname", curlConnectionTimeoutCode, true
+						// Because of the difference in IPv4 vs IPv6 "fib daddr type local" (see #5419, above),
+						// forbidden IPv4 NodePort connections do not match the nftables rule, don't get DNATted,
+						// and then get rejected by the host, while forbidden IPv6 NodePort connections do get
+						// DNATted but then get dropped by OVN ACLs.
+						expectedOutput = curlConnectionRefusedCode
+						if ipFamily == utilnet.IPv6 {
+							expectedOutput = curlConnectionTimeoutCode
+						}
+
+						return clientPod.Name, clientPod.Namespace, net.JoinHostPort(nodeIP, fmt.Sprint(nodePortB)) + "/hostname", expectedOutput, true
 					}),
 				ginkgo.Entry("[ETP=LOCAL] UDN pod to a different node nodeport service in default network should work",
 					func(ipFamily utilnet.IPFamily) (clientName string, clientNamespace string, dst string, expectedOutput string, expectErr bool) {
@@ -2546,7 +2609,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				),
 			).To(gomega.Succeed())
 			servers = append(servers, agnhostName)
-		case cudnAdvertisedEVPNUnmanagedSharedVTEP, cudnAdvertisedEVPNUnmanagedRandomVTEP:
+		case cudnAdvertisedEVPNUnmanagedSharedVTEP, cudnAdvertisedEVPNUnmanagedRandomVTEP, cudnAdvertisedEVPNOverlappingCIDRSharedVTEP:
 			ginkgo.By("Running an external EVPN network")
 
 			bridgeName := "br" + networkName
@@ -2563,6 +2626,11 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				bgpAlloc.VTEPSubnet = kindV4Subnet
 				vtepName = sharedNodeIPsVTEPName
+				// All networks sharing the same VTEP also share the same bridge and
+				// VXLAN interface on the external FRR; derive names from testName so
+				// every network in the test lands on the same device.
+				bridgeName = "br" + testName
+				vxlanName = "vx" + testName
 			}
 
 			macVRFContainer := infraapi.ExternalContainer{
@@ -2593,6 +2661,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 					macVRFNetworkName,
 					&ipVRFContainer,
 					ipVRFNetworkName,
+					networkType == cudnAdvertisedEVPNOverlappingCIDRSharedVTEP,
 				),
 			).To(gomega.Succeed())
 			if networkSpec.EVPN.MACVRF != nil {
@@ -2952,6 +3021,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			var testPod *corev1.Pod
 			var vrfLiteNodeInterfaces map[string]infraapi.NetworkInterface
 			var networkSpec *udnv1.NetworkSpec
+			var testNetworkSpec *udnv1.NetworkSpec
 
 			expectedSNATSourceIP := func(family utilnet.IPFamily, node *corev1.Node) string {
 				ginkgo.GinkgoHelper()
@@ -2972,6 +3042,18 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				}
 				gomega.Expect(expectedNodeIPs).NotTo(gomega.BeEmpty(), "Expected node %s to have an InternalIP for %v", node.Name, family)
 				return expectedNodeIPs[0]
+			}
+
+			getExternalServerIPForFamily := func(server string, family utilnet.IPFamily) string {
+				ginkgo.GinkgoHelper()
+				bgpServerNetwork, err := infraprovider.Get().GetNetwork(server)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				iface, err := infraprovider.Get().GetExternalContainerNetworkInterface(
+					infraapi.ExternalContainer{Name: server},
+					bgpServerNetwork,
+				)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				return getFirstIPStringOfFamily(family, []string{iface.IPv4, iface.IPv6})
 			}
 
 			getSameNode := func() string {
@@ -3002,6 +3084,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				case networkSpec.Layer2 != nil:
 					networkSpec.Layer2.Subnets = matchL2SubnetsByIPFamilies(ipFamilySet, networkSpec.Layer2.Subnets...)
 				}
+				testNetworkSpec = networkSpec
 
 				testNamespace, externalServers, vrfLiteNodeInterfaces = configureNetworkWithInfra(
 					f,
@@ -3047,14 +3130,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 							ginkgo.By("Ensuring a request from the pod can reach the external servers without being SNATed")
 						}
 						for _, externalServer := range externalServers {
-							bgpServerNetwork, err := infraprovider.Get().GetNetwork(externalServer)
-							gomega.Expect(err).NotTo(gomega.HaveOccurred())
-							iface, err := infraprovider.Get().GetExternalContainerNetworkInterface(
-								infraapi.ExternalContainer{Name: externalServer},
-								bgpServerNetwork,
-							)
-							gomega.Expect(err).NotTo(gomega.HaveOccurred())
-							serverIP := getFirstIPStringOfFamily(family, []string{iface.IPv4, iface.IPv6})
+							serverIP := getExternalServerIPForFamily(externalServer, family)
 							gomega.Expect(serverIP).NotTo(gomega.BeEmpty())
 							framework.Logf("Checking request from pod reaches server %q", externalServer)
 							testPodToHostnameAndExpect(testPod, serverIP, externalServer)
@@ -3104,14 +3180,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						}
 						ginkgo.By("Ensuring a request from the external servers can reach the pod")
 						for _, externalServer := range externalServers {
-							bgpServerNetwork, err := infraprovider.Get().GetNetwork(externalServer)
-							gomega.Expect(err).NotTo(gomega.HaveOccurred())
-							iface, err := infraprovider.Get().GetExternalContainerNetworkInterface(
-								infraapi.ExternalContainer{Name: externalServer},
-								bgpServerNetwork,
-							)
-							gomega.Expect(err).NotTo(gomega.HaveOccurred())
-							serverIP := getFirstIPStringOfFamily(family, []string{iface.IPv4, iface.IPv6})
+							serverIP := getExternalServerIPForFamily(externalServer, family)
 							gomega.Expect(serverIP).NotTo(gomega.BeEmpty())
 							podIP, err := getPodAnnotationIPsForPrimaryNetworkByIPFamily(
 								f.ClientSet,
@@ -3298,6 +3367,23 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						return nil
 					}
 
+					// overlappingSpecGen reuses the tested network's topology and subnets
+					// with fresh VNIs to prove VPN-level isolation with overlapping IP
+					// address space. Only appended to otherNetworksToTest when the outer
+					// tested network is cudnAdvertisedEVPNUnmanagedSharedVTEP, so
+					// testNetworkSpec is guaranteed to have an EVPN config here.
+					overlappingSpecGen := func(_ string, _ string, bgpAlloc allocators.BGPAllocation) *udnv1.NetworkSpec {
+						spec := testNetworkSpec.DeepCopy()
+						if spec.EVPN.MACVRF != nil {
+							spec.EVPN.MACVRF.VNI = int32(bgpAlloc.MACVRFVNI)
+						}
+						if spec.EVPN.IPVRF != nil {
+							spec.EVPN.IPVRF.VNI = int32(bgpAlloc.IPVRFVNI)
+						}
+						spec.EVPN.VTEP = ""
+						return spec
+					}
+
 					otherNetworksToTest := []ginkgo.TableEntry{
 						ginkgo.Entry("Default", defaultNetwork, nilNetworkSpecGen),
 						ginkgo.Entry("Layer 3 CUDN VRF-Lite", cudnAdvertisedVRFLite, layer3NetworkSpecGen),
@@ -3312,6 +3398,11 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 						ginkgo.Entry("Layer 3 CUDN EVPN IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer3IPVRFNetworkSpecGen),
 						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer2MACVRFNetworkSpecGen),
 						ginkgo.Entry("Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP", feature.EVPN, cudnAdvertisedEVPNUnmanagedRandomVTEP, layer2MACVRFIPVRFNetworkSpecGen),
+					}
+					if testedNetworkType == cudnAdvertisedEVPNUnmanagedSharedVTEP {
+						otherNetworksToTest = append(otherNetworksToTest,
+							ginkgo.Entry("CUDN EVPN overlapping subnet shared VTEP", feature.EVPN, cudnAdvertisedEVPNOverlappingCIDRSharedVTEP, overlappingSpecGen),
+						)
 					}
 
 					ginkgo.DescribeTableSubtree("Of type",
@@ -3329,7 +3420,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 
 								otherNetworkSpec := otherNetworkSpecGen(otherUDNIPv4, otherUDNIPv6, otherBGPAlloc)
 								switch {
-								case otherNetworkSpec == nil:
+								case otherNetworkSpec == nil && networkType == defaultNetwork:
 									otherNetworkName = "default"
 								case otherNetworkSpec.Layer3 != nil:
 									otherNetworkSpec.Layer3.Subnets = matchL3SubnetsByIPFamilies(ipFamilySet, otherNetworkSpec.Layer3.Subnets...)
@@ -3422,7 +3513,24 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 											)
 											gomega.Expect(err).NotTo(gomega.HaveOccurred())
 											gomega.Expect(otherPodIP).ToNot(gomega.BeEmpty())
-											testPodToClientIPNOK(testPod, otherPodIP)
+											testPodIP, err := getPodAnnotationIPsForPrimaryNetworkByIPFamily(
+												f.ClientSet,
+												testPod.Namespace,
+												testPod.Name,
+												testNetworkName,
+												family,
+											)
+											gomega.Expect(err).NotTo(gomega.HaveOccurred())
+											gomega.Expect(testPodIP).ToNot(gomega.BeEmpty())
+											if testPodIP == otherPodIP {
+												// Overlapping CUDNs assigned the same IP; verify the tested pod
+												// reaches itself (its own hostname), proving traffic stays within
+												// its own CUDN.
+												framework.Logf("Tested pod and other pod share IP %s; verifying hostname to confirm per-CUDN isolation", otherPodIP)
+												testPodToHostnameAndExpect(testPod, otherPodIP, testPod.Name)
+											} else {
+												testPodToClientIPNOK(testPod, otherPodIP)
+											}
 										},
 									)
 								}
@@ -3443,7 +3551,49 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 											)
 											gomega.Expect(err).NotTo(gomega.HaveOccurred())
 											gomega.Expect(testPodIP).ToNot(gomega.BeEmpty())
-											testPodToClientIPNOK(source, testPodIP)
+											sourcePodIP, err := getPodAnnotationIPsForPrimaryNetworkByIPFamily(
+												f.ClientSet,
+												source.Namespace,
+												source.Name,
+												otherNetworkName,
+												family,
+											)
+											gomega.Expect(err).NotTo(gomega.HaveOccurred())
+											gomega.Expect(sourcePodIP).ToNot(gomega.BeEmpty())
+											if sourcePodIP == testPodIP {
+												// Overlapping CUDNs assigned the same IP; verify the other pod
+												// reaches itself (its own hostname) to confirm per-CUDN isolation.
+												framework.Logf("Other pod %s and tested pod share IP %s; verifying hostname to confirm per-CUDN isolation", source.Name, testPodIP)
+												testPodToHostnameAndExpect(source, testPodIP, source.Name)
+											} else {
+												// Source pod has a different IP from the tested pod. In the
+												// overlapping CIDR case, the source's same-network peer may
+												// share the tested pod's IP. If so, when the source curls
+												// testPodIP, routing within the other network delivers the
+												// packet to that peer — not to the tested pod. Determine
+												// which pod is the peer and check its IP.
+												var peerPod *corev1.Pod
+												if source == otherPodSameNode {
+													peerPod = otherPodDiffNode
+												} else {
+													peerPod = otherPodSameNode
+												}
+												peerPodIP, err := getPodAnnotationIPsForPrimaryNetworkByIPFamily(
+													f.ClientSet,
+													peerPod.Namespace,
+													peerPod.Name,
+													otherNetworkName,
+													family,
+												)
+												gomega.Expect(err).NotTo(gomega.HaveOccurred())
+												gomega.Expect(peerPodIP).ToNot(gomega.BeEmpty())
+												if peerPodIP == testPodIP {
+													framework.Logf("Other network peer pod %s and tested pod share IP %s; verifying pod %s reaches its same-network peer, not the tested pod", peerPod.Name, testPodIP, source.Name)
+													testPodToHostnameAndExpect(source, testPodIP, peerPod.Name)
+												} else {
+													testPodToClientIPNOK(source, testPodIP)
+												}
+											}
 										},
 									)
 								}
@@ -3490,6 +3640,35 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 											clusterIP := getFirstIPStringOfFamily(family, service.Spec.ClusterIPs)
 											gomega.Expect(clusterIP).ToNot(gomega.BeEmpty())
 											testPodToClientIPNOK(testPod, clusterIP)
+										},
+									)
+								}
+
+								if networkType == cudnAdvertisedEVPNOverlappingCIDRSharedVTEP &&
+									testNetworkSpec.EVPN != nil && testNetworkSpec.EVPN.MACVRF != nil {
+									// The outer "It can reach external servers on the same network" block already
+									// tests north-south connectivity for the tested network in isolation.
+									// This additional check runs within the "other network is set up" context,
+									// verifying that VNI isolation holds for north-south traffic: even when
+									// the other network shares the same VTEP IP and its MAC-VRF external server
+									// is reachable at the same IP (both networks derive container IPs from the
+									// shared CUDN subnet), the tested pod still reaches only its own external
+									// server (identified by hostname) rather than the other network's.
+									// Only the MAC-VRF server is checked here: it is the only one whose IP is
+									// shared between both networks (secondToLastIP of the CUDN subnet).
+									// IP-VRF containers are allocated from a separate per-network subnet
+									// (bgpAlloc.IPVRFSubnet6), so they have distinct IPs and there is no
+									// shared-IP VNI ambiguity to verify.
+									ginkgo.By("Ensuring the tested network pod reaches its own MAC-VRF external server at the shared IP (north-south VNI isolation)")
+									macVRFServerName := testNetworkName + "-macvrf-agnhost"
+									testForIPFamilies(
+										ipFamilySet,
+										func(family utilnet.IPFamily) {
+											ginkgo.GinkgoHelper()
+											serverIP := getExternalServerIPForFamily(macVRFServerName, family)
+											gomega.Expect(serverIP).NotTo(gomega.BeEmpty())
+											framework.Logf("Ensuring testPod reaches its external server %q at shared IP %s (IPv%v)", macVRFServerName, serverIP, family)
+											testPodToHostnameAndExpect(testPod, serverIP, macVRFServerName)
 										},
 									)
 								}
@@ -3946,6 +4125,10 @@ func generateFRRConfiguration(neighborIPs, advertiseNetworks []string) (director
 // network's VRF, configured to receive advertisements for the provided
 // networks. Returns a temporary directory where the configuration is generated.
 func generateFRRk8sConfiguration(networkName string, neighborIPs, receiveNetworks []string) (directory string, err error) {
+	return generateFRRk8sConfigurationForVRF(networkName, networkName, neighborIPs, receiveNetworks)
+}
+
+func generateFRRk8sConfigurationForVRF(networkName, vrf string, neighborIPs, receiveNetworks []string) (directory string, err error) {
 	// parse configuration templates
 	var templates *template.Template
 	templates, err = template.ParseFS(ratestdata, filepath.Join(tmplDir, "frr-k8s", "*.tmpl"))
@@ -3971,7 +4154,7 @@ func generateFRRk8sConfiguration(networkName string, neighborIPs, receiveNetwork
 		Labels: map[string]string{"network": networkName},
 		Routers: []templateInputRouter{
 			{
-				VRF:           networkName,
+				VRF:           vrf,
 				NeighborsIPv4: neighborsIPv4,
 				NeighborsIPv6: neighborsIPv6,
 				NetworksIPv4:  receivesIPv4,
@@ -4005,6 +4188,30 @@ func runBGPNetworkAndServer(
 	serverNetworkName string,
 	peerNetworks []string,
 	serverNetworks []string,
+) error {
+	return runBGPNetworkAndServerWithFRRVRF(
+		f,
+		ictx,
+		ipFamilySet,
+		networkName,
+		serverName,
+		serverNetworkName,
+		peerNetworks,
+		serverNetworks,
+		networkName,
+	)
+}
+
+func runBGPNetworkAndServerWithFRRVRF(
+	f *framework.Framework,
+	ictx infraapi.Context,
+	ipFamilySet sets.Set[utilnet.IPFamily],
+	networkName string,
+	serverName string,
+	serverNetworkName string,
+	peerNetworks []string,
+	serverNetworks []string,
+	frrVRF string,
 ) error {
 	// filter networks by supported IP families
 	peerNetworks = matchCIDRStringsByIPFamilySet(peerNetworks, ipFamilySet)
@@ -4096,7 +4303,7 @@ func runBGPNetworkAndServer(
 
 	// apply FRR-K8s Configuration
 	receiveNetworks := serverNetworks
-	frrK8sConfig, err := generateFRRk8sConfiguration(networkName, []string{frr.IPv4, frr.IPv6}, receiveNetworks)
+	frrK8sConfig, err := generateFRRk8sConfigurationForVRF(networkName, frrVRF, []string{frr.IPv4, frr.IPv6}, receiveNetworks)
 	if err != nil {
 		return fmt.Errorf("failed to generate FRR-k8s configuration: %w", err)
 	}
@@ -4119,13 +4326,14 @@ func runBGPNetworkAndServer(
 type networkType string
 
 const (
-	defaultNetwork                        networkType = "DEFAULT"
-	udn                                   networkType = "UDN"
-	cudn                                  networkType = "CUDN"
-	cudnAdvertised                        networkType = "CUDN_ADVERTISED"
-	cudnAdvertisedVRFLite                 networkType = "CUDN_ADVERTISED_VRFLITE"
-	cudnAdvertisedEVPNUnmanagedSharedVTEP networkType = "CUDN_ADVERTISED_EVPN_UNMANAGED_SHARED_VTEP"
-	cudnAdvertisedEVPNUnmanagedRandomVTEP networkType = "CUDN_ADVERTISED_EVPN_UNMANAGED_RANDOM_VTEP"
+	defaultNetwork                              networkType = "DEFAULT"
+	udn                                         networkType = "UDN"
+	cudn                                        networkType = "CUDN"
+	cudnAdvertised                              networkType = "CUDN_ADVERTISED"
+	cudnAdvertisedVRFLite                       networkType = "CUDN_ADVERTISED_VRFLITE"
+	cudnAdvertisedEVPNUnmanagedSharedVTEP       networkType = "CUDN_ADVERTISED_EVPN_UNMANAGED_SHARED_VTEP"
+	cudnAdvertisedEVPNUnmanagedRandomVTEP       networkType = "CUDN_ADVERTISED_EVPN_UNMANAGED_RANDOM_VTEP"
+	cudnAdvertisedEVPNOverlappingCIDRSharedVTEP networkType = "CUDN_ADVERTISED_EVPN_OVERLAPPING_CIDR_SHARED_VTEP"
 )
 
 // createNamespaceWithPrimaryNetworkOfType helper function configures a
@@ -4148,7 +4356,7 @@ func createNamespaceWithPrimaryNetworkOfType(
 	case cudnAdvertised:
 		networkLabels = map[string]string{"advertise": networkName}
 		frrConfigurationLabels = map[string]string{"name": "receive-all"}
-	case cudnAdvertisedVRFLite, cudnAdvertisedEVPNUnmanagedSharedVTEP, cudnAdvertisedEVPNUnmanagedRandomVTEP:
+	case cudnAdvertisedVRFLite, cudnAdvertisedEVPNUnmanagedSharedVTEP, cudnAdvertisedEVPNUnmanagedRandomVTEP, cudnAdvertisedEVPNOverlappingCIDRSharedVTEP:
 		targetVRF = networkName
 		networkLabels = map[string]string{"advertise": networkName}
 		frrConfigurationLabels = map[string]string{"network": networkName}
@@ -4279,17 +4487,20 @@ func createUserDefinedNetwork(
 	ictx.AddCleanUpFn(func() error {
 		return client.Delete(context.Background(), name, metav1.DeleteOptions{})
 	})
-	wait.PollUntilContextTimeout(
+	var lastReadyErr error
+	if err := wait.PollUntilContextTimeout(
 		context.Background(),
 		time.Second,
-		5*time.Second,
+		30*time.Second,
 		true,
 		func(ctx context.Context) (bool, error) {
-			err = networkReadyFunc(client, name)()
-			return err == nil, nil
+			lastReadyErr = networkReadyFunc(client, name)()
+			return lastReadyErr == nil, nil
 		},
-	)
-	if err != nil {
+	); err != nil {
+		if lastReadyErr != nil {
+			return fmt.Errorf("failed to wait for the network to be ready: %w", lastReadyErr)
+		}
 		return fmt.Errorf("failed to wait for the network to be ready: %w", err)
 	}
 
@@ -4339,19 +4550,27 @@ func createRouteAdvertisements(
 		return fmt.Errorf("failed to create RouteAdvertisements: %w", err)
 	}
 	ictx.AddCleanUpFn(func() error {
-		return raClient.K8sV1().RouteAdvertisements().Delete(context.Background(), name, metav1.DeleteOptions{})
+		err := raClient.K8sV1().RouteAdvertisements().Delete(context.Background(), name, metav1.DeleteOptions{})
+		if apierrors.IsNotFound(err) {
+			// tolerate tests that delete the RouteAdvertisements themselves
+			return nil
+		}
+		return err
 	})
-	wait.PollUntilContextTimeout(
+	var lastReadyErr error
+	if err := wait.PollUntilContextTimeout(
 		context.Background(),
 		time.Second,
-		5*time.Second,
+		30*time.Second,
 		true,
 		func(ctx context.Context) (bool, error) {
-			err = routeAdvertisementsReadyFunc(*raClient, name)()
-			return err == nil, nil
+			lastReadyErr = routeAdvertisementsReadyFunc(*raClient, name)()
+			return lastReadyErr == nil, nil
 		},
-	)
-	if err != nil {
+	); err != nil {
+		if lastReadyErr != nil {
+			return fmt.Errorf("failed to wait for the RouteAdvertisements to be ready: %w", lastReadyErr)
+		}
 		return fmt.Errorf("failed to wait for the RouteAdvertisements to be ready: %w", err)
 	}
 
@@ -4456,7 +4675,7 @@ func checkRouteInFRR(node corev1.Node, podCIDR, routerContainerName string, isIP
 	}, 30*time.Second).Should(gomega.BeTrue(), "route for %s via %s not found on %s", podCIDR, nodeIP[0], routerContainerName)
 }
 
-func hasRouteInCUDNVRF(node corev1.Node, cudnName, cidr, nextHop string) (bool, error) {
+func hasRouteInCUDNVRF(node corev1.Node, cudnName, cidr string, nextHops ...string) (bool, error) {
 	if len(cudnName) > 15 {
 		return false, fmt.Errorf("CUDN name %q is too long to be used as the Linux VRF device name", cudnName)
 	}
@@ -4475,7 +4694,7 @@ func hasRouteInCUDNVRF(node corev1.Node, cudnName, cidr, nextHop string) (bool, 
 		return false, fmt.Errorf("failed to parse routes from CUDN VRF %s on node %s: %w; output: %s", cudnName, node.Name, err, out)
 	}
 	framework.Logf("Routes in CUDN VRF %s on node %s for %s: %s", cudnName, node.Name, cidr, out)
-	return hasBGPRoute(routes, cidr, nextHop), nil
+	return hasBGPRoute(routes, cidr, nextHops...), nil
 }
 
 type kernelRoute struct {
@@ -4489,22 +4708,24 @@ type kernelRouteNexthop struct {
 	Gateway string `json:"gateway"`
 }
 
-func hasBGPRoute(routes []kernelRoute, cidr, nextHop string) bool {
+func hasBGPRoute(routes []kernelRoute, cidr string, nextHops ...string) bool {
 	for _, route := range routes {
-		if route.Dst == cidr && route.Protocol == "bgp" && routeHasGateway(route, nextHop) {
+		if route.Dst == cidr && route.Protocol == "bgp" && routeHasGateway(route, nextHops...) {
 			return true
 		}
 	}
 	return false
 }
 
-func routeHasGateway(route kernelRoute, nextHop string) bool {
-	if route.Gateway == nextHop {
-		return true
-	}
-	for _, nexthop := range route.Nexthops {
-		if nexthop.Gateway == nextHop {
+func routeHasGateway(route kernelRoute, nextHops ...string) bool {
+	for _, nextHop := range nextHops {
+		if route.Gateway == nextHop {
 			return true
+		}
+		for _, nexthop := range route.Nexthops {
+			if nexthop.Gateway == nextHop {
+				return true
+			}
 		}
 	}
 	return false

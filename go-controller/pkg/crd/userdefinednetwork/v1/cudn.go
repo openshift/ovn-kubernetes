@@ -25,11 +25,26 @@ type ClusterUserDefinedNetwork struct {
 }
 
 // ClusterUserDefinedNetworkSpec defines the desired state of ClusterUserDefinedNetwork.
+// +kubebuilder:validation:XValidation:rule="!has(self.uplinks) || ((self.network.topology == 'Layer2' && has(self.network.layer2) && self.network.layer2.role == 'Primary') || (self.network.topology == 'Layer3' && has(self.network.layer3) && self.network.layer3.role == 'Primary'))", message="spec.uplinks is supported only for primary Layer2 and Layer3 networks"
+// +kubebuilder:validation:XValidation:rule="!has(self.uplinks) || !has(self.network.transport) || self.network.transport != 'EVPN'", message="spec.uplinks is not supported with EVPN transport"
 type ClusterUserDefinedNetworkSpec struct {
 	// NamespaceSelector Label selector for which namespace network should be available for.
 	// +kubebuilder:validation:Required
 	// +required
 	NamespaceSelector metav1.LabelSelector `json:"namespaceSelector"`
+
+	// Uplinks references Uplink resources used for this network's external
+	// traffic. Currently, one Uplink is supported. When omitted, existing gateway
+	// behavior is preserved.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=1
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="uplinks is immutable"
+	// +optional
+	// +listType=atomic
+	Uplinks []string `json:"uplinks,omitempty"`
 
 	// Network is the user-defined-network spec
 	// +kubebuilder:validation:Required
@@ -108,6 +123,15 @@ type ClusterUserDefinedNetworkStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// VRFName is the name of the Linux VRF device that OVN-Kubernetes creates
+	// for this network on every node where the network is present. It is
+	// populated for primary networks. Consumers that must name the VRF, such
+	// as FRRConfiguration authors filling in the routers 'vrf' field, should
+	// read this value instead of deriving it.
+	// +kubebuilder:validation:MaxLength=15
+	// +optional
+	VRFName *string `json:"vrfName,omitempty"`
 }
 
 // ClusterUserDefinedNetworkList contains a list of ClusterUserDefinedNetwork.
@@ -156,10 +180,11 @@ type LocalnetConfig struct {
 	// subnets is optional. When omitted OVN-Kubernetes won't assign IP address automatically.
 	// Dual-stack clusters may set 2 subnets (one for each IP family), otherwise only 1 subnet is allowed.
 	// The format should match standard CIDR notation (for example, "10.128.0.0/16").
-	// This field must be omitted if `ipam.mode` is `Disabled`.
-	// When physicalNetworkName points to the OVS bridge mapping of a network that provides IPAM services
-	// (e.g., a DHCP server), ipam.mode should be set to Disabled. This turns off OVN-Kubernetes IPAM and avoids
-	// conflicts with the existing IPAM services on this localnet network.
+	// This field must be omitted if `ipam.mode` is `Disabled` or `DHCP`.
+	// When physicalNetworkName points to the OVS bridge mapping of a network that provides IPAM services,
+	// ipam.mode should be set to `Disabled` (users configure the pod IPs themselves) or `DHCP` (a DHCP
+	// server on that network assigns them). Both turn off OVN-Kubernetes IPAM and avoid conflicts with
+	// the existing IPAM services on this localnet network.
 	//
 	// +optional
 	Subnets DualStackCIDRs `json:"subnets,omitempty"`
@@ -169,25 +194,28 @@ type LocalnetConfig struct {
 	// excludeSubnets is optional. When omitted no IP address is excluded and all IP addresses specified in `subnets`
 	// are subject to assignment.
 	// The format should match standard CIDR notation (for example, "10.128.0.0/16").
-	// This field must be omitted if `subnets` is unset or `ipam.mode` is `Disabled`.
+	// This field must be omitted if `subnets` is unset or `ipam.mode` is `Disabled` or `DHCP`.
 	// When `physicalNetworkName` points to OVS bridge mapping of a network with reserved IP addresses
 	// (which shouldn't be assigned by OVN-Kubernetes), the specified CIDRs will not be assigned. For example:
-	// Given: `subnets: "10.0.0.0/24"`, `excludeSubnets: "10.0.0.200/30", the following addresses will not be assigned
+	// Given: `subnets: "10.0.0.0/24"`, `excludeSubnets`: "10.0.0.200/30", the following addresses will not be assigned
 	// to pods: `10.0.0.201`, `10.0.0.202`.
 	//
 	// +optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=25
+	// +listType=atomic
 	ExcludeSubnets []CIDR `json:"excludeSubnets,omitempty"`
 
 	// ipam configurations for the network.
 	// ipam is optional. When omitted, `subnets` must be specified.
-	// When `ipam.mode` is `Disabled`, `subnets` must be omitted.
+	// When `ipam.mode` is `Disabled` or `DHCP`, `subnets` must be omitted.
 	// `ipam.mode` controls how much of the IP configuration will be managed by OVN.
 	//    When `Enabled`, OVN-Kubernetes will apply IP configuration to the SDN infra and assign IPs from the selected
 	//    subnet to the pods.
 	//    When `Disabled`, OVN-Kubernetes only assigns MAC addresses, and provides layer2 communication, and enables users
 	//    to configure IP addresses on the pods.
+	//    When `DHCP`, IP assignment is delegated to a DHCP server reachable on the physical network. OVN-Kubernetes
+	//    learns the assigned IPs but does not allocate them. Currently supported only for IPv4.
 	// `ipam.lifecycle` controls IP addresses management lifecycle.
 	//    When set to 'Persistent', the assigned IP addresses will be persisted in `ipamclaims.k8s.cni.cncf.io` object.
 	// 	  Useful for VMs, IP address will be persistent after restarts and migrations. Supported when `ipam.mode` is `Enabled`.

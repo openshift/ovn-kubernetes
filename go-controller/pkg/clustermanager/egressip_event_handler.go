@@ -57,7 +57,17 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, _ b
 		nodeLabels := node.GetLabels()
 		_, hasEgressLabel := nodeLabels[nodeEgressLabel]
 		if hasEgressLabel {
-			h.eIPC.setNodeEgressAssignable(node.Name, true)
+			// A node is only assignable when its host-cidrs annotation is
+			// present, parseable, and non-empty; without addresses the
+			// conflict check has no data for this node.
+			hostCIDRs, err := util.ParseNodeHostCIDRsDropNetMask(node)
+			nodeIsAssignable := err == nil && hostCIDRs.Len() > 0
+			if err != nil {
+				klog.Warningf("Node %s is not egress-assignable: failed to parse host-cidrs: %v", node.Name, err)
+			} else if hostCIDRs.Len() == 0 {
+				klog.Warningf("Node %s is not egress-assignable: host-cidrs contains no host CIDRs", node.Name)
+			}
+			h.eIPC.setNodeEgressAssignable(node.Name, nodeIsAssignable)
 		}
 		isReady := h.eIPC.isEgressNodeReady(node)
 		if isReady {
@@ -85,7 +95,7 @@ func (h *egressIPClusterControllerEventHandler) AddResource(obj interface{}, _ b
 // UpdateResource updates the specified object in the cluster to its version in newObj according
 // to its type and returns the error, if any, yielded during the object update.
 // The inRetryCache boolean argument is to indicate if the given resource is in the retryCache or not.
-func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, _ bool) error {
+func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj interface{}, inRetryCache bool) error {
 	switch h.objType {
 	case factory.EgressIPType:
 		oldEIP := oldObj.(*egressipv1.EgressIP)
@@ -119,7 +129,44 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		if !oldHadEgressLabel && !newHasEgressLabel {
 			return nil
 		}
-		h.eIPC.setNodeEgressAssignable(newNode.Name, newHasEgressLabel)
+		// A node is only assignable when it carries the egress-assignable label
+		// and its host-cidrs annotation is present, parseable, and non-empty.
+		// Without addresses the conflict check has no data for this node.
+		oldNodeIsAssignable := oldHadEgressLabel
+		if oldNodeIsAssignable {
+			hostCIDRs, err := util.ParseNodeHostCIDRsDropNetMask(oldNode)
+			oldNodeIsAssignable = err == nil && hostCIDRs.Len() > 0
+		}
+
+		nodeIsAssignable := newHasEgressLabel
+		if nodeIsAssignable {
+			hostCIDRs, err := util.ParseNodeHostCIDRsDropNetMask(newNode)
+			nodeIsAssignable = err == nil && hostCIDRs.Len() > 0
+			if err != nil {
+				klog.Warningf("Node %s is not egress-assignable: failed to parse host-cidrs: %v", newNode.Name, err)
+			} else if hostCIDRs.Len() == 0 {
+				klog.Warningf("Node %s is not egress-assignable: host-cidrs contains no host CIDRs", newNode.Name)
+			}
+		}
+		h.eIPC.setNodeEgressAssignable(newNode.Name, nodeIsAssignable)
+
+		// setNodeEgressAssignable clears the node's allocation cache when it
+		// turns a node unassignable, on the understanding that the caller then
+		// clears that node's assignments too. Release them here to keep the
+		// cache and status.items in agreement. A node that is genuinely gone is
+		// released anyway by the readiness and reachability handling below, so
+		// this only fires for a labelled, reachable node whose annotation stopped
+		// parsing.
+		if newHasEgressLabel && !nodeIsAssignable && (oldNodeIsAssignable || inRetryCache) {
+			klog.Infof("Node: %s is no longer assignable (host-cidrs annotation missing or invalid), "+
+				"deleting it from egress assignment", newNode.Name)
+			h.eIPC.setNodeEgressReady(newNode.Name, h.eIPC.isEgressNodeReady(newNode))
+			if err := h.eIPC.deleteEgressNode(newNode.Name); err != nil {
+				return fmt.Errorf("failed to delete egress assignments for node %s: %w", newNode.Name, err)
+			}
+			return nil
+		}
+
 		if oldHadEgressLabel && !newHasEgressLabel {
 			klog.Infof("Node: %s has been un-labeled, deleting it from egress assignment", newNode.Name)
 			return h.eIPC.deleteEgressNode(oldNode.Name)
@@ -128,6 +175,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		isNewReady := h.eIPC.isEgressNodeReady(newNode)
 		isNewReachable := h.eIPC.isEgressNodeReachable(newNode)
 		isHostCIDRsAltered := util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+		isCloudEgressIPConfigAltered := util.CloudEgressIPConfigAnnotationChanged(oldNode, newNode)
 		h.eIPC.setNodeEgressReady(newNode.Name, isNewReady)
 		if !oldHadEgressLabel && newHasEgressLabel {
 			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
@@ -142,7 +190,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			}
 			return nil
 		}
-		if isOldReady == isNewReady && !isHostCIDRsAltered {
+		if isOldReady == isNewReady && !isHostCIDRsAltered && !isCloudEgressIPConfigAltered {
 			return nil
 		}
 		if !isNewReady {
@@ -151,7 +199,17 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 				return err
 			}
 		} else if isNewReady && isNewReachable {
-			klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+			// Build a log message that captures all reasons we are re-evaluating,
+			// so operators can correlate annotation changes with re-assignments even
+			// when multiple conditions change simultaneously.
+			switch {
+			case isCloudEgressIPConfigAltered && isHostCIDRsAltered:
+				klog.Infof("Node: %s cloud egress IP config annotation and host CIDRs changed, re-evaluating egress IP assignments", newNode.Name)
+			case isCloudEgressIPConfigAltered:
+				klog.Infof("Node: %s cloud egress IP config annotation changed, re-evaluating egress IP assignments", newNode.Name)
+			default:
+				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+			}
 			h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
 				return err

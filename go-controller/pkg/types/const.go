@@ -21,6 +21,13 @@ const (
 	// UDNVRFDevicePrefix vrf device prefix associated with every user
 	UDNVRFDevicePrefix = "mp"
 
+	// MaxInterfaceNameLength is the maximum length of a Linux network
+	// interface name: IFNAMSIZ - 1, where IFNAMSIZ (16) includes the NUL
+	// terminator. Kept as a literal rather than unix.IFNAMSIZ - 1 because
+	// this package also builds on Windows (hybrid-overlay), where
+	// golang.org/x/sys/unix is not available.
+	MaxInterfaceNameLength = 15
+
 	// K8sMgmtIntfName name to be used as an OVS internal port on the node
 	K8sMgmtIntfName = K8sMgmtIntfNamePrefix + "0"
 
@@ -155,12 +162,39 @@ const (
 	// LabelUserDefinedServiceName label key used in mirrored EndpointSlices that contains the service name matching the EndpointSlice
 	LabelUserDefinedServiceName = "k8s.ovn.org/service-name"
 
+	// OVNKProtocol is the protocol value used to mark kernel networking
+	// objects as OVN-Kubernetes-managed. Value 85 is used instead of
+	// RTPROT_OVN (84) so we do not reuse a protocol identifier already
+	// owned by OVN.
+	OVNKProtocol = 85
+	// IFAProtOVNK is the IFA_PROTO value used to mark addresses as
+	// OVN-Kubernetes-managed. IFA_PROTO requires Linux kernel 5.18+; on
+	// older kernels the attribute is silently ignored.
+	IFAProtOVNK = OVNKProtocol
+
 	// Packet marking
 	EgressIPNodeConnectionMark         = "1008"
 	EgressIPReplyTrafficConnectionMark = 42
 	// Packet mark for egress IP traffic on secondary host interfaces
 	// This mark will be cleared by node controller when SNAT is ready
 	EgressIPSecondaryInterfaceMark = "1009"
+	// EgressIPConnmarkMark is the packet mark used by LGW conntrack save/restore rules and the
+	// node IP fwmark IP rule. Same value as EgressIPNodeConnectionMark, kept as an int here since
+	// nftables rule building and netlink.Rule.Mark both need it in that form.
+	EgressIPConnmarkMark = 1008
+
+	// EgressIPNFTablesChainName is the nftables chain for EgressIP SNAT rules (postrouting hook, SNAT priority)
+	EgressIPNFTablesChainName = "egress-ip-snat"
+	// EgressIPNFTablesMapV4 is the nftables map for IPv4 SNAT mappings: podIP+oif -> egressIP
+	EgressIPNFTablesMapV4 = "egress-ip-snat-v4"
+	// EgressIPNFTablesMapV6 is the nftables map for IPv6 SNAT mappings: podIP+oif -> egressIP
+	EgressIPNFTablesMapV6 = "egress-ip-snat-v6"
+	// EgressIPNFTablesConnmarkChainName is the nftables chain for LGW connmark save/restore rules
+	// (prerouting hook, mangle priority)
+	EgressIPNFTablesConnmarkChainName = "egress-ip-connmark"
+	// EgressIPNFTablesSecondaryInterfaceChainName is the nftables chain that drops pod traffic
+	// egressing a secondary interface before SNAT has been programmed
+	EgressIPNFTablesSecondaryInterfaceChainName = "egress-ip-sec-filter"
 
 	// primary user defined network's default join subnet value
 	// users can configure custom values using NADs
@@ -197,7 +231,6 @@ const (
 	OvnK8sTopoAnno            = OvnK8sPrefix + "/" + "topology-version"
 	OvnK8sSmallMTUTaintKey    = OvnK8sPrefix + "/" + "mtu-too-small"
 	OvnRouteAdvertisementsKey = OvnK8sPrefix + "/route-advertisements"
-	OvnDPUHostNodeLabel       = OvnK8sPrefix + "/dpu-host"
 
 	// name of the configmap used to synchronize status (e.g. watch for topology changes)
 	OvnK8sStatusCMName         = "control-plane-status"
@@ -275,6 +308,12 @@ const (
 	Layer2Topology   = "layer2"
 	LocalnetTopology = "localnet"
 
+	// IPAMTypeDHCP is the NAD "ipam.type" value that hands IP address
+	// management on a localnet network over to an external DHCP server:
+	// OVN-Kubernetes allocates no addresses on such networks and only
+	// reports the DHCP-assigned ones.
+	IPAMTypeDHCP = "dhcp"
+
 	// different types of network roles
 	// defined in CNI netconf as a user-defined network
 	NetworkRolePrimary   = "primary"
@@ -300,8 +339,6 @@ const (
 	// db index keys
 	// PrimaryIDKey is used as a primary client index
 	PrimaryIDKey = OvnK8sPrefix + "/id"
-
-	OvnDefaultZone = "global"
 
 	// EgressService "reserved" hosts - when set on an EgressService they have a special meaning
 
@@ -346,7 +383,7 @@ const (
 	// OVNKubeITPMark is the fwmark used for host->ITP=local svc traffic. Note
 	// that the fwmark is not a part of the packet, but just stored by kernel in
 	// its memory to track/filter packet. Hence fwmark is lost as soon as packet
-	// exits the host. The mark is set with an iptables rule by gateway and used
+	// exits the host. The mark is set with an nftables rule by gateway and used
 	// to route to management port.
 	OVNKubeITPMark = "0x1745ec" // constant itp(174)-service(5ec)
 

@@ -6,8 +6,11 @@
 package v1alpha1
 
 import (
+	networkqosv1alpha1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1/apis/applyconfiguration/internal"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	v1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -36,6 +39,47 @@ func NetworkQoS(name, namespace string) *NetworkQoSApplyConfiguration {
 	b.WithKind("NetworkQoS")
 	b.WithAPIVersion("k8s.ovn.org/v1alpha1")
 	return b
+}
+
+// ExtractNetworkQoSFrom extracts the applied configuration owned by fieldManager from
+// networkQoS for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// networkQoS must be a unmodified NetworkQoS API object that was retrieved from the Kubernetes API.
+// ExtractNetworkQoSFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractNetworkQoSFrom(networkQoS *networkqosv1alpha1.NetworkQoS, fieldManager string, subresource string) (*NetworkQoSApplyConfiguration, error) {
+	b := &NetworkQoSApplyConfiguration{}
+	err := managedfields.ExtractInto(networkQoS, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.networkqos.v1alpha1.NetworkQoS"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(networkQoS.Name)
+	b.WithNamespace(networkQoS.Namespace)
+
+	b.WithKind("NetworkQoS")
+	b.WithAPIVersion("k8s.ovn.org/v1alpha1")
+	return b, nil
+}
+
+// ExtractNetworkQoS extracts the applied configuration owned by fieldManager from
+// networkQoS. If no managedFields are found in networkQoS for fieldManager, a
+// NetworkQoSApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// networkQoS must be a unmodified NetworkQoS API object that was retrieved from the Kubernetes API.
+// ExtractNetworkQoS provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractNetworkQoS(networkQoS *networkqosv1alpha1.NetworkQoS, fieldManager string) (*NetworkQoSApplyConfiguration, error) {
+	return ExtractNetworkQoSFrom(networkQoS, fieldManager, "")
+}
+
+// ExtractNetworkQoSStatus extracts the applied configuration owned by fieldManager from
+// networkQoS for the status subresource.
+func ExtractNetworkQoSStatus(networkQoS *networkqosv1alpha1.NetworkQoS, fieldManager string) (*NetworkQoSApplyConfiguration, error) {
+	return ExtractNetworkQoSFrom(networkQoS, fieldManager, "status")
 }
 
 func (b NetworkQoSApplyConfiguration) IsApplyConfiguration() {}

@@ -9,3 +9,7 @@ ovn-kubernetes-anp-test-report.yaml
 **/ginkgo.report
 
 .gocache
+
+# MkDocs build output (local mkdocs build / mike deploy)
+/site/
+__pycache__/

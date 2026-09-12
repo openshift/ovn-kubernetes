@@ -29,8 +29,8 @@ Egress traffic from the pods that belong to the selected namespaces to outside t
 | `apiVersion` _string_ | `k8s.ovn.org/v1` | | |
 | `kind` _string_ | `AdminPolicyBasedExternalRoute` | | |
 | `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
-| `spec` _[AdminPolicyBasedExternalRouteSpec](#adminpolicybasedexternalroutespec)_ |  |  | Required: {} <br /> |
-| `status` _[AdminPolicyBasedRouteStatus](#adminpolicybasedroutestatus)_ |  |  |  |
+| `spec` _[AdminPolicyBasedExternalRouteSpec](#adminpolicybasedexternalroutespec)_ |  |  | Required: \{\} <br />Required: \{\} <br /> |
+| `status` _[AdminPolicyBasedRouteStatus](#adminpolicybasedroutestatus)_ |  |  | Optional: \{\} <br /> |
 
 
 #### AdminPolicyBasedExternalRouteSpec
@@ -63,9 +63,9 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `lastTransitionTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#time-v1-meta)_ | Captures the time when the last change was applied. |  |  |
-| `messages` _string array_ | An array of Human-readable messages indicating details about the status of the object. |  |  |
-| `status` _[StatusType](#statustype)_ | A concise indication of whether the AdminPolicyBasedRoute resource is applied with success |  |  |
+| `lastTransitionTime` _[Time](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#time-v1-meta)_ | Captures the time when the last change was applied. |  | Optional: \{\} <br /> |
+| `messages` _string array_ | An array of Human-readable messages indicating details about the status of the object. |  | Optional: \{\} <br /> |
+| `status` _[StatusType](#statustype)_ | A concise indication of whether the AdminPolicyBasedRoute resource is applied with success |  | Optional: \{\} <br /> |
 
 
 #### DynamicHop
@@ -84,10 +84,10 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `podSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta)_ | PodSelector defines the selector to filter the pods that are external gateways. |  | Required: {} <br /> |
-| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta)_ | NamespaceSelector defines a selector to filter the namespaces where the pod gateways are located. |  | Required: {} <br /> |
-| `networkAttachmentName` _string_ | NetworkAttachmentName determines the multus network name to use when retrieving the pod IPs that will be used as the gateway IP.<br />When this field is empty, the logic assumes that the pod is configured with HostNetwork and is using the node's IP as gateway. |  |  |
-| `bfdEnabled` _boolean_ | BFDEnabled determines if the interface implements the Bidirectional Forward Detection protocol. Defaults to false. | false |  |
+| `podSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta)_ | PodSelector defines the selector to filter the pods that are external gateways. |  | Required: \{\} <br />Required: \{\} <br /> |
+| `namespaceSelector` _[LabelSelector](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.28/#labelselector-v1-meta)_ | NamespaceSelector defines a selector to filter the namespaces where the pod gateways are located. |  | Required: \{\} <br />Required: \{\} <br /> |
+| `networkAttachmentName` _string_ | NetworkAttachmentName determines the multus network name to use when retrieving the pod IPs that will be used as the gateway IP.<br />When this field is empty, the logic assumes that the pod is configured with HostNetwork and is using the node's IP as gateway. |  | Optional: \{\} <br /> |
+| `bfdEnabled` _boolean_ | BFDEnabled determines if the interface implements the Bidirectional Forward Detection protocol. Defaults to false. | false | Optional: \{\} <br /> |
 
 
 #### ExternalNetworkSource
@@ -121,7 +121,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `static` _[StaticHop](#statichop) array_ | StaticHops defines a slice of StaticHop. This field is optional. |  |  |
-| `dynamic` _[DynamicHop](#dynamichop) array_ | DynamicHops defines a slices of DynamicHop. This field is optional. |  |  |
+| `dynamic` _[DynamicHop](#dynamichop) array_ | DynamicHops defines a slice of DynamicHop. This field is optional. |  |  |
 
 
 #### StaticHop
@@ -137,8 +137,8 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `ip` _string_ | IP defines the static IP to be used for egress traffic. The IP can be either IPv4 or IPv6. |  | Pattern: `^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$|^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]d|1dd|[1-9]?d)(.(25[0-5]|2[0-4]d|1dd|[1-9]?d)){3}))|:)))(%.+)?s*` <br />Required: {} <br /> |
-| `bfdEnabled` _boolean_ | BFDEnabled determines if the interface implements the Bidirectional Forward Detection protocol. Defaults to false. | false |  |
+| `ip` _string_ | IP defines the static IP to be used for egress traffic. The IP can be either IPv4 or IPv6. |  | Pattern: `^(([0-9]\|[1-9][0-9]\|1[0-9]\{2\}\|2[0-4][0-9]\|25[0-5])\.)\{3\}([0-9]\|[1-9][0-9]\|1[0-9]\{2\}\|2[0-4][0-9]\|25[0-5])$\|^s*((([0-9A-Fa-f]\{1,4\}:)\{7\}([0-9A-Fa-f]\{1,4\}\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{6\}(:[0-9A-Fa-f]\{1,4\}\|((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\})\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{5\}(((:[0-9A-Fa-f]\{1,4\})\{1,2\})\|:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\})\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{4\}(((:[0-9A-Fa-f]\{1,4\})\{1,3\})\|((:[0-9A-Fa-f]\{1,4\})?:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{3\}(((:[0-9A-Fa-f]\{1,4\})\{1,4\})\|((:[0-9A-Fa-f]\{1,4\})\{0,2\}:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{2\}(((:[0-9A-Fa-f]\{1,4\})\{1,5\})\|((:[0-9A-Fa-f]\{1,4\})\{0,3\}:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:))\|(([0-9A-Fa-f]\{1,4\}:)\{1\}(((:[0-9A-Fa-f]\{1,4\})\{1,6\})\|((:[0-9A-Fa-f]\{1,4\})\{0,4\}:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:))\|(:(((:[0-9A-Fa-f]\{1,4\})\{1,7\})\|((:[0-9A-Fa-f]\{1,4\})\{0,5\}:((25[0-5]\|2[0-4]d\|1dd\|[1-9]?d)(.(25[0-5]\|2[0-4]d\|1dd\|[1-9]?d))\{3\}))\|:)))(%.+)?s*` <br />Required: \{\} <br />Required: \{\} <br /> |
+| `bfdEnabled` _boolean_ | BFDEnabled determines if the interface implements the Bidirectional Forward Detection protocol. Defaults to false. | false | Optional: \{\} <br /> |
 
 
 #### StatusType
@@ -153,5 +153,9 @@ deployment of the CR was successful or if it failed.
 _Appears in:_
 - [AdminPolicyBasedRouteStatus](#adminpolicybasedroutestatus)
 
+| Field | Description |
+| --- | --- |
+| `Success` |  |
+| `Fail` |  |
 
 

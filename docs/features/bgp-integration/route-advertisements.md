@@ -143,6 +143,16 @@ in shared gateway mode.
 > previous example must correspond to the remote BGP router's configuration
 > (router ID, AS number, accept routes, etc...), and vice versa.
 
+> [!NOTE]
+> A neighbor can be defined by IP `address` or, for unnumbered BGP peering, by
+> node `interface`; one of the two must be specified. A neighbor defined by
+> address peers over a session of that address family and is only advertised
+> prefixes of the same family. FRR establishes an unnumbered session over an
+> IPv4 address derived from a /30 or /31 on the interface or, failing that,
+> over the peer's IPv6 link-local address; in either case the session can
+> carry prefixes of both IP families (RFC 8950), so OVN-Kubernetes advertises
+> prefixes of both families to interface-defined neighbors.
+
 ### Import routes from the default VRF into a CUDN
 
 Assuming we have a CUDN:
@@ -196,10 +206,10 @@ gateway router of the associated CUDN and hence will be used for the egress
 traffic of the pods on that network.
 
 > [!NOTE]
-> As long as the name of the CUDN is less than 16 characters, the corresponding
-> VRF name for the network will have the same name. Otherwise the name will be
-> pseudo-randomly generated and not easy to predict. Future enhancements will
-> allow for the VRF name to be configurable.
+> For CUDN names of 15 characters or fewer, the corresponding network VRF has
+> the same name. For longer CUDN names, the VRF name is derived from the network
+> ID. Read the actual VRF name from the CUDN `status.vrfName` field instead of
+> deriving it.
 
 > [!NOTE]
 > If you export routes for a CUDN over the default VRF as detailed on the next

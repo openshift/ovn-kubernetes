@@ -4,10 +4,12 @@
 package util
 
 import (
+	"cmp"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"net"
 	"regexp"
 	"slices"
@@ -17,8 +19,6 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v2"
-	"golang.org/x/exp/constraints"
-	"golang.org/x/exp/maps"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -479,7 +479,7 @@ func StringSlice[T fmt.Stringer](items []T) []string {
 	return s
 }
 
-func SortedKeys[K constraints.Ordered, V any](m map[K]V) []K {
+func SortedKeys[K cmp.Ordered, V any](m map[K]V) []K {
 	keys := make([]K, len(m))
 	i := 0
 	for k := range m {
@@ -843,7 +843,7 @@ func GetEndpointsForService(endpointSlices []*discoveryv1.EndpointSlice, service
 	targetEndpoints := newTargetEndpoints(endpointSlices)
 
 	// Build list of valid service port keys, if a non-nil service was provided. Otherwise, if service is nil, this
-	// is a deletion (at least for the iptables / nftables logic) and thus accept all endpoints.
+	// is a deletion (at least for the nftables logic) and thus accept all endpoints.
 	validServicePortKeys := map[string]bool{}
 	if service != nil {
 		for _, servicePort := range service.Spec.Ports {
@@ -871,7 +871,7 @@ func GetEndpointsForService(endpointSlices []*discoveryv1.EndpointSlice, service
 			// Process all target port numbers for this service port key.
 			// During rolling updates, a service port may temporarily map to multiple target ports
 			// (e.g., old pods on port 8080 and new pods on port 9090).
-			portNumbers := maps.Keys(portNumberMap)
+			portNumbers := slices.Collect(maps.Keys(portNumberMap))
 			slices.Sort(portNumbers)
 			for _, targetPortNumber := range portNumbers {
 				endpointList := portNumberMap[targetPortNumber]

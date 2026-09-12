@@ -127,9 +127,12 @@ func FindBridgesWithPredicate(ovsClient libovsdbclient.Client, p ovsBridgePredic
 }
 
 // GetPortBridge returns the OVS bridge that owns the named port.
-// Returns ErrNotFound if the port does not exist or no bridge references it
-// in its ports column. This is the libovsdb equivalent of
-// `ovs-vsctl port-to-br <port>`.
+// Returns ErrNotFound if the port does not exist, no bridge references it
+// in its ports column, or the port is the bridge's local port. This is the
+// libovsdb equivalent of `ovs-vsctl port-to-br <port>`.
+//
+// Like ovs-vsctl port-to-br / list-ports, a bridge's local port (the Port
+// created by add-br with the same name as the bridge) is not reported.
 func GetPortBridge(ovsClient libovsdbclient.Client, portName string) (*vswitchd.Bridge, error) {
 	port, err := GetOVSPort(ovsClient, portName)
 	if err != nil {
@@ -150,6 +153,11 @@ func GetPortBridge(ovsClient libovsdbclient.Client, portName string) (*vswitchd.
 		return nil, fmt.Errorf("OVSDB corruption: port %q is referenced by multiple bridges: %w", portName, errMultipleResults)
 	}
 	if len(bridges) == 1 {
+		// ovs-vsctl port-to-br does not resolve a bridge's own local port.
+		if bridges[0].Name == portName {
+			return nil, fmt.Errorf("port %q is the local port of bridge %q: %w",
+				portName, bridges[0].Name, libovsdbclient.ErrNotFound)
+		}
 		return bridges[0], nil
 	}
 	return nil, fmt.Errorf("no bridge contains port %q: %w", portName, libovsdbclient.ErrNotFound)

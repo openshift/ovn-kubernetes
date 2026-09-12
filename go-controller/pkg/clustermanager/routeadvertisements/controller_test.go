@@ -6,6 +6,7 @@ package routeadvertisements
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -38,6 +39,7 @@ import (
 	controllerutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	eiptypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
+	rafake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1/apis/clientset/versioned/fake"
 	apitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/types"
 	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
 	vtepv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/vtep/v1"
@@ -142,6 +144,7 @@ type testNode struct {
 	Generation                int
 	Labels                    map[string]string
 	PrimaryAddressAnnotation  string
+	DPUHostAddressAnnotation  string
 	SubnetsAnnotation         string
 	TunnelIDsAnnotation       string
 	L3GatewayConfigAnnotation string
@@ -161,6 +164,9 @@ func (tn testNode) Node() *corev1.Node {
 	}
 	if tn.TunnelIDsAnnotation != "" {
 		annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] = tn.TunnelIDsAnnotation
+	}
+	if tn.DPUHostAddressAnnotation != "" {
+		annotations[util.OVNNodePrimaryDPUHostAddr] = tn.DPUHostAddressAnnotation
 	}
 	if tn.L3GatewayConfigAnnotation != "" {
 		annotations[util.OvnNodeL3GatewayConfig] = tn.L3GatewayConfigAnnotation
@@ -187,6 +193,45 @@ func (tn testNode) Node() *corev1.Node {
 			Annotations: annotations,
 		},
 	}
+}
+
+func TestGetDPUHostGatewayNextHopsUsesDPUHostAddressAnnotation(t *testing.T) {
+	g := gomega.NewWithT(t)
+	previousGatewayMode := config.Gateway.Mode
+	t.Cleanup(func() { config.Gateway.Mode = previousGatewayMode })
+	config.Gateway.Mode = config.GatewayModeShared
+
+	c := &Controller{}
+	selected := &selectedNetworks{networkUplinks: map[string]string{}}
+
+	nextHops, err := c.getDPUHostGatewayNextHops(&corev1.Node{}, selected, types.DefaultNetworkName)
+	g.Expect(err).NotTo(gomega.HaveOccurred())
+	g.Expect(nextHops).To(gomega.BeNil(), "a node without the annotation is not a DPU host")
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        "node",
+		Annotations: map[string]string{util.OVNNodePrimaryDPUHostAddr: "invalid"},
+	}}
+	_, err = c.getDPUHostGatewayNextHops(node, selected, types.DefaultNetworkName)
+	g.Expect(errors.Is(err, errConfig)).To(gomega.BeTrue(), "a malformed DPU-host annotation is a configuration error")
+
+	node.Annotations[util.OVNNodePrimaryDPUHostAddr] = `{"ipv4":"not-a-cidr"}`
+	_, err = c.getDPUHostGatewayNextHops(node, selected, types.DefaultNetworkName)
+	g.Expect(errors.Is(err, errConfig)).To(gomega.BeTrue(), "an invalid DPU-host CIDR is a configuration error")
+
+	for _, annotation := range []string{
+		`{"ipv4":"fd00::1/64"}`,
+		`{"ipv6":"192.0.2.1/24"}`,
+	} {
+		node.Annotations[util.OVNNodePrimaryDPUHostAddr] = annotation
+		_, err = c.getDPUHostGatewayNextHops(node, selected, types.DefaultNetworkName)
+		g.Expect(errors.Is(err, errConfig)).To(gomega.BeTrue(),
+			"a CIDR in the wrong address-family field is a configuration error: %s", annotation)
+	}
+
+	node.Annotations[util.OVNNodePrimaryDPUHostAddr] = `{"ipv4":"172.18.255.254/16"}`
+	_, err = c.getDPUHostGatewayNextHops(node, selected, types.DefaultNetworkName)
+	g.Expect(errors.Is(err, errPending)).To(gomega.BeTrue(), "a DPU host waits for its gateway state")
 }
 
 type testPod struct {
@@ -216,6 +261,7 @@ type testPrefixSelector struct {
 type testNeighbor struct {
 	ASN                    uint32
 	Address                string
+	Interface              string
 	DualStackAddressFamily *bool
 	Advertise              []string
 	NextHopV4              string
@@ -225,8 +271,9 @@ type testNeighbor struct {
 
 func (tn testNeighbor) Neighbor() frrapi.Neighbor {
 	n := frrapi.Neighbor{
-		ASN:     tn.ASN,
-		Address: tn.Address,
+		ASN:       tn.ASN,
+		Address:   tn.Address,
+		Interface: tn.Interface,
 		ToAdvertise: frrapi.Advertise{
 			Allowed: frrapi.AllowedOutPrefixes{
 				Mode:     frrapi.AllowRestricted,
@@ -348,9 +395,14 @@ func (tf testFRRConfig) generateUnicastRawConfig() string {
 			fmt.Fprintf(&buf, "router bgp %d vrf %s\n", r.ASN, r.VRF)
 		}
 		for _, n := range r.Neighbors {
-			if utilnet.IsIPv6String(n.Address) {
+			switch {
+			case n.Address == "" && n.Interface != "":
+				// unnumbered neighbors are included in both address families
+				fmt.Fprintf(&buf, " address-family ipv4 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Interface)
+				fmt.Fprintf(&buf, " address-family ipv6 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Interface)
+			case utilnet.IsIPv6String(n.Address):
 				fmt.Fprintf(&buf, " address-family ipv6 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Address)
-			} else {
+			default:
 				fmt.Fprintf(&buf, " address-family ipv4 unicast\n  neighbor %s allowas-in origin\n exit-address-family\n", n.Address)
 			}
 		}
@@ -551,6 +603,7 @@ func TestController_reconcile(t *testing.T) {
 		transport            string
 		gatewayMode          config.GatewayMode
 		dynamicUDN           bool
+		layer2TransitRouter  bool
 		ipv6                 bool
 		wantErr              bool
 		expectAcceptedStatus metav1.ConditionStatus
@@ -587,6 +640,135 @@ func TestController_reconcile(t *testing.T) {
 					}},
 			},
 			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "reconciles pod RouteAdvertisement with an unnumbered interface neighbor",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0"},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0", Advertise: []string{"1.1.0.0/24"}},
+						}},
+					},
+				},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "reconciles dual-stack pod RouteAdvertisement with an unnumbered interface neighbor",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0"},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":[\"1.1.0.0/24\",\"fd01::/64\"]}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24", "fd01::/64"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0", Advertise: []string{"1.1.0.0/24", "fd01::/64"}},
+						}},
+					},
+				},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "reconciles IPv6-only pod RouteAdvertisement with an unnumbered interface neighbor",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0"},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"fd01::/64\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"fd01::/64"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0", Advertise: []string{"fd01::/64"}},
+						}},
+					},
+				},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "fails to reconcile a neighbor with neither address nor interface",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
+		},
+		{
+			name: "fails to reconcile a neighbor with neither address nor interface in an IPv6-only cluster",
+			ra:   &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1},
+						}},
+					},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"default\":\"fd01::/64\"}"}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionFalse,
 		},
 		{
 			name: "reconciles dual-stack pod+eip RouteAdvertisement for a single FRR config, node and default network and target VRF",
@@ -1010,7 +1192,7 @@ func TestController_reconcile(t *testing.T) {
 			nodes: []*testNode{
 				{
 					Name:                      "node",
-					Labels:                    map[string]string{types.OvnDPUHostNodeLabel: ""},
+					DPUHostAddressAnnotation:  `{"ipv4":"172.18.255.254/16"}`,
 					SubnetsAnnotation:         "{\"default\":\"1.1.0.0/24\"}",
 					L3GatewayConfigAnnotation: `{"default":{"mode":"shared","mac-address":"52:54:00:4c:e6:00","ip-addresses":["172.18.255.254/16"],"next-hops":["172.18.0.1"]}}`,
 				},
@@ -1027,6 +1209,45 @@ func TestController_reconcile(t *testing.T) {
 							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.1.0.0/24"}, NextHopV4: "172.18.255.254"},
 						}},
 					}},
+			},
+			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name:        "reconciles dual-stack pod RouteAdvertisement for DPU host with an unnumbered interface neighbor and next-hops",
+			ra:          &testRA{Name: "ra", AdvertisePods: true, SelectsDefault: true},
+			gatewayMode: config.GatewayModeShared,
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0"},
+						}},
+					},
+				},
+			},
+			nodes: []*testNode{
+				{
+					Name:                      "node",
+					DPUHostAddressAnnotation:  `{"ipv4":"172.18.255.254/16","ipv6":"fc00:f853:ccd:e793::4/64"}`,
+					SubnetsAnnotation:         "{\"default\":[\"1.1.0.0/24\",\"fd01::/64\"]}",
+					L3GatewayConfigAnnotation: `{"default":{"mode":"shared","mac-address":"52:54:00:4c:e6:00","ip-addresses":["172.18.255.254/16","fc00:f853:ccd:e793::4/64"],"next-hops":["172.18.0.1","fc00:f853:ccd:e793::1"]}}`,
+				},
+			},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.0.0/24", "fd01::/64"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Interface: "enp4s0f0np0", Advertise: []string{"1.1.0.0/24", "fd01::/64"}, NextHopV4: "172.18.255.254", NextHopV6: "fc00:f853:ccd:e793::4"},
+						}},
+					},
+				},
 			},
 			expectNADAnnotations: map[string]map[string]string{"default": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
@@ -1721,6 +1942,77 @@ exit
 						{ASN: 65000, VRF: "blue", Prefixes: []string{"10.2.1.0/24"}},
 						{ASN: 65000, Prefixes: []string{"100.64.0.1/32"}, Neighbors: []*testNeighbor{
 							{ASN: 65000, Address: "192.168.1.1", Advertise: []string{"100.64.0.1/32"}, Receive: []testPrefixSelector{{Prefix: "100.64.0.0/16", LE: 32, GE: 32}}},
+						}},
+					},
+				},
+			},
+			expectNADAnnotations: map[string]map[string]string{"blue": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
+			name: "advertises dual-stack VTEP IPs to an unnumbered interface neighbor for EVPN IP-VRF",
+			ra:   &testRA{Name: "ra", TargetVRF: "auto", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 65000, Neighbors: []*testNeighbor{
+							{ASN: 65000, Interface: "enp4s0f0np0"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "blue", Namespace: "blue", Network: util.GenerateCUDNNetworkName("blue"),
+					Topology: "layer3", Subnet: "10.2.0.0/16", Labels: map[string]string{"selected": "true"},
+					EVPNVTEPName: "my-vtep", EVPNIPVRFVNI: 2000, EVPNIPVRFRouteTarget: "65000:2000"},
+			},
+			vteps: []*vtepv1.VTEP{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "my-vtep"},
+					Spec:       vtepv1.VTEPSpec{CIDRs: []vtepv1.CIDR{"100.64.0.0/16", "fd64::/48"}},
+				},
+			},
+			nodes:                []*testNode{{Name: "node", SubnetsAnnotation: "{\"cluster_udn_blue\":\"10.2.1.0/24\"}", VTEPIPs: map[string][]string{"my-vtep": {"100.64.0.1", "fd64::1"}}}},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					RawConfig: `router bgp 65000
+ address-family ipv4 unicast
+  neighbor enp4s0f0np0 allowas-in origin
+ exit-address-family
+ address-family ipv6 unicast
+  neighbor enp4s0f0np0 allowas-in origin
+ exit-address-family
+ address-family l2vpn evpn
+  neighbor enp4s0f0np0 activate
+  neighbor enp4s0f0np0 allowas-in origin
+  advertise-all-vni
+ exit-address-family
+exit
+!
+vrf blue
+ vni 2000
+exit-vrf
+!
+router bgp 65000 vrf blue
+ address-family l2vpn evpn
+  advertise ipv4 unicast
+  route-target import 65000:2000
+  route-target export 65000:2000
+ exit-address-family
+exit
+!
+`,
+					Routers: []*testRouter{
+						{ASN: 65000, VRF: "blue", Prefixes: []string{"10.2.1.0/24"}},
+						{ASN: 65000, Prefixes: []string{"100.64.0.1/32", "fd64::1/128"}, Neighbors: []*testNeighbor{
+							{ASN: 65000, Interface: "enp4s0f0np0", Advertise: []string{"100.64.0.1/32", "fd64::1/128"},
+								Receive: []testPrefixSelector{{Prefix: "100.64.0.0/16", LE: 32, GE: 32}, {Prefix: "fd64::/48", LE: 128, GE: 128}}},
 						}},
 					},
 				},
@@ -2495,6 +2787,50 @@ exit
 			expectNADAnnotations: map[string]map[string]string{"green": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
 		},
 		{
+			name:                "with dynamic UDN allocation and transit router, advertises an active layer2 network without a tunnel ID allocation and skips inactive nodes",
+			dynamicUDN:          true,
+			layer2TransitRouter: true,
+			ra:                  &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
+			frrConfigs: []*testFRRConfig{
+				{
+					Name:      "frrConfig",
+					Namespace: frrNamespace,
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.1.1.0/24"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100"},
+						}},
+					},
+				},
+			},
+			nads: []*testNAD{
+				{Name: "green", Namespace: "green", Network: util.GenerateCUDNNetworkName("green"), Topology: "layer2", Subnet: "1.4.0.0/16", Labels: map[string]string{"selected": "true"}},
+			},
+			namespaces: []*testNamespace{{Name: "green"}},
+			pods:       []*testPod{{Name: "pod", Namespace: "green", Node: "node"}},
+			nodes: []*testNode{
+				// "node" runs a pod attached to the network; "node2" does not.
+				// Neither has a tunnel ID allocation, and only "node" must be
+				// advertised.
+				{Name: "node", SubnetsAnnotation: "{\"default\":\"1.1.0.0/24\"}"},
+				{Name: "node2", SubnetsAnnotation: "{\"default\":\"1.1.1.0/24\"}"},
+			},
+			reconcile:            "ra",
+			expectAcceptedStatus: metav1.ConditionTrue,
+			expectFRRConfigs: []*testFRRConfig{
+				{
+					Labels:       map[string]string{types.OvnRouteAdvertisementsKey: "ra"},
+					Annotations:  map[string]string{types.OvnRouteAdvertisementsKey: "ra/frrConfig/node"},
+					NodeSelector: map[string]string{"kubernetes.io/hostname": "node"},
+					Routers: []*testRouter{
+						{ASN: 1, Prefixes: []string{"1.4.0.0/16"}, Imports: []string{"green"}, Neighbors: []*testNeighbor{
+							{ASN: 1, Address: "1.0.0.100", Advertise: []string{"1.4.0.0/16"}},
+						}},
+						{ASN: 1, VRF: "green", Imports: []string{"default"}},
+					}},
+			},
+			expectNADAnnotations: map[string]map[string]string{"green": {types.OvnRouteAdvertisementsKey: "[\"ra\"]"}},
+		},
+		{
 			name:       "with dynamic UDN allocation, does not advertise a layer2 network from an active node until its tunnel ID is allocated",
 			dynamicUDN: true,
 			ra:         &testRA{Name: "ra", AdvertisePods: true, NetworkSelector: map[string]string{"selected": "true"}},
@@ -2586,6 +2922,9 @@ exit
 			gMaxLength := format.MaxLength
 			format.MaxLength = 0
 			defer func() { format.MaxLength = gMaxLength }()
+			previousLayer2TransitRouter := config.Layer2UsesTransitRouter
+			config.Layer2UsesTransitRouter = tt.layer2TransitRouter
+			t.Cleanup(func() { config.Layer2UsesTransitRouter = previousLayer2TransitRouter })
 
 			config.Default.ClusterSubnets = []config.CIDRNetworkEntry{
 				{
@@ -2628,11 +2967,12 @@ exit
 				g.Expect(err).ToNot(gomega.HaveOccurred())
 			}
 
+			defaultNADName := config.Default.ClusterDefaultNetworkNAD
 			var defaultNAD *nadtypes.NetworkAttachmentDefinition
 			for _, nad := range tt.nads {
 				n, err := fakeClientset.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(nad.Namespace).Create(context.Background(), nad.NAD(), metav1.CreateOptions{})
 				g.Expect(err).ToNot(gomega.HaveOccurred())
-				if nad.Name == types.DefaultNetworkName && nad.Namespace == config.Kubernetes.OVNConfigNamespace {
+				if nad.Name == defaultNADName.Name && nad.Namespace == defaultNADName.Namespace {
 					defaultNAD = n
 				}
 			}
@@ -2673,7 +3013,7 @@ exit
 			// prime the default network NAD namespace
 			namespace := &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: config.Kubernetes.OVNConfigNamespace,
+					Name: config.Default.ClusterDefaultNetworkNAD.Namespace,
 				},
 			}
 			_, err = fakeClientset.KubeClient.CoreV1().Namespaces().Create(context.Background(), namespace, metav1.CreateOptions{})
@@ -2843,7 +3183,7 @@ func TestController_reconcileOnNetworkActivity(t *testing.T) {
 	_, err = fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node.Node(), metav1.CreateOptions{})
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
-	for _, namespace := range []string{"blue", config.Kubernetes.OVNConfigNamespace} {
+	for _, namespace := range []string{"blue", config.Default.ClusterDefaultNetworkNAD.Namespace} {
 		_, err = fakeClientset.KubeClient.CoreV1().Namespaces().Create(context.Background(),
 			&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}, metav1.CreateOptions{})
 		g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -2911,6 +3251,12 @@ func TestController_reconcileOnNetworkActivity(t *testing.T) {
 	g.Eventually(raAccepted, 5*time.Second).Should(gomega.BeTrue())
 	g.Expect(generatedFRRConfigs()).To(gomega.BeEmpty())
 
+	// the initial reconcile cached which networks the RouteAdvertisements
+	// selects
+	networkName := util.GenerateCUDNNetworkName("blue")
+	g.Expect(c.getRAsForNetwork(networkName)).To(gomega.ConsistOf("ra"))
+	g.Expect(c.getRAsForNetwork(util.GenerateCUDNNetworkName("red"))).To(gomega.BeEmpty())
+
 	// scheduling a pod on the node activates the network there without
 	// updating any object the controller watches: the network manager
 	// notification must trigger the reconcile that advertises the node
@@ -2919,6 +3265,11 @@ func TestController_reconcileOnNetworkActivity(t *testing.T) {
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	g.Eventually(generatedFRRConfigs, 5*time.Second).Should(gomega.ConsistOf("ra/frrConfig/node"))
+
+	// deleting the RouteAdvertisements removes it from the cache
+	err = fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Delete(context.Background(), "ra", metav1.DeleteOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Eventually(func() []string { return c.getRAsForNetwork(networkName) }, 5*time.Second).Should(gomega.BeEmpty())
 }
 
 func TestUpdates(t *testing.T) {
@@ -3108,6 +3459,18 @@ func TestUpdates(t *testing.T) {
 			expectedReconcile: []string{"ra1", "ra2", "ra3"},
 		},
 		{
+			name:              "reconciles all RAs when the Node becomes a DPU host",
+			oldObject:         &testNode{Name: "eip"},
+			newObject:         &testNode{Name: "eip", DPUHostAddressAnnotation: `{"ipv4":"172.18.255.254/16"}`},
+			expectedReconcile: []string{"ra1", "ra2", "ra3"},
+		},
+		{
+			name:              "reconciles all RAs when the Node stops being a DPU host",
+			oldObject:         &testNode{Name: "eip", DPUHostAddressAnnotation: `{"ipv4":"172.18.255.254/16"}`},
+			newObject:         &testNode{Name: "eip"},
+			expectedReconcile: []string{"ra1", "ra2", "ra3"},
+		},
+		{
 			name: "reconciles all RAs on updated Node L3 gateway annotation",
 			oldObject: &testNode{
 				Name:                      "eip",
@@ -3292,4 +3655,101 @@ func TestUpdates(t *testing.T) {
 func getRAConditionMetricValue(nameLabel, conditionLabel, statusLabel string) (float64, bool) {
 	metricName := prometheus.BuildFQName(types.MetricOvnkubeNamespace, types.MetricOvnkubeSubsystemClusterManager, "route_advertisement_condition")
 	return ovntest.GetConditionMetricValue(metricName, nameLabel, conditionLabel, statusLabel)
+}
+
+// TestController_updateRAStatus verifies that the 'Accepted' condition is
+// refreshed when consecutive reconciles fail for different reasons, so that
+// the status message never gets stale.
+func TestController_updateRAStatus(t *testing.T) {
+	g := gomega.NewWithT(t)
+
+	fakeClientset := util.GetOVNClientset().GetClusterManagerClientset()
+	c := &Controller{raClient: fakeClientset.RouteAdvertisementsClient}
+
+	raName := "ra"
+	tra := &testRA{Name: raName}
+	_, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), tra.RouteAdvertisements(), metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	t.Cleanup(func() { metrics.DeleteRouteAdvertisementCondition(raName) })
+
+	getRA := func() *ratypes.RouteAdvertisements {
+		ra, err := fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(context.Background(), raName, metav1.GetOptions{})
+		g.Expect(err).ToNot(gomega.HaveOccurred())
+		return ra
+	}
+
+	// first reconcile fails with error A
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error A", errConfig))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "first reconcile with error A should update the status")
+	accepted := meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should be set after the first reconcile")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should be false after error A")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationError"), "errConfig should be reported as ConfigurationError")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error A"), "the message should report error A")
+
+	// rewind the condition transition time one hour into the past, so we can
+	// tell whether subsequent refreshes preserve or bump it: condition
+	// timestamps have one-second resolution and the whole test runs within a
+	// single second, so against a "now" timestamp an unchanged and a wrongly
+	// re-stamped transition time would look identical
+	rewound := metav1.NewTime(time.Now().Add(-time.Hour).Truncate(time.Second))
+	ra := getRA()
+	meta.FindStatusCondition(ra.Status.Conditions, "Accepted").LastTransitionTime = rewound
+	_, err = fakeClientset.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().UpdateStatus(context.Background(), ra, metav1.UpdateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "rewinding the condition transition time should succeed")
+
+	// second reconcile fails with error B for the same reason: the message
+	// must be refreshed
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error B", errConfig))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "second reconcile with error B should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after error B")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should stay false after error B")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationError"), "errConfig should still be reported as ConfigurationError")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error B"), "the message should be refreshed to error B")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a message-only refresh should preserve the transition time")
+
+	// third reconcile fails with a different reason: reason and message must
+	// be refreshed
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "third reconcile with error C should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after error C")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionFalse), "the Accepted condition should stay false after error C")
+	g.Expect(accepted.Reason).To(gomega.Equal("ConfigurationPending"), "errPending should be reported as ConfigurationPending")
+	g.Expect(accepted.Message).To(gomega.ContainSubstring("error C"), "the message should be refreshed to error C")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a reason/message refresh should preserve the transition time")
+
+	// fourth reconcile fails with the same error: the status must not be
+	// applied again
+	countStatusPatches := func() int {
+		patches := 0
+		for _, action := range fakeClientset.RouteAdvertisementsClient.(*rafake.Clientset).Actions() {
+			if action.GetVerb() == "patch" {
+				patches++
+			}
+		}
+		return patches
+	}
+	patches := countStatusPatches()
+	err = c.updateRAStatus(getRA(), false, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a reconcile with an unchanged error should succeed")
+	g.Expect(countStatusPatches()).To(gomega.Equal(patches), "an unchanged status must not be re-applied")
+
+	// fifth reconcile fails with the same error but had FRRConfig/NAD updates:
+	// the status must be applied even though the condition is unchanged
+	err = c.updateRAStatus(getRA(), true, fmt.Errorf("%w: error C", errPending))
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a reconcile with updates should update the status")
+	g.Expect(countStatusPatches()).To(gomega.Equal(patches+1), "hadUpdates should apply the status even when the condition is unchanged")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally("==", rewound.Time), "a hadUpdates apply should preserve the transition time of an unchanged condition")
+
+	// sixth reconcile succeeds: the condition status flips and the transition
+	// time must be bumped
+	err = c.updateRAStatus(getRA(), false, nil)
+	g.Expect(err).ToNot(gomega.HaveOccurred(), "a successful reconcile should update the status")
+	accepted = meta.FindStatusCondition(getRA().Status.Conditions, "Accepted")
+	g.Expect(accepted).NotTo(gomega.BeNil(), "the Accepted condition should still be set after a successful reconcile")
+	g.Expect(accepted.Status).To(gomega.Equal(metav1.ConditionTrue), "the Accepted condition should be true after a successful reconcile")
+	g.Expect(accepted.LastTransitionTime.Time).To(gomega.BeTemporally(">", rewound.Time), "a status flip should bump the transition time")
 }

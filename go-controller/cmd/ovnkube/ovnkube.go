@@ -84,6 +84,7 @@ func getFlagsByCategory() map[string][]cli.Flag {
 	m["IPFIX Flow Tracing Options"] = config.IPFIXFlags
 	m["Metrics Options"] = config.MetricsFlags
 	m["TLS Options"] = config.TLSFlags
+	m["Egress IP Health-Check TLS Options"] = config.EgressIPHealthCheckTLSFlags
 	m["Hybrid Overlay Options"] = config.HybridOverlayFlags
 
 	return m
@@ -325,7 +326,6 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	if err != nil {
 		return err
 	}
-
 	eventRecorder := util.EventRecorder(ovnClientset.KubeClient)
 
 	if config.Metrics.BindAddress != "" && !combineMetricsEndpoints(runMode) {
@@ -518,6 +518,7 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			}
 
 			controllerManager, err := controllermanager.NewControllerManager(
+				runMode.identity,
 				ovnClientset,
 				watchFactory,
 				libovsdbOvnNBClient,
@@ -662,7 +663,8 @@ func newWatchFactory(runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset) (
 	case runMode.clusterManager:
 		watchFactory, err = factory.NewClusterManagerWatchFactory(ovnClientset.GetClusterManagerClientset())
 	case runMode.ovnkubeController:
-		watchFactory, err = factory.NewOVNKubeControllerWatchFactory(ovnClientset.GetOVNKubeControllerClientset())
+		watchFactory, err = factory.NewOVNKubeControllerWatchFactory(
+			ovnClientset.GetOVNKubeControllerClientset(), runMode.identity)
 	case runMode.node:
 		watchFactory, err = factory.NewNodeWatchFactory(ovnClientset.GetNodeClientset(), runMode.identity)
 	default:

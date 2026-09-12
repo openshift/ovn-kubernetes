@@ -67,6 +67,8 @@ global:
   enableNetworkSegmentation: false
   # -- Configure to use route advertisements feature with ovn-kubernetes
   enableRouteAdvertisements: false
+  # -- Configure to enable the uplink feature with ovn-kubernetes
+  enableUplink: false
   # -- Optional Linux routing table ID start used by ovnkube-node for generated VRF/route tables.
   # -- Minimum: 1000. If unset, ovnkube-node uses its built-in default.
   # routingTableIDStart: 1002
@@ -84,6 +86,8 @@ global:
   managedBGPFRRNamespace: "frr-k8s-system"
   # -- Configure to enable workloads with preconfigured network connect to user defined networks (UDN) with ovn-kubernetes
   enablePreconfiguredUDNAddresses: false
+  # -- Namespace/name of the default cluster network NAD. Empty defaults to <ovn-config-namespace>/default
+  #clusterDefaultNAD: ""
   # -- Configure to enable IPsec
   enableIpsec: false
   # -- Use SSL transport for the Egress IP gRPC health-check (NB cert paths
@@ -123,10 +127,6 @@ global:
   aclLoggingRateLimit: 20
   # -- If set, then load balancers do not get deleted when all backends are removed
   emptyLbEvents: ""
-  # -- Port of north bound ovsdb
-  nbPort: 6641
-  # -- Port of south bound ovsdb
-  sbPort: 6642
   # -- A comma separated set of NetFlow collectors to export flow data
   netFlowTargets: ""
   # -- A comma separated set of SFlow collectors to export flow data

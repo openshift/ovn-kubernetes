@@ -14,7 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
@@ -488,62 +491,6 @@ func TestParseNodeManagementPortMACAddresses(t *testing.T) {
 	}
 }
 
-func TestParseNodeGatewayRouterLRPAddr(t *testing.T) {
-	tests := []struct {
-		desc        string
-		inpNode     corev1.Node
-		errExpected bool
-		expOutput   bool
-	}{
-		{
-			desc:      "Gateway router LPR IP address annotation not found for node, however, does not return error",
-			inpNode:   corev1.Node{},
-			expOutput: false,
-		},
-		{
-			desc: "success: Gateway router parse LPR IP address",
-			inpNode: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5/16"}`},
-				},
-			},
-			expOutput: true,
-		},
-		{
-			desc: "success: Gateway router parse LPR IP address dual stack",
-			inpNode: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5/16", "ipv6":"fd:98::/64"}`},
-				},
-			},
-			expOutput: true,
-		},
-		{
-			desc: "error: Gateway router parse LPR IP address error",
-			inpNode: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{"k8s.ovn.org/node-gateway-router-lrp-ifaddr": `{"ipv4":"100.64.0.5"}`},
-				},
-			},
-			errExpected: true,
-		},
-	}
-
-	for i, tc := range tests {
-		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
-			cfg, e := ParseNodeGatewayRouterLRPAddr(&tc.inpNode)
-			if tc.errExpected {
-				t.Log(e)
-				require.Error(t, e)
-				assert.Nil(t, cfg)
-			}
-			if tc.expOutput {
-				assert.NotNil(t, cfg)
-			}
-		})
-	}
-}
-
 func TestSetGatewayMTUSupport(t *testing.T) {
 	mockAnnotator := new(annotatorMock.Annotator)
 
@@ -812,6 +759,67 @@ func TestNodeDontSNATSubnetAnnotationChanged(t *testing.T) {
 	}
 }
 
+func TestCloudEgressIPConfigAnnotationChanged(t *testing.T) {
+	v4Only := `[{"interface":"eth0","ifaddr":{"ipv4":"192.168.126.12/24"},"capacity":{}}]`
+	dualStack := `[{"interface":"eth0","ifaddr":{"ipv4":"192.168.126.12/24","ipv6":"fc00:f853:ccd:e793::12/64"},"capacity":{}}]`
+
+	tests := []struct {
+		desc    string
+		oldNode *corev1.Node
+		newNode *corev1.Node
+		result  bool
+	}{
+		{
+			desc:    "annotation added",
+			oldNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			newNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				cloudEgressIPConfigAnnotationKey: v4Only,
+			}}},
+			result: true,
+		},
+		{
+			desc: "annotation removed",
+			oldNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				cloudEgressIPConfigAnnotationKey: v4Only,
+			}}},
+			newNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			result:  true,
+		},
+		{
+			desc: "annotation value changed (IPv6 subnet added)",
+			oldNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				cloudEgressIPConfigAnnotationKey: v4Only,
+			}}},
+			newNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				cloudEgressIPConfigAnnotationKey: dualStack,
+			}}},
+			result: true,
+		},
+		{
+			desc: "false: annotation unchanged",
+			oldNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				cloudEgressIPConfigAnnotationKey: v4Only,
+			}}},
+			newNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+				cloudEgressIPConfigAnnotationKey: v4Only,
+			}}},
+			result: false,
+		},
+		{
+			desc:    "false: annotation absent in both",
+			oldNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			newNode: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			result:  false,
+		},
+	}
+
+	for i, tc := range tests {
+		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
+			assert.Equal(t, tc.result, CloudEgressIPConfigAnnotationChanged(tc.oldNode, tc.newNode))
+		})
+	}
+}
+
 func TestParseNodeDontSNATSubnetsList(t *testing.T) {
 	tests := []struct {
 		desc        string
@@ -966,6 +974,36 @@ func TestParseNodeManagementPortAnnotation(t *testing.T) {
 				require.NoError(t, err)
 				assert.True(t, reflect.DeepEqual(mpDetails, tc.expectedOutput))
 			}
+		})
+	}
+}
+
+func TestIsNodeAnnotationPatchRetryable(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "conflict error is retryable",
+			err:      apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, "node1", fmt.Errorf("conflict")),
+			expected: true,
+		},
+		{
+			name:     "invalid error is retryable (JSON Patch test failure)",
+			err:      apierrors.NewInvalid(schema.GroupKind{Group: "", Kind: "Node"}, "node1", field.ErrorList{field.Invalid(field.NewPath("metadata"), nil, "test failed")}),
+			expected: true,
+		},
+		{
+			name:     "plain error is not retryable",
+			err:      fmt.Errorf("plain error"),
+			expected: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, IsNodeAnnotationPatchRetryable(tc.err))
 		})
 	}
 }

@@ -20,40 +20,32 @@ import (
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 )
 
-func TestAreNetlinkRulesEqualChecksFamily(t *testing.T) {
-	v4Rule := netlink.NewRule()
-	v4Rule.Priority = 2000
-	v4Rule.Table = 1020
-	v4Rule.Family = netlink.FAMILY_V4
-	v4Rule.Mark = 0x1003
+func TestIPRuleEquality(t *testing.T) {
+	v4Rule := IPRuleFromNetlinkRule(&netlink.Rule{
+		Priority: 2000,
+		Table:    1020,
+		Family:   netlink.FAMILY_V4,
+		Mark:     0x1003,
+	})
+	v6Rule := IPRuleFromNetlinkRule(&netlink.Rule{
+		Priority: 2000,
+		Table:    1020,
+		Family:   netlink.FAMILY_V6,
+		Mark:     0x1003,
+	})
 
-	v6Rule := netlink.NewRule()
-	v6Rule.Priority = v4Rule.Priority
-	v6Rule.Table = v4Rule.Table
-	v6Rule.Family = netlink.FAMILY_V6
-	v6Rule.Mark = v4Rule.Mark
-
-	if areNetlinkRulesEqual(v4Rule, v6Rule) {
+	if v4Rule == v6Rule {
 		t.Fatalf("expected IPv4 and IPv6 rules with the same mark/table to be different")
 	}
 }
 
-func TestAreNetlinkRulesEqualTreatsFamilyAllAsWildcard(t *testing.T) {
-	v4Rule := netlink.NewRule()
-	v4Rule.Priority = 2000
-	v4Rule.Table = 1020
-	v4Rule.Family = netlink.FAMILY_V4
-	v4Rule.Mark = 0x1003
-
-	anyFamilyRule := netlink.NewRule()
-	anyFamilyRule.Priority = v4Rule.Priority
-	anyFamilyRule.Table = v4Rule.Table
-	anyFamilyRule.Family = netlink.FAMILY_ALL
-	anyFamilyRule.Mark = v4Rule.Mark
-
-	if !areNetlinkRulesEqual(v4Rule, anyFamilyRule) {
-		t.Fatalf("expected FAMILY_ALL to match a specific rule family")
+func isRuleInSlice(rules []netlink.Rule, candidate IPRule) bool {
+	for _, r := range rules {
+		if IPRuleFromNetlinkRule(&r) == candidate {
+			return true
+		}
 	}
+	return false
 }
 
 // FIXME(mk) - Within GH VM, if I need to create a new NetNs. I see the following error:
@@ -72,6 +64,9 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 	ruleWithSrc.Priority = 3000
 	ruleWithSrc.Table = 254
 	ruleWithSrc.Src = testIPNet
+
+	ipRuleWithDst := IPRuleFromNetlinkRule(ruleWithDst)
+	ipRuleWithSrc := IPRuleFromNetlinkRule(ruleWithSrc)
 
 	defer ginkgo.GinkgoRecover()
 	if ovntest.NoRoot() {
@@ -111,7 +106,7 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 		ginkgo.It("ensure rule exist", func() {
 			gomega.Expect(func() error {
 				return testNS.Do(func(ns.NetNS) error {
-					return c.Add(*ruleWithDst)
+					return c.Add(ipRuleWithDst)
 				})
 			}()).Should(gomega.Succeed())
 
@@ -121,8 +116,8 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 					if err != nil {
 						return err
 					}
-					if ok, _ := isNetlinkRuleInSlice(rules, ruleWithDst); !ok {
-						return fmt.Errorf("failed to find rule %q", ruleWithDst.String())
+					if !isRuleInSlice(rules, ipRuleWithDst) {
+						return fmt.Errorf("failed to find rule %q", ipRuleWithDst.String())
 					}
 					return nil
 				})
@@ -132,7 +127,7 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 		ginkgo.It("ensure rule is restored if it is removed", func() {
 			gomega.Expect(func() error {
 				return testNS.Do(func(ns.NetNS) error {
-					return c.Add(*ruleWithDst)
+					return c.Add(ipRuleWithDst)
 				})
 			}()).Should(gomega.Succeed())
 
@@ -142,8 +137,8 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 					if err != nil {
 						return err
 					}
-					if ok, _ := isNetlinkRuleInSlice(rules, ruleWithDst); !ok {
-						return fmt.Errorf("failed to find rule %q", ruleWithDst.String())
+					if !isRuleInSlice(rules, ipRuleWithDst) {
+						return fmt.Errorf("failed to find rule %q", ipRuleWithDst.String())
 					}
 					return nil
 				})
@@ -160,8 +155,8 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 					if err != nil {
 						return err
 					}
-					if ok, _ := isNetlinkRuleInSlice(rules, ruleWithDst); !ok {
-						return fmt.Errorf("failed to find rule %q", ruleWithDst.String())
+					if !isRuleInSlice(rules, ipRuleWithDst) {
+						return fmt.Errorf("failed to find rule %q", ipRuleWithDst.String())
 					}
 					return nil
 				})
@@ -171,12 +166,12 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 		ginkgo.It("ensure multiple rules are restored if they're removed", func() {
 			gomega.Expect(func() error {
 				return testNS.Do(func(ns.NetNS) error {
-					return c.Add(*ruleWithDst)
+					return c.Add(ipRuleWithDst)
 				})
 			}()).Should(gomega.Succeed())
 			gomega.Expect(func() error {
 				return testNS.Do(func(ns.NetNS) error {
-					return c.Add(*ruleWithSrc)
+					return c.Add(ipRuleWithSrc)
 				})
 			}()).Should(gomega.Succeed())
 
@@ -186,10 +181,10 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 					if err != nil {
 						return err
 					}
-					if ok, _ := isNetlinkRuleInSlice(rules, ruleWithDst); !ok {
+					if !isRuleInSlice(rules, ipRuleWithDst) {
 						return fmt.Errorf("failed to find rule with dst")
 					}
-					if ok2, _ := isNetlinkRuleInSlice(rules, ruleWithSrc); !ok2 {
+					if !isRuleInSlice(rules, ipRuleWithSrc) {
 						return fmt.Errorf("failed to find rule with src")
 					}
 					return nil
@@ -207,8 +202,8 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 					if err != nil {
 						return err
 					}
-					if ok, _ := isNetlinkRuleInSlice(rules, ruleWithDst); !ok {
-						return fmt.Errorf("failed to find rule %s", ruleWithDst.String())
+					if !isRuleInSlice(rules, ipRuleWithDst) {
+						return fmt.Errorf("failed to find rule %s", ipRuleWithDst.String())
 					}
 					return nil
 				})
@@ -225,8 +220,8 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 					if err != nil {
 						return err
 					}
-					if ok, _ := isNetlinkRuleInSlice(rules, ruleWithSrc); !ok {
-						return fmt.Errorf("failed to find rule %s", ruleWithSrc)
+					if !isRuleInSlice(rules, ipRuleWithSrc) {
+						return fmt.Errorf("failed to find rule %s", ipRuleWithSrc.String())
 					}
 					return nil
 				})
@@ -238,7 +233,7 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 		ginkgo.It("doesn't fail when no rule to delete", func() {
 			gomega.Expect(func() error {
 				return testNS.Do(func(ns.NetNS) error {
-					return c.Delete(*ruleWithDst)
+					return c.Delete(ipRuleWithDst)
 				})
 			}()).Should(gomega.Succeed())
 		})
@@ -246,10 +241,10 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 		ginkgo.It("deletes a rule", func() {
 			gomega.Expect(func() error {
 				return testNS.Do(func(ns.NetNS) error {
-					if err := c.Add(*ruleWithDst); err != nil {
+					if err := c.Add(ipRuleWithDst); err != nil {
 						return err
 					}
-					if err := c.Delete(*ruleWithDst); err != nil {
+					if err := c.Delete(ipRuleWithDst); err != nil {
 						return err
 					}
 					return nil
@@ -262,8 +257,8 @@ var _ = ginkgo.XDescribe("IP Rule Manager", func() {
 					if err != nil {
 						return err
 					}
-					if ok, _ := isNetlinkRuleInSlice(rules, ruleWithDst); ok {
-						return fmt.Errorf("expected rule (%s) to be deleted but it was found", ruleWithDst)
+					if isRuleInSlice(rules, ipRuleWithDst) {
+						return fmt.Errorf("expected rule (%s) to be deleted but it was found", ipRuleWithDst.String())
 					}
 					return nil
 				})

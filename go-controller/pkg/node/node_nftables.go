@@ -207,15 +207,10 @@ func setupPMTUDNFTChain() error {
 	return nil
 }
 
-// SetupEgressIPARPBlockNFTables sets up nftables for blocking ARP/NDP responses for egress IPs during
+// SetupEgressIPARPBlockNFT sets up nftables for blocking ARP/NDP responses for egress IPs during
 // graceful shutdown. Uses netdev family with ingress hook on the physical uplink interface to intercept
 // packets before they reach the OVS bridge, preventing OVN from responding to ARP/NDP requests.
-func SetupEgressIPARPBlockNFTables(egressIPs []string, uplinkName string) error {
-	if len(egressIPs) == 0 {
-		klog.V(5).Info("No egress IPs to setup ARP block rules for")
-		return nil
-	}
-
+func SetupEgressIPARPBlockNFT(egressIPs []string, uplinkName string) error {
 	if uplinkName == "" {
 		return fmt.Errorf("uplink interface name is required for netdev nftables rules")
 	}
@@ -306,10 +301,10 @@ func SetupEgressIPARPBlockNFTables(egressIPs []string, uplinkName string) error 
 	return nil
 }
 
-// CleanupEgressIPARPBlockNFTTable deletes the dedicated nftables table for egress IP ARP/NDP blocking.
+// CleanupEgressIPARPBlockNFT deletes the dedicated nftable "ovn-kubernetes-egressip"  for egress IP ARP/NDP blocking.
 // Called during startup to remove stale rules from previous container shutdown.
 // On full node reboot, nftables state is cleared automatically, so this primarily handles container restarts.
-func CleanupEgressIPARPBlockNFTTable(ctx context.Context) error {
+func CleanupEgressIPARPBlockNFT(ctx context.Context) error {
 	nft, err := nodenft.GetEgressIPNFTablesHelper()
 	if err != nil {
 		return fmt.Errorf("failed to get egress IP nftables helper: %w", err)
@@ -319,9 +314,9 @@ func CleanupEgressIPARPBlockNFTTable(ctx context.Context) error {
 	tx.Delete(&knftables.Table{})
 
 	if err = nft.Run(ctx, tx); err != nil && !knftables.IsNotFound(err) {
-		return fmt.Errorf("could not delete egress IP nftables table: %v", err)
+		return fmt.Errorf("could not delete egress IP nftables table %s: %v", nodenft.OVNKubernetesEgressIPNFTablesName, err)
 	}
 
-	klog.Infof("Cleaned up egress IP nftables table from previous shutdown")
+	klog.Infof("Cleaned up egress IP nftables table from previous shutdown : %s", nodenft.OVNKubernetesEgressIPNFTablesName)
 	return nil
 }

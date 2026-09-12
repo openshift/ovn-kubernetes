@@ -238,6 +238,8 @@ ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
 #OVN_NETWORK_CONNECT_ENABLE - enable network connect for ovn-kubernetes
 ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE:=false}
+#OVN_UPLINK_ENABLE - enable uplink for ovn-kubernetes
+ovn_uplink_enable=${OVN_UPLINK_ENABLE:=false}
 #OVN_PRE_CONF_UDN_ADDR_ENABLE - enable connecting workloads with custom network configuration to UDNs
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
 #OVN_ROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
@@ -265,6 +267,16 @@ ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 #OVN_ENABLE_PERSISTENT_IPS - enable IPAM for virtualization workloads (KubeVirt persistent IPs)
 ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS:-false}
+# OVNKUBE_CLUSTER_DEFAULT_NAD - namespace/name of the default cluster wide net-attach-def.
+# When unset, ovnkube defaults to <ovn-config-namespace>/default.
+ovnkube_cluster_default_nad=${OVNKUBE_CLUSTER_DEFAULT_NAD:-}
+
+# only pass the flag when the env variable is set, otherwise let ovnkube
+# resolve the default
+ovnkube_cluster_default_nad_flag=
+if [[ -n "${ovnkube_cluster_default_nad}" ]]; then
+  ovnkube_cluster_default_nad_flag="--cluster-default-nad=${ovnkube_cluster_default_nad}"
+fi
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -861,14 +873,6 @@ function memory_trim_on_compaction_supported {
   fi
 }
 
-function get_node_zone() {
-  # Single-node-zone is the only supported interconnect topology: each node is
-  # its own zone, named after the kube node. In DPU mode, K8S_NODE has already
-  # been overridden earlier in this script from the OVS external_id
-  # host-k8s-nodename, so it carries the DPU-host's node name.
-  echo "${K8S_NODE}"
-}
-
 # v1.0.0 - run nb_ovsdb in a separate container listening only on
 # unix sockets
 local-nb-ovsdb() {
@@ -1122,6 +1126,12 @@ ovnkube-controller() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -1184,9 +1194,6 @@ ovnkube-controller() {
     ovnkube_config_duration_enable_flag="--metrics-enable-config-duration"
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
-
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-controller's configured zone is ${ovn_zone}"
 
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
@@ -1268,6 +1275,7 @@ ovnkube-controller() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -1290,6 +1298,7 @@ ovnkube-controller() {
     ${ovn_enable_dnsnameresolver_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -1302,8 +1311,7 @@ ovnkube-controller() {
     --metrics-bind-address ${ovnkube_controller_metrics_bind_address} \
     --metrics-enable-pprof \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
-    --zone ${ovn_zone} &
+    --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid &
 
   echo "=============== ovnkube-controller ========== running"
   wait_for_event attempts=3 process_ready ovnkube-controller
@@ -1462,6 +1470,12 @@ ovnkube-controller-with-node() {
 	  network_connect_enabled_flag="--enable-network-connect"
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
 
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
@@ -1625,9 +1639,6 @@ ovnkube-controller-with-node() {
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
 
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-controller-with-node's configured zone is ${ovn_zone}"
-
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
@@ -1780,6 +1791,7 @@ ovnkube-controller-with-node() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -1811,6 +1823,7 @@ ovnkube-controller-with-node() {
     ${sflow_targets} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_disable_requestedchassis_flag} \
@@ -1833,8 +1846,7 @@ ovnkube-controller-with-node() {
     --nodeport \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
-    --zone ${ovn_zone} &
+    --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid &
 
   wait_for_event attempts=3 process_ready ovnkube-controller-with-node
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then
@@ -1962,6 +1974,12 @@ ovn-cluster-manager() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -2086,6 +2104,7 @@ ovn-cluster-manager() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -2105,6 +2124,7 @@ ovn-cluster-manager() {
     ${network_qos_enabled_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -2253,6 +2273,12 @@ ovn-node() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -2396,9 +2422,6 @@ ovn-node() {
       "
   fi
 
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-node's configured zone is ${ovn_zone}"
-
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
 	  ovnkube_enable_multi_external_gateway_flag="--enable-multi-external-gateway"
@@ -2484,6 +2507,7 @@ ovn-node() {
         ${multi_network_enabled_flag} \
         ${network_segmentation_enabled_flag} \
         ${network_connect_enabled_flag} \
+        ${uplink_enabled_flag} \
         ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
         ${evpn_enabled_flag} \
@@ -2509,6 +2533,7 @@ ovn-node() {
         ${sflow_targets} \
         ${dynamic_udn_allocation_flag} \
         ${dynamic_udn_grace_period} \
+        ${ovnkube_cluster_default_nad_flag} \
         ${network_qos_enabled_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --export-ovs-metrics \
@@ -2527,8 +2552,7 @@ ovn-node() {
         --nodeport \
         --ovn-config-namespace ${ovn_kubernetes_namespace} \
         --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-        --pidfile ${OVN_RUNDIR}/ovnkube.pid \
-        --zone ${ovn_zone} &
+        --pidfile ${OVN_RUNDIR}/ovnkube.pid &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then

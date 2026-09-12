@@ -26,6 +26,8 @@ import (
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	uplinkfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned/fake"
+	uplinkinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/informers/externalversions"
 	udnfakeclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
@@ -93,7 +95,7 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 		factoryMock.On("GetNodes").Return(nodeList, nil)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{}, nil)
+		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{}, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).NotTo(HaveOccurred())
@@ -120,11 +122,26 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 		factoryMock.On("NodeCoreInformer").Return(&nodeInformer)
 		nodeLister := v1mocks.NodeLister{}
 		nodeInformer.On("Lister").Return(&nodeLister)
+		uplinkFactory := uplinkinformerfactory.NewSharedInformerFactory(
+			uplinkfake.NewSimpleClientset(),
+			time.Second,
+		)
+		factoryMock.On("UplinkStateInformer").Return(uplinkFactory.K8s().V1alpha1().UplinkStates())
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
 		getCreationFakeCommands(fexec, "ovn-k8s-mp3", mgtPortMAC, NetInfo.GetNetworkName(), "worker1", NetInfo.MTU())
 		ofm := getDummyOpenflowManager()
-		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{openflowManager: ofm}, nil)
+		controller, err := NewUserDefinedNodeNetworkController(
+			&cnnci,
+			NetInfo,
+			nil,
+			nil,
+			nil,
+			nil,
+			&gateway{openflowManager: ofm},
+			nil,
+			nil,
+		)
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).To(HaveOccurred()) // we don't have the gateway pieces setup so its expected to fail here
@@ -152,7 +169,7 @@ var _ = Describe("UserDefinedNodeNetworkController", func() {
 			types.Layer3Topology, "100.128.0.0/16", types.NetworkRoleSecondary)
 		NetInfo, err := util.ParseNADInfo(nad)
 		Expect(err).NotTo(HaveOccurred())
-		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{}, nil)
+		controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, nil, nil, nil, &gateway{}, nil, nil)
 		Expect(err).NotTo(HaveOccurred())
 		err = controller.Start(context.Background())
 		Expect(err).NotTo(HaveOccurred())
@@ -201,9 +218,12 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 					Name:  "breth0",
 					Ports: []string{"breth0-port-uuid", "eth0-port-uuid"},
 				},
+				// Local port of the bridge (hidden by GetPortBridge / port-to-br).
 				&vswitchd.Port{UUID: "breth0-port-uuid", Name: "breth0", Interfaces: []string{"breth0-iface-uuid"}},
-				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "system"},
-				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0"},
+				&vswitchd.Interface{UUID: "breth0-iface-uuid", Name: "breth0", Type: "internal", Ofport: ptr.To(65534)},
+				// Physical uplink: system-typed so GetNicName resolves eth0.
+				&vswitchd.Port{UUID: "eth0-port-uuid", Name: "eth0", Interfaces: []string{"eth0-iface-uuid"}},
+				&vswitchd.Interface{UUID: "eth0-iface-uuid", Name: "eth0", Type: "system", Ofport: ptr.To(7)},
 			},
 		})
 		Expect(ovsErr).NotTo(HaveOccurred())
@@ -329,6 +349,12 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		nodeLister := v1mocks.NodeLister{}
 		nodeInformer.On("Lister").Return(&nodeLister)
 		nodeLister.On("Get", mock.AnythingOfType("string")).Return(node, nil)
+		uplinkFactory := uplinkinformerfactory.NewSharedInformerFactory(
+			uplinkfake.NewSimpleClientset(),
+			time.Second,
+		)
+		factoryMock.On("UplinkStateInformer").Return(
+			uplinkFactory.K8s().V1alpha1().UplinkStates())
 
 		kubeFakeClient := fake.NewSimpleClientset(
 			&corev1.NodeList{
@@ -338,6 +364,7 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 		fakeClient := &util.OVNNodeClientset{
 			KubeClient:               kubeFakeClient,
 			NetworkAttchDefClient:    nadfake.NewSimpleClientset(),
+			UplinkClient:             uplinkfake.NewSimpleClientset(),
 			UserDefinedNetworkClient: udnfakeclient.NewSimpleClientset(),
 		}
 
@@ -447,13 +474,24 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 
 			By("creating a UDN controller for user-defined primary network")
 			cnnci := CommonNodeNetworkControllerInfo{name: nodeName, watchFactory: &factoryMock}
-			controller, err := NewUserDefinedNodeNetworkController(&cnnci, NetInfo, nil, vrf, ipRulesManager, nil, localGw, nil)
+			controller, err := NewUserDefinedNodeNetworkController(
+				&cnnci,
+				NetInfo,
+				nil,
+				vrf,
+				ipRulesManager,
+				nil,
+				localGw,
+				nil,
+				nil,
+			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(controller.gateway).To(Not(BeNil()))
 			Expect(controller.gateway.ruleManager).To(Not(BeNil()))
 			controller.gateway.kubeInterface = &kubeMock
 
 			By("starting UDN controller for user-defined primary network")
+			addOVSPatchPortInterface(ovsClient, "breth0", "patch-breth0_bluenet_worker1-to-br-int", 15)
 			err = controller.Start(context.Background())
 			Expect(err).NotTo(HaveOccurred())
 
@@ -506,8 +544,6 @@ var _ = Describe("UserDefinedNodeNetworkController: UserDefinedPrimaryNetwork Ga
 			Expect(v6MasqIPRule).To(BeTrue())
 
 			By("delete the network and ensure its associated VRF device is also deleted")
-			cnode := node.DeepCopy()
-			kubeMock.On("UpdateNodeStatus", cnode).Return(nil)
 			err = controller.Cleanup()
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(func() error {

@@ -40,7 +40,6 @@ type EgressFirewall struct {
 type EgressFirewallStatus struct {
 	// +optional
 	Status string `json:"status,omitempty"`
-	// +patchStrategy=merge
 	// +listType=set
 	// +optional
 	Messages []string `json:"messages,omitempty"`
@@ -49,6 +48,7 @@ type EgressFirewallStatus struct {
 // EgressFirewallSpec is a desired state description of EgressFirewall.
 type EgressFirewallSpec struct {
 	// a collection of egress firewall rule objects
+	// +listType=atomic
 	Egress []EgressFirewallRule `json:"egress"`
 }
 
@@ -58,6 +58,7 @@ type EgressFirewallRule struct {
 	Type EgressFirewallRuleType `json:"type"`
 	// ports specify what ports and protocols the rule applies to
 	// +optional
+	// +listType=atomic
 	Ports []EgressFirewallPort `json:"ports,omitempty"`
 	// to is the target that traffic is allowed/denied to
 	To EgressFirewallDestination `json:"to"`

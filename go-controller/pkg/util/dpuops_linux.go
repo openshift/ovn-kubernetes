@@ -7,10 +7,14 @@
 package util
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/k8snetworkplumbingwg/sriovnet"
@@ -22,6 +26,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 // DPU operations abstraction.
@@ -48,16 +53,50 @@ type DPUOps interface {
 	// nodeName is the K8s node name of the host this DPU operates behalf of.
 	GetHostGatewayMACAddress(ovsClient libovsdbclient.Client, bridgeName, nodeName string) (net.HardwareAddr, error)
 
+	// FindHostRepresentorByPeerMAC returns the DPU-side representor attached to
+	// bridge whose host-side peer function has hostMAC. Unlike
+	// GetHostGatewayMACAddress, which only considers the single host PF
+	// representor that backs the default gateway bridge, this inspects every
+	// host-facing representor on the bridge, so it also resolves uplinks backed
+	// by a host VF or SF. It wraps ErrHostRepresentorNotFound when the bridge
+	// has no representor peering with hostMAC, which lets callers distinguish a
+	// clean miss from a lookup failure. nodeName is the K8s node name of the
+	// host this DPU operates on behalf of.
+	FindHostRepresentorByPeerMAC(ovsClient libovsdbclient.Client, bridge *vswitchd.Bridge, hostMAC net.HardwareAddr,
+		nodeName string) (string, error)
+
+	// IsHostFacingRepresentor reports whether netdev is a DPU-side representor
+	// of a host function (PF, VF or SF). Such representors can never be a
+	// bridge's physical uplink even though OVS reports them as system-type
+	// ports.
+	IsHostFacingRepresentor(netdev string) bool
+
 	// ResolveDeviceDetails returns PF and VF indices for a device identified
 	// by either a PCI address (e.g. "0000:03:00.2") or a netdev name
 	// (e.g. "eth0-1"). It is up to the implementation to interpret the deviceID
 	// for the underlying platform.
 	ResolveDeviceDetails(deviceID string) (*NetworkDeviceDetails, error)
 
+	// ResolvePFIndex returns the PF index of a host physical function
+	// identified by either a PCI address (e.g. "0000:03:00.0") or a netdev
+	// name. It errors when the device is a VF or is not an SR-IOV capable
+	// physical function.
+	ResolvePFIndex(deviceID string) (int, error)
+
 	// GetPortRepresentor finds the DPU-side representor (VF representor in the case of switchdev hardware)
 	// for the given PF and function indices. On simulation this follows the
 	// pattern rep<pfId>-<funcId> (e.g. "rep0-1").
 	GetPortRepresentor(pfId, funcId string) (string, error)
+
+	// GetPFRepresentor finds the DPU-side representor of the host PF with
+	// the given index (e.g. "pf0hpf" on switchdev hardware).
+	GetPFRepresentor(pfId string) (string, error)
+
+	// GetHostPeerMACAddress returns the MAC of the host-side function peered
+	// with the given DPU representor. nodeName is the K8s node name of the
+	// host this DPU operates on behalf of; simulated platforms derive the
+	// peer MAC from it.
+	GetHostPeerMACAddress(rep, nodeName string) (net.HardwareAddr, error)
 
 	// GetDeviceAddress returns an opaque, platform-specific identifier for
 	// a representor interface. On switchdev hardware this is a PCI address
@@ -65,6 +104,10 @@ type DPUOps interface {
 	// itself. On switchdev, failure to resolve PCI for the representor is an error.
 	GetDeviceAddress(repName string) (string, error)
 }
+
+// ErrHostRepresentorNotFound is wrapped by FindHostRepresentorByPeerMAC when a
+// bridge holds no representor whose host-side peer matches the requested MAC.
+var ErrHostRepresentorNotFound = errors.New("dpu host representor not found")
 
 // ---------------------------------------------------------------------------
 // DPUOps singleton
@@ -138,6 +181,93 @@ func (n *SwitchdevDPUOps) GetHostGatewayMACAddress(ovsClient libovsdbclient.Clie
 	return GetSriovnetOps().GetRepresentorPeerMacAddress(hostRep)
 }
 
+// hostFacingRepresentorFlavours are the switchdev port flavours whose
+// representors have a host-side peer function that can carry the gateway L3
+// identity an Uplink selects.
+var hostFacingRepresentorFlavours = map[sriovnet.PortFlavour]struct{}{
+	sriovnet.PORT_FLAVOUR_PCI_PF: {},
+	sriovnet.PORT_FLAVOUR_PCI_VF: {},
+	sriovnet.PORT_FLAVOUR_PCI_SF: {},
+}
+
+func (n *SwitchdevDPUOps) FindHostRepresentorByPeerMAC(
+	ovsClient libovsdbclient.Client,
+	bridge *vswitchd.Bridge,
+	hostMAC net.HardwareAddr,
+	_ string,
+) (string, error) {
+	bridgeName := bridge.Name
+	portsToInterfaces, err := getBridgePortsInterfaces(ovsClient, bridge)
+	if err != nil {
+		return "", err
+	}
+
+	for _, ifaces := range portsToInterfaces {
+		for _, iface := range ifaces {
+			rep := normalizeOVSName(iface.Name)
+			flavour, err := GetSriovnetOps().GetRepresentorPortFlavour(rep)
+			if err != nil {
+				klog.V(5).Infof("Bridge %s: skipping interface %s, not a switchdev representor: %v",
+					bridgeName, rep, err)
+				continue
+			}
+			if _, ok := hostFacingRepresentorFlavours[flavour]; !ok {
+				klog.V(5).Infof("Bridge %s: skipping representor %s, port flavour %d has no host peer",
+					bridgeName, rep, flavour)
+				continue
+			}
+			peerMAC, err := hostPeerMACAddress(rep, flavour)
+			if err != nil {
+				klog.V(5).Infof("Bridge %s: skipping representor %s, failed to read host peer MAC: %v",
+					bridgeName, rep, err)
+				continue
+			}
+			if bytes.Equal(peerMAC, hostMAC) {
+				klog.V(4).Infof("Bridge %s: representor %s (flavour %d) peers with host MAC %s",
+					bridgeName, rep, flavour, hostMAC)
+				return rep, nil
+			}
+			klog.V(5).Infof("Bridge %s: representor %s peers with host MAC %s, looking for %s",
+				bridgeName, rep, peerMAC, hostMAC)
+		}
+	}
+	return "", fmt.Errorf("%w: no representor on bridge %q peers with host MAC %s",
+		ErrHostRepresentorNotFound, bridgeName, hostMAC)
+}
+
+// hostPeerMACAddress returns the MAC of the host-side function peered with the
+// representor rep. devlink reports the function address for every flavour, so it
+// is tried first. sriovnet.GetRepresentorPeerMacAddress is only a fallback for
+// PF representors, where it additionally understands the legacy sysfs layout.
+func hostPeerMACAddress(rep string, flavour sriovnet.PortFlavour) (net.HardwareAddr, error) {
+	mac, devlinkErr := GetSriovnetOps().GetDevlinkPortFunctionMacAddress(rep)
+	if devlinkErr == nil {
+		return mac, nil
+	}
+	if flavour != sriovnet.PORT_FLAVOUR_PCI_PF {
+		return nil, devlinkErr
+	}
+	mac, err := GetSriovnetOps().GetRepresentorPeerMacAddress(rep)
+	if err != nil {
+		return nil, fmt.Errorf("%v; devlink lookup also failed: %v", err, devlinkErr)
+	}
+	// GetRepresentorPeerMacAddress can succeed with an empty or all-zero MAC
+	// when the peer function MAC is unset; treat that as absent too.
+	if !IsUsableEthernetMAC(mac) {
+		return nil, fmt.Errorf("representor %s peer MAC is unusable; devlink lookup also failed: %v", rep, devlinkErr)
+	}
+	return mac, nil
+}
+
+func (n *SwitchdevDPUOps) IsHostFacingRepresentor(netdev string) bool {
+	flavour, err := GetSriovnetOps().GetRepresentorPortFlavour(normalizeOVSName(netdev))
+	if err != nil {
+		return false
+	}
+	_, ok := hostFacingRepresentorFlavours[flavour]
+	return ok
+}
+
 func (n *SwitchdevDPUOps) ResolveDeviceDetails(deviceID string) (*NetworkDeviceDetails, error) {
 	if IsPCIDeviceName(deviceID) {
 		return GetNetworkDeviceDetails(deviceID)
@@ -150,8 +280,59 @@ func (n *SwitchdevDPUOps) ResolveDeviceDetails(deviceID string) (*NetworkDeviceD
 	return GetNetworkDeviceDetails(pciAddr)
 }
 
+func (n *SwitchdevDPUOps) ResolvePFIndex(deviceID string) (int, error) {
+	pciAddr := deviceID
+	if !IsPCIDeviceName(deviceID) {
+		var err error
+		pciAddr, err = GetDeviceIDFromNetdevice(deviceID)
+		if err != nil {
+			return -1, fmt.Errorf("failed to read sysfs device link for %s: %v", deviceID, err)
+		}
+	}
+	// A VF has a parent PF behind a physfn link; refuse it here so PF and VF
+	// resolution stay distinct.
+	if _, err := GetSriovnetOps().GetPfPciFromVfPci(pciAddr); err == nil {
+		return -1, fmt.Errorf("device %s is a virtual function, not a physical function", pciAddr)
+	}
+	// Any netdev parses to some PCI function number, so require SR-IOV
+	// capability before treating the device as a PF with a DPU representor.
+	sriovCapable, err := GetFileSystemOps().PathExists(
+		filepath.Join(sriovnet.PciSysDir, pciAddr, "sriov_totalvfs"))
+	if err != nil {
+		return -1, fmt.Errorf("failed to check SR-IOV capability of device %s: %v", pciAddr, err)
+	}
+	if !sriovCapable {
+		return -1, fmt.Errorf("device %s is not an SR-IOV capable physical function", pciAddr)
+	}
+	// The PF index is the PCI function number, the same convention sriovnet
+	// uses to derive a VF's parent PF index.
+	var domain, bus, dev, fn int
+	const pciParts = 4
+	parsed, err := fmt.Sscanf(pciAddr, "%04x:%02x:%02x.%d", &domain, &bus, &dev, &fn)
+	if err != nil || parsed != pciParts {
+		return -1, fmt.Errorf("failed to parse PCI address %s of device %s: parsed %d of %d fields: %v",
+			pciAddr, deviceID, parsed, pciParts, err)
+	}
+	return fn, nil
+}
+
 func (n *SwitchdevDPUOps) GetPortRepresentor(pfId, funcId string) (string, error) {
 	return GetSriovnetOps().GetVfRepresentorDPU(pfId, funcId)
+}
+
+func (n *SwitchdevDPUOps) GetPFRepresentor(pfId string) (string, error) {
+	return GetSriovnetOps().GetPfRepresentorDPU(pfId)
+}
+
+func (n *SwitchdevDPUOps) GetHostPeerMACAddress(rep, _ string) (net.HardwareAddr, error) {
+	flavour, err := GetSriovnetOps().GetRepresentorPortFlavour(rep)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get port flavour for representor %s: %v", rep, err)
+	}
+	if _, ok := hostFacingRepresentorFlavours[flavour]; !ok {
+		return nil, fmt.Errorf("representor %s port flavour %d has no host peer", rep, flavour)
+	}
+	return hostPeerMACAddress(rep, flavour)
 }
 
 func (n *SwitchdevDPUOps) GetDeviceAddress(repName string) (string, error) {
@@ -203,24 +384,131 @@ func (s *SimulatedDPUOps) getDPURepresentor(pfId, funcId string) (string, error)
 	return "", fmt.Errorf("simulated representor %s not found: link name or alias not present", rep)
 }
 
-func (s *SimulatedDPUOps) GetDPUHostRepInterface(_ libovsdbclient.Client, _ string) (string, error) {
-	return dpusim.HostGatewayPeerInterface, nil
+func (s *SimulatedDPUOps) GetDPUHostRepInterface(ovsClient libovsdbclient.Client, bridgeName string) (string, error) {
+	if bridgeName == "" {
+		return dpusim.HostGatewayPeerInterface, nil
+	}
+
+	bridge, err := ovsops.GetBridge(ovsClient, bridgeName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get bridge %q: %w", bridgeName, err)
+	}
+	portsToInterfaces, err := getBridgePortsInterfaces(ovsClient, bridge)
+	if err != nil {
+		return "", err
+	}
+	for _, port := range SortedKeys(portsToInterfaces) {
+		ifaces := portsToInterfaces[port]
+		normalizedPort := normalizeOVSName(port)
+		if simulatedDPURepresentorIndex(normalizedPort) >= 0 {
+			return normalizedPort, nil
+		}
+		for _, iface := range ifaces {
+			ifaceName := normalizeOVSName(iface.Name)
+			if simulatedDPURepresentorIndex(ifaceName) >= 0 {
+				return ifaceName, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("simulated DPU host representor was not found for bridge %q", bridgeName)
 }
 
-func (s *SimulatedDPUOps) GetHostGatewayMACAddress(_ libovsdbclient.Client, _, nodeName string) (net.HardwareAddr, error) {
+func (s *SimulatedDPUOps) GetHostGatewayMACAddress(
+	ovsClient libovsdbclient.Client,
+	bridgeName, nodeName string,
+) (net.HardwareAddr, error) {
 	if nodeName == "" {
 		return nil, fmt.Errorf("nodeName must be provided for simulated GetHostGatewayMACAddress")
 	}
 
+	index := dpusim.HostGatewayInterfaceIndex
+	if bridgeName != "" {
+		rep, err := s.GetDPUHostRepInterface(ovsClient, bridgeName)
+		if err != nil {
+			return nil, err
+		}
+		index = simulatedDPURepresentorIndex(rep)
+		if index < 0 {
+			return nil, fmt.Errorf("failed to parse simulated DPU representor %q", rep)
+		}
+	}
+
 	// TODO: This identifies a need to have an API to get reliable information from the host (requested by the DPU)
-	macStr := s.generateMACForHostToDpu(nodeName, "host", dpusim.HostGatewayInterfaceIndex)
+	macStr := s.generateMACForHostToDpu(nodeName, "host", index)
 	mac, err := net.ParseMAC(macStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse generated MAC %s: %v", macStr, err)
 	}
 
-	klog.Infof("Derived host gateway peer MAC %s for node %s", mac, nodeName)
+	klog.Infof("Derived host gateway peer MAC %s for node %s bridge %s", mac, nodeName, bridgeName)
 	return mac, nil
+}
+
+func (s *SimulatedDPUOps) FindHostRepresentorByPeerMAC(
+	ovsClient libovsdbclient.Client,
+	bridge *vswitchd.Bridge,
+	hostMAC net.HardwareAddr,
+	nodeName string,
+) (string, error) {
+	if nodeName == "" {
+		return "", fmt.Errorf("nodeName must be provided for simulated FindHostRepresentorByPeerMAC")
+	}
+	bridgeName := bridge.Name
+	portsToInterfaces, err := getBridgePortsInterfaces(ovsClient, bridge)
+	if err != nil {
+		return "", err
+	}
+
+	for port, ifaces := range portsToInterfaces {
+		candidates := []string{port}
+		for _, iface := range ifaces {
+			candidates = append(candidates, iface.Name)
+		}
+		for _, candidate := range candidates {
+			rep := normalizeOVSName(candidate)
+			index := simulatedDPURepresentorIndex(rep)
+			if index < 0 {
+				continue
+			}
+			macStr := s.generateMACForHostToDpu(nodeName, "host", index)
+			peerMAC, err := net.ParseMAC(macStr)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse generated MAC %s: %v", macStr, err)
+			}
+			if bytes.Equal(peerMAC, hostMAC) {
+				klog.V(4).Infof("Bridge %s: simulated representor %s peers with host MAC %s",
+					bridgeName, rep, hostMAC)
+				return rep, nil
+			}
+			klog.V(5).Infof("Bridge %s: simulated representor %s peers with host MAC %s, looking for %s",
+				bridgeName, rep, peerMAC, hostMAC)
+		}
+	}
+	return "", fmt.Errorf("%w: no simulated representor on bridge %q peers with host MAC %s",
+		ErrHostRepresentorNotFound, bridgeName, hostMAC)
+}
+
+func (s *SimulatedDPUOps) IsHostFacingRepresentor(netdev string) bool {
+	return simulatedDPURepresentorIndex(normalizeOVSName(netdev)) >= 0
+}
+
+func normalizeOVSName(name string) string {
+	return strings.Trim(strings.TrimSpace(name), `"`)
+}
+
+func simulatedDPURepresentorIndex(iface string) int {
+	if !strings.HasPrefix(iface, strings.TrimSuffix(dpusim.DPUDataIfFmt, "%d")) {
+		return -1
+	}
+	matches := dpusim.ReSimulationNetdevFunc.FindStringSubmatch(iface)
+	if len(matches) != 3 || matches[1] != "0" {
+		return -1
+	}
+	index, err := strconv.Atoi(matches[2])
+	if err != nil || index < dpusim.HostGatewayInterfaceIndex {
+		return -1
+	}
+	return index
 }
 
 func (s *SimulatedDPUOps) ResolveDeviceDetails(deviceID string) (*NetworkDeviceDetails, error) {
@@ -244,8 +532,29 @@ func (s *SimulatedDPUOps) ResolveDeviceDetails(deviceID string) (*NetworkDeviceD
 	}, nil
 }
 
+func (s *SimulatedDPUOps) ResolvePFIndex(string) (int, error) {
+	// Simulated deployments have no host PF; PF uplinks fall back to the host
+	// MAC resolution path.
+	return -1, fmt.Errorf("PF device details are not supported in simulated DPU environments")
+}
+
 func (s *SimulatedDPUOps) GetPortRepresentor(pfId, funcId string) (string, error) {
 	return s.getDPURepresentor(pfId, funcId)
+}
+
+func (s *SimulatedDPUOps) GetPFRepresentor(string) (string, error) {
+	return "", fmt.Errorf("PF representor lookup is not supported in simulated DPU environments")
+}
+
+func (s *SimulatedDPUOps) GetHostPeerMACAddress(rep, nodeName string) (net.HardwareAddr, error) {
+	if nodeName == "" {
+		return nil, fmt.Errorf("nodeName must be provided for simulated GetHostPeerMACAddress")
+	}
+	index := simulatedDPURepresentorIndex(normalizeOVSName(rep))
+	if index < 0 {
+		return nil, fmt.Errorf("interface %s is not a simulated representor", rep)
+	}
+	return net.ParseMAC(s.generateMACForHostToDpu(nodeName, "host", index))
 }
 
 func (s *SimulatedDPUOps) GetDeviceAddress(repName string) (string, error) {

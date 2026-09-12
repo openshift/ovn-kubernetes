@@ -61,6 +61,7 @@ spec:
                 items:
                   type: string
                 type: array
+                x-kubernetes-list-type: atomic
               namespaceSelector:
                 description: |-
                   NamespaceSelector applies the egress IP only to the namespace(s) whose label
@@ -187,6 +188,7 @@ spec:
                   - node
                   type: object
                 type: array
+                x-kubernetes-list-type: atomic
             required:
             - items
             type: object

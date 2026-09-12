@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/nooverlay"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/routeadvertisements"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/status_manager"
+	uplinkcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/uplink"
 	udncontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork"
 	udntemplate "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/userdefinednetwork/template"
 	vtepcontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/clustermanager/vtep"
@@ -62,6 +63,8 @@ type ClusterManager struct {
 	userDefinedNetworkController *udncontroller.Controller
 	// Controller for managing cluster-network-connect CRD
 	networkConnectController *networkconnect.Controller
+	// Controller for managing uplink CRDs
+	uplinkController *uplinkcontroller.Controller
 	// event recorder used to post events to k8s
 	recorder record.EventRecorder
 
@@ -209,11 +212,22 @@ func NewClusterManager(
 	if util.IsNetworkConnectEnabled() {
 		cm.networkConnectController = networkconnect.NewController(wf, ovnClient, cm.networkManager.Interface(), tunnelKeysAllocator)
 	}
+	if util.IsUplinkEnabled() {
+		cm.uplinkController = uplinkcontroller.NewController(
+			wf,
+			ovnClient,
+			cm.networkManager.Interface(),
+		)
+	}
 
 	if util.IsRouteAdvertisementsEnabled() {
 		cm.raController = routeadvertisements.NewController(cm.networkManager.Interface(), wf, ovnClient)
 		if config.ManagedBGP.FRRNamespace != "" {
-			cm.managedBGPController = managedbgp.NewController(wf, ovnClient.FRRClient, ovnClient.RouteAdvertisementsClient, recorder)
+			var err error
+			cm.managedBGPController, err = managedbgp.NewController(wf, ovnClient.FRRClient, ovnClient.RouteAdvertisementsClient, ovnClient.UserDefinedNetworkClient)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create managed BGP controller: %w", err)
+			}
 		}
 		if config.Default.Transport == types.NetworkTransportNoOverlay {
 			cm.noOverlayController = nooverlay.NewController(wf, recorder)
@@ -230,6 +244,9 @@ func NewClusterManager(
 // Start the cluster manager.
 func (cm *ClusterManager) Start(ctx context.Context) error {
 	klog.Info("Starting the cluster manager")
+	if err := cm.setTopologyType(); err != nil {
+		return fmt.Errorf("failed to set layer2 topology type: %w", err)
+	}
 
 	// Start and sync the watch factory to begin listening for events
 	if err := cm.wf.Start(); err != nil {
@@ -293,6 +310,11 @@ func (cm *ClusterManager) Start(ctx context.Context) error {
 			return err
 		}
 	}
+	if util.IsUplinkEnabled() {
+		if err := cm.uplinkController.Start(); err != nil {
+			return err
+		}
+	}
 
 	if cm.raController != nil {
 		if cm.managedBGPController != nil {
@@ -348,6 +370,9 @@ func (cm *ClusterManager) Stop() {
 	if cm.networkConnectController != nil {
 		cm.networkConnectController.Stop()
 	}
+	if util.IsUplinkEnabled() {
+		cm.uplinkController.Stop()
+	}
 	if cm.vtepController != nil {
 		cm.vtepController.Stop()
 		cm.vtepController = nil
@@ -382,6 +407,31 @@ func (cm *ClusterManager) Reconcile(name string, old, new util.NetInfo) error {
 	if cm.raController != nil {
 		cm.raController.ReconcileNetwork(name, old, new)
 	}
+	return nil
+}
+
+// setTopologyType determines whether to use transit router for layer2 networks.
+// It checks for the presence of legacy per-node tunnel ID annotations: if any
+// node has tunnel IDs but no topology version annotation, there is pre-existing
+// legacy state that must be preserved until migration completes.
+// If no legacy state is found (fresh cluster or fully migrated), transit router
+// mode is enabled.
+func (cm *ClusterManager) setTopologyType() error {
+	if config.Layer2UsesTransitRouter {
+		return nil
+	}
+	nodes, err := cm.client.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("unable to get nodes while setting topology type for layer2: %w", err)
+	}
+	for _, node := range nodes.Items {
+		if node.Annotations[types.UDNLayer2NodeGRLRPTunnelIDAnnotation] != "" && !util.UDNLayer2NodeUsesTransitRouter(&node) {
+			klog.Infof("Node %s has legacy L2 tunnel IDs without topology version annotation, keeping legacy mode", node.Name)
+			return nil
+		}
+	}
+	klog.Infof("Switching to transit router for layer2 networks")
+	config.Layer2UsesTransitRouter = true
 	return nil
 }
 

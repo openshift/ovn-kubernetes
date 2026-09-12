@@ -80,7 +80,7 @@ var longRetry = wait.Backoff{Steps: 100}
 
 func fatalErr(msg interface{}) {
 	// the path that leads to this being called isn't always clear...
-	fmt.Fprintln(ginkgo.GinkgoWriter, string(debug.Stack()))
+	_, _ = fmt.Fprintln(ginkgo.GinkgoWriter, string(debug.Stack()))
 	framework.Failf("%v", msg)
 }
 

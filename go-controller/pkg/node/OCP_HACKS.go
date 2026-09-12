@@ -4,51 +4,115 @@
 package node
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/coreos/go-iptables/iptables"
 
+	"sigs.k8s.io/knftables"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	nodeipt "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iptables"
+	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
 )
 
-// Block MCS Access. https://github.com/openshift/ovn-kubernetes/pull/170
-func generateBlockMCSRules(rules *[]nodeipt.Rule, protocol iptables.Protocol) {
-	var delRules []nodeipt.Rule
+const (
+	mcsBlockingChain        = "mcs-blocking"
+	mcsBlockingOutputChain  = "mcs-blocking-output"
+	mcsBlockingForwardChain = "mcs-blocking-forward"
+)
 
-	for _, chain := range []string{"FORWARD", "OUTPUT"} {
-		for _, port := range []string{"22623", "22624"} {
-			*rules = append(*rules, nodeipt.Rule{
-				Table:    "filter",
-				Chain:    chain,
-				Args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "--syn", "-j", "REJECT"},
-				Protocol: protocol,
-			})
-			// Delete the old "--syn"-less rules on upgrade
-			delRules = append(delRules, nodeipt.Rule{
-				Table:    "filter",
-				Chain:    chain,
-				Args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "-j", "REJECT"},
-				Protocol: protocol,
-			})
+// cleanupLegacyMCSBlockIptRules best-effort deletes leftover host iptables MCS REJECT
+// rules from before the nftables migration (both --syn and legacy non--syn variants).
+func cleanupLegacyMCSBlockIptRules() {
+	var delRules []nodeipt.Rule
+	for _, protocol := range []iptables.Protocol{iptables.ProtocolIPv4, iptables.ProtocolIPv6} {
+		if protocol == iptables.ProtocolIPv4 && !config.IPv4Mode {
+			continue
+		}
+		if protocol == iptables.ProtocolIPv6 && !config.IPv6Mode {
+			continue
+		}
+		for _, chain := range []string{"FORWARD", "OUTPUT"} {
+			for _, port := range []string{"22623", "22624"} {
+				delRules = append(delRules,
+					nodeipt.Rule{
+						Table:    "filter",
+						Chain:    chain,
+						Args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "--syn", "-j", "REJECT"},
+						Protocol: protocol,
+					},
+					nodeipt.Rule{
+						Table:    "filter",
+						Chain:    chain,
+						Args:     []string{"-p", "tcp", "-m", "tcp", "--dport", port, "-j", "REJECT"},
+						Protocol: protocol,
+					},
+				)
+			}
 		}
 	}
-
 	_ = nodeipt.DelRules(delRules)
 }
 
-// insertMCSBlockIptRules inserts iptables rules to block local Machine Config Service
+// setupMCSBlockNFTRules inserts nftables rules to block local Machine Config Service
 // ports. See https://github.com/openshift/ovn-kubernetes/pull/170
-func insertMCSBlockIptRules() error {
-	rules := []nodeipt.Rule{}
-	if config.IPv4Mode {
-		generateBlockMCSRules(&rules, iptables.ProtocolIPv4)
-	}
-	if config.IPv6Mode {
-		generateBlockMCSRules(&rules, iptables.ProtocolIPv6)
-	}
-	if err := insertIptRules(rules); err != nil {
+func setupMCSBlockNFTRules() error {
+	nft, err := nodenft.GetNFTablesHelper()
+	if err != nil {
 		return fmt.Errorf("failed to setup MCS-blocking rules: %w", err)
 	}
+
+	tx := nft.NewTransaction()
+
+	tx.Add(&knftables.Chain{
+		Name: mcsBlockingChain,
+	})
+	tx.Flush(&knftables.Chain{
+		Name: mcsBlockingChain,
+	})
+	tx.Add(&knftables.Rule{
+		Chain: mcsBlockingChain,
+		Rule: knftables.Concat(
+			"tcp dport { 22623, 22624 } tcp flags syn / fin,syn,rst,ack",
+			"reject",
+		),
+	})
+
+	tx.Add(&knftables.Chain{
+		Name:     mcsBlockingOutputChain,
+		Type:     knftables.PtrTo(knftables.FilterType),
+		Hook:     knftables.PtrTo(knftables.OutputHook),
+		Priority: knftables.PtrTo(knftables.FilterPriority),
+	})
+	tx.Flush(&knftables.Chain{
+		Name: mcsBlockingOutputChain,
+	})
+	tx.Add(&knftables.Rule{
+		Chain: mcsBlockingOutputChain,
+		Rule:  "jump " + mcsBlockingChain,
+	})
+
+	tx.Add(&knftables.Chain{
+		Name:     mcsBlockingForwardChain,
+		Type:     knftables.PtrTo(knftables.FilterType),
+		Hook:     knftables.PtrTo(knftables.ForwardHook),
+		Priority: knftables.PtrTo(knftables.FilterPriority),
+	})
+	tx.Flush(&knftables.Chain{
+		Name: mcsBlockingForwardChain,
+	})
+	tx.Add(&knftables.Rule{
+		Chain: mcsBlockingForwardChain,
+		Rule:  "jump " + mcsBlockingChain,
+	})
+
+	if err := nft.Run(context.TODO(), tx); err != nil {
+		return fmt.Errorf("failed to setup MCS-blocking rules: %w", err)
+	}
+
+	// If there are legacy IPTables rules left around, try to clean them up.
+	cleanupLegacyMCSBlockIptRules()
+
 	return nil
 }

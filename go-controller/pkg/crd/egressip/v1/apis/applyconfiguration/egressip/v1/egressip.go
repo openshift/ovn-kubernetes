@@ -6,8 +6,11 @@
 package v1
 
 import (
+	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -36,6 +39,40 @@ func EgressIP(name string) *EgressIPApplyConfiguration {
 	b.WithKind("EgressIP")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractEgressIPFrom extracts the applied configuration owned by fieldManager from
+// egressIP for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// egressIP must be a unmodified EgressIP API object that was retrieved from the Kubernetes API.
+// ExtractEgressIPFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEgressIPFrom(egressIP *egressipv1.EgressIP, fieldManager string, subresource string) (*EgressIPApplyConfiguration, error) {
+	b := &EgressIPApplyConfiguration{}
+	err := managedfields.ExtractInto(egressIP, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.egressip.v1.EgressIP"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(egressIP.Name)
+
+	b.WithKind("EgressIP")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractEgressIP extracts the applied configuration owned by fieldManager from
+// egressIP. If no managedFields are found in egressIP for fieldManager, a
+// EgressIPApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// egressIP must be a unmodified EgressIP API object that was retrieved from the Kubernetes API.
+// ExtractEgressIP provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEgressIP(egressIP *egressipv1.EgressIP, fieldManager string) (*EgressIPApplyConfiguration, error) {
+	return ExtractEgressIPFrom(egressIP, fieldManager, "")
 }
 
 func (b EgressIPApplyConfiguration) IsApplyConfiguration() {}
