@@ -17,7 +17,6 @@ var (
 			`[Feature:NetworkPolicy]`,
 			`[Feature:AdminNetworkPolicy]`,
 			`[Feature:BaselineNetworkPolicy]`,
-			`[Feature:EgressService]`,
 			`[Feature:EgressFirewall]`,
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
