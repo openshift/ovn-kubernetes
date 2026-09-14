@@ -61,6 +61,23 @@ var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
+	// EgressService tests
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate pods' egress is SNATed to the LB's ingress ip without selectors ipv4 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate pods' egress is SNATed to the LB's ingress ip without selectors ipv6 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv4 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv6 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate the egress SVC SNAT functionality against host-networked pods ipv4 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate the egress SVC SNAT functionality against host-networked pods ipv6 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv4 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv6 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv4 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv6 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate a node with a local ep is selected when ETP=Local ipv4 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Should validate a node with a local ep is selected when ETP=Local ipv6 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService [LGW] Should validate ingress reply traffic uses the Network ipv4 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService [LGW] Should validate ingress reply traffic uses the Network ipv6 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressService][ovn-kubernetes-ote][sig-network] EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv6 pods [Suite:ovn-kubernetes/conformance/parallel]",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
