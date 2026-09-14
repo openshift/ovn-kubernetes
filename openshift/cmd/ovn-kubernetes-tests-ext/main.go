@@ -87,12 +87,19 @@ func main() {
 	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/serial",
-		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`labels.exists(l, l == "Serial") && !labels.exists(l, l == "Disruptive")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`!labels.exists(l, l == "Serial") && !labels.exists(l, l == "Disruptive")`},
+	})
+
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name:             "ovn-kubernetes/conformance/disruptive",
+		Qualifiers:       []string{`labels.exists(l, l == "Disruptive")`},
+		Parallelism:      1,
+		ClusterStability: extension.ClusterStabilityDisruptive,
 	})
 
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
