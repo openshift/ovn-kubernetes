@@ -2579,21 +2579,12 @@ func nodeInterfacePrefixCIDR(nodeName, devName string, family utilnet.IPFamily) 
 	if family == utilnet.IPv6 {
 		familyFlag = "-6"
 	}
-	// Replicates the relevant fields of the json output of "ip -j addr show".
-	type addrInfo struct {
-		Local     string `json:"local"`
-		PrefixLen int    `json:"prefixlen"`
-	}
-	type ipAddrJSON struct {
-		AddrInfo []addrInfo `json:"addr_info"`
-	}
-
 	out, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{
 		"ip", "-j", familyFlag, "addr", "show", "dev", devName, "scope", "global",
 	})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	var parsed []ipAddrJSON
-	gomega.Expect(json.Unmarshal([]byte(out), &parsed)).To(gomega.Succeed(),
+	parsed, err := parseIPAddrJSON(out)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred(),
 		"failed to parse ip -j output for %s on node %s", devName, nodeName)
 	gomega.Expect(parsed).NotTo(gomega.BeEmpty())
 	gomega.Expect(parsed[0].AddrInfo).NotTo(gomega.BeEmpty(),
