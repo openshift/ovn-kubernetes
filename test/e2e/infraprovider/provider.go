@@ -35,3 +35,8 @@ func Get() api.Provider {
 	}
 	return provider
 }
+
+// SetProvider injects an infrastructure provider (used by OpenShift OTE).
+func SetProvider(p api.Provider) {
+	provider = p
+}
