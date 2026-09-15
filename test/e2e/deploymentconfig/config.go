@@ -23,3 +23,8 @@ func Get() api.DeploymentConfig {
 	}
 	return deployment
 }
+
+// SetConfig injects a deployment config (used by OpenShift OTE).
+func SetConfig(d api.DeploymentConfig) {
+	deployment = d
+}

@@ -9,6 +9,7 @@ require (
 	github.com/onsi/gomega v1.36.1
 	github.com/openshift-eng/openshift-tests-extension v0.0.0-20250203145713-9dabf237d635
 	github.com/openshift/api v0.0.0-20231120222239-b86761094ee3
+	github.com/ovn-org/ovn-kubernetes/go-controller v1.0.0
 	github.com/ovn-org/ovn-kubernetes/test/e2e v0.0.0-20250827185716-56d14a3074ba
 	github.com/spf13/cobra v1.8.1
 	k8s.io/api v0.33.3
@@ -105,7 +106,7 @@ require (
 	github.com/miekg/dns v1.1.43 // indirect
 	github.com/mistifyio/go-zfs v2.1.2-0.20190413222219-f784269be439+incompatible // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
-	github.com/moby/spdystream v0.5.0 // indirect
+	github.com/moby/spdystream v0.5.1 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
@@ -122,7 +123,6 @@ require (
 	github.com/openshift-kni/k8sreporter v1.0.6 // indirect
 	github.com/openshift/client-go v0.0.0-20231121143148-910ca30a1a9a // indirect
 	github.com/openshift/custom-resource-status v1.1.2 // indirect
-	github.com/ovn-org/ovn-kubernetes/go-controller v1.0.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.22.0 // indirect

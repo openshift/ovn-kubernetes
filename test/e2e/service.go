@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/ipalloc"
 
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -2230,7 +2231,7 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 		externalContainer := infraapi.ExternalContainer{Name: externalClientContainerName}
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
+		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		// Patch the service to use named ports.
@@ -2255,7 +2256,7 @@ spec:
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 		externalContainer = infraapi.ExternalContainer{Name: externalClientContainerName}
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
+		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		// Patch the service to use allocateLoadBalancerNodeProts=false and externalTrafficPolicy=local.
@@ -2288,7 +2289,7 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
+		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		pktSize := 60
@@ -2321,7 +2322,7 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
+		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))

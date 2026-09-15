@@ -36,6 +36,10 @@ func joinStrings(vals ...string) string {
 	return strings.Join(vals, ",")
 }
 
+func primaryLayer3MultiCIDRs() string {
+	return joinStrings("10.128.0.0/16", "2014:100:200::0/60")
+}
+
 func filterCIDRsAndJoin(cs clientset.Interface, cidrs string) string {
 	if cidrs == "" {
 		return "" // we may not always set CIDR - i.e. CDN
