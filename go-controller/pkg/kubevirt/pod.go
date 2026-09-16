@@ -522,6 +522,11 @@ type LiveMigrationStatus struct {
 	State     LiveMigrationState // State is the current state of the live migration.
 }
 
+// IsTarget returns whether pod is the migration target.
+func (lm LiveMigrationStatus) IsTarget(pod *corev1.Pod) bool {
+	return lm.TargetPod.UID == pod.UID
+}
+
 // IsTargetDomainReady returns true if the target domain in the live migration process is ready.
 func (lm LiveMigrationStatus) IsTargetDomainReady() bool {
 	return lm.State == LiveMigrationTargetDomainReady
