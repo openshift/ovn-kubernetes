@@ -69,3 +69,7 @@ func (m openshift) GetAgnHostContainerImage() string {
 func (m openshift) IsConfigurationEnabled(config api.Config) bool {
 	return false
 }
+
+func (m openshift) NBDBContainerName() string {
+	return "nbdb"
+}
