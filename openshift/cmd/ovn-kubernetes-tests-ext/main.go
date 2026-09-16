@@ -11,6 +11,7 @@ import (
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -77,10 +78,6 @@ func main() {
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
 	ovnTestsExtension := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
-	// register OVN-Kubernetes e2e images to the openshift-tests extension
-	if err := registerTestImages(ovnTestsExtension); err != nil {
-		panic(err)
-	}
 	// add ovn-kubernetes test suites into openshift suites
 	// by default, we treat all tests as parallel and only expose tests as Serial if the appropriate label is added - "Serial"
 	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
@@ -107,7 +104,7 @@ func main() {
 	cfg, cfgErr := getKubeConfig()
 	var infraErr error
 	if cfgErr == nil {
-		infra, err := ocpinfraprovider.New(cfg)
+		infra, err := ocpinfraprovider.New(cfg, ovnTestsExtension)
 		if err != nil {
 			infraErr = err
 		} else {
@@ -168,6 +165,12 @@ func main() {
 
 	ovnTestsExtension.AddSpecs(specs)
 	extensionRegistry.Register(ovnTestsExtension)
+
+	// Register OVN-Kubernetes e2e images to the openshift-tests extension
+	if ocpInfra != nil {
+		ocpInfra.PreloadImages(deploymentconfig.Get().GetRequiredImages())
+	}
+
 	root := &cobra.Command{
 		Long: "OVN-Kubernetes tests extension for OpenShift",
 	}

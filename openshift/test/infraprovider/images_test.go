@@ -1,11 +1,8 @@
-package main
+package infraprovider
 
 import (
-	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 )
 
 func TestSplitImagePullSpec(t *testing.T) {
@@ -151,44 +148,5 @@ func TestExtensionImageFromPullSpec(t *testing.T) {
 
 	if _, err := extensionImageFromPullSpec(""); err == nil {
 		t.Fatal("expected error for empty pullspec")
-	}
-}
-
-func TestRegisterTestImages(t *testing.T) {
-	if len(requiredImages) == 0 {
-		t.Fatal("requiredImages is empty")
-	}
-
-	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
-	err := registerTestImages(ext)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if got, want := len(ext.Images), len(requiredImages); got != want {
-		t.Fatalf("registered %d images, want %d from requiredImages", got, want)
-	}
-
-	type imageKey struct {
-		index    int
-		pullSpec string
-	}
-	want := make(map[imageKey]int)
-	for _, ri := range requiredImages {
-		want[imageKey{ri.index, ri.pullSpec}]++
-	}
-
-	got := make(map[imageKey]int, len(ext.Images))
-	for _, img := range ext.Images {
-		got[imageKey{img.Index, fmt.Sprintf("%s/%s:%s", img.Registry, img.Name, img.Version)}]++
-	}
-
-	if len(got) != len(want) {
-		t.Fatalf("registered %d unique images, want %d", len(got), len(want))
-	}
-	for key, count := range want {
-		if got[key] != count {
-			t.Errorf("image %+v: got count %d, want %d", key, got[key], count)
-		}
 	}
 }
