@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
@@ -186,7 +187,7 @@ func (o *OpenshiftInfraProvider) GetDefaultTimeoutContext() *framework.TimeoutCo
 	return timeouts
 }
 
-func (o OpenshiftInfraProvider) PreloadImages(images []string) {
+func (o OpenshiftInfraProvider) PreloadImages(images []deploymentconfigapi.ImageConfig) {
 	// no-op: OpenShift clusters pull images at runtime
 }
 
