@@ -68,6 +68,10 @@ func (m openshift) IsConfigurationEnabled(config api.Config) bool {
 	return false
 }
 
+func (m openshift) NBDBContainerName() string {
+	return "nbdb"
+}
+
 func (m openshift) GetNodeMachineNetworks() (map[string][]string, error) {
 	if m.kubeConfig == nil {
 		return make(map[string][]string), nil
