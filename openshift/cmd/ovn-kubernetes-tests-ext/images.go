@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+
 	imageutils "k8s.io/kubernetes/test/utils/image"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -24,6 +26,11 @@ func init() {
 		index:    int(imageutils.Agnhost),
 	}
 	requiredImages = append(requiredImages, agnhostImage)
+	requiredImages = append(requiredImages,
+		// Origin maps extension images through the Kubernetes mapper, where
+		// None produces the index-free tag used by Origin's Fedora image.
+		requiredImage{pullSpec: ocpdeploymentconfig.FedoraContainerDiskImage, index: int(imageutils.None)},
+	)
 }
 
 // registerTestImages advertises OVN-Kubernetes e2e images to the openshift-tests

@@ -201,7 +201,7 @@ func composeFedoraWithTestToolingVMI(namespace string, labels, annotations, node
 			NetworkData: networkData,
 		},
 	}
-	return composeVMI(namespace, labels, annotations, nodeSelector, networkSource, cloudInitVolumeSource, kubevirt.FedoraWithTestToolingContainerDiskImage)
+	return composeVMI(namespace, labels, annotations, nodeSelector, networkSource, cloudInitVolumeSource, images.FedoraContainerDisk())
 }
 
 func composeFedoraWithTestToolingVM(namespace string, labels, annotations, nodeSelector map[string]string,
@@ -260,6 +260,13 @@ func composeAgnhostPod(name, namespace, nodeName string, args ...string) *corev1
 	return agnHostPod
 }
 
+// iperf3Provider optionally prepares traffic endpoints for a downstream runtime.
+// Providers that do not implement it retain the upstream image and commands.
+type iperf3Provider interface {
+	ConfigureIPerf3Pod(*corev1.Pod) error
+	PrepareIPerf3Container(infraapi.Context, infraapi.ExternalContainer) (infraapi.ExternalContainer, error)
+}
+
 func removeImagesInNode(node, imageURL string) error {
 	By("Removing unused images in node " + node)
 	output, err := infraprovider.Get().ExecK8NodeCommand(node, []string{
@@ -293,6 +300,12 @@ func removeImagesInNode(node, imageURL string) error {
 }
 
 func removeImagesFromNodes(cs kubernetes.Interface, imageURL string) error {
+	// OpenShift jobs share nodes with other suites, and AfterAll runs before
+	// namespace teardown. CRI-O rejects deleting in-use container disks; leave
+	// cache eviction to kubelet rather than pruning other tests' images.
+	if infraprovider.Get().Name() == "openshift" {
+		return nil
+	}
 	nodesList, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	for nodeIdx := range nodesList.Items {
@@ -306,7 +319,7 @@ func removeImagesFromNodes(cs kubernetes.Interface, imageURL string) error {
 
 func init() {
 	if os.Getenv("KIND_INSTALL_KUBEVIRT") == "true" {
-		images.Add(images.Netshoot())
+		images.AddDeferred(images.Netshoot)
 	}
 }
 
@@ -1268,15 +1281,32 @@ config:
 						IPRequest: staticIPs,
 					}
 				}
-				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, []string{"bash", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
+				trafficPod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Image: images.Netshoot(), Command: []string{"bash", "-c"},
+					Args: []string{iperfServerScript + "\n sleep infinity"},
+				}}}}
+				if provider, ok := infraprovider.Get().(iperf3Provider); ok {
+					if err := provider.ConfigureIPerf3Pod(trafficPod); err != nil {
+						return nil, err
+					}
+				}
+				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, trafficPod.Spec.Containers[0].Command, map[string]string{}, func(pod *corev1.Pod) {
 					if nse != nil {
 						pod.Annotations = networkSelectionElements(*nse)
 					}
-					pod.Spec.Containers[0].Image = images.Netshoot()
-					pod.Spec.Containers[0].Args = []string{iperfServerScript + "\n sleep infinity"}
+					name := pod.Spec.Containers[0].Name
+					pod.Spec.Containers[0] = trafficPod.Spec.Containers[0]
+					pod.Spec.Containers[0].Name = name
 				})
 				if err != nil {
 					return nil, err
+				}
+				if trafficPod.Spec.Containers[0].ReadinessProbe != nil {
+					if err := e2epod.WaitTimeoutForPodReadyInNamespace(context.Background(), fr.ClientSet, pod.Name, namespace, 4*time.Minute); err != nil {
+						logs, _ := e2epod.GetPodLogs(context.Background(), fr.ClientSet, namespace, pod.Name, pod.Spec.Containers[0].Name)
+						e2eframework.Logf("iperf3 preparation logs for %s/%s:\n%s", namespace, pod.Name, logs)
+						return nil, fmt.Errorf("iperf3 endpoint %s/%s did not become ready: %w", namespace, pod.Name, err)
+					}
 				}
 				pods = append(pods, pod)
 			}
@@ -1395,7 +1425,7 @@ config:
 		})
 
 		AfterAll(func() {
-			Expect(removeImagesInNodes(kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesInNodes(images.FedoraContainerDisk())).To(Succeed())
 		})
 
 		DescribeTable("when live migration", func(td liveMigrationTestData) {
@@ -1501,7 +1531,7 @@ config:
 	})
 	Context("with user defined networks and persistent ips configured", Ordered, func() {
 		AfterAll(func() {
-			Expect(removeImagesInNodes(kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesInNodes(images.FedoraContainerDisk())).To(Succeed())
 		})
 		type testCommand struct {
 			description string
@@ -1522,7 +1552,6 @@ config:
 			staticIPv4, staticIPv6  string
 			staticMAC               = "02:00:00:00:00:01"
 			externalMACVRFContainer = infraapi.ExternalContainer{
-				Image:   images.Netshoot(),
 				CmdArgs: []string{"sleep", "infinity"},
 			}
 
@@ -1744,6 +1773,7 @@ write_files:
 				td.evpn.MACVRF.VNI = int32(bgpAlloc.MACVRFVNI)
 				td.evpn.IPVRF.VNI = int32(bgpAlloc.IPVRFVNI)
 				externalMACVRFContainer.Name = fmt.Sprintf("iperf3-macvrf-%d", bgpAlloc.MACVRFVNI)
+				externalMACVRFContainer.Image = images.Netshoot()
 				// Shorten the CUDN name to fit Linux interface name limits.
 				// The name is used as testName for runEVPNNetworkAndServers which
 				// derives bridge/SVI names: worst-case SVI is "br<name>.4094"
@@ -1869,7 +1899,11 @@ write_files:
 				providerNetwork, err := containerNetwork(td)
 				Expect(err).ShouldNot(HaveOccurred(), "primary network must be available to attach containers")
 				externalContainer.Network = providerNetwork
-				externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
+				if provider, ok := infraprovider.Get().(iperf3Provider); ok {
+					externalContainer, err = provider.PrepareIPerf3Container(providerCtx, externalContainer)
+				} else {
+					externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
+				}
 				Expect(err).ShouldNot(HaveOccurred(), "creation of external container is test dependency")
 			} else if td.role == udnv1.NetworkRolePrimary && td.evpn != nil {
 				// Containers were set up by runEVPNNetworkAndServers; collect MAC-VRF IPs.
@@ -2225,7 +2259,7 @@ ip route add %[3]s via %[4]s
 			}
 		)
 		AfterAll(func() {
-			Expect(removeImagesInNodes(kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesInNodes(images.FedoraContainerDisk())).To(Succeed())
 		})
 		BeforeEach(func() {
 			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, map[string]string{
@@ -2328,7 +2362,7 @@ ethernets:
 			namespace = fr.Namespace.Name
 		})
 		AfterAll(func() {
-			Expect(removeImagesInNodes(kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesInNodes(images.FedoraContainerDisk())).To(Succeed())
 		})
 		var (
 			ipv4CIDR             = "172.31.0.0/24"

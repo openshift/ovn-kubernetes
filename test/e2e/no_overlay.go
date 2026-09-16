@@ -35,7 +35,7 @@ import (
 
 func init() {
 	if os.Getenv("ENABLE_NO_OVERLAY") == "true" {
-		images.Add(images.Netshoot())
+		images.AddDeferred(images.Netshoot)
 	}
 }
 

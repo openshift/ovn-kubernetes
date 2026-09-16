@@ -5,8 +5,66 @@ import (
 	"strings"
 	"testing"
 
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+
+	imageutils "k8s.io/kubernetes/test/utils/image"
+
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 )
+
+func TestVirtualizationImageMirrors(t *testing.T) {
+	t.Setenv("KUBE_TEST_REPO", "registry.example.com/e2e")
+	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
+	if err := registerTestImages(ext); err != nil {
+		t.Fatal(err)
+	}
+	if len(ext.Images) != 2 {
+		t.Fatalf("expected agnhost and Fedora, got %d", len(ext.Images))
+	}
+	if ext.Images[1].Registry != "quay.io" {
+		t.Fatal("image discovery must advertise original pullspecs, not mirror locations")
+	}
+	if ext.Images[1].Index != int(imageutils.None) || ext.Images[1].Name != "kubevirt/fedora-with-test-tooling-container-disk" || ext.Images[1].Version != "v1.8.2" {
+		t.Fatalf("Fedora registration must match Origin's approved image: %+v", ext.Images[1])
+	}
+	// Origin converts extension images to Kubernetes configs before mirroring.
+	configs := make(map[imageutils.ImageID]imageutils.Config)
+	for _, img := range ext.Images {
+		var config imageutils.Config
+		config.SetRegistry(img.Registry)
+		config.SetName(img.Name)
+		config.SetVersion(img.Version)
+		configs[imageutils.ImageID(img.Index)] = config
+	}
+	const tag = "e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-v1-8-2-DmMayTpvDZVswLv0"
+	for _, repo := range []string{"quay.io/openshift/community-e2e-images", "registry.example.com/e2e"} {
+		t.Setenv("KUBE_TEST_REPO", repo)
+		mapped := imageutils.GetMappedImageConfigs(configs, repo)
+		fedora := mapped[imageutils.ImageID(ext.Images[1].Index)]
+		if got, want := fedora.GetE2EImage(), repo+":"+tag; got != want {
+			t.Fatalf("discovered Fedora mirror: got %q, want %q", got, want)
+		}
+		if got := images.FedoraContainerDisk(); fedora.GetE2EImage() != got {
+			t.Fatalf("discovered Fedora mirror %q differs from VM image %q", fedora.GetE2EImage(), got)
+		}
+	}
+}
+
+func TestFedoraImageMatchesOriginMapping(t *testing.T) {
+	const tag = "e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-v1-8-2-DmMayTpvDZVswLv0"
+	for _, repo := range []string{"", "quay.io/openshift/community-e2e-images", "mirror.example.com:5000/e2e"} {
+		t.Setenv("KUBE_TEST_REPO", repo)
+		got := images.FedoraContainerDisk()
+		want := ocpdeploymentconfig.FedoraContainerDiskImage
+		if repo != "" {
+			want = repo + ":" + tag
+		}
+		if got != want {
+			t.Fatalf("repo %q: got %q, want %q", repo, got, want)
+		}
+	}
+}
 
 func TestSplitImagePullSpec(t *testing.T) {
 	t.Parallel()
