@@ -6,6 +6,9 @@ import (
 	"testing"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 )
 
 func TestSplitImagePullSpec(t *testing.T) {
@@ -155,7 +158,8 @@ func TestExtensionImageFromPullSpec(t *testing.T) {
 }
 
 func TestRegisterTestImages(t *testing.T) {
-	if len(requiredImages) == 0 {
+	deploymentconfig.Get().AddImage(images.Agnhost)
+	if len(deploymentconfig.Get().GetRequiredImages()) == 0 {
 		t.Fatal("requiredImages is empty")
 	}
 
@@ -165,22 +169,22 @@ func TestRegisterTestImages(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if got, want := len(ext.Images), len(requiredImages); got != want {
+	if got, want := len(ext.Images), len(deploymentconfig.Get().GetRequiredImages()); got != want {
 		t.Fatalf("registered %d images, want %d from requiredImages", got, want)
 	}
 
 	type imageKey struct {
-		index    int
+		imageID  api.ImageID
 		pullSpec string
 	}
 	want := make(map[imageKey]int)
-	for _, ri := range requiredImages {
-		want[imageKey{ri.index, ri.pullSpec}]++
+	for _, ri := range deploymentconfig.Get().GetRequiredImages() {
+		want[imageKey{ri.ImageID, ri.PullSpec}]++
 	}
 
 	got := make(map[imageKey]int, len(ext.Images))
 	for _, img := range ext.Images {
-		got[imageKey{img.Index, fmt.Sprintf("%s/%s:%s", img.Registry, img.Name, img.Version)}]++
+		got[imageKey{api.ImageID(img.Index), fmt.Sprintf("%s/%s:%s", img.Registry, img.Name, img.Version)}]++
 	}
 
 	if len(got) != len(want) {
