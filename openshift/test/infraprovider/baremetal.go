@@ -6,6 +6,8 @@ import (
 	"net"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
@@ -165,6 +167,11 @@ func findInterfaceBySubnet(ipAddrJSON, v4Subnet, v6Subnet string) string {
 		}
 	}
 	return ""
+}
+
+func (ci *baremetalInfra) InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string]) {
+	// The hypervisor is on the same machine network as the cluster nodes.
+	return nil, nil
 }
 
 func (ci *baremetalInfra) PrimaryNetwork() (api.Network, error) {
