@@ -3,10 +3,13 @@ package infraprovider
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
@@ -95,6 +98,25 @@ func (h *baseInfra) GetExternalContainerNetworkInterface(ec api.ExternalContaine
 		}, nil
 	}
 	return h.engine.GetNetworkInterface(ec.Name, network.Name())
+}
+
+func (h *baseInfra) InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string]) {
+	ipv4 = sets.New[string]()
+	ipv6 = sets.New[string]()
+	if h.hostNetworkInfo == nil {
+		return ipv4, ipv6
+	}
+	if h.hostNetworkInfo.IPv4Prefix != "" {
+		if _, cidr, err := net.ParseCIDR(h.hostNetworkInfo.IPv4Prefix); err == nil {
+			ipv4.Insert(cidr.String())
+		}
+	}
+	if h.hostNetworkInfo.IPv6Prefix != "" {
+		if _, cidr, err := net.ParseCIDR(h.hostNetworkInfo.IPv6Prefix); err == nil {
+			ipv6.Insert(cidr.String())
+		}
+	}
+	return ipv4, ipv6
 }
 
 func (h *baseInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {

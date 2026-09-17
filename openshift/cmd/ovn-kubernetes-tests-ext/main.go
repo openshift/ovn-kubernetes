@@ -130,13 +130,11 @@ func main() {
 		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/parallel')"},
 	})
 
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
-	if err != nil {
-		panic(err)
-	}
-
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
+	// Must happen before BuildExtensionTestSpecsFromOpenShiftGinkgoSuite because Ginkgo
+	// Entry() arguments are evaluated during tree construction, triggering UDN subnet
+	// allocation which queries the infra provider for network exclusions.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
@@ -151,6 +149,11 @@ func main() {
 		}
 	}
 	deploymentconfig.Set(ocpdeploymentconfig.New(cfg))
+
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
+	if err != nil {
+		panic(err)
+	}
 
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
 	specs.AddBeforeAll(func() {

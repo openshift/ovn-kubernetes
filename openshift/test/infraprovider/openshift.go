@@ -14,6 +14,7 @@ import (
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -32,6 +33,7 @@ type platformInfra interface {
 	api.ExternalContainerProvider
 	PrimaryNetwork() (api.Network, error)
 	GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider
+	InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string])
 }
 
 type OpenshiftInfraProvider struct {
@@ -207,6 +209,13 @@ func isLocalGatewayMode(network *operv1.Network) bool {
 
 	return network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig != nil &&
 		network.Spec.DefaultNetwork.OVNKubernetesConfig.GatewayConfig.RoutingViaHost
+}
+
+func (o *OpenshiftInfraProvider) InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string]) {
+	if o.clusterInfra == nil {
+		return nil, nil
+	}
+	return o.clusterInfra.InfrastructureNetworkExclusions()
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
