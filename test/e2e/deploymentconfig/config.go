@@ -14,6 +14,11 @@ func Set(deployment api.DeploymentConfig) {
 	deploymentConfig = deployment
 }
 
+// IsSet returns true if the deployment config has been set.
+func IsSet() bool {
+	return deploymentConfig != nil
+}
+
 // Get deployment config.
 func Get() api.DeploymentConfig {
 	if deploymentConfig == nil {
