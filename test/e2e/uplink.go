@@ -268,6 +268,60 @@ var _ = ginkgo.Describe("Network Segmentation Uplink default-VRF egress", featur
 			"expected VRF device %s on node %s", vrfName, longNamePod.Spec.NodeName)
 	})
 
+	ginkgo.It("publishes the heaviest next hops of the lowest-metric default routes", func(ctx ginkgo.SpecContext) {
+		nodes, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		uplinkAlloc, err := allocators.AllocateBGP(f, ictx)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		_, nodeIfaces := setupUplinkNetwork(ictx, nodes.Items, ipFamilySet,
+			"upnet"+testSuffix, []string{uplinkAlloc.BGPPeerSubnet, uplinkAlloc.BGPPeerSubnet6})
+		bridgeName := uplinkBridgeName("upecmp" + testSuffix)
+		gomega.Expect(configureUplinkBridge(f, ictx, bridgeName, nodeIfaces)).To(gomega.Succeed())
+
+		gateways := map[utilnet.IPFamily][]string{
+			utilnet.IPv4: {"192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4"},
+			utilnet.IPv6: {"2001:db8::1", "2001:db8::2", "2001:db8::3", "2001:db8::4"},
+		}
+		// Per family: the preferred (metric 50000) route carries a heavy and a
+		// light next hop, the backup (metric 50001) route two more. Only the
+		// heavy next hop of the preferred route must be published.
+		var expectedGateways []string
+		for family := range ipFamilySet {
+			expectedGateways = append(expectedGateways, gateways[family][0])
+		}
+		ginkgo.By("installing unequal-weight and higher-metric default routes on the Uplink bridge")
+		for _, node := range nodes.Items {
+			for family := range ipFamilySet {
+				ipCmd := "ip"
+				if family == utilnet.IPv6 {
+					ipCmd = "ip -6"
+				}
+				nextHops := gateways[family]
+				// These routes test discovery only; deleting the test bridge removes them.
+				_, err := execNodeCommand(node.Name,
+					"%s route replace default metric 50000 nexthop via %s dev %s weight 4 onlink nexthop via %s dev %s weight 1 onlink",
+					ipCmd, nextHops[0], bridgeName, nextHops[1], bridgeName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = execNodeCommand(node.Name,
+					"%s route replace default metric 50001 nexthop via %s dev %s weight 4 onlink nexthop via %s dev %s weight 1 onlink",
+					ipCmd, nextHops[2], bridgeName, nextHops[3], bridgeName)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			}
+		}
+
+		ginkgo.By("publishing only the heaviest next hops of the lowest-metric defaults")
+		uplinkName := "uplink" + testSuffix
+		createUplink(f, ictx, uplinkName, nodes.Items, nodeIfaces, bridgeName)
+		waitForUplinkStatesResolved(f, uplinkName, bridgeName, nodes.Items)
+		for _, node := range nodes.Items {
+			state, err := getUplinkState(f, uplinkName, node.Name)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			actual, _, err := unstructured.NestedStringSlice(state.Object, "status", "defaultGateways")
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(actual).To(gomega.ConsistOf(expectedGateways))
+		}
+	})
+
 	ginkgo.It("runs a CUDN without Uplink default gateways and adds its default routes when they appear", func(ctx ginkgo.SpecContext) {
 		nodes, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1189,6 +1243,151 @@ var _ = ginkgo.Describe("Network Segmentation Uplink route advertisements", feat
 		ginkgo.Entry("with kernel-owned interface addressing", false),
 		ginkgo.Entry("with NetworkManager-style interface addressing", true),
 	)
+
+	ginkgo.It("discovers a default gateway that appears in the CUDN VRF after enslavement", func(ctx ginkgo.SpecContext) {
+		if isDPUUplinkE2E() {
+			e2eskipper.Skipf("full-mode Uplink bridge provisioning; the split DPU mode variant covers DPU")
+		}
+		nodes, err := f.ClientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		schedulableNodes, err := e2enode.GetBoundedReadySchedulableNodes(ctx, f.ClientSet, 2)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(schedulableNodes.Items).NotTo(gomega.BeEmpty())
+
+		bgpAlloc, err := allocators.AllocateBGP(f, ictx)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		networkName := "uplate" + testSuffix
+		serverName := networkName + "-srv"
+		peerCIDRs := []string{bgpAlloc.BGPPeerSubnet, bgpAlloc.BGPPeerSubnet6}
+		serverCIDRs := []string{bgpAlloc.IPVRFSubnet, bgpAlloc.IPVRFSubnet6}
+		gomega.Expect(runBGPNetworkAndServer(
+			f,
+			ictx,
+			ipFamilySet,
+			networkName,
+			serverName,
+			serverName,
+			peerCIDRs,
+			serverCIDRs,
+		)).To(gomega.Succeed())
+
+		peerNetwork, err := infraprovider.Get().GetNetwork(networkName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		nodeIfaces := collectNodeNetworkInterfaces(nodes.Items, peerNetwork)
+
+		ginkgo.By("provisioning the Uplink bridge without default routes and creating the Uplink")
+		bridgeName := uplinkBridgeName("uplate" + testSuffix)
+		gomega.Expect(configureUplinkBridge(f, ictx, bridgeName, nodeIfaces)).To(gomega.Succeed())
+		uplinkName := networkName
+		createUplink(f, ictx, uplinkName, nodes.Items, nodeIfaces, bridgeName)
+		waitForUplinkStatesResolved(f, uplinkName, bridgeName, nodes.Items)
+		waitForUplinkStatesNoDefaultGateways(f, uplinkName, nodes.Items)
+
+		ginkgo.By("creating the advertised CUDN backed by the Uplink")
+		networkLabels := map[string]string{"advertise": networkName}
+		networkSpec := uplinkLayer3NetworkSpec(ipFamilySet, bgpAlloc.UDNSubnet, bgpAlloc.UDNSubnet6)
+		namespace, err := createUplinkNamespace(f, ictx, "uplink-bgp", networkName)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(createUplinkCUDN(
+			f,
+			ictx,
+			namespace,
+			networkName,
+			networkSpec,
+			networkLabels,
+			uplinkName,
+		)).To(gomega.Succeed())
+		if isDynamicUDNEnabled() {
+			ginkgo.By("activating the dynamic CUDN on the nodes under test")
+			for i, node := range schedulableNodes.Items {
+				createUplinkNetexecPod(
+					f,
+					namespace.Name,
+					fmt.Sprintf("activate-%s-%d", networkName, i),
+					node.Name,
+				)
+			}
+		}
+
+		gomega.Expect(createRouteAdvertisements(
+			f,
+			ictx,
+			networkName,
+			"auto",
+			networkLabels,
+			map[string]string{"network": networkName},
+		)).To(gomega.Succeed())
+
+		ginkgo.By("waiting for the Uplink bridge to be enslaved to the CUDN VRF")
+		for _, node := range schedulableNodes.Items {
+			node := node
+			gomega.Eventually(func() error {
+				_, err := execNodeCommand(node.Name,
+					"ip -o link show dev %s | grep -q 'master %s'", bridgeName, networkName)
+				return err
+			}).WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(
+				gomega.Succeed(),
+				"expected Uplink bridge %s enslaved to VRF %s on node %s",
+				bridgeName,
+				networkName,
+				node.Name,
+			)
+		}
+
+		nodeNames := make([]string, 0, len(schedulableNodes.Items))
+		for _, node := range schedulableNodes.Items {
+			nodeNames = append(nodeNames, node.Name)
+		}
+
+		waitForUplinkStatesNoDefaultGateways(f, uplinkName, schedulableNodes.Items)
+		ginkgo.By("adding default routes explicitly to the CUDN VRF routing table")
+		frr := infraapi.ExternalContainer{Name: networkName + "-frr"}
+		frrIface, err := infraprovider.Get().GetExternalContainerNetworkInterface(frr, peerNetwork)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		for _, family := range ipFamilySet.UnsortedList() {
+			frrIP := getFirstIPStringOfFamily(family, []string{frrIface.IPv4, frrIface.IPv6})
+			gomega.Expect(frrIP).NotTo(gomega.BeEmpty())
+			hasDefaultRoute := func(nodeName string) (bool, error) {
+				return cudnGRHasRoute(f.ClientSet, networkName, nodeName, defaultRouteCIDR(family), frrIP)
+			}
+			for _, node := range schedulableNodes.Items {
+				gomega.Expect(hasDefaultRoute(node.Name)).To(gomega.BeFalse(),
+					"expected no default route via %s on the gateway router of CUDN %s for node %s before discovery",
+					frrIP, networkName, node.Name)
+			}
+			gomega.Expect(configureUplinkStaticRoute(
+				ictx,
+				bridgeName,
+				nodeNames,
+				defaultRouteCIDR(family),
+				frrIP,
+				false,
+				networkName,
+			)).To(gomega.Succeed())
+			for _, node := range schedulableNodes.Items {
+				gomega.Expect(uplinkRouteShownIn(node.Name, "vrf "+networkName, defaultRouteCIDR(family), frrIP)).
+					To(gomega.Succeed(),
+						"expected the added default route via %s in CUDN VRF %s on node %s",
+						frrIP, networkName, node.Name)
+				gomega.Eventually(func() (bool, error) { return hasDefaultRoute(node.Name) }).
+					WithTimeout(uplinkTimeout).WithPolling(uplinkPoll).Should(gomega.BeTrue(),
+					"expected CUDN %s gateway router on node %s to acquire default route via %s",
+					networkName, node.Name, frrIP)
+			}
+		}
+
+		ginkgo.By("waiting for discovery to publish the default gateways from the VRF routing table")
+		waitForUplinkStatesDefaultGateways(f, uplinkName, schedulableNodes.Items, ipFamilySet)
+		for _, node := range schedulableNodes.Items {
+			waitForUplinkStateGatewayCondition(
+				f,
+				uplinkName,
+				node.Name,
+				metav1.ConditionTrue,
+				uplinkv1alpha1.UplinkStateReasonGatewayConfigured,
+			)
+		}
+	})
 })
 
 var _ = ginkgo.Describe("Uplink route advertisements with Dynamic UDN allocation", feature.RouteAdvertisementsDynamicUDN, feature.Uplink, func() {
