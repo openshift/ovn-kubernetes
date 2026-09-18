@@ -668,16 +668,17 @@ func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
 				klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		} else {
-			klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
+			klog.Infof("[REACHABILITY-CHECK] Node: %s transitioned from unreachable to reachable, will trigger EgressIP reconciliation", nodeName)
 			nodeToAdd, err := eIPC.watchFactory.GetNode(nodeName)
 			if err != nil {
-				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
+				klog.Errorf("[REACHABILITY-CHECK] Node: %s is reachable but failed to get node object, err: %v", nodeName, err)
 				continue
 			}
 			if err := eIPC.retryEgressNodes.AddRetryObjWithAddNoBackoff(nodeToAdd); err != nil {
-				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
+				klog.Errorf("[REACHABILITY-CHECK] Node: %s failed to add to retry queue, err: %v", nodeName, err)
 				continue
 			}
+			klog.Infof("[REACHABILITY-CHECK] Node: %s added to retry queue, requesting retry processing", nodeName)
 			eIPC.retryEgressNodes.RequestRetryObjs()
 		}
 	}
@@ -783,30 +784,41 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *c
 
 func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	var errors []error
-	klog.V(5).Infof("Egress node: %s about to be initialized", nodeName)
+	klog.Infof("[ADD-EGRESS-NODE] Node %s about to be added for egress assignment", nodeName)
 
-	// If a node has been labelled for egress IP we need to check if there are any
-	// egress IPs which are missing an assignment. If there are, we need to send a
-	// synthetic update since reconcileEgressIP will then try to assign those IPs to
-	// this node (if possible)
 	egressIPs, err := eIPC.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
+
+	klog.Infof("[ADD-EGRESS-NODE] Found %d total EgressIPs to check for node %s", len(egressIPs), nodeName)
+
+	reconciledCount := 0
+	skippedCount := 0
+
 	for _, egressIP := range egressIPs {
 		egressIP := *egressIP
-		if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
-			// Send a "synthetic update" on all egress IPs which are not fully
-			// assigned, the reconciliation loop for WatchEgressIP will try to
-			// assign stuff to this new node. The workqueue's delta FIFO
-			// implementation will not trigger a watch event for updates on
-			// objects which have no semantic difference, hence: call the
-			// reconciliation function directly.
+		specCount := len(egressIP.Spec.EgressIPs)
+		statusCount := len(egressIP.Status.Items)
+
+		if specCount != statusCount {
+			klog.Infof("[ADD-EGRESS-NODE] EgressIP %s has unassigned IPs (spec=%d, status=%d), triggering reconciliation for node %s",
+				egressIP.Name, specCount, statusCount, nodeName)
+
 			if err := eIPC.reconcileEgressIP(nil, &egressIP); err != nil {
+				klog.Errorf("[ADD-EGRESS-NODE] Failed to reconcile EgressIP %s for node %s: %v", egressIP.Name, nodeName, err)
 				errors = append(errors, fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err))
+			} else {
+				klog.Infof("[ADD-EGRESS-NODE] Successfully triggered reconciliation for EgressIP %s", egressIP.Name)
+				reconciledCount++
 			}
+		} else {
+			skippedCount++
 		}
 	}
+
+	klog.Infof("[ADD-EGRESS-NODE] Node %s: reconciled %d EgressIPs, skipped %d fully-assigned EgressIPs",
+		nodeName, reconciledCount, skippedCount)
 
 	if len(errors) > 0 {
 		return utilerrors.Join(errors...)
@@ -937,6 +949,17 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 
 	name := ""
 
+	// Get name for logging
+	if old != nil {
+		name = old.Name
+	}
+	if new != nil {
+		name = new.Name
+	}
+
+	klog.Infof("[RECONCILE-EIP] Starting reconciliation for EgressIP %s (old=%v, new=%v)",
+		name, old != nil, new != nil)
+
 	// Initialize a status which will be used to compare against
 	// new.spec.egressIPs and decide on what from the status should get deleted
 	// or kept.
@@ -950,13 +973,11 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	// but are allocated and they are meant to be removed.
 	staleEgressIPs := sets.NewString()
 	if old != nil {
-		name = old.Name
 		status = old.Status.Items
 		staleEgressIPs.Insert(old.Spec.EgressIPs...)
 	}
 	if new != nil {
 		newEIP = new
-		name = newEIP.Name
 		status = newEIP.Status.Items
 		if staleEgressIPs.Len() > 0 {
 			for _, egressIP := range newEIP.Spec.EgressIPs {
@@ -1296,15 +1317,27 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 	defer eIPC.nodeAllocator.Unlock()
 	assignments := []egressipv1.EgressIPStatusItem{}
 	assignableNodes, existingAllocations := eIPC.getSortedEgressData()
+
+	klog.Infof("[ASSIGN-EIP] EgressIP %s: attempting to assign %d IPs, found %d assignable nodes",
+		name, len(egressIPs), len(assignableNodes))
+
 	if len(assignableNodes) == 0 {
 		eIPRef := corev1.ObjectReference{
 			Kind: "EgressIP",
 			Name: name,
 		}
 		eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", name, util.GetNodeEgressLabel())
-		klog.Errorf("No assignable nodes found for EgressIP: %s and requested IPs: %v", name, egressIPs)
+		klog.Errorf("[ASSIGN-EIP] No assignable nodes found for EgressIP %s and requested IPs: %v", name, egressIPs)
 		return assignments
 	}
+
+	// Log available nodes
+	nodeNames := make([]string, 0, len(assignableNodes))
+	for _, node := range assignableNodes {
+		nodeNames = append(nodeNames, node.name)
+	}
+	klog.Infof("[ASSIGN-EIP] EgressIP %s: assignable nodes are: %v", name, nodeNames)
+
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
 	for _, egressIP := range egressIPs {
 		klog.V(5).Infof("Will attempt assignment for egress IP: %s", egressIP)
