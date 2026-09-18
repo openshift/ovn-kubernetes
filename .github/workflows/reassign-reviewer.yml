@@ -13,13 +13,14 @@ on:
 
 jobs:
   request-reviewer:
-    # React only to /assign-reviewer at the start of a human comment on a PR.
-    # Ignore Bot-authored comments so the workflow never reacts to its own
-    # confirmation/error messages.
+    # React only to /assign-reviewer in a human comment on a PR. The exact
+    # position check happens in the script because expressions cannot trim
+    # leading whitespace. Ignore Bot-authored comments so the workflow never
+    # reacts to its own confirmation/error messages.
     if: >
       github.event.issue.pull_request &&
       github.event.comment.user.type != 'Bot' &&
-      startsWith(github.event.comment.body, '/assign-reviewer')
+      contains(github.event.comment.body, '/assign-reviewer')
     runs-on: ubuntu-latest
     steps:
       # Use the same app token the repo uses for privileged PR automation:
@@ -34,23 +35,56 @@ jobs:
 
       - name: Request the ovn-kubernetes-reviewers team for review
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
+            // The command must start the comment, ignoring surrounding whitespace
+            // (web/mobile clients may prepend a newline).
+            if (!process.env.COMMENT_BODY.trim().startsWith('/assign-reviewer')) {
+              core.info('Comment does not start with /assign-reviewer, ignoring');
+              return;
+            }
+
             const { owner, repo } = context.repo;
             const pull_number = context.issue.number;
             const team = 'ovn-kubernetes-reviewers';
+
+            const requestedUsers = async () => {
+              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
+              return {
+                users: new Set(pr.requested_reviewers.map(u => u.login)),
+                teamPending: pr.requested_teams.some(t => t.slug === team),
+              };
+            };
+
             try {
+              const before = await requestedUsers();
+              // Requesting a team that is already a requested reviewer is a
+              // silent no-op for GitHub and skips the code-review assignment.
+              // Drop the stale team request first so the re-request always
+              // triggers the assignment.
+              if (before.teamPending) {
+                await github.rest.pulls.removeRequestedReviewers({
+                  owner, repo, pull_number, reviewers: [], team_reviewers: [team],
+                });
+              }
               // Re-requesting the team triggers the team's code-review assignment,
               // which load-balances the PR onto another member from the pool.
               await github.rest.pulls.requestReviewers({
                 owner, repo, pull_number, team_reviewers: [team],
               });
+
+              const after = await requestedUsers();
+              const assigned = [...after.users].filter(u => !before.users.has(u));
+              const body = assigned.length > 0
+                ? `Requested a review from \`@${owner}/${team}\` — GitHub routed this ` +
+                  `to ${assigned.map(u => `@${u}`).join(', ')}.`
+                : `Requested a review from \`@${owner}/${team}\`, but GitHub did not ` +
+                  `assign a new member.`;
               await github.rest.issues.createComment({
-                owner, repo, issue_number: pull_number,
-                body: `Requested a review from \`@${owner}/${team}\` — GitHub will ` +
-                      `route this to an available member. Set your GitHub status to ` +
-                      `"Busy" to be skipped by the assignment.`,
+                owner, repo, issue_number: pull_number, body,
               });
             } catch (e) {
               await github.rest.issues.createComment({
