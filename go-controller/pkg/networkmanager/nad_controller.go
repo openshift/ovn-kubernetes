@@ -92,7 +92,7 @@ type nadController struct {
 	// primaryNADs holds a mapping of namespace to NAD of primary UDNs
 	primaryNADs map[string]string
 
-	// networkIDAllocator used by cluster-manager to allocate new IDs, zone/node mode only uses as a cache
+	// networkIDAllocator is used by cluster-manager to allocate new IDs; node mode only uses it as a cache.
 	networkIDAllocator  id.Allocator
 	tunnelKeysAllocator *id.TunnelKeysAllocator
 	nadClient           nadclientset.Interface
@@ -129,7 +129,6 @@ type networkRefReconcilerRegistration struct {
 
 func newController(
 	name string,
-	zone string,
 	node string,
 	cm ControllerManager,
 	wf watchFactory,
@@ -138,7 +137,7 @@ func newController(
 	tunnelKeysAllocator *id.TunnelKeysAllocator,
 	filterNADsOnNode string,
 ) (*nadController, error) {
-	networkController := newNetworkController(name, zone, node, cm, wf)
+	networkController := newNetworkController(name, node, cm, wf)
 	c := &nadController{
 		name:                   fmt.Sprintf("[%s NAD controller]", name),
 		stopChan:               make(chan struct{}),
@@ -200,7 +199,7 @@ func newController(
 	if err != nil {
 		return nil, fmt.Errorf("failed to allocate default network ID: %w", err)
 	}
-	if zone == "" && node == "" {
+	if node == "" {
 		// tunnelKeysAllocator must be passed for cluster manager
 		c.tunnelKeysAllocator = tunnelKeysAllocator
 	}
@@ -381,7 +380,7 @@ func (c *nadController) deleteNADFromNetworkLocked(networkName, nadKey string) {
 // Trackers invoke this callback after releasing their cache locks, so local
 // activity checks are safe here but should stay brief.
 func (c *nadController) OnNetworkRefChange(node, nadNamespacedName string, active bool) {
-	klog.V(4).Infof("%s Network change for zone controller triggered by pod/egress IP events "+
+	klog.V(4).Infof("%s Network change for node controller triggered by pod/egress IP events "+
 		"on node: %s, NAD: %s, active: %t", c.name, node, nadNamespacedName, active)
 
 	namespace, name, err := cache.SplitMetaNamespaceKey(nadNamespacedName)
@@ -493,7 +492,6 @@ func (c *nadController) filter(nad *nettypes.NetworkAttachmentDefinition) (bool,
 
 	ourNode := c.filterNADsOnNode
 
-	// We don't support multiple nodes per zone; assume zone name is node name.
 	if c.nodeHasNAD(ourNode, nad) {
 		return false, nil
 	}
@@ -1336,6 +1334,8 @@ func (c *nadController) nadNeedsUpdate(oldNAD, newNAD *nettypes.NetworkAttachmen
 // Returns DefaultNetwork if Network Segmentation disabled or namespace does not require primary UDN.
 // Returns nil if there is no active network.
 // Returns InvalidPrimaryNetworkError if a network should be present but is not.
+// Returns a NotFound error if the namespace is absent from the informer
+// cache (not necessarily definitively deleted).
 func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.NetInfo, error) {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return &util.DefaultNetInfo{}, nil
@@ -1344,10 +1344,6 @@ func (c *nadController) GetActiveNetworkForNamespace(namespace string) (util.Net
 	// check if required UDN label is on namespace
 	ns, err := c.namespaceLister.Get(namespace)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// namespace is gone, no active network for it
-			return nil, nil
-		}
 		return nil, fmt.Errorf("failed to get namespace %q: %w", namespace, err)
 	}
 	if _, exists := ns.Labels[types.RequiredUDNNamespaceLabel]; !exists {
@@ -1385,7 +1381,9 @@ func (c *nadController) GetActiveNetworkForNamespaceFast(namespace string) util.
 
 // GetPrimaryNADForNamespace returns the full namespaced key of the
 // primary NAD for the given namespace, if one exists.
-// Returns default network if namespace has no primary UDN or Network Segmentation is disabled
+// Returns default network if namespace has no primary UDN or Network Segmentation is disabled.
+// Returns a NotFound error if the namespace is absent from the informer
+// cache (not necessarily definitively deleted).
 func (c *nadController) GetPrimaryNADForNamespace(namespace string) (string, error) {
 	if !util.IsNetworkSegmentationSupportEnabled() {
 		return types.DefaultNetworkName, nil
@@ -1400,10 +1398,6 @@ func (c *nadController) GetPrimaryNADForNamespace(namespace string) (string, err
 	// Double-check if the namespace *requires* a primary UDN.
 	ns, err := c.namespaceLister.Get(namespace)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			// Namespace is gone — no primary NAD by definition.
-			return "", nil
-		}
 		return "", fmt.Errorf("failed to fetch namespace %q: %w", namespace, err)
 	}
 	if _, exists := ns.Labels[types.RequiredUDNNamespaceLabel]; exists {

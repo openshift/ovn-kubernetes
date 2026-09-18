@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/cache"
@@ -273,20 +274,20 @@ func TestNodeNeedsUpdate(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "zone annotation changed",
+			name: "legacy zone annotation change is ignored",
 			oldObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "node1",
-					Annotations: map[string]string{"k8s.ovn.org/zone-name": "zone1"},
+					Annotations: map[string]string{util.OvnNodeZoneName: "zone1"},
 				},
 			},
 			newObj: &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "node1",
-					Annotations: map[string]string{"k8s.ovn.org/zone-name": "zone2"},
+					Annotations: map[string]string{util.OvnNodeZoneName: "zone2"},
 				},
 			},
-			expected: true,
+			expected: false,
 		},
 		{
 			name: "node subnet annotation changed",
@@ -357,7 +358,6 @@ func TestNodeNeedsUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node1",
 					Annotations: map[string]string{
-						"k8s.ovn.org/zone-name":    "zone1",
 						"k8s.ovn.org/node-subnets": `{"default":"10.244.0.0/24"}`,
 						"k8s.ovn.org/node-id":      "1",
 					},
@@ -367,7 +367,6 @@ func TestNodeNeedsUpdate(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node1",
 					Annotations: map[string]string{
-						"k8s.ovn.org/zone-name":    "zone1",
 						"k8s.ovn.org/node-subnets": `{"default":"10.244.0.0/24"}`,
 						"k8s.ovn.org/node-id":      "1",
 					},
@@ -411,7 +410,6 @@ func TestController_reconcileNode(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node1",
 			Annotations: map[string]string{
-				"k8s.ovn.org/zone-name":    "zone1",
 				"k8s.ovn.org/node-subnets": `{"default":"10.244.0.0/24"}`,
 			},
 		},
@@ -1090,4 +1088,45 @@ func TestController_reconcileService(t *testing.T) {
 		defer reconciledMutex.Unlock()
 		return reconciledCNCs.UnsortedList()
 	}).Should(gomega.ConsistOf("cnc1"))
+}
+
+func TestController_reconcileService_ReturnsErrorOnNamespaceNotFound(t *testing.T) {
+	g := gomega.NewWithT(t)
+	setupTestConfig(true, true)
+
+	fakeClientset := util.GetOVNClientset().GetOVNKubeControllerClientset()
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "svc1", Namespace: "ns1"},
+	}
+	_, err := fakeClientset.KubeClient.CoreV1().Services("ns1").Create(
+		context.Background(), svc, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset, "test-node")
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	err = wf.Start()
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	defer wf.Shutdown()
+
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer syncCancel()
+	g.Expect(cache.WaitForCacheSync(
+		syncCtx.Done(),
+		wf.ServiceCoreInformer().Informer().HasSynced,
+	)).To(gomega.BeTrue())
+
+	fakeNetworkManager := &networkmanager.FakeNetworkManager{
+		NotFoundNamespaces: sets.New[string]("ns1"),
+	}
+
+	c := &Controller{
+		cncLister:      wf.ClusterNetworkConnectInformer().Lister(),
+		serviceLister:  wf.ServiceCoreInformer().Lister(),
+		networkManager: fakeNetworkManager,
+		cncCache:       map[string]*networkConnectState{},
+	}
+
+	err = c.reconcileService("ns1/svc1")
+	g.Expect(err).To(gomega.HaveOccurred())
+	g.Expect(apierrors.IsNotFound(err)).To(gomega.BeTrue())
 }
