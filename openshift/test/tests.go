@@ -61,6 +61,7 @@ var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:EgressIP][ovn-kubernetes-ote][sig-network] e2e egress IP validation: no external containers Should reassign a stale egress IP allocation after rapid EgressIP delete/create cycles, while preserving genuine conflicts [Serial][Suite:ovn-kubernetes/conformance/serial]",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
