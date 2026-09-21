@@ -124,7 +124,15 @@ var (
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			// Localnet kubevirt tests call SetupUnderlay which mutates the
+			// shared OVN bridge-mappings (br-ex) on every node and restores
+			// them on cleanup. Concurrent localnet tests would clobber each
+			// other's mappings and reuse the same physical-network addresses,
+			// so they must not run in parallel.
+			`ipamless localnet topology`,
+			`Secondary/Localnet`,
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)
