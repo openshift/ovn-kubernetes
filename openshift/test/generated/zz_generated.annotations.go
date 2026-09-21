@@ -1479,7 +1479,13 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation Uplink default-VRF egress recreates an UplinkState deleted out of band": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation Uplink route advertisements preserves pre-existing Uplink interface routes across VRF enslavement and release": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation Uplink route advertisements preserves pre-existing Uplink interface routes across VRF enslavement and release with NetworkManager-style interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation Uplink route advertisements preserves pre-existing Uplink interface routes across VRF enslavement and release with kernel-owned interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path in split DPU mode with NetworkManager-style interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path in split DPU mode with kernel-owned interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1890,6 +1896,12 @@ var AppendedAnnotations = map[string]string{
 	"e2e NetworkQoS validation Should have correct DSCP value for overlay traffic when NetworkQoS is applied ipv4": "[Disabled:Unimplemented]",
 
 	"e2e NetworkQoS validation Should have correct DSCP value for overlay traffic when NetworkQoS is applied ipv6": "[Disabled:Unimplemented]",
+
+	"e2e OVN/OVS metrics delivers OVN controller and northd metrics, including the loop-collected ones": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"e2e OVN/OVS metrics delivers OVS metrics from the standalone exporter": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"e2e OVN/OVS metrics keeps the endpoint responsive to repeated scrapes": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"e2e br-int flow monitoring export validation Should validate flow data of br-int is sent to an external gateway with netflow v5": "[Disabled:Unimplemented]",
 

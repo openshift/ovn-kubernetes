@@ -80,7 +80,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.3.0"
+          value: "1.4.0"
         - name: OVN_LOGLEVEL_NB
           value: {{ default "-vconsole:info -vfile:info" .Values.nbLogLevel | quote }}
         - name: OVN_GATEWAY_MODE
@@ -160,7 +160,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.3.0"
+          value: "1.4.0"
         - name: OVN_LOGLEVEL_SB
           value: {{ default "-vconsole:info -vfile:info" .Values.sbLogLevel | quote }}
         - name: K8S_APISERVER
@@ -226,7 +226,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.3.0"
+          value: "1.4.0"
         - name: OVN_LOGLEVEL_NORTHD
           value: {{ default "-vconsole:info -vfile:info" .Values.northdLogLevel | quote }}
         - name: K8S_APISERVER
@@ -321,10 +321,12 @@ spec:
         - mountPath: /var/lib/ovn/
           name: host-var-lib-ovs
           readOnly: true
+        {{- if not .Values.global.noSystemd }}
         - mountPath: /run/systemd/private
           name: run-systemd
           subPath: private
           readOnly: true
+        {{- end }}
         - mountPath: /var/run/k8s.cni.cncf.io/devinfo/dp
           name: host-devinfo-dp
           readOnly: true
@@ -345,7 +347,7 @@ spec:
         - name: OVN_EGRESSSERVICE_ENABLE
           value: {{ default "" .Values.global.enableEgressService | quote }}
         - name: OVN_DAEMONSET_VERSION
-          value: "1.3.0"
+          value: "1.4.0"
         - name: OVNKUBE_LOGLEVEL
           value: {{ default 4 .Values.ovnkubeNodeLogLevel | quote }}
         - name: OVNKUBE_LOGFILE_MAXSIZE
@@ -558,7 +560,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.3.0"
+          value: "1.4.0"
         - name: OVN_LOGLEVEL_CONTROLLER
           value: {{ default "-vconsole:info" .Values.ovnControllerLogLevel | quote }}
         - name: K8S_APISERVER
@@ -601,7 +603,7 @@ spec:
             memory: 300Mi
         env:
         - name: OVN_DAEMONSET_VERSION
-          value: "1.3.0"
+          value: "1.4.0"
         - name: K8S_NODE_IP
           valueFrom:
             fieldRef:
@@ -677,9 +679,11 @@ spec:
       - name: host-var-lib-ovs
         hostPath:
           path: /var/lib/openvswitch
+      {{- if not .Values.global.noSystemd }}
       - name: run-systemd
         hostPath:
           path: /run/systemd
+      {{- end }}
       - name: host-devinfo-dp
         hostPath:
           path: /var/run/k8s.cni.cncf.io/devinfo/dp
