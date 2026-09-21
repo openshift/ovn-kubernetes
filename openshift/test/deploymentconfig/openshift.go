@@ -3,6 +3,9 @@ package deploymentconfig
 import (
 	"fmt"
 	"strings"
+	"sync"
+
+	imageclient "github.com/openshift/client-go/image/clientset/versioned"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
@@ -53,6 +56,9 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 
 type openshift struct {
 	requiredImages map[api.ImageID]struct{}
+	imageLock         sync.Mutex
+	imageClient       imageclient.Interface
+	networkToolsImage string
 }
 
 func New() api.DeploymentConfig {

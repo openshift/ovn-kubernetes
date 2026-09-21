@@ -35,6 +35,8 @@ const (
 
 type baremetalInfra struct {
 	engine               *container.Engine
+	runner               api.Runner
+	testContext          *testcontext.TestContext
 	machineNetwork       api.Network           // contains subnet details about cluster machine network
 	machineNetworkGwInfo *api.NetworkInterface // contains interface info about hypervisor node machine network interface
 }
@@ -62,7 +64,7 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if infra.Spec.PlatformSpec.Type != configv1.BareMetalPlatformType {
 		return nil, nil
 	}
-	ci := &baremetalInfra{}
+	ci := &baremetalInfra{runner: sshRunner}
 	// Verify SSH connectivity works
 	if _, err := sshRunner.Run("echo", "connection test"); err != nil {
 		return nil, fmt.Errorf("failed to check frr container status, connectivity check failed with hypervisor: %w", err)
@@ -131,6 +133,9 @@ func (ci *baremetalInfra) ListNetworks() ([]string, error) {
 }
 
 func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
+	if container.Network != nil && container.Network.Name() == "host" && network.Name() == primaryNetworkName {
+		return *ci.machineNetworkGwInfo, nil
+	}
 	if container.Name == externalFRRContainerName && network.Name() == primaryNetworkName {
 		// frr container uses static ip configuration for ostestbm_net,
 		// querying it with podman inspect returns empty values, so build
@@ -153,12 +158,49 @@ func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.Ext
 
 func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
 	ciWithTestContext := &baremetalInfra{
-		engine: ci.engine.WithTestContext(context)}
+		engine:               ci.engine.WithTestContext(context),
+		runner:               ci.runner,
+		testContext:          context,
+		machineNetwork:       ci.machineNetwork,
+		machineNetworkGwInfo: ci.machineNetworkGwInfo,
+	}
 	return ciWithTestContext
 }
 
 func (ci *baremetalInfra) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
+	// The dev-scripts machine-network bridge has IPAM disabled. Use the
+	// hypervisor network namespace, as the non-virt external-peer tests do,
+	// rather than waiting for Podman to allocate a nonexistent address.
+	if container.Network != nil && container.Network.Name() == primaryNetworkName {
+		return ci.createHostNetworkedContainer(container)
+	}
 	return ci.engine.CreateExternalContainer(container)
+}
+
+func (ci *baremetalInfra) createHostNetworkedContainer(ec api.ExternalContainer) (api.ExternalContainer, error) {
+	if ci.testContext == nil || ci.machineNetworkGwInfo == nil {
+		return ec, fmt.Errorf("host-networked container requires a test context and hypervisor interface")
+	}
+	if valid, err := ec.IsValidPreCreateContainer(); !valid {
+		return ec, err
+	}
+	if ec.IPv4 != "" || ec.IPv6 != "" {
+		return ec, fmt.Errorf("host-networked container %q cannot request its own IP address", ec.Name)
+	}
+	ec.Network = &network.ContainerEngineNetwork{NetName: "host"}
+	ec.IPv4, ec.IPv6 = ci.machineNetworkGwInfo.IPv4, ci.machineNetworkGwInfo.IPv6
+	args := []string{"run", "-d", "--privileged", "--network", "host", "--name", ec.Name}
+	if ec.Entrypoint != "" {
+		args = append(args, "--entrypoint", ec.Entrypoint)
+	}
+	args = append(args, ec.RuntimeArgs...)
+	args = append(args, ec.Image)
+	args = append(args, ec.CmdArgs...)
+	if _, err := ci.runner.Run("podman", args...); err != nil {
+		return ec, fmt.Errorf("creating external container %q: %w", ec.Name, err)
+	}
+	ci.testContext.AddCleanUpFn(func() error { return ci.engine.DeleteExternalContainer(ec) })
+	return ec, nil
 }
 
 func (ci *baremetalInfra) DeleteExternalContainer(container api.ExternalContainer) error {

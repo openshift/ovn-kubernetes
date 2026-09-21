@@ -29,6 +29,7 @@ import (
 )
 
 type OpenshiftInfraProvider struct {
+	restConfig              *rest.Config
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
@@ -44,6 +45,7 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
+		restConfig:   config,
 		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
 	}
@@ -318,8 +320,4 @@ func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 		panic("not implemented")
 	}
 	return o.externalContainerContextProvider.DeleteNetwork(network)
-}
-
-func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
-	panic("not implemented")
 }

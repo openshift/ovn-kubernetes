@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
@@ -83,12 +85,18 @@ func main() {
 	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/serial",
-		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`labels.exists(l, l == "Serial") && !labels.exists(l, l == "Feature:VirtualMachineSupport")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`!labels.exists(l, l == "Serial") && !labels.exists(l, l == "Feature:VirtualMachineSupport")`},
+	})
+
+	// The dedicated virtualization OTE lane selects this suite directly.
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name:       "ovn-kubernetes/conformance/serial/virtualization",
+		Qualifiers: []string{`labels.exists(l, l == "Feature:VirtualMachineSupport")`},
 	})
 
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
@@ -135,7 +143,7 @@ func main() {
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
 		// These tests require at least 2 nodes and will fail on single-node deployments
-		if spec.Labels.Has(featureLabelNetworkSegmentation) {
+		if spec.Labels.Has(featureLabelNetworkSegmentation) || spec.Labels.Has("Feature:VirtualMachineSupport") {
 			spec.Exclude(extensiontests.TopologyEquals("SingleReplica"))
 		}
 
@@ -149,6 +157,15 @@ func main() {
 		}
 
 		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		// The builder captured the unannotated name. Child processes look up
+		// the final exported name when run-suite invokes run-test.
+		spec.RunParallel = func(ctx context.Context) *extensiontests.ExtensionTestResult {
+			timeout := spec.Timeout
+			if timeout <= 0 {
+				timeout = 90 * time.Minute
+			}
+			return ginkgo.SpawnProcessToRunTest(ctx, spec.Name, timeout)
+		}
 
 		switch {
 		case informingTests.Has(spec.Name):
