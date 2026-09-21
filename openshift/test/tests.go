@@ -32,13 +32,13 @@ var InformingTests = []string{
 	// Layer2 primary UDN DHCP/NDP/MTU validation.
 	"[Feature:VirtualMachineSupport][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP [Suite:openshift/network/virtualization]",
 	// Preconfigured static IP/MAC persistence (Primary/Layer2). Gated on
-	// OVN_PRE_CONF_UDN_ADDR_ENABLE; skips if the feature is not enabled.
+	// deployment configuration; skips if the feature is not enabled.
 	"[Feature:VirtualMachineSupport][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after restart of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress snat [Suite:openshift/network/virtualization]",
 	"[Feature:VirtualMachineSupport][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines with user defined networks and persistent ips configured should keep ip after live migration of VirtualMachine with interface binding for UDN and statics IPs and MAC with Primary/Layer2 ingress snat [Suite:openshift/network/virtualization]",
-	// Duplicate address validation (gated on OVN_PRE_CONF_UDN_ADDR_ENABLE).
+	// Duplicate address validation (gated on preconfigured UDN addresses).
 	"[Feature:VirtualMachineSupport][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines duplicate addresses validation should fail when creating second VM with duplicate static IP [Suite:openshift/network/virtualization]",
 	"[Feature:VirtualMachineSupport][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines duplicate addresses validation should fail when creating second VM with duplicate user requested MAC [Suite:openshift/network/virtualization]",
-	// IP family validation for layer2 primary networks (gated on OVN_PRE_CONF_UDN_ADDR_ENABLE).
+	// IP family validation for layer2 primary networks (gated on preconfigured UDN addresses).
 	"[Feature:VirtualMachineSupport][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv4 [Suite:openshift/network/virtualization]",
 	"[Feature:VirtualMachineSupport][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv6 [Suite:openshift/network/virtualization]",
 	"[Feature:VirtualMachineSupport][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when single-stack IPv4 network requests multiple IPv4 IPs [Suite:openshift/network/virtualization]",

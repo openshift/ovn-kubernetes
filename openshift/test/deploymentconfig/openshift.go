@@ -59,6 +59,7 @@ type openshift struct {
 	imageLock         sync.Mutex
 	imageClient       imageclient.Interface
 	networkToolsImage string
+	configClient      kubernetes.Interface
 }
 
 func New() api.DeploymentConfig {
@@ -84,6 +85,13 @@ func (m *openshift) PrimaryInterfaceName() string {
 }
 
 func (m *openshift) IsConfigurationEnabled(config api.Config) bool {
+	if config == api.PreconfiguredUDNAddressesConfig {
+		enabled, err := m.preconfiguredUDNAddressesEnabled()
+		if err != nil {
+			panic(err)
+		}
+		return enabled
+	}
 	return false
 }
 
