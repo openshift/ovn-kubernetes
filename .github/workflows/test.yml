@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  K8S_VERSION: v1.36.2
+  K8S_VERSION: v1.36.4
   KIND_CLUSTER_NAME: ovn
   KIND_INSTALL_INGRESS: true
   KIND_ALLOW_SYSTEM_WRITES: true
@@ -344,6 +344,17 @@ jobs:
         set -x
         pushd go-controller
         COVERALLS=1 CONTAINER_RUNNABLE=1 make check
+        popd
+
+    # CRD integration tests (envtest — real kube-apiserver + etcd, no Kind
+    # cluster) run here alongside the unit tests rather than in a dedicated
+    # lane: they are lightweight (seconds) and gate every PR on CRD admission
+    # behaviour without spinning up a separate job.
+    - name: Run CRD integration tests
+      run: |
+        set -x
+        pushd test
+        make test-crd
         popd
 
     - name: Submit code coverage to Coveralls
