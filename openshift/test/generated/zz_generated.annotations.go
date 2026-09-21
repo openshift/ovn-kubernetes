@@ -1477,7 +1477,15 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation Uplink default-VRF egress maps multiple CUDNs to the same Uplink bridge": "[Suite:ovn-kubernetes/conformance/parallel]",
 
+	"Network Segmentation Uplink default-VRF egress publishes the heaviest next hops of the lowest-metric default routes": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"Network Segmentation Uplink default-VRF egress recreates an UplinkState deleted out of band": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation Uplink default-VRF egress reprograms an active CUDN when the selected Uplink configuration changes": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation Uplink default-VRF egress runs a CUDN without Uplink default gateways and adds its default routes when they appear": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation Uplink route advertisements discovers a default gateway that appears in the CUDN VRF after enslavement": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation Uplink route advertisements preserves pre-existing Uplink interface routes across VRF enslavement and release with NetworkManager-style interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1491,11 +1499,15 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation Uplink route advertisements uses the default VRF as the BGP peering path": "[Suite:ovn-kubernetes/conformance/parallel]",
 
+	"Network Segmentation Uplink split DPU status conditions discovers a default gateway that appears in the host-side CUDN VRF after enslavement": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"Network Segmentation Uplink split DPU status conditions keeps one writer per condition and recovers a missing host interface": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation Uplink split DPU status conditions recreates an UplinkState deleted out of band": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation Uplink split DPU status conditions resolves the bridge by host function and falls back to host MAC": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation Uplink split DPU status conditions runs a CUDN without Uplink default gateways and publishes them when they appear": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network pod connected to UserDefinedNetwork cannot be deleted when being used": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1856,6 +1868,8 @@ var AppendedAnnotations = map[string]string{
 	"Unidling With non annotated service Should not generate a NeedPods event when has backend": "[Disabled:Unimplemented]",
 
 	"Uplink route advertisements with Dynamic UDN allocation allows node-disjoint Dynamic CUDNs to share a targetVRF auto Uplink and rejects overlap": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"UplinkState API validation accepts up to 256 default gateways across both IP families": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"blocking ICMP needs frag when a client VM pod with 1500 MTU targets a host networked pod should be able to send large TCP packet and not get a route cache entry": "[Disabled:Unimplemented]",
 
