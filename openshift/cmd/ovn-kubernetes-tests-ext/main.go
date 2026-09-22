@@ -99,13 +99,10 @@ func main() {
 		Qualifiers: []string{`labels.exists(l, l == "Feature:VirtualMachineSupport")`},
 	})
 
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
-	if err != nil {
-		panic(err)
-	}
-
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
+	// Do this before building the Ginkgo tree: tests such as KubeVirt subnet
+	// exhaustion capture provider-configured environment variables during construction.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
@@ -118,6 +115,11 @@ func main() {
 			ocpInfra = infra
 			infraprovider.Set(ocpInfra)
 		}
+	}
+
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
+	if err != nil {
+		panic(err)
 	}
 
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
