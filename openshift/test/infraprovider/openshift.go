@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -92,9 +94,15 @@ func New(config *rest.Config) (api.Provider, error) {
 		framework.Logf("WARNING: could not discover primary network: %v", err)
 	}
 
+	// Offset the port range by PID so parallel ginkgo processes don't collide
+	// when creating hostNetwork pods on the same node.
+	pid := os.Getpid()
+	rng := rand.New(rand.NewSource(int64(pid)))
+	startPort := uint16(30100 + rng.Intn(2600))
+
 	return &openshift{
-		externalContainerPortAlloc: portalloc.New(30000, 32767),
-		hostPortAlloc:              portalloc.New(30000, 32767),
+		externalContainerPortAlloc: portalloc.New(startPort, 32767),
+		hostPortAlloc:              portalloc.New(startPort, 32767),
 		kubeClient:                 kubeClient,
 		restConfig:                 config,
 		primaryNet:                 pNet,
@@ -261,29 +269,6 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 	// Create a hostNetwork pod to simulate an external container.
 	// Use GenerateName to avoid name collisions between parallel tests.
 	podPrefix := sanitizePodName(container.Name) + "-"
-	nodes, err := c.kubeClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return container, fmt.Errorf("failed to list nodes: %w", err)
-	}
-
-	// Find a worker node (not master/control-plane)
-	var targetNode string
-	for _, node := range nodes.Items {
-		isMaster := false
-		for k := range node.Labels {
-			if k == "node-role.kubernetes.io/master" || k == "node-role.kubernetes.io/control-plane" {
-				isMaster = true
-				break
-			}
-		}
-		if !isMaster {
-			targetNode = node.Name
-			break
-		}
-	}
-	if targetNode == "" && len(nodes.Items) > 0 {
-		targetNode = nodes.Items[0].Name
-	}
 
 	privileged := true
 	pod := &corev1.Pod{
@@ -294,7 +279,6 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 		},
 		Spec: corev1.PodSpec{
 			HostNetwork: true,
-			NodeName:    targetNode,
 			Containers: []corev1.Container{
 				{
 					Name:            "main",
