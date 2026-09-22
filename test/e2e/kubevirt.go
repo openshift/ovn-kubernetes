@@ -258,6 +258,19 @@ func composeAgnhostPod(name, namespace, nodeName string, args ...string) *corev1
 	return agnHostPod
 }
 
+// iperf3Provider optionally prepares traffic endpoints for a downstream runtime.
+// Providers that do not implement it retain the upstream image and commands.
+type iperf3Provider interface {
+	ConfigureIPerf3Pod(*corev1.Pod) error
+	PrepareIPerf3Container(infraapi.Context, infraapi.ExternalContainer) (infraapi.ExternalContainer, error)
+}
+
+// kubevirtImageCleanupPolicy lets providers leave container-disk cache eviction
+// to their runtime when nodes are shared with other test suites.
+type kubevirtImageCleanupPolicy interface {
+	ShouldPruneKubeVirtImages() bool
+}
+
 func removeImagesInNode(node, imageURL string) error {
 	By("Removing unused images in node " + node)
 	output, err := infraprovider.Get().ExecK8NodeCommand(node, []string{
@@ -291,6 +304,9 @@ func removeImagesInNode(node, imageURL string) error {
 }
 
 func removeImagesFromNodes(cs kubernetes.Interface, imageURL string) error {
+	if policy, ok := infraprovider.Get().(kubevirtImageCleanupPolicy); ok && !policy.ShouldPruneKubeVirtImages() {
+		return nil
+	}
 	nodesList, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	for nodeIdx := range nodesList.Items {
@@ -1226,15 +1242,32 @@ config:
 						IPRequest: staticIPs,
 					}
 				}
-				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, []string{"bash", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
+				trafficPod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Image: deploymentconfig.Get().GetImage(images.Netshoot), Command: []string{"bash", "-c"},
+					Args: []string{iperfServerScript + "\n sleep infinity"},
+				}}}}
+				if provider, ok := infraprovider.Get().(iperf3Provider); ok {
+					if err := provider.ConfigureIPerf3Pod(trafficPod); err != nil {
+						return nil, err
+					}
+				}
+				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, trafficPod.Spec.Containers[0].Command, map[string]string{}, func(pod *corev1.Pod) {
 					if nse != nil {
 						pod.Annotations = networkSelectionElements(*nse)
 					}
-					pod.Spec.Containers[0].Image = deploymentconfig.Get().GetImage(images.Netshoot)
-					pod.Spec.Containers[0].Args = []string{iperfServerScript + "\n sleep infinity"}
+					name := pod.Spec.Containers[0].Name
+					pod.Spec.Containers[0] = trafficPod.Spec.Containers[0]
+					pod.Spec.Containers[0].Name = name
 				})
 				if err != nil {
 					return nil, err
+				}
+				if trafficPod.Spec.Containers[0].ReadinessProbe != nil {
+					if err := e2epod.WaitTimeoutForPodReadyInNamespace(context.Background(), fr.ClientSet, pod.Name, namespace, 4*time.Minute); err != nil {
+						logs, _ := e2epod.GetPodLogs(context.Background(), fr.ClientSet, namespace, pod.Name, pod.Spec.Containers[0].Name)
+						e2eframework.Logf("iperf3 preparation logs for %s/%s:\n%s", namespace, pod.Name, logs)
+						return nil, fmt.Errorf("iperf3 endpoint %s/%s did not become ready: %w", namespace, pod.Name, err)
+					}
 				}
 				pods = append(pods, pod)
 			}
@@ -1480,7 +1513,6 @@ config:
 			staticIPv4, staticIPv6  string
 			staticMAC               = "02:00:00:00:00:01"
 			externalMACVRFContainer = infraapi.ExternalContainer{
-				Image:   deploymentconfig.Get().GetImage(images.Netshoot),
 				CmdArgs: []string{"sleep", "infinity"},
 			}
 
@@ -1702,6 +1734,7 @@ write_files:
 				td.evpn.MACVRF.VNI = int32(bgpAlloc.MACVRFVNI)
 				td.evpn.IPVRF.VNI = int32(bgpAlloc.IPVRFVNI)
 				externalMACVRFContainer.Name = fmt.Sprintf("iperf3-macvrf-%d", bgpAlloc.MACVRFVNI)
+				externalMACVRFContainer.Image = deploymentconfig.Get().GetImage(images.Netshoot)
 				// Shorten the CUDN name to fit Linux interface name limits.
 				// The name is used as testName for runEVPNNetworkAndServers which
 				// derives bridge/SVI names: worst-case SVI is "br<name>.4094"
@@ -1827,7 +1860,11 @@ write_files:
 				providerNetwork, err := containerNetwork(td)
 				Expect(err).ShouldNot(HaveOccurred(), "primary network must be available to attach containers")
 				externalContainer.Network = providerNetwork
-				externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
+				if provider, ok := infraprovider.Get().(iperf3Provider); ok {
+					externalContainer, err = provider.PrepareIPerf3Container(providerCtx, externalContainer)
+				} else {
+					externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
+				}
 				Expect(err).ShouldNot(HaveOccurred(), "creation of external container is test dependency")
 			} else if td.role == udnv1.NetworkRolePrimary && td.evpn != nil {
 				// Containers were set up by runEVPNNetworkAndServers; collect MAC-VRF IPs.
