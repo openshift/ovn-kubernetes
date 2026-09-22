@@ -482,11 +482,11 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			return nil
 		}
 
-		checkIperfTraffic = func(iperfLogFile string, execFn func(cmd string) (string, error), timeout time.Duration, stage string) {
+		checkIperfTraffic = func(iperfLogFile string, readLog func() (string, error), timeout time.Duration, stage string) {
 			GinkgoHelper()
 			// Check the last line eventually show traffic flowing
 			Eventually(func() (string, error) {
-				iperfLog, err := execFn("cat " + iperfLogFile)
+				iperfLog, err := readLog()
 				if err != nil {
 					return "", err
 				}
@@ -517,10 +517,10 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
 					iperfLogFile := fmt.Sprintf("/tmp/%s_%s_iperf3.log", podName, podIP)
-					execFn := func(cmd string) (string, error) {
-						return virtClient.RunCommand(vmi, cmd, 2*time.Second)
+					readLog := func() (string, error) {
+						return virtClient.ReadIPerfLog(vmi, iperfLogFile)
 					}
-					checkIperfTraffic(iperfLogFile, execFn, 2*time.Second, stage)
+					checkIperfTraffic(iperfLogFile, readLog, 2*time.Second, stage)
 				}
 			}
 		}
@@ -630,7 +630,10 @@ fi
 				execFn := func(cmd string) (string, error) {
 					return infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", cmd})
 				}
-				checkIperfTraffic(ingressIperfLogFile(ip, port), execFn, timeout, stage)
+				readLog := func() (string, error) {
+					return execFn(kubevirt.IPerfLogCommand(ingressIperfLogFile(ip, port)))
+				}
+				checkIperfTraffic(ingressIperfLogFile(ip, port), readLog, timeout, stage)
 				// A client killed without writing "iperf3: error" (like an
 				// OOM kill) leaves a stale good looking last log line, ensure
 				// it's still alive so that does not become a false positive.
@@ -644,10 +647,10 @@ fi
 			Expect(macVRFContainerIPs).NotTo(BeEmpty())
 			for _, ip := range macVRFContainerIPs {
 				iperfLogFile := fmt.Sprintf("/tmp/external-east-west_%s_iperf3.log", ip)
-				execFn := func(cmd string) (string, error) {
-					return virtClient.RunCommand(vmi, cmd, 2*time.Second)
+				readLog := func() (string, error) {
+					return virtClient.ReadIPerfLog(vmi, iperfLogFile)
 				}
-				checkIperfTraffic(iperfLogFile, execFn, 2*time.Second, stage)
+				checkIperfTraffic(iperfLogFile, readLog, 2*time.Second, stage)
 			}
 		}
 
@@ -658,10 +661,10 @@ fi
 				if ip == "" {
 					continue
 				}
-				execFn := func(cmd string) (string, error) {
-					return virtClient.RunCommand(vmi, cmd, 5*time.Second)
+				readLog := func() (string, error) {
+					return virtClient.ReadIPerfLog(vmi, northSouthIperfLogFile("egress", ip, port))
 				}
-				checkIperfTraffic(northSouthIperfLogFile("egress", ip, port), execFn, 2*time.Second, stage)
+				checkIperfTraffic(northSouthIperfLogFile("egress", ip, port), readLog, 2*time.Second, stage)
 			}
 		}
 
