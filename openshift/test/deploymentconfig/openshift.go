@@ -2,6 +2,7 @@ package deploymentconfig
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -19,7 +20,8 @@ import (
 var (
 	deploymentConfig api.DeploymentConfig
 	imageIDMapping   map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
-		images.Agnhost: imageutils.Agnhost,
+		images.Agnhost:             imageutils.Agnhost,
+		images.FedoraContainerDisk: imageutils.None,
 	}
 	imageConfigMap map[api.ImageID]string
 )
@@ -32,8 +34,10 @@ func init() {
 
 	// Add images that are needed by the test suite.
 	imageConfigMap = map[api.ImageID]string{
-		images.Agnhost: imageutils.GetE2EImage(imageutils.Agnhost),
+		images.Agnhost:             imageutils.GetE2EImage(imageutils.Agnhost),
+		images.FedoraContainerDisk: FedoraContainerDiskImage,
 	}
+	deploymentConfig.AddImage(images.Agnhost, images.FedoraContainerDisk)
 }
 
 func IsOpenShift(config *rest.Config) (bool, error) {
@@ -55,7 +59,7 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 }
 
 type openshift struct {
-	requiredImages map[api.ImageID]struct{}
+	requiredImages    map[api.ImageID]struct{}
 	imageLock         sync.Mutex
 	imageClient       imageclient.Interface
 	networkToolsImage string
@@ -99,26 +103,42 @@ func (m *openshift) NBDBContainerName() string {
 	return "nbdb"
 }
 
-func (m *openshift) GetImage(imageID api.ImageID) string {
-	return imageConfigMap[imageID]
-}
-
 func (m *openshift) AddImage(imageID ...api.ImageID) {
+	if m.requiredImages == nil {
+		m.requiredImages = make(map[api.ImageID]struct{})
+	}
 	for _, imgID := range imageID {
 		m.requiredImages[imgID] = struct{}{}
 	}
 }
 
 func (m *openshift) GetRequiredImages() []api.ImageConfig {
+	// OTE discovery runs without KIND_INSTALL_KUBEVIRT or cluster access.
+	m.AddImage(images.Agnhost, images.FedoraContainerDisk)
 	imageConfigs := []api.ImageConfig{}
-	for imageID := range m.requiredImages {
+	ids := make([]int, 0, len(m.requiredImages))
+	for id := range m.requiredImages {
+		ids = append(ids, int(id))
+	}
+	sort.Ints(ids)
+	for _, id := range ids {
+		imageID := api.ImageID(id)
+		if imageID == images.Netshoot {
+			// network-tools is supplied by the payload, not community-e2e-images.
+			continue
+		}
+		// Advertise original pullspecs; GetImage may return a runtime mirror.
+		pullSpec, ok := imageConfigMap[imageID]
+		if !ok {
+			pullSpec = images.GetImageConfigs()[imageID]
+		}
 		newID, ok := imageIDMapping[imageID]
 		if !ok {
 			newID = imageutils.None
 		}
 		imageConfigs = append(imageConfigs, api.ImageConfig{
 			ImageID:  api.ImageID(newID),
-			PullSpec: m.GetImage(imageID),
+			PullSpec: pullSpec,
 		})
 	}
 	return imageConfigs

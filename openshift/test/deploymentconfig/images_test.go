@@ -4,12 +4,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
+	imageutils "k8s.io/kubernetes/test/utils/image"
+
 	imagev1 "github.com/openshift/api/image/v1"
 	imagefake "github.com/openshift/client-go/image/clientset/versioned/fake"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestNetworkToolsImage(t *testing.T) {
+	t.Setenv("NETSHOOT_IMAGE", "")
 	const pullspec = "mirror.example.com/network-tools@sha256:abc"
 	for _, tc := range []struct {
 		name    string
@@ -40,7 +45,7 @@ func TestNetworkToolsImage(t *testing.T) {
 			if err != nil || got != pullspec {
 				t.Fatalf("got %q, %v; want %q", got, err, pullspec)
 			}
-			if got := config.GetNetshootContainerImage(); got != pullspec || len(client.Actions()) != 1 {
+			if got := config.GetImage(images.Netshoot); got != pullspec || len(client.Actions()) != 1 {
 				t.Fatalf("expected cached image %q, got %q with %d API calls", pullspec, got, len(client.Actions()))
 			}
 		})
@@ -51,4 +56,29 @@ func TestNetworkToolsImage(t *testing.T) {
 			t.Fatalf("expected image lookup error, got %v", err)
 		}
 	})
+}
+
+func TestRequiredImagesForVirtualization(t *testing.T) {
+	t.Setenv("KUBE_TEST_REPO", "example.com/mirror")
+	client := imagefake.NewSimpleClientset()
+	config := &openshift{imageClient: client}
+	foundFedora := false
+	for _, image := range config.GetRequiredImages() {
+		if image.PullSpec == FedoraContainerDiskImage {
+			foundFedora = true
+			if image.ImageID != api.ImageID(imageutils.None) {
+				t.Fatalf("Fedora mirror index: got %d, want %d", image.ImageID, imageutils.None)
+			}
+		}
+	}
+	if !foundFedora {
+		t.Fatal("Fedora must be advertised without KIND_INSTALL_KUBEVIRT")
+	}
+	if len(client.Actions()) != 0 {
+		t.Fatal("image discovery must not query the cluster")
+	}
+	t.Setenv("NETSHOOT_IMAGE", "example.com/tools:test")
+	if got := config.GetImage(images.Netshoot); got != "example.com/tools:test" {
+		t.Fatalf("Netshoot override ignored: %q", got)
+	}
 }

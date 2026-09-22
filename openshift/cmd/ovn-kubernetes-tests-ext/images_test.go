@@ -48,7 +48,7 @@ func TestVirtualizationImageMirrors(t *testing.T) {
 		if got, want := fedora.GetE2EImage(), repo+":"+tag; got != want {
 			t.Fatalf("discovered Fedora mirror: got %q, want %q", got, want)
 		}
-		if got := images.FedoraContainerDisk(); fedora.GetE2EImage() != got {
+		if got := deploymentconfig.Get().GetImage(images.FedoraContainerDisk); fedora.GetE2EImage() != got {
 			t.Fatalf("discovered Fedora mirror %q differs from VM image %q", fedora.GetE2EImage(), got)
 		}
 	}
@@ -58,7 +58,7 @@ func TestFedoraImageMatchesOriginMapping(t *testing.T) {
 	const tag = "e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-v1-8-2-DmMayTpvDZVswLv0"
 	for _, repo := range []string{"", "quay.io/openshift/community-e2e-images", "mirror.example.com:5000/e2e"} {
 		t.Setenv("KUBE_TEST_REPO", repo)
-		got := images.FedoraContainerDisk()
+		got := deploymentconfig.Get().GetImage(images.FedoraContainerDisk)
 		want := ocpdeploymentconfig.FedoraContainerDiskImage
 		if repo != "" {
 			want = repo + ":" + tag

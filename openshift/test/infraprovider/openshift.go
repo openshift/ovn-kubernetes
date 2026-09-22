@@ -225,6 +225,10 @@ func (o *OpenshiftInfraProvider) GetDefaultTimeoutContext() *framework.TimeoutCo
 	return timeouts
 }
 
+func (o OpenshiftInfraProvider) ShouldPruneKubeVirtImages() bool {
+	return false
+}
+
 func (o OpenshiftInfraProvider) PreloadImages(images []deploymentconfigapi.ImageConfig) {
 	// no-op: OpenShift clusters pull images at runtime
 }
