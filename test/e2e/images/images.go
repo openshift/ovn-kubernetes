@@ -43,6 +43,7 @@ const (
 	UDPServerSrcIPPrinter
 	FRR
 	Dnsmasq
+	FedoraContainerDisk
 )
 
 func init() {
@@ -77,6 +78,7 @@ func init() {
 		UDPServerSrcIPPrinter: udpServerSrcIPPrinter,
 		FRR:                   frr,
 		Dnsmasq:               dnsmasq,
+		FedoraContainerDisk:   "quay.io/kubevirtci/fedora-with-test-tooling:v20250416-e37573e",
 	}
 }
 
