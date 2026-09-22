@@ -183,8 +183,7 @@ func (o *openshift) GetK8NodeNetworkInterface(instance string, network api.Netwo
 }
 
 func (o *openshift) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
-	podName := sanitizePodName(container.Name)
-	return runOC("logs", fmt.Sprintf("pod/%s", podName), "-n", "default")
+	return runOC("logs", fmt.Sprintf("pod/%s", container.Name), "-n", "default")
 }
 
 func (o *openshift) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
@@ -200,8 +199,7 @@ func (o *openshift) ExecExternalContainerCommand(container api.ExternalContainer
 	if len(cmd) == 0 {
 		return "", fmt.Errorf("empty command")
 	}
-	podName := sanitizePodName(container.Name)
-	args := append([]string{"exec", podName, "-n", "default", "--"}, cmd...)
+	args := append([]string{"exec", container.Name, "-n", "default", "--"}, cmd...)
 	return runOC(args...)
 }
 
@@ -260,9 +258,9 @@ func sanitizePodName(name string) string {
 }
 
 func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	// Create a hostNetwork pod in the default namespace to simulate an external container.
-	// Pick a worker node to schedule on.
-	podName := sanitizePodName(container.Name)
+	// Create a hostNetwork pod to simulate an external container.
+	// Use GenerateName to avoid name collisions between parallel tests.
+	podPrefix := sanitizePodName(container.Name) + "-"
 	nodes, err := c.kubeClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return container, fmt.Errorf("failed to list nodes: %w", err)
@@ -290,9 +288,9 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 	privileged := true
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      podName,
-			Namespace: "default",
-			Labels:    map[string]string{"app": "ext-container-hack", "ext-name": podName},
+			GenerateName: podPrefix,
+			Namespace:    "default",
+			Labels:       map[string]string{"app": "ext-container-hack"},
 		},
 		Spec: corev1.PodSpec{
 			HostNetwork: true,
@@ -314,8 +312,9 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 
 	created, err := c.kubeClient.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
 	if err != nil {
-		return container, fmt.Errorf("failed to create external container pod %s: %w", podName, err)
+		return container, fmt.Errorf("failed to create external container pod %s*: %w", podPrefix, err)
 	}
+	podName := created.Name
 
 	// Register cleanup
 	c.AddCleanUpFn(func() error {
@@ -324,7 +323,7 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 
 	// Wait for pod to be running
 	err = wait.PollUntilContextTimeout(context.TODO(), 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-		p, err := c.kubeClient.CoreV1().Pods("default").Get(ctx, created.Name, metav1.GetOptions{})
+		p, err := c.kubeClient.CoreV1().Pods("default").Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			return false, nil
 		}
@@ -335,12 +334,12 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 	}
 
 	// Get the pod's host IP (node IP)
-	running, err := c.kubeClient.CoreV1().Pods("default").Get(context.TODO(), created.Name, metav1.GetOptions{})
+	running, err := c.kubeClient.CoreV1().Pods("default").Get(context.TODO(), podName, metav1.GetOptions{})
 	if err != nil {
 		return container, fmt.Errorf("failed to get running pod %s: %w", podName, err)
 	}
 
-	// Update container.Name to the sanitized podName so callers can exec into it
+	// Update container.Name to the generated pod name so callers can exec/delete it
 	container.Name = podName
 
 	container.IPv4 = ""
@@ -365,13 +364,12 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 }
 
 func (c *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
-	podName := sanitizePodName(container.Name)
-	return c.kubeClient.CoreV1().Pods("default").Delete(context.TODO(), podName, metav1.DeleteOptions{})
+	// container.Name is already the generated pod name from CreateExternalContainer
+	return c.kubeClient.CoreV1().Pods("default").Delete(context.TODO(), container.Name, metav1.DeleteOptions{})
 }
 
 func (c *contextOpenshift) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
-	podName := sanitizePodName(container.Name)
-	return runOC("logs", fmt.Sprintf("pod/%s", podName), "-n", "default")
+	return runOC("logs", fmt.Sprintf("pod/%s", container.Name), "-n", "default")
 }
 
 func (c *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
