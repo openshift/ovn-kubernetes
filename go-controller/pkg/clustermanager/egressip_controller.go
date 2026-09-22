@@ -1176,7 +1176,9 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 						if ipv4Allocated >= *eNode.egressIPConfig.Capacity.IPv4 {
 							klog.Warningf("[CPIC-VALIDATION] IPv4 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
 								item.Node, ipv4Allocated, *eNode.egressIPConfig.Capacity.IPv4, item.EgressIP)
-							continue
+							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
+							delete(eNode.allocations, item.EgressIP)
+							return fmt.Errorf("IPv4 capacity exceeded on node %s, deleting allocation %s", eNode.name, item.EgressIP)
 						}
 					}
 				}
@@ -1188,7 +1190,9 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 						if ipv6Allocated >= *eNode.egressIPConfig.Capacity.IPv6 {
 							klog.Warningf("[CPIC-VALIDATION] IPv6 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
 								item.Node, ipv6Allocated, *eNode.egressIPConfig.Capacity.IPv6, item.EgressIP)
-							continue
+							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
+							delete(eNode.allocations, item.EgressIP)
+							return fmt.Errorf("IPv6 capacity exceeded on node %s, deleting allocation %s", eNode.name, item.EgressIP)
 						}
 					}
 				}
@@ -1475,7 +1479,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			}
 			if eNode.egressIPConfig.Capacity.IPv4 != nil && *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity && utilnet.IsIPv4(eIP) {
 				ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
-				ipv4Capacity := *eNode.egressIPConfig.Capacity.IPv4
+				ipv4Capacity := *eNode.egressIPConfig.Capacity.IPv4 - 1
 				ipv4Remaining := ipv4Capacity - ipv4Allocated
 
 				klog.Infof("[CAPACITY-CHECK-IPv4] EgressIP: %s, IP: %s, Node: %s, Capacity: %d, Allocated: %d, Remaining: %d",
@@ -1489,7 +1493,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			}
 			if eNode.egressIPConfig.Capacity.IPv6 != nil && *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity && utilnet.IsIPv6(eIP) {
 				ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
-				ipv6Capacity := *eNode.egressIPConfig.Capacity.IPv6
+				ipv6Capacity := *eNode.egressIPConfig.Capacity.IPv6 - 1
 				ipv6Remaining := ipv6Capacity - ipv6Allocated
 
 				klog.Infof("[CAPACITY-CHECK-IPv6] EgressIP: %s, IP: %s, Node: %s, Capacity: %d, Allocated: %d, Remaining: %d",
