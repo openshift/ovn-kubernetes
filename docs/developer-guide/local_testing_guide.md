@@ -32,7 +32,7 @@ and set the environmental variable `K8S_VERSION` to the same value. Also make su
 your go directory with `export GOPATH=(...)`.
 
 ```
-K8S_VERSION=v1.36.2
+K8S_VERSION=v1.36.4
 git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
 pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
@@ -210,6 +210,63 @@ SUCCESS! -- 1 Passed | 0 Failed | 0 Flaked | 0 Pending | 5666 Skipped
 Ginkgo ran 1 suite in 38.489055861s
 Test Suite Passed
 ~~~
+
+## CRD Integration Tests
+
+CRD integration tests live in `test/crd-integration/` and run against a real
+kube-apiserver + etcd started by [envtest](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest).
+They verify CRD admission behaviour — defaulting, validation, and CEL rules —
+without requiring a full Kind cluster.
+
+The tests are the intended future home for scenarios currently living in
+`test/e2e/testscenario/` that do not need live pod networking. This migration
+is tracked in
+[ovn-kubernetes#6932](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6932).
+
+### Prerequisites
+
+No cluster is needed.  `setup-envtest` downloads the required kube-apiserver
+and etcd binaries automatically on the first run.
+
+Go 1.26+ must be on `$PATH` (same requirement as the rest of the project).
+
+### Running the CRD integration tests
+
+```bash
+cd $REPO/test
+make test-crd
+```
+
+To pin a specific Kubernetes API version for the embedded API server:
+
+```bash
+make test-crd ENVTEST_K8S_VERSION=1.37.0
+```
+
+### Running a single CRD integration test
+
+`go test -run` matches against the Go test function name (`TestCRDIntegration`),
+not the Ginkgo `It` description.  Use Ginkgo's `--focus` flag after `--` to
+filter by description:
+
+```bash
+cd $REPO/test/crd-integration
+KUBEBUILDER_ASSETS="$(go tool setup-envtest \
+    use 1.36.2 --bin-dir /tmp/envtest-bin -p path)" \
+  go test -v ./... -- --focus "fills in the egress-assignable default"
+```
+
+### Adding new CRD integration tests
+
+All CRDs share a single Ginkgo suite. `suite_test.go` is the one bootstrap: its
+`BeforeSuite` points `envtest.Environment.CRDDirectoryPaths` at
+`helm/ovn-kubernetes/crds/` so every committed CRD manifest is loaded
+automatically, and it registers the CRD schemes the suite exercises.
+
+1. Register its types in the scheme in `suite_test.go`, e.g.
+   `utilruntime.Must(egressipv1.AddToScheme(scheme))`.
+2. Add a `test/crd-integration/<feature>_test.go` with a top-level Ginkgo
+   `Describe` for that CRD.
 
 ### Running a control-plane test
 
