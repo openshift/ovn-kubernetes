@@ -611,6 +611,18 @@ func getExistingIfaceMeta(ovsClient client.Client, name string) (string, string,
 // network, stripDefaultNetIDs=true explicitly removes NetworkExternalID and
 // NADExternalID left by a previous owner. If useDPDK is true the Interface
 // type is set to dpdk with mtu_request=mtu.
+//
+// Pod ports are deliberately not marked other_config:transient=true. That flag
+// used to be set so ovsdb-server, which the OVS container always starts with
+// --delete-transient-ports, would scrub leftover pod ports after a hard node
+// reboot. But the flag fires on every ovsdb-server restart, not only after a
+// reboot, so an OVS container restart would delete the br-int ports of pods
+// whose sandboxes are still running. Nothing re-runs CNI ADD for a live
+// sandbox, so those pods lost their datapath permanently. Leftover pod ports
+// are instead scrubbed by checkForStaleOVSPodInterfaces, which deletes pod
+// ports whose backing host netdev is gone - precisely the post-reboot state,
+// and nothing else. The transient key is also removed here so that ports
+// plugged by an older ovn-kubernetes converge on upgrade.
 func addOrUpdatePodPort(ovsClient client.Client, hostIfaceName string,
 	extIDs map[string]string, useDPDK bool, mtu int, stripDefaultNetIDs bool) error {
 	if ovsClient != nil {
@@ -620,10 +632,14 @@ func addOrUpdatePodPort(ovsClient client.Client, hostIfaceName string,
 			iface.Type = "dpdk"
 			iface.MTURequest = &m
 		}
-		port := &vswitchd.Port{OtherConfig: map[string]string{"transient": "true"}}
+		port := &vswitchd.Port{}
 		ops, err := ovsops.CreateOrUpdatePodPortOps(ovsClient, nil, "br-int", hostIfaceName, port, iface)
 		if err != nil {
 			return fmt.Errorf("failed to build operations for plugging pod interface: %v", err)
+		}
+		ops, err = ovsops.RemoveOVSPortOtherConfigOps(ovsClient, ops, hostIfaceName, "transient")
+		if err != nil {
+			return fmt.Errorf("failed to clear the transient flag from port %s: %v", hostIfaceName, err)
 		}
 		if stripDefaultNetIDs {
 			ops, err = ovsops.RemoveOVSInterfaceExternalIDsOps(ovsClient, ops, hostIfaceName, types.NetworkExternalID, types.NADExternalID)
@@ -637,7 +653,8 @@ func addOrUpdatePodPort(ovsClient client.Client, hostIfaceName string,
 		return nil
 	}
 	args := []string{
-		"--may-exist", "add-port", "br-int", hostIfaceName, "other_config:transient=true",
+		"--may-exist", "add-port", "br-int", hostIfaceName,
+		"--", "--if-exists", "remove", "port", hostIfaceName, "other_config", "transient",
 		"--", "set", "interface", hostIfaceName,
 	}
 	// Walk extIDs in the canonical ovs-vsctl arg order that this CNI has
@@ -717,8 +734,7 @@ func ConfigureOVS(ctx context.Context, ovsClient client.Client, namespace, podNa
 		}
 	}
 
-	// Add the new sandbox's OVS port, tag the port as transient so stale
-	// pod ports are scrubbed on hard reboot
+	// Add the new sandbox's OVS port
 	extIDs := map[string]string{
 		"attached_mac": ifInfo.MAC.String(),
 		"iface-id":     ifaceID,
@@ -829,6 +845,51 @@ func ConfigureOVS(ctx context.Context, ovsClient client.Client, namespace, podNa
 		// being reported back to the runtime.
 		klog.Warningf("[%s/%s %s] pod uid %s: %v", namespace, podName, sandboxID, initialPodUID, err)
 		return err
+	}
+
+	// Record the known-good port so ovnkube-node can re-plug it if the OVS
+	// database loses it while this sandbox is still alive. Best effort: a
+	// missing record only costs the pod the later repair.
+	if err := WritePortJournal(&PortJournalEntry{
+		PodNamespace:       namespace,
+		PodName:            podName,
+		PodUID:             initialPodUID,
+		SandboxID:          sandboxID,
+		PodIfName:          podIfName,
+		HostIfaceName:      hostIfaceName,
+		IfaceID:            ifaceID,
+		ExternalIDs:        extIDs,
+		StripDefaultNetIDs: stripDefaultNetIDs,
+		UseDPDK:            useDPDK,
+		MTU:                ifInfo.MTU,
+		Ingress:            ifInfo.Ingress,
+		Egress:             ifInfo.Egress,
+	}); err != nil {
+		klog.Warningf("[%s/%s %s] failed to journal OVS port %s, it will not be repairable if OVS "+
+			"loses it: %v", namespace, podName, sandboxID, hostIfaceName, err)
+	}
+	return nil
+}
+
+// ReplugPodPort re-creates a pod's br-int port from its journal entry. It is
+// only ever called for a sandbox that is still alive and whose host netdev
+// still exists, so no netns work is needed: re-adding the port with the
+// original external_ids is enough for ovn-controller to claim the logical
+// switch port again and reinstall the pod's flows.
+func ReplugPodPort(ovsClient client.Client, entry *PortJournalEntry) error {
+	if err := addOrUpdatePodPort(ovsClient, entry.HostIfaceName, entry.ExternalIDs,
+		entry.UseDPDK, entry.MTU, entry.StripDefaultNetIDs); err != nil {
+		return err
+	}
+	// The QoS and Queue records backing the pod's bandwidth limits live in the
+	// same database as the port, so they are gone too.
+	if entry.Ingress > 0 || entry.Egress > 0 {
+		if err := clearPodBandwidth(ovsClient, entry.SandboxID); err != nil {
+			return fmt.Errorf("failed to clear stale bandwidth config of %s: %w", entry.HostIfaceName, err)
+		}
+		if err := setPodBandwidth(entry.SandboxID, entry.HostIfaceName, entry.Ingress, entry.Egress); err != nil {
+			return fmt.Errorf("failed to restore bandwidth config of %s: %w", entry.HostIfaceName, err)
+		}
 	}
 	return nil
 }

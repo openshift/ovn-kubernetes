@@ -5,6 +5,7 @@ package controllermanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	v1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -30,6 +32,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/controllers/evpn"
@@ -401,10 +404,15 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 	}()
 
 	if config.OvnKubeNode.Mode != ovntypes.NodeModeDPUHost {
-		// start health check to ensure there are no stale OVS internal ports
+		// start health check to ensure br-int carries exactly the pod ports it
+		// should: no stale ones left by a reboot, and none missing for a
+		// sandbox that is still running. This runs before the CNI server
+		// starts serving, so a reboot's leftovers are scrubbed before the
+		// first CNI ADD.
 		go wait.Until(func() {
 			checkForStaleOVSInternalPorts()
 			ncm.checkForStaleOVSPodInterfaces()
+			ncm.repairMissingOVSPodInterfaces()
 		}, time.Minute, ncm.stopChan)
 	}
 
@@ -626,8 +634,152 @@ func (ncm *NodeControllerManager) checkForStaleOVSPodInterfaces() {
 			if err := ovsops.DeletePortWithInterfaces(ncm.ovsClient, "br-int", ovsIface.Name); err != nil {
 				klog.Errorf("Failed to delete stale interface %s: %v", ovsIface.Name, err)
 			}
+			continue
+		}
+		// A pod port whose host netdev is gone can never carry traffic again:
+		// the netns that owned the other end of the veth is gone with it. This
+		// is exactly the state a node reboot leaves behind, since conf.db
+		// survives the reboot but no veth does, and the pod keeps its UID so
+		// the check above does not catch it. Pod ports used to be marked
+		// other_config:transient=true to have ovsdb-server scrub them on
+		// startup, but that also scrubbed the ports of live sandboxes whenever
+		// OVS restarted for any other reason, permanently black-holing those
+		// pods.
+		if !ncm.isPodOVSInterfaceStranded(ovsIface) {
+			continue
+		}
+		klog.Warningf("Found OVS Interface %s (iface-id %s) with no host netdev, deleting it",
+			ovsIface.Name, ovsIface.ExternalIDs["iface-id"])
+		if err := ovsops.DeletePortWithInterfaces(ncm.ovsClient, "br-int", ovsIface.Name); err != nil {
+			klog.Errorf("Failed to delete interface %s with no host netdev: %v", ovsIface.Name, err)
 		}
 	}
+}
+
+// isPodOVSInterfaceStranded reports whether a pod OVS interface has lost its
+// backing host netdev. A dpdk interface is never stranded: it has no kernel
+// netdev by design. Lookup errors other than "not found" are treated as not
+// stranded so a transient netlink failure cannot unplug a healthy pod.
+func (ncm *NodeControllerManager) isPodOVSInterfaceStranded(ovsIface *vswitchd.Interface) bool {
+	if ovsIface.Type == "dpdk" {
+		return false
+	}
+	if _, err := util.GetNetLinkOps().LinkByName(ovsIface.Name); err != nil {
+		if util.GetNetLinkOps().IsLinkNotFoundError(err) {
+			return true
+		}
+		klog.Errorf("Failed to look up the host netdev of OVS Interface %s: %v", ovsIface.Name, err)
+	}
+	return false
+}
+
+// repairMissingOVSPodInterfaces re-plugs br-int ports that the OVS database
+// lost while the pod sandbox that owns them is still running.
+//
+// The runtime only calls CNI ADD when it builds a sandbox. If a pod's port
+// disappears from br-int afterwards - ovsdb-server restarting with
+// --delete-transient-ports, conf.db rolling back to a pre-crash snapshot after
+// an unclean power off, an operator deleting the port - the sandbox, its netns,
+// its veth pair and its pod IP all survive untouched. Kubelet sees a ready
+// sandbox and never re-runs CNI, so the pod is left with a datapath that
+// answers nothing: it cannot ARP its OVN gateway, so every connection out of
+// the pod netns fails with "no route to host", while the host netns on the same
+// node is unaffected. Restarting the pod's containers does not help, because
+// CrashLoopBackOff never rebuilds the sandbox.
+//
+// Re-adding the port with its original external_ids is enough for
+// ovn-controller to claim the logical switch port again and reinstall the
+// pod's flows, so the pod recovers without the sandbox being rebuilt.
+func (ncm *NodeControllerManager) repairMissingOVSPodInterfaces() {
+	entries, err := cni.ListPortJournal()
+	if err != nil {
+		klog.Errorf("Failed to list journaled pod OVS ports: %v", err)
+		return
+	}
+	for _, entry := range entries {
+		// The host netdev is the authority on whether the sandbox still
+		// exists. It is also the only reason to forget a journal entry here:
+		// the apiserver view can lag or be briefly unavailable, and dropping
+		// an entry over that would make the pod unrepairable for good.
+		if _, err := util.GetNetLinkOps().LinkByName(entry.HostIfaceName); err != nil {
+			if !util.GetNetLinkOps().IsLinkNotFoundError(err) {
+				klog.Errorf("Failed to look up host netdev %s of pod %s/%s: %v",
+					entry.HostIfaceName, entry.PodNamespace, entry.PodName, err)
+				continue
+			}
+			klog.V(5).Infof("Sandbox %s of pod %s/%s is gone, forgetting its OVS port %s",
+				entry.SandboxID, entry.PodNamespace, entry.PodName, entry.HostIfaceName)
+			cni.RemovePortJournal(entry.SandboxID, entry.PodIfName)
+			continue
+		}
+
+		pod, err := ncm.watchFactory.GetPod(entry.PodNamespace, entry.PodName)
+		if err != nil {
+			klog.V(5).Infof("Not repairing OVS port %s, pod %s/%s is unavailable: %v",
+				entry.HostIfaceName, entry.PodNamespace, entry.PodName, err)
+			continue
+		}
+		// Only repair the sandbox this pod instance actually runs, and leave
+		// pods that are on their way out to CNI DEL.
+		if string(pod.UID) != entry.PodUID || pod.Spec.NodeName != ncm.name || pod.DeletionTimestamp != nil {
+			continue
+		}
+
+		repaired, err := ncm.repairPodOVSInterface(entry)
+		if err != nil {
+			klog.Errorf("Failed to repair OVS port %s of pod %s/%s: %v",
+				entry.HostIfaceName, entry.PodNamespace, entry.PodName, err)
+			metrics.MetricPodInterfaceRepairs.WithLabelValues("error").Inc()
+			continue
+		}
+		if !repaired {
+			continue
+		}
+		klog.Warningf("Re-plugged OVS port %s (iface-id %s) of pod %s/%s: it was missing from br-int "+
+			"while its sandbox %s was still running",
+			entry.HostIfaceName, entry.IfaceID, entry.PodNamespace, entry.PodName, entry.SandboxID)
+		metrics.MetricPodInterfaceRepairs.WithLabelValues("success").Inc()
+		if ncm.recorder != nil {
+			ncm.recorder.Eventf(pod, corev1.EventTypeWarning, "PodInterfaceRepaired",
+				"OVS port %s was missing from br-int while the pod sandbox was running; "+
+					"ovn-kubernetes re-plugged it", entry.HostIfaceName)
+		}
+	}
+}
+
+// repairPodOVSInterface re-plugs one journaled port if, and only if, br-int is
+// missing it. It reports whether a repair was performed.
+func (ncm *NodeControllerManager) repairPodOVSInterface(entry *cni.PortJournalEntry) (bool, error) {
+	_, err := ovsops.GetOVSInterface(ncm.ovsClient, entry.HostIfaceName)
+	if err != nil && !errors.Is(err, client.ErrNotFound) {
+		return false, fmt.Errorf("failed to look up OVS interface %s: %w", entry.HostIfaceName, err)
+	}
+	if err == nil {
+		// The port is there. If it carries a different iface-id the netdev
+		// name has been handed to another sandbox and this entry is obsolete;
+		// either way there is nothing to repair.
+		return false, nil
+	}
+
+	// Never create a second interface for a logical switch port that something
+	// else already owns - ovn-controller would have to pick one of them, and
+	// the loser silently gets no flows.
+	owners, err := ovsops.FindInterfacesWithPredicate(ncm.ovsClient, func(i *vswitchd.Interface) bool {
+		return i.ExternalIDs["iface-id"] == entry.IfaceID
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to look up the owner of iface-id %s: %w", entry.IfaceID, err)
+	}
+	if len(owners) > 0 {
+		klog.V(5).Infof("Not repairing OVS port %s, iface-id %s is already bound to interface %s",
+			entry.HostIfaceName, entry.IfaceID, owners[0].Name)
+		return false, nil
+	}
+
+	if err := cni.ReplugPodPort(ncm.ovsClient, entry); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // getAssignedEgressIPs returns IP addresses of all Egress IPs assigned to this node
