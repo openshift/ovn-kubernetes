@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -265,10 +266,33 @@ func sanitizePodName(name string) string {
 	return name
 }
 
+// pinAgnhostUDPPort makes agnhost netexec bind a unique UDP port.
+//
+// The tests only pass --http-port, so netexec falls back to its default
+// --udp-port=8081. Every external container here is a hostNetwork pod, so the
+// second netexec scheduled onto a node fails to bind UDP 8081 and log.Fatal()s
+// immediately. The pod then never reaches Running and the test fails in
+// BeforeEach. Reuse the already-unique HTTP port number for UDP: TCP and UDP
+// port spaces are separate, so this cannot collide with the HTTP listener.
+func pinAgnhostUDPPort(args []string, httpPort uint16) []string {
+	if !slices.Contains(args, "netexec") || httpPort == 0 {
+		return args
+	}
+	for _, a := range args {
+		if strings.HasPrefix(a, "--udp-port") {
+			return args
+		}
+	}
+	out := make([]string, 0, len(args)+1)
+	out = append(out, args...)
+	return append(out, fmt.Sprintf("--udp-port=%d", httpPort))
+}
+
 func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
 	// Create a hostNetwork pod to simulate an external container.
 	// Use GenerateName to avoid name collisions between parallel tests.
 	podPrefix := sanitizePodName(container.Name) + "-"
+	args := pinAgnhostUDPPort(container.CmdArgs, container.ExtPort)
 
 	privileged := true
 	pod := &corev1.Pod{
@@ -283,7 +307,7 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 				{
 					Name:            "main",
 					Image:           container.Image,
-					Args:            container.CmdArgs,
+					Args:            args,
 					SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
 				},
 			},
@@ -314,7 +338,7 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 		return p.Status.Phase == corev1.PodRunning, nil
 	})
 	if err != nil {
-		return container, fmt.Errorf("external container pod %s did not become running: %w", podName, err)
+		return container, fmt.Errorf("external container pod %s did not become running: %w (%s)", podName, err, describeStuckPod(c.kubeClient, podName))
 	}
 
 	// Get the pod's host IP (node IP)
@@ -345,6 +369,30 @@ func (c *contextOpenshift) CreateExternalContainer(container api.ExternalContain
 	}
 
 	return container, nil
+}
+
+// describeStuckPod summarises why a pod never reached Running so the failure
+// message in CI is actionable without digging through must-gather.
+func describeStuckPod(kubeClient *kubernetes.Clientset, podName string) string {
+	p, err := kubeClient.CoreV1().Pods("default").Get(context.TODO(), podName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Sprintf("pod lookup failed: %v", err)
+	}
+	details := []string{fmt.Sprintf("phase=%s node=%s", p.Status.Phase, p.Spec.NodeName)}
+	for _, cs := range p.Status.ContainerStatuses {
+		switch {
+		case cs.State.Terminated != nil:
+			t := cs.State.Terminated
+			details = append(details, fmt.Sprintf("%s terminated reason=%s exit=%d msg=%q", cs.Name, t.Reason, t.ExitCode, t.Message))
+		case cs.State.Waiting != nil:
+			w := cs.State.Waiting
+			details = append(details, fmt.Sprintf("%s waiting reason=%s msg=%q", cs.Name, w.Reason, w.Message))
+		}
+	}
+	if logs, err := runOC("logs", "--tail=20", fmt.Sprintf("pod/%s", podName), "-n", "default"); err == nil && logs != "" {
+		details = append(details, "logs: "+strings.ReplaceAll(strings.TrimSpace(logs), "\n", " | "))
+	}
+	return strings.Join(details, "; ")
 }
 
 func (c *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {

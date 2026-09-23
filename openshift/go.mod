@@ -17,6 +17,7 @@ require (
 	k8s.io/client-go v0.33.3
 	k8s.io/component-base v0.33.3
 	k8s.io/kubernetes v1.33.3
+	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
 )
 
 require (
@@ -198,7 +199,6 @@ require (
 	k8s.io/kubelet v0.33.3 // indirect
 	k8s.io/mount-utils v0.33.3 // indirect
 	k8s.io/pod-security-admission v0.33.3 // indirect
-	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect
 	kubevirt.io/api v1.4.0 // indirect
 	kubevirt.io/containerized-data-importer-api v1.57.0-alpha1 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
