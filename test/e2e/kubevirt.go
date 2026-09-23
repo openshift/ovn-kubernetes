@@ -1007,6 +1007,26 @@ fi
 			return addresses
 		}
 
+		virtualMachineMACFromStatus = func(vmi *kubevirtv1.VirtualMachineInstance, interfaceName string) string {
+			GinkgoHelper()
+			var mac string
+			Eventually(func() (string, error) {
+				if err := crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi), vmi); err != nil {
+					return "", err
+				}
+				mac = ""
+				for _, iface := range vmi.Status.Interfaces {
+					if iface.Name == interfaceName {
+						mac = iface.MAC
+						break
+					}
+				}
+				return mac, nil
+			}).WithPolling(time.Second).WithTimeout(10*time.Second).ShouldNot(BeEmpty(),
+				"VMI %s/%s should report a MAC for interface %s", vmi.Namespace, vmi.Name, interfaceName)
+			return mac
+		}
+
 		generateVM = func(vmi *kubevirtv1.VirtualMachineInstance) *kubevirtv1.VirtualMachine {
 			return composeVM(namespace, vmi)
 		}
@@ -1933,8 +1953,10 @@ ip route add %[3]s via %[4]s
 			if _, hasIPRequests := vmi.Annotations[kubevirt.AddressesAnnotation]; hasIPRequests {
 				Expect(expectedAddreses).To(ConsistOf(filterIPs(fr.ClientSet, staticIPv4, staticIPv6)), "expected addresses should be consistent with the static IPs")
 			}
-			if vmi.Spec.Domain.Devices.Interfaces[0].MacAddress != "" {
-				Expect(vmi.Spec.Domain.Devices.Interfaces[0].MacAddress).To(Equal(vmi.Status.Interfaces[0].MAC), "expected mac address should be consistent with the static MAC")
+			requestedInterface := vmi.Spec.Domain.Devices.Interfaces[0]
+			expectedMAC := virtualMachineMACFromStatus(vmi, requestedInterface.Name)
+			if requestedInterface.MacAddress != "" {
+				Expect(expectedMAC).To(Equal(requestedInterface.MacAddress), "expected MAC should be consistent with the requested MAC")
 			}
 
 			expectedAddresesAtGuest := expectedAddreses
@@ -1956,6 +1978,12 @@ ip route add %[3]s via %[4]s
 				WithTimeout(5*time.Second).
 				WithPolling(time.Second).
 				Should(ConsistOf(expectedAddresesAtGuest), step)
+
+			Eventually(kubevirt.RetrieveAllMACAddressesFromGuest).
+				WithArguments(virtClient, vmi).
+				WithTimeout(5*time.Second).
+				WithPolling(time.Second).
+				Should(ConsistOf(expectedMAC), "guest %s/%s should use the expected MAC before %s", namespace, vmi.Name, td.test.description)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic before %s %s", td.resource.description, td.test.description))
 			Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
@@ -2008,13 +2036,21 @@ ip route add %[3]s via %[4]s
 			Expect(virtClient.LoginToFedora(vmi, "fedora", "fedora")).To(Succeed(), step)
 
 			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			obtainedMAC := virtualMachineMACFromStatus(vmi, requestedInterface.Name)
 
 			Expect(obtainedAddresses).To(Equal(expectedAddreses))
+			Expect(obtainedMAC).To(Equal(expectedMAC), "VMI %s/%s should preserve its MAC after %s", namespace, vmi.Name, td.test.description)
 			Eventually(kubevirt.RetrieveAllGlobalAddressesFromGuest).
 				WithArguments(virtClient, vmi).
 				WithTimeout(5*time.Second).
 				WithPolling(time.Second).
 				Should(ConsistOf(expectedAddresesAtGuest), step)
+
+			Eventually(kubevirt.RetrieveAllMACAddressesFromGuest).
+				WithArguments(virtClient, vmi).
+				WithTimeout(5*time.Second).
+				WithPolling(time.Second).
+				Should(ConsistOf(expectedMAC), "guest %s/%s should preserve its MAC after %s", namespace, vmi.Name, td.test.description)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
 			if td.test.description == restart.description {
