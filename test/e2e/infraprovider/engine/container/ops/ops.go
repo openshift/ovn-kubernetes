@@ -418,7 +418,13 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 		return container, fmt.Errorf("failed to check if external container %s exists: %w", container.Name, err)
 	}
 	if exists {
-		return container, fmt.Errorf("external container %s already exists", container.Name)
+		// A container with this name may be left over from a previous run that failed after creation
+		// (for example, a crashed test). Remove it and proceed instead of failing every subsequent
+		// caller that reuses the same fixed container name.
+		framework.Logf("external container %s already exists, removing stale container before recreating", container.Name)
+		if err := o.DeleteExternalContainer(container); err != nil {
+			return container, fmt.Errorf("external container %s already exists and could not be removed: %w", container.Name, err)
+		}
 	}
 	cmd := []string{"run", "-itd", "--privileged", "--name", container.Name, "--network", container.Network.Name(), "--hostname", container.Name}
 	if container.IPv4 != "" {
@@ -444,6 +450,14 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 	if err != nil {
 		return container, fmt.Errorf("failed to create external container %s: %s (%s)", container, err, stdOut)
 	}
+	// From this point the container exists in the runtime. If anything below fails, remove it so a leaked
+	// container doesn't cause "already exists" failures for the next caller that reuses this name.
+	cleanupOnFailure := func(cause error) (api.ExternalContainer, error) {
+		if delErr := o.DeleteExternalContainer(container); delErr != nil {
+			framework.Logf("failed to clean up external container %s after creation error: %v", container.Name, delErr)
+		}
+		return container, cause
+	}
 	// fetch IPs for the attached container network. Host networked and --network none containers do not expose IP information.
 	if container.Network != nil && !isHostNetworked(container.Network.Name()) {
 		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 360*time.Second, true, func(ctx context.Context) (done bool, err error) {
@@ -460,12 +474,12 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 			return true, nil
 		})
 		if err != nil {
-			return container, fmt.Errorf("failed to get network interface information: %w", err)
+			return cleanupOnFailure(fmt.Errorf("failed to get network interface information: %w", err))
 		}
 	}
 
 	if valid, err := container.IsValidPostCreate(); !valid {
-		return container, err
+		return cleanupOnFailure(err)
 	}
 	return container, nil
 }
