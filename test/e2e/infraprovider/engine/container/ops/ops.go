@@ -418,7 +418,13 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 		return container, fmt.Errorf("failed to check if external container %s exists: %w", container.Name, err)
 	}
 	if exists {
-		return container, fmt.Errorf("external container %s already exists", container.Name)
+		// A container with this name may be left over from a previous run that failed after creation
+		// (for example, a crashed test). Remove it and proceed instead of failing every subsequent
+		// caller that reuses the same fixed container name.
+		framework.Logf("external container %s already exists, removing stale container before recreating", container.Name)
+		if err := o.DeleteExternalContainer(container); err != nil {
+			return container, fmt.Errorf("external container %s already exists and could not be removed: %w", container.Name, err)
+		}
 	}
 	cmd := []string{"run", "-itd", "--init", "--privileged", "--name", container.Name, "--network", container.Network.Name(), "--hostname", container.Name}
 	if container.IPv4 != "" {
