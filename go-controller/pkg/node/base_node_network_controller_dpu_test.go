@@ -113,12 +113,14 @@ func genOVSAddPortCmd(hostIfaceName, ifaceID, mac, ip, sandboxID, podUID string)
 	if ip != "" {
 		ipAddrExtID = fmt.Sprintf("external_ids:ip_addresses=%s ", ip)
 	}
-	return fmt.Sprintf("ovs-vsctl --timeout=30 --may-exist add-port br-int %s other_config:transient=true "+
+	return fmt.Sprintf("ovs-vsctl --timeout=30 --may-exist add-port br-int %s "+
+		"-- --if-exists remove port %s other_config transient "+
 		"-- set interface %s external_ids:attached_mac=%s external_ids:iface-id=%s external_ids:iface-id-ver=%s "+
 		"%sexternal_ids:sandbox=%s external_ids:vf-netdev-name=%s "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/network "+
 		"-- --if-exists remove interface %s external_ids k8s.ovn.org/nad",
-		hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, hostIfaceName, hostIfaceName, hostIfaceName)
+		hostIfaceName, hostIfaceName, hostIfaceName, mac, ifaceID, podUID, ipAddrExtID, sandboxID, hostIfaceName,
+		hostIfaceName, hostIfaceName)
 }
 
 func genOVSGetCmd(table, record, column, key string) string {

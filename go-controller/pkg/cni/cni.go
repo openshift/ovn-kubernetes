@@ -357,6 +357,14 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 		return nil, fmt.Errorf("required CNI variable missing")
 	}
 
+	// Forget this sandbox's ports before anything is torn down, so that the
+	// pod interface repair loop cannot re-plug a port that is on its way out.
+	// A multi-homed pod gets one DEL per attachment and the first of them drops
+	// the records of all of them, which is safe: the runtime only ever deletes
+	// the attachments of a sandbox it is tearing down as a whole, and a missing
+	// record costs nothing but the chance of a repair.
+	RemovePortJournalsForSandbox(pr.SandboxID)
+
 	pod, err := clientset.getPod(pr.PodNamespace, pr.PodName)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {

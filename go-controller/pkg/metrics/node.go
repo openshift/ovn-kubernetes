@@ -32,6 +32,18 @@ var MetricNodeReadyDuration = prometheus.NewGauge(prometheus.GaugeOpts{
 	Help:      "The duration for the node to get to ready state.",
 })
 
+// MetricPodInterfaceRepairs counts br-int pod ports that went missing while
+// their sandbox was still running and had to be re-plugged by ovnkube-node.
+// Any non-zero value means the OVS database lost pod ports underneath live
+// sandboxes, which black-holes those pods until the repair runs.
+var MetricPodInterfaceRepairs = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: types.MetricOvnkubeNamespace,
+	Subsystem: types.MetricOvnkubeSubsystemNode,
+	Name:      "pod_interface_repairs_total",
+	Help:      "The number of pod OVS ports that were missing from br-int while their sandbox was running and that ovnkube-node attempted to re-plug."},
+	[]string{"result"},
+)
+
 var metricOvnNodePortEnabled = prometheus.NewGauge(prometheus.GaugeOpts{
 	Namespace: types.MetricOvnkubeNamespace,
 	Subsystem: types.MetricOvnkubeSubsystemNode,
@@ -56,6 +68,7 @@ func RegisterNodeMetrics(stopChan <-chan struct{}) {
 	registerNodeMetricsOnce.Do(func() {
 		// ovnkube-node metrics
 		prometheus.MustRegister(MetricCNIRequestDuration)
+		prometheus.MustRegister(MetricPodInterfaceRepairs)
 		prometheus.MustRegister(MetricNodeReadyDuration)
 		prometheus.MustRegister(metricOvnNodePortEnabled)
 		prometheus.MustRegister(prometheus.NewGaugeFunc(

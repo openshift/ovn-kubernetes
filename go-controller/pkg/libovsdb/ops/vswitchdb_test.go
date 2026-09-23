@@ -717,6 +717,84 @@ func TestGetOVSPort(t *testing.T) {
 	}
 }
 
+func TestRemoveOVSPortOtherConfig(t *testing.T) {
+	bridgeUUID := buildNamedUUID()
+	portUUID := buildNamedUUID()
+	ifaceUUID := buildNamedUUID()
+
+	setup := func(t *testing.T, otherConfig map[string]string) libovsdbclient.Client {
+		t.Helper()
+		ovsClient, cleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+			OVSData: []libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{bridgeUUID}},
+				&vswitchd.Bridge{UUID: bridgeUUID, Name: "br-int", Ports: []string{portUUID}},
+				&vswitchd.Port{UUID: portUUID, Name: "test-port", Interfaces: []string{ifaceUUID}, OtherConfig: otherConfig},
+				&vswitchd.Interface{UUID: ifaceUUID, Name: "test-port"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("harness setup: %v", err)
+		}
+		t.Cleanup(cleanup.Cleanup)
+		return ovsClient
+	}
+
+	t.Run("removes the requested keys and keeps the rest", func(t *testing.T) {
+		ovsClient := setup(t, map[string]string{"transient": "true", "keep": "me"})
+
+		if err := RemoveOVSPortOtherConfig(ovsClient, "test-port", "transient"); err != nil {
+			t.Fatalf("RemoveOVSPortOtherConfig: %v", err)
+		}
+
+		got, err := GetOVSPort(ovsClient, "test-port")
+		if err != nil {
+			t.Fatalf("GetOVSPort: %v", err)
+		}
+		if _, ok := got.OtherConfig["transient"]; ok {
+			t.Errorf("Port.OtherConfig still has transient: %v", got.OtherConfig)
+		}
+		if got.OtherConfig["keep"] != "me" {
+			t.Errorf("Port.OtherConfig lost an unrelated key: %v", got.OtherConfig)
+		}
+	})
+
+	t.Run("is a no-op when the key is not set", func(t *testing.T) {
+		ovsClient := setup(t, map[string]string{"keep": "me"})
+
+		if err := RemoveOVSPortOtherConfig(ovsClient, "test-port", "transient"); err != nil {
+			t.Fatalf("RemoveOVSPortOtherConfig: %v", err)
+		}
+
+		got, err := GetOVSPort(ovsClient, "test-port")
+		if err != nil {
+			t.Fatalf("GetOVSPort: %v", err)
+		}
+		if got.OtherConfig["keep"] != "me" {
+			t.Errorf("Port.OtherConfig = %v, want keep=me", got.OtherConfig)
+		}
+	})
+
+	t.Run("is a no-op when the port does not exist", func(t *testing.T) {
+		ovsClient := setup(t, nil)
+
+		if err := RemoveOVSPortOtherConfig(ovsClient, "no-such-port", "transient"); err != nil {
+			t.Fatalf("RemoveOVSPortOtherConfig: %v", err)
+		}
+	})
+
+	t.Run("returns the incoming ops unchanged when no key is given", func(t *testing.T) {
+		ovsClient := setup(t, map[string]string{"transient": "true"})
+
+		ops, err := RemoveOVSPortOtherConfigOps(ovsClient, nil, "test-port")
+		if err != nil {
+			t.Fatalf("RemoveOVSPortOtherConfigOps: %v", err)
+		}
+		if len(ops) != 0 {
+			t.Errorf("got %d ops, want none", len(ops))
+		}
+	})
+}
+
 func TestFindOVSPortsWithPredicate(t *testing.T) {
 	bridgeUUID := buildNamedUUID()
 	port1UUID := buildNamedUUID()

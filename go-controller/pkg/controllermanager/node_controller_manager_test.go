@@ -6,27 +6,32 @@ package controllermanager
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/mock"
 	"github.com/vishvananda/netlink"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	uplinkfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned/fake"
 	uplinkinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/informers/externalversions"
 	factoryMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -69,6 +74,58 @@ func newTestOVSClient(ovsData []libovsdbtest.TestData) (libovsdbclient.Client, *
 func ovsPortAndInterface(portUUID, ifaceUUID, name string, extIDs map[string]string) (*vswitchd.Port, *vswitchd.Interface) {
 	return &vswitchd.Port{UUID: portUUID, Name: name, Interfaces: []string{ifaceUUID}},
 		&vswitchd.Interface{UUID: ifaceUUID, Name: name, ExternalIDs: extIDs}
+}
+
+// fakeNetLinkOps answers link lookups from a set of names. Only the two methods
+// the OVS pod interface health checks use are implemented; anything else panics
+// on the embedded nil interface, which keeps the fake honest.
+type fakeNetLinkOps struct {
+	util.NetLinkOps
+	links sets.Set[string]
+}
+
+func (f *fakeNetLinkOps) LinkByName(name string) (netlink.Link, error) {
+	if f.links.Has(name) {
+		return &netlink.Veth{LinkAttrs: netlink.LinkAttrs{Name: name}}, nil
+	}
+	return nil, netlink.LinkNotFoundError{}
+}
+
+func (f *fakeNetLinkOps) IsLinkNotFoundError(err error) bool {
+	var notFound netlink.LinkNotFoundError
+	return errors.As(err, &notFound)
+}
+
+// useFakeNetLinkOps makes the given host netdev names, and only those, exist
+// for the duration of the spec.
+func useFakeNetLinkOps(names ...string) *fakeNetLinkOps {
+	fake := &fakeNetLinkOps{links: sets.New(names...)}
+	original := util.GetNetLinkOps()
+	util.SetNetLinkOpMockInst(fake)
+	DeferCleanup(func() { util.SetNetLinkOpMockInst(original) })
+	return fake
+}
+
+// newTestNCM builds a NodeControllerManager backed by an in-memory OVS
+// database. The returned context must be cleaned up by the caller.
+func newTestNCM(fakeClient *util.OVNClientset, factoryMock *factoryMocks.NodeWatchFactory, nodeName string,
+	ovsData []libovsdbtest.TestData) (*NodeControllerManager, *libovsdbtest.Context) {
+	nadListerMock := &nadlistermocks.NetworkAttachmentDefinitionLister{}
+	nadInformerMock := &nadinformermocks.NetworkAttachmentDefinitionInformer{}
+	nadInformerMock.On("Lister").Return(nadListerMock)
+	nadInformerMock.On("Informer").Return(nil)
+	factoryMock.On("NADInformer").Return(nadInformerMock)
+	nodeInformerMock := &coreinformermocks.NodeInformer{}
+	nodeListerMock := &corelistermocks.NodeLister{}
+	nodeListerMock.On("List", mock.Anything).Return(nil, nil)
+	nodeInformerMock.On("Lister").Return(nodeListerMock)
+	factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
+
+	ovsClient, ovsCleanup := newTestOVSClient(ovsData)
+	ncm, err := NewNodeControllerManager(fakeClient, factoryMock, nodeName, &sync.WaitGroup{}, nil,
+		routemanager.NewController(), ovsClient)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred())
+	return ncm, ovsCleanup
 }
 
 func expectUplinkInformers(factoryMock *factoryMocks.NodeWatchFactory) {
@@ -145,7 +202,6 @@ var _ = Describe("Healthcheck tests", func() {
 		var ncm *NodeControllerManager
 		var ovsCleanup *libovsdbtest.Context
 		nodeName := "localNode"
-		routeManager := routemanager.NewController()
 		podList := []*corev1.Pod{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -173,23 +229,14 @@ var _ = Describe("Healthcheck tests", func() {
 
 		setupNCM := func(ovsData []libovsdbtest.TestData) {
 			factoryMock.On("GetPods", "").Return(podList, nil)
-			nadListerMock := &nadlistermocks.NetworkAttachmentDefinitionLister{}
-			nadInformerMock := &nadinformermocks.NetworkAttachmentDefinitionInformer{}
-			nadInformerMock.On("Lister").Return(nadListerMock)
-			nadInformerMock.On("Informer").Return(nil)
-			factoryMock.On("NADInformer").Return(nadInformerMock)
-			nodeInformerMock := &coreinformermocks.NodeInformer{}
-			nodeListerMock := &corelistermocks.NodeLister{}
-			nodeListerMock.On("List", mock.Anything).Return(nil, nil)
-			nodeInformerMock.On("Lister").Return(nodeListerMock)
-			factoryMock.On("NodeCoreInformer").Return(nodeInformerMock)
-
-			var ovsClient libovsdbclient.Client
-			ovsClient, ovsCleanup = newTestOVSClient(ovsData)
-
-			ncm, err = NewNodeControllerManager(fakeClient, &factoryMock, nodeName, &sync.WaitGroup{}, nil, routeManager, ovsClient)
-			Expect(err).NotTo(HaveOccurred())
+			ncm, ovsCleanup = newTestNCM(fakeClient, &factoryMock, nodeName, ovsData)
 		}
+
+		BeforeEach(func() {
+			// By default every pod OVS interface in these specs is backed by a
+			// live host netdev, so only the pod-UID check decides what is stale.
+			useFakeNetLinkOps("pod-a-ifc", "pod-b-ifc", "stale-pod-ifc", "vfio-pod-ifc", "veth-ifc")
+		})
 
 		AfterEach(func() {
 			if ovsCleanup != nil {
@@ -294,6 +341,260 @@ var _ = Describe("Healthcheck tests", func() {
 			})
 		})
 
+		Context("bridge has pod ports whose host netdev is gone", func() {
+			// This is what a node reboot leaves behind: conf.db survives, no
+			// veth does, and the pod keeps its UID so the staleness check above
+			// cannot see it.
+			It("removes the port left behind by a reboot and keeps the live one", func() {
+				useFakeNetLinkOps("pod-a-ifc")
+				portA, ifaceA := ovsPortAndInterface("port-1", "iface-1", "pod-a-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "a-ns_a-pod", "iface-id-ver": "pod-a-uuid-1"})
+				portB, ifaceB := ovsPortAndInterface("port-2", "iface-2", "pod-b-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "b-ns_b-pod", "iface-id-ver": "pod-b-uuid-2"})
+				setupNCM([]libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+					&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-1", "port-2"}},
+					portA, ifaceA, portB, ifaceB,
+				})
+				ncm.checkForStaleOVSPodInterfaces()
+				_, err := libovsdbops.GetOVSPort(ncm.ovsClient, "pod-a-ifc")
+				Expect(err).NotTo(HaveOccurred())
+				_, err = libovsdbops.GetOVSPort(ncm.ovsClient, "pod-b-ifc")
+				Expect(err).To(HaveOccurred())
+			})
+
+			It("keeps dpdk ports, which have no kernel netdev by design", func() {
+				useFakeNetLinkOps()
+				portA, ifaceA := ovsPortAndInterface("port-1", "iface-1", "pod-a-ifc", map[string]string{
+					"sandbox": "123abcfaa", "iface-id": "a-ns_a-pod", "iface-id-ver": "pod-a-uuid-1"})
+				ifaceA.Type = "dpdk"
+				setupNCM([]libovsdbtest.TestData{
+					&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+					&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-1"}},
+					portA, ifaceA,
+				})
+				ncm.checkForStaleOVSPodInterfaces()
+				_, err := libovsdbops.GetOVSPort(ncm.ovsClient, "pod-a-ifc")
+				Expect(err).NotTo(HaveOccurred())
+			})
+		})
+	})
+
+	Describe("repairMissingOVSPodInterfaces", func() {
+		var ncm *NodeControllerManager
+		var ovsCleanup *libovsdbtest.Context
+		const (
+			nodeName      = "localNode"
+			podNamespace  = "a-ns"
+			podName       = "a-pod"
+			podUID        = "pod-a-uuid-1"
+			sandboxID     = "123abcfaa"
+			hostIfaceName = "pod-a-ifc"
+			ifaceID       = "a-ns_a-pod"
+		)
+		var pod *corev1.Pod
+		var journalEntry *cni.PortJournalEntry
+
+		// brIntOnly is a br-int that has lost the pod's port, the state an
+		// ovsdb-server restart or a conf.db rollback leaves behind.
+		brIntOnly := []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+			&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int"},
+		}
+
+		journaledPorts := func() []string {
+			entries, err := cni.ListPortJournal()
+			ExpectWithOffset(1, err).NotTo(HaveOccurred())
+			names := make([]string, 0, len(entries))
+			for _, e := range entries {
+				names = append(names, e.HostIfaceName)
+			}
+			return names
+		}
+
+		repairCount := func(result string) float64 {
+			m := &dto.Metric{}
+			ExpectWithOffset(1, metrics.MetricPodInterfaceRepairs.WithLabelValues(result).Write(m)).To(Succeed())
+			return m.GetCounter().GetValue()
+		}
+
+		BeforeEach(func() {
+			cni.SetPortJournalDir(filepath.Join(GinkgoT().TempDir(), "ports"))
+			useFakeNetLinkOps(hostIfaceName)
+
+			pod = &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      podName,
+					Namespace: podNamespace,
+					UID:       podUID,
+				},
+				Spec: corev1.PodSpec{NodeName: nodeName},
+			}
+			journalEntry = &cni.PortJournalEntry{
+				PodNamespace:  podNamespace,
+				PodName:       podName,
+				PodUID:        podUID,
+				SandboxID:     sandboxID,
+				PodIfName:     "eth0",
+				HostIfaceName: hostIfaceName,
+				IfaceID:       ifaceID,
+				ExternalIDs: map[string]string{
+					"iface-id":     ifaceID,
+					"iface-id-ver": podUID,
+					"sandbox":      sandboxID,
+					"attached_mac": "0a:58:0a:80:03:9e",
+				},
+			}
+		})
+
+		AfterEach(func() {
+			if ovsCleanup != nil {
+				ovsCleanup.Cleanup()
+				ovsCleanup = nil
+			}
+		})
+
+		setup := func(ovsData []libovsdbtest.TestData) {
+			factoryMock.On("GetPod", podNamespace, podName).Return(pod, nil)
+			ncm, ovsCleanup = newTestNCM(fakeClient, &factoryMock, nodeName, ovsData)
+		}
+
+		It("re-plugs a port that OVS lost while the sandbox is still running", func() {
+			Expect(cni.WritePortJournal(journalEntry)).To(Succeed())
+			setup(brIntOnly)
+
+			before := repairCount("success")
+			ncm.repairMissingOVSPodInterfaces()
+
+			iface, err := libovsdbops.GetOVSInterface(ncm.ovsClient, hostIfaceName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(iface.ExternalIDs).To(Equal(journalEntry.ExternalIDs))
+			// The port must not come back marked transient: that flag is what
+			// made an OVS restart delete it in the first place.
+			port, err := libovsdbops.GetOVSPort(ncm.ovsClient, hostIfaceName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(port.OtherConfig).NotTo(HaveKey("transient"))
+			bridge, err := libovsdbops.GetBridge(ncm.ovsClient, "br-int")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bridge.Ports).To(ContainElement(port.UUID))
+
+			Expect(repairCount("success")).To(Equal(before + 1))
+			// The entry stays, the pod may need repairing again.
+			Expect(journaledPorts()).To(ConsistOf(hostIfaceName))
+		})
+
+		It("does nothing when the port is already on br-int", func() {
+			Expect(cni.WritePortJournal(journalEntry)).To(Succeed())
+			port, iface := ovsPortAndInterface("port-1", "iface-1", hostIfaceName, map[string]string{
+				"sandbox": sandboxID, "iface-id": ifaceID, "iface-id-ver": podUID})
+			setup([]libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+				&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-1"}},
+				port, iface,
+			})
+
+			before := repairCount("success")
+			ncm.repairMissingOVSPodInterfaces()
+
+			Expect(repairCount("success")).To(Equal(before))
+			// The row must be left exactly as OVS had it: the journal carries an
+			// attached_mac that a repair would have written.
+			existing, err := libovsdbops.GetOVSInterface(ncm.ovsClient, hostIfaceName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(existing.ExternalIDs).NotTo(HaveKey("attached_mac"))
+			bridge, err := libovsdbops.GetBridge(ncm.ovsClient, "br-int")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(bridge.Ports).To(HaveLen(1))
+		})
+
+		It("does not add a second interface for a logical port something else already owns", func() {
+			Expect(cni.WritePortJournal(journalEntry)).To(Succeed())
+			// A new sandbox for the same pod got a different host veth name.
+			port, iface := ovsPortAndInterface("port-1", "iface-1", "pod-a-ifc-new", map[string]string{
+				"sandbox": "999newsandbox", "iface-id": ifaceID, "iface-id-ver": podUID})
+			setup([]libovsdbtest.TestData{
+				&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{"bridge-uuid"}},
+				&vswitchd.Bridge{UUID: "bridge-uuid", Name: "br-int", Ports: []string{"port-1"}},
+				port, iface,
+			})
+
+			before := repairCount("success")
+			ncm.repairMissingOVSPodInterfaces()
+
+			Expect(repairCount("success")).To(Equal(before))
+			_, err := libovsdbops.GetOVSInterface(ncm.ovsClient, hostIfaceName)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("forgets a port whose host netdev is gone", func() {
+			useFakeNetLinkOps()
+			Expect(cni.WritePortJournal(journalEntry)).To(Succeed())
+			setup(brIntOnly)
+
+			ncm.repairMissingOVSPodInterfaces()
+
+			Expect(journaledPorts()).To(BeEmpty())
+			_, err := libovsdbops.GetOVSInterface(ncm.ovsClient, hostIfaceName)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("does not repair a port recorded by a previous instance of the pod", func() {
+			journalEntry.PodUID = "pod-a-uuid-0"
+			Expect(cni.WritePortJournal(journalEntry)).To(Succeed())
+			setup(brIntOnly)
+
+			ncm.repairMissingOVSPodInterfaces()
+
+			_, err := libovsdbops.GetOVSInterface(ncm.ovsClient, hostIfaceName)
+			Expect(err).To(HaveOccurred())
+			// The netdev is still there, so the entry must survive for the
+			// instant when CNI DEL finally removes it.
+			Expect(journaledPorts()).To(ConsistOf(hostIfaceName))
+		})
+
+		It("does not repair a port of a pod that is being deleted", func() {
+			now := metav1.Now()
+			pod.DeletionTimestamp = &now
+			Expect(cni.WritePortJournal(journalEntry)).To(Succeed())
+			setup(brIntOnly)
+
+			ncm.repairMissingOVSPodInterfaces()
+
+			_, err := libovsdbops.GetOVSInterface(ncm.ovsClient, hostIfaceName)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("does not repair a port of a pod that has moved to another node", func() {
+			pod.Spec.NodeName = "otherNode"
+			Expect(cni.WritePortJournal(journalEntry)).To(Succeed())
+			setup(brIntOnly)
+
+			ncm.repairMissingOVSPodInterfaces()
+
+			_, err := libovsdbops.GetOVSInterface(ncm.ovsClient, hostIfaceName)
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("does not repair while the pod cannot be read from the apiserver", func() {
+			Expect(cni.WritePortJournal(journalEntry)).To(Succeed())
+			factoryMock.On("GetPod", podNamespace, podName).Return(nil, errors.New("not found"))
+			ncm, ovsCleanup = newTestNCM(fakeClient, &factoryMock, nodeName, brIntOnly)
+
+			ncm.repairMissingOVSPodInterfaces()
+
+			_, err := libovsdbops.GetOVSInterface(ncm.ovsClient, hostIfaceName)
+			Expect(err).To(HaveOccurred())
+			// An apiserver blip must never cost the pod its chance of a repair.
+			Expect(journaledPorts()).To(ConsistOf(hostIfaceName))
+		})
+
+		It("does nothing when no port has been journaled", func() {
+			setup(brIntOnly)
+
+			before := repairCount("success")
+			ncm.repairMissingOVSPodInterfaces()
+			Expect(repairCount("success")).To(Equal(before))
+		})
 	})
 
 	Describe("NewNodeControllerManager", func() {

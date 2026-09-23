@@ -1797,11 +1797,12 @@ func TestConfigureOVS(t *testing.T) {
 			// ovs-vsctl add port to br-int
 			ovsAddPortCmd := fmt.Sprintf(
 				"ovs-vsctl --timeout=30 --may-exist "+
-					"add-port br-int %s other_config:transient=true "+
+					"add-port br-int %s "+
+					"-- --if-exists remove port %s other_config transient "+
 					"-- set interface %s external_ids:attached_mac=%s "+
 					"external_ids:iface-id=%s external_ids:iface-id-ver=%s "+
 					"external_ids:sandbox=%s ",
-				tc.vfRep, tc.vfRep, "", genIfaceID(tc.podNs, tc.podName), tc.ifInfo.PodUID, sandboxID)
+				tc.vfRep, tc.vfRep, tc.vfRep, "", genIfaceID(tc.podNs, tc.podName), tc.ifInfo.PodUID, sandboxID)
 			if tc.pfEncapIp != "" {
 				ovsAddPortCmd += fmt.Sprintf("external_ids:encap-ip=%s ", tc.pfEncapIp)
 			}

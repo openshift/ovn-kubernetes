@@ -489,6 +489,38 @@ func GetOVSPort(ovsClient libovsdbclient.Client, name string) (*vswitchd.Port, e
 	return found[0], nil
 }
 
+// RemoveOVSPortOtherConfig removes the given keys from a Port's other_config.
+// Missing keys, and a missing port, are no-ops.
+func RemoveOVSPortOtherConfig(ovsClient libovsdbclient.Client, name string, keys ...string) error {
+	ops, err := RemoveOVSPortOtherConfigOps(ovsClient, nil, name, keys...)
+	if err != nil {
+		return err
+	}
+	_, err = TransactAndCheck(ovsClient, ops)
+	return err
+}
+
+// RemoveOVSPortOtherConfigOps returns operations that remove the given keys
+// from a Port's other_config. Missing keys, and a missing port, are no-ops.
+func RemoveOVSPortOtherConfigOps(ovsClient libovsdbclient.Client, ops []ovsdb.Operation, name string, keys ...string) ([]ovsdb.Operation, error) {
+	if len(keys) == 0 {
+		return ops, nil
+	}
+	cfg := make(map[string]string, len(keys))
+	for _, key := range keys {
+		cfg[key] = ""
+	}
+	port := &vswitchd.Port{Name: name, OtherConfig: cfg}
+	opModel := operationModel{
+		Model:            port,
+		OnModelMutations: []interface{}{&port.OtherConfig},
+		ErrNotFound:      false,
+		BulkOp:           false,
+	}
+	m := newModelClient(ovsClient)
+	return m.DeleteOps(ops, opModel)
+}
+
 // CreateOrUpdatePortWithInterface creates or updates an OVS port and its interface on a bridge.
 // This creates both the Port and Interface objects atomically in a single transaction,
 // and attaches the port to the specified bridge.
