@@ -4,37 +4,19 @@ import (
 	"fmt"
 	"strings"
 
-	imageutils "k8s.io/kubernetes/test/utils/image"
-
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 )
-
-// requiredImage associates an e2e image pullspec with an index used to generate
-// the image tag so that it matches with the tag in quay.io/openshift/community-e2e-images.
-type requiredImage struct {
-	pullSpec string
-	index    int
-}
-
-var requiredImages []requiredImage
-
-func init() {
-	agnhostImage := requiredImage{
-		pullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
-		index:    int(imageutils.Agnhost),
-	}
-	requiredImages = append(requiredImages, agnhostImage)
-}
 
 // registerTestImages advertises OVN-Kubernetes e2e images to the openshift-tests
 // extension so origin can list and mirror them (see "images" subcommand).
 func registerTestImages(ext *extension.Extension) error {
-	for _, ri := range requiredImages {
-		img, err := extensionImageFromPullSpec(ri.pullSpec)
+	for _, ri := range deploymentconfig.Get().GetRequiredImages() {
+		img, err := extensionImageFromPullSpec(ri.PullSpec)
 		if err != nil {
-			return fmt.Errorf("failed to register test image %q: %v", ri.pullSpec, err)
+			return fmt.Errorf("failed to register test image %q: %v", ri.PullSpec, err)
 		}
-		img.Index = ri.index
+		img.Index = int(ri.ImageID)
 		ext.RegisterImage(img)
 	}
 	return nil
