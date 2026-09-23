@@ -28,6 +28,7 @@ const (
 	// cluster primary network as per changes in the link:
 	// https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L123-L124
 	primaryNetworkName         = "ostestbm_net"
+	primaryNetworkBridge       = "ostestbm"
 	frrContainerPrimaryNetIPv4 = "192.168.111.3"
 	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
 	externalFRRContainerName   = "frr"
@@ -66,6 +67,11 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	// Verify SSH connectivity works
 	if _, err := sshRunner.Run("echo", "connection test"); err != nil {
 		return nil, fmt.Errorf("failed to check frr container status, connectivity check failed with hypervisor: %w", err)
+	}
+	// Ensure primary network exists here so any OTE job
+	// can create external containers on the primary network.
+	if err := ensurePrimaryNetworkExists(sshRunner); err != nil {
+		return nil, err
 	}
 	// Initialize podman container engine
 	ci.engine = container.NewEngine("podman", sshRunner)
@@ -179,6 +185,19 @@ func (ci *baremetalInfra) DetachNetwork(network api.Network, container string) e
 
 func (ci *baremetalInfra) DeleteNetwork(network api.Network) error {
 	return ci.engine.DeleteNetwork(network)
+}
+
+// ensurePrimaryNetworkExists creates the podman network bound to the
+// hypervisor's primaryNetworkBridge if it doesn't exist yet
+func ensurePrimaryNetworkExists(runner api.Runner) error {
+	if _, err := runner.Run("podman", "network", "exists", primaryNetworkName); err == nil {
+		return nil
+	}
+	if _, err := runner.Run("podman", "network", "create", "--driver", "bridge", "--ipam-driver=none",
+		"--opt", fmt.Sprintf("com.docker.network.bridge.name=%s", primaryNetworkBridge), primaryNetworkName); err != nil {
+		return fmt.Errorf("failed to create primary network %s: %w", primaryNetworkName, err)
+	}
+	return nil
 }
 
 func hypervisorSshCmdRunner() (api.Runner, error) {

@@ -1073,37 +1073,37 @@ var AppendedAnnotations = map[string]string{
 
 	"EVPN: VTEP API validations api-server should reject invalid VTEP updates Invalid VTEP update configurations": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Disabled:Unimplemented]",
+	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv6 pods": "[Disabled:Unimplemented]",
+	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate a node with a local ep is selected when ETP=Local ipv4 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate a node with a local ep is selected when ETP=Local ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate a node with a local ep is selected when ETP=Local ipv6 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate a node with a local ep is selected when ETP=Local ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv4 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv6 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv4 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv6 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip without selectors ipv4 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip without selectors ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip without selectors ipv6 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip without selectors ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate the egress SVC SNAT functionality against host-networked pods ipv4 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate the egress SVC SNAT functionality against host-networked pods ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Should validate the egress SVC SNAT functionality against host-networked pods ipv6 pods": "[Disabled:Unimplemented]",
+	"EgressService Should validate the egress SVC SNAT functionality against host-networked pods ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService [LGW] Should validate ingress reply traffic uses the Network ipv4 pods": "[Disabled:Unimplemented]",
+	"EgressService [LGW] Should validate ingress reply traffic uses the Network ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService [LGW] Should validate ingress reply traffic uses the Network ipv6 pods": "[Disabled:Unimplemented]",
+	"EgressService [LGW] Should validate ingress reply traffic uses the Network ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv4 pods": "[Disabled:Unimplemented]",
+	"EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv6 pods": "[Disabled:Unimplemented]",
+	"EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"External Gateway When validating the Admin Policy Based External Route status Should update the status of a successful and failed CRs": "[Disabled:Unimplemented]",
 
