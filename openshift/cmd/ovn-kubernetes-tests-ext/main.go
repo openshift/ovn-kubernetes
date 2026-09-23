@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -12,6 +13,9 @@ import (
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
+
+	kclientset "k8s.io/client-go/kubernetes"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -39,6 +43,9 @@ const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+	featureLabelEgressIP            = "Feature:EgressIP"
+	// Test constants used for test categorization and filtering
+	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -64,7 +71,33 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// Future feature-based filters can be added here
+	// If platform infra node (hypervisor node for baremetal, bastion host
+	// for cloud platforms) doesn't exist, then ignore running EgressIP tests.
+	if !ocpInfra.HasPlatformInfra() && spec.Labels.Has(featureLabelEgressIP) {
+		return false
+	}
+	// secondary-host-eip tests: only include on platforms with a
+	// pre-configured secondary network (currently baremetal only)
+	if strings.Contains(spec.Name, EIPSecondaryNetworkTestPrefix) && !ocpInfra.HasSecondaryHostEIPSupport() {
+		return false
+	}
+	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
+	// which is not yet configured on bastion-based platforms.
+	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsCloudPlatform() {
+		return false
+	}
+	// On GCP, nodes have a /32 primary interface address
+	// (k8s.ovn.org/node-primary-ifaddr: {"ipv4":"10.0.128.x/32"}), so
+	// isOVNNetworkIP returns false for any EgressIP because no IP other
+	// than the node's own can fall within a /32 network. This causes
+	// BridgeEIPAddrManager to skip assigning the EIP to the bridge
+	// interface, breaking IFA_PROTO verification and UDN EgressIP tests.
+	// Tracking via https://redhat.atlassian.net/browse/OCPBUGS-122016.
+	if ocpInfra.IsGCPPlatform() && spec.Labels.Has(featureLabelEgressIP) &&
+		(spec.Labels.Has(featureLabelNetworkSegmentation) || strings.Contains(spec.Name, "Primary UDN") ||
+			strings.Contains(spec.Name, "disabling egress nodes with egress-assignable label")) {
+		return false
+	}
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
@@ -86,22 +119,23 @@ func main() {
 	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
 	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name:       "ovn-kubernetes/conformance/serial",
-		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
+		Name:        "ovn-kubernetes/conformance/serial",
+		Parallelism: 1,
+		Qualifiers: []string{fmt.Sprintf(`labels.exists(l, l == "Serial") || labels.exists(l, l == "%s")`,
+			featureLabelEgressIP)},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Name: "ovn-kubernetes/conformance/parallel",
+		Qualifiers: []string{fmt.Sprintf(`!labels.exists(l, l == "Serial") && !labels.exists(l, l == "%s")`,
+			featureLabelEgressIP)},
 	})
-
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
-	if err != nil {
-		panic(err)
-	}
 
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
+	// Must happen before BuildExtensionTestSpecsFromOpenShiftGinkgoSuite because Ginkgo
+	// Entry() arguments are evaluated during tree construction, triggering UDN subnet
+	// allocation which queries the infra provider for network exclusions.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
@@ -116,6 +150,11 @@ func main() {
 		}
 	}
 
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
+	if err != nil {
+		panic(err)
+	}
+
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
 	specs.AddBeforeAll(func() {
 		if cfgErr != nil {
@@ -126,6 +165,13 @@ func main() {
 		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
+		}
+		client, err := kclientset.NewForConfig(cfg)
+		if err != nil {
+			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
+		}
+		if err := ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
 	})
 
