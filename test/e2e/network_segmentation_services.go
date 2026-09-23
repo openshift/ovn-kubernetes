@@ -30,6 +30,7 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
+	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	utilnet "k8s.io/utils/net"
 )
 
@@ -98,6 +99,16 @@ var _ = Describe("Network Segmentation: services", feature.NetworkSegmentation, 
 			func(
 				netConfigParams networkAttachmentConfigParams,
 			) {
+				// This test validates connectivity to a UDN LoadBalancer service from an
+				// external container (the "frr" container). That infrastructure only
+				// exists on providers such as kind and bare-metal; cloud platforms
+				// (Azure, AWS, GCP) have none. Skip the whole test there rather than
+				// running a partial variant, which would still exercise default-network
+				// pods that violate restricted PodSecurity and trip cluster monitors.
+				if !externalContainerConnectivitySupported() {
+					e2eskipper.Skipf("test requires external container infrastructure, which is not available on this platform")
+				}
+
 				namespace := f.Namespace.Name
 				jig := e2eservice.NewTestJig(cs, namespace, "udn-service")
 
@@ -495,6 +506,23 @@ func checkConnectionOrNoConnectionToLoadBalancers(f *framework.Framework, client
 		}
 		framework.ExpectNoError(err, fmt.Sprintf("Failed to verify that %s", msg))
 	}
+}
+
+// externalContainerConnectivitySupported reports whether the active infrastructure
+// provider can reach pre-provisioned external containers (e.g. the "frr" container).
+// It uses an optional capability interface so providers that do not implement it
+// (such as kind, which always has external containers) default to supported, while
+// providers that do (e.g. the OpenShift provider on cloud platforms without external
+// container infrastructure) can advertise the lack of support so callers skip the
+// external container connectivity checks instead of failing.
+func externalContainerConnectivitySupported() bool {
+	type externalContainerCapabilityChecker interface {
+		IsExternalContainerAvailable() bool
+	}
+	if checker, ok := infraprovider.Get().(externalContainerCapabilityChecker); ok {
+		return checker.IsExternalContainerAvailable()
+	}
+	return true
 }
 
 func checkConnectionToNodePortFromExternalContainer(externalContainer infraapi.ExternalContainer, service *v1.Service, node *v1.Node, nodeRoleMsg, expectedOutput string) {
