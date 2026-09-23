@@ -110,6 +110,42 @@ type BridgeConfiguration struct {
 	dropGARP   bool
 }
 
+// IsLocalnetTopologyPort reports whether port is an OVN patch port for a
+// localnet topology. The ovn-localnet-port external ID is also set on gateway
+// patch ports, so the key's presence alone is not sufficient.
+func IsLocalnetTopologyPort(port *vswitchd.Port) bool {
+	if port == nil {
+		return false
+	}
+	logicalPort, ok := port.ExternalIDs["ovn-localnet-port"]
+	return ok && (logicalPort == types.OVNLocalnetPort ||
+		strings.HasSuffix(logicalPort, "_"+types.OVNLocalnetPort))
+}
+
+// hasLocalnetPatchPort returns true when this bridge contains an OVN patch port
+// for a localnet topology.
+func (b *BridgeConfiguration) hasLocalnetPatchPort() (bool, error) {
+	bridge, err := ovsops.GetBridge(b.ovsClient, b.bridgeName)
+	if err != nil {
+		return false, fmt.Errorf("failed to find OVS bridge %s: %w", b.bridgeName, err)
+	}
+	bridgePortIDs := make(map[string]struct{}, len(bridge.Ports))
+	for _, portID := range bridge.Ports {
+		bridgePortIDs[portID] = struct{}{}
+	}
+
+	ports, err := ovsops.FindOVSPortsWithPredicate(b.ovsClient, func(port *vswitchd.Port) bool {
+		if _, ok := bridgePortIDs[port.UUID]; !ok {
+			return false
+		}
+		return IsLocalnetTopologyPort(port)
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to list localnet ports on OVS bridge %s: %w", b.bridgeName, err)
+	}
+	return len(ports) > 0, nil
+}
+
 func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
 	physicalNetworkName string,
 	nodeSubnets, gwIPs []*net.IPNet,
@@ -354,6 +390,7 @@ func NewUnmanagedBridgeConfiguration(ovsClient libovsdbclient.Client, bridgeName
 	}
 
 	return &BridgeConfiguration{
+		ovsClient:   ovsClient,
 		nodeName:    nodeName,
 		bridgeName:  bridgeName,
 		uplinkName:  uplinkName,
