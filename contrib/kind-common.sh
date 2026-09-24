@@ -207,8 +207,13 @@ set_common_default_params() {
 
   ENABLE_MULTI_NET=${ENABLE_MULTI_NET:-false}
   ENABLE_NETWORK_SEGMENTATION=${ENABLE_NETWORK_SEGMENTATION:-false}
+  DISABLE_UDN_ARP_NDP_FLOOD=${DISABLE_UDN_ARP_NDP_FLOOD:-false}
   if [ "$ENABLE_NETWORK_SEGMENTATION" == true ] && [ "$ENABLE_MULTI_NET" != true ]; then
     echo "Network segmentation (UDN) requires multi-network to be enabled (-mne)"
+    exit 1
+  fi
+  if [ "$DISABLE_UDN_ARP_NDP_FLOOD" == true ] && [ "$ENABLE_NETWORK_SEGMENTATION" != true ]; then
+    echo "Disabling UDN ARP/NDP flood requires network-segmentation (UDN) to be enabled (-nse)"
     exit 1
   fi
 
