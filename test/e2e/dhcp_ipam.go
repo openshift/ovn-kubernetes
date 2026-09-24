@@ -16,6 +16,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	udnv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
@@ -94,7 +95,7 @@ ethernets:
 		runDHCPServer := func(namespace string, network infraapi.Network) error {
 			_, err := providerCtx.CreateExternalContainer(infraapi.ExternalContainer{
 				Name:       namespace + "-dhcp-server",
-				Image:      images.DNSMasq(),
+				Image:      deploymentconfig.Get().GetImage(images.Dnsmasq),
 				Network:    network,
 				Entrypoint: "sh",
 				CmdArgs: []string{"-c", fmt.Sprintf(
@@ -136,7 +137,7 @@ ethernets:
 		})
 
 		AfterAll(func() {
-			Expect(removeImagesFromNodes(fr.ClientSet, kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesFromNodes(fr.ClientSet, deploymentconfig.Get().GetImage(images.FedoraContainerDisk))).To(Succeed())
 		})
 
 		// startVM boots a fedora VM attached to the DHCP CUDN. The role label

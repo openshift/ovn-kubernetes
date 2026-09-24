@@ -38,10 +38,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
@@ -201,7 +199,7 @@ func composeFedoraWithTestToolingVMI(namespace string, labels, annotations, node
 			NetworkData: networkData,
 		},
 	}
-	return composeVMI(namespace, labels, annotations, nodeSelector, networkSource, cloudInitVolumeSource, kubevirt.FedoraWithTestToolingContainerDiskImage)
+	return composeVMI(namespace, labels, annotations, nodeSelector, networkSource, cloudInitVolumeSource, deploymentconfig.Get().GetImage(images.FedoraContainerDisk))
 }
 
 func composeFedoraWithTestToolingVM(namespace string, labels, annotations, nodeSelector map[string]string,
@@ -260,6 +258,19 @@ func composeAgnhostPod(name, namespace, nodeName string, args ...string) *corev1
 	return agnHostPod
 }
 
+// iperf3Provider optionally prepares traffic endpoints for a downstream runtime.
+// Providers that do not implement it retain the upstream image and commands.
+type iperf3Provider interface {
+	ConfigureIPerf3Pod(*corev1.Pod) error
+	PrepareIPerf3Container(infraapi.Context, infraapi.ExternalContainer) (infraapi.ExternalContainer, error)
+}
+
+// kubevirtImageCleanupPolicy lets providers leave container-disk cache eviction
+// to their runtime when nodes are shared with other test suites.
+type kubevirtImageCleanupPolicy interface {
+	ShouldPruneKubeVirtImages() bool
+}
+
 func removeImagesInNode(node, imageURL string) error {
 	By("Removing unused images in node " + node)
 	output, err := infraprovider.Get().ExecK8NodeCommand(node, []string{
@@ -293,6 +304,9 @@ func removeImagesInNode(node, imageURL string) error {
 }
 
 func removeImagesFromNodes(cs kubernetes.Interface, imageURL string) error {
+	if policy, ok := infraprovider.Get().(kubevirtImageCleanupPolicy); ok && !policy.ShouldPruneKubeVirtImages() {
+		return nil
+	}
 	nodesList, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	for nodeIdx := range nodesList.Items {
@@ -302,12 +316,6 @@ func removeImagesFromNodes(cs kubernetes.Interface, imageURL string) error {
 		}
 	}
 	return nil
-}
-
-func init() {
-	if os.Getenv("KIND_INSTALL_KUBEVIRT") == "true" {
-		images.Add(images.Netshoot())
-	}
 }
 
 var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, func() {
@@ -484,11 +492,11 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			return nil
 		}
 
-		checkIperfTraffic = func(iperfLogFile string, execFn func(cmd string) (string, error), timeout time.Duration, stage string) {
+		checkIperfTraffic = func(iperfLogFile string, readLog func() (string, error), timeout time.Duration, stage string) {
 			GinkgoHelper()
 			// Check the last line eventually show traffic flowing
 			Eventually(func() (string, error) {
-				iperfLog, err := execFn("cat " + iperfLogFile)
+				iperfLog, err := readLog()
 				if err != nil {
 					return "", err
 				}
@@ -519,10 +527,10 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			for podName, podIPs := range podIPsByName {
 				for _, podIP := range podIPs {
 					iperfLogFile := fmt.Sprintf("/tmp/%s_%s_iperf3.log", podName, podIP)
-					execFn := func(cmd string) (string, error) {
-						return virtClient.RunCommand(vmi, cmd, 2*time.Second)
+					readLog := func() (string, error) {
+						return virtClient.ReadIPerfLog(vmi, iperfLogFile)
 					}
-					checkIperfTraffic(iperfLogFile, execFn, 2*time.Second, stage)
+					checkIperfTraffic(iperfLogFile, readLog, 2*time.Second, stage)
 				}
 			}
 		}
@@ -632,7 +640,10 @@ fi
 				execFn := func(cmd string) (string, error) {
 					return infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c", cmd})
 				}
-				checkIperfTraffic(ingressIperfLogFile(ip, port), execFn, timeout, stage)
+				readLog := func() (string, error) {
+					return execFn(kubevirt.IPerfLogCommand(ingressIperfLogFile(ip, port)))
+				}
+				checkIperfTraffic(ingressIperfLogFile(ip, port), readLog, timeout, stage)
 				// A client killed without writing "iperf3: error" (like an
 				// OOM kill) leaves a stale good looking last log line, ensure
 				// it's still alive so that does not become a false positive.
@@ -646,10 +657,10 @@ fi
 			Expect(macVRFContainerIPs).NotTo(BeEmpty())
 			for _, ip := range macVRFContainerIPs {
 				iperfLogFile := fmt.Sprintf("/tmp/external-east-west_%s_iperf3.log", ip)
-				execFn := func(cmd string) (string, error) {
-					return virtClient.RunCommand(vmi, cmd, 2*time.Second)
+				readLog := func() (string, error) {
+					return virtClient.ReadIPerfLog(vmi, iperfLogFile)
 				}
-				checkIperfTraffic(iperfLogFile, execFn, 2*time.Second, stage)
+				checkIperfTraffic(iperfLogFile, readLog, 2*time.Second, stage)
 			}
 		}
 
@@ -660,10 +671,10 @@ fi
 				if ip == "" {
 					continue
 				}
-				execFn := func(cmd string) (string, error) {
-					return virtClient.RunCommand(vmi, cmd, 5*time.Second)
+				readLog := func() (string, error) {
+					return virtClient.ReadIPerfLog(vmi, northSouthIperfLogFile("egress", ip, port))
 				}
-				checkIperfTraffic(northSouthIperfLogFile("egress", ip, port), execFn, 2*time.Second, stage)
+				checkIperfTraffic(northSouthIperfLogFile("egress", ip, port), readLog, 2*time.Second, stage)
 			}
 		}
 
@@ -747,16 +758,17 @@ fi
 			By("Skip network policy, test should be fixed after OVN bump broke them")
 		}
 
-		liveMigrateVirtualMachine = func(vmName string) {
+		liveMigrateVirtualMachine = func(vmName string) *kubevirtv1.VirtualMachineInstanceMigration {
 			GinkgoHelper()
 			vmimCreationRetries := 0
+			var vmim *kubevirtv1.VirtualMachineInstanceMigration
 			Eventually(func() error {
 				if vmimCreationRetries > 0 {
 					// retry due to unknown issue where kubevirt webhook gets stuck reading the request body
 					// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/3902#issuecomment-1750257559
 					By(fmt.Sprintf("Retrying vmim %s creation", vmName))
 				}
-				vmim := &kubevirtv1.VirtualMachineInstanceMigration{
+				vmim = &kubevirtv1.VirtualMachineInstanceMigration{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace:    namespace,
 						GenerateName: vmName,
@@ -769,6 +781,7 @@ fi
 				vmimCreationRetries++
 				return err
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+			return vmim
 		}
 
 		checkLiveMigrationSucceeded = func(vmName string, migrationMode kubevirtv1.MigrationMode) {
@@ -829,59 +842,14 @@ fi
 			checkLiveMigrationSucceeded(vmi.Name, kubevirtv1.MigrationPreCopy)
 		}
 
-		vmiMigrations = func(client crclient.Client) ([]kubevirtv1.VirtualMachineInstanceMigration, error) {
-			unstructuredVMIMigrations := &unstructured.UnstructuredList{}
-			unstructuredVMIMigrations.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   kubevirtv1.GroupVersion.Group,
-				Kind:    "VirtualMachineInstanceMigrationList",
-				Version: kubevirtv1.GroupVersion.Version,
-			})
-
-			if err := client.List(context.Background(), unstructuredVMIMigrations); err != nil {
-				return nil, err
-			}
-			if len(unstructuredVMIMigrations.Items) == 0 {
-				return nil, fmt.Errorf("empty migration list")
-			}
-
-			var migrations []kubevirtv1.VirtualMachineInstanceMigration
-			for i := range unstructuredVMIMigrations.Items {
-				var vmiMigration kubevirtv1.VirtualMachineInstanceMigration
-				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(
-					unstructuredVMIMigrations.Items[i].Object,
-					&vmiMigration,
-				); err != nil {
-					return nil, err
-				}
-				migrations = append(migrations, vmiMigration)
-			}
-
-			return migrations, nil
-		}
-
-		checkLiveMigrationFailed = func(vmName string) {
+		checkLiveMigrationFailed = func(migration *kubevirtv1.VirtualMachineInstanceMigration) {
 			GinkgoHelper()
-			By("checking the VM live-migrated failed to migrate")
-			vmi := &kubevirtv1.VirtualMachineInstance{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: namespace,
-					Name:      vmName,
-				},
-			}
-			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).NotTo(HaveOccurred(), "should success retrieving vmi")
-
+			By(fmt.Sprintf("checking migration %s/%s failed", migration.Namespace, migration.Name))
 			Eventually(func() (kubevirtv1.VirtualMachineInstanceMigrationPhase, error) {
-				migrations, err := vmiMigrations(crClient)
-				if err != nil {
-					return kubevirtv1.MigrationPhaseUnset, err
-				}
-				if len(migrations) > 1 {
-					return kubevirtv1.MigrationPhaseUnset, fmt.Errorf("expected one migration, got %d", len(migrations))
-				}
-				return migrations[0].Status.Phase, nil
-			}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(
+				return kubevirt.MigrationPhase(context.Background(), crClient, migration)
+			}).WithPolling(time.Second).WithTimeout(5*time.Minute).Should(
 				Equal(kubevirtv1.MigrationFailed),
+				"migration %s/%s for VMI %s should fail", migration.Namespace, migration.Name, migration.Spec.VMIName,
 			)
 		}
 
@@ -899,8 +867,8 @@ fi
 				return err
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 
-			liveMigrateVirtualMachine(vmi.Name)
-			checkLiveMigrationFailed(vmi.Name)
+			migration := liveMigrateVirtualMachine(vmi.Name)
+			checkLiveMigrationFailed(migration)
 		}
 
 		globalAddressesByFamily = func(isOfFamily func(string) bool, vmi *kubevirtv1.VirtualMachineInstance) func() ([]string, error) {
@@ -1031,6 +999,26 @@ fi
 			addresses, err := addressesFromStatus(vmi)()
 			Expect(err).NotTo(HaveOccurred())
 			return addresses
+		}
+
+		virtualMachineMACFromStatus = func(vmi *kubevirtv1.VirtualMachineInstance, interfaceName string) string {
+			GinkgoHelper()
+			var mac string
+			Eventually(func() (string, error) {
+				if err := crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi), vmi); err != nil {
+					return "", err
+				}
+				mac = ""
+				for _, iface := range vmi.Status.Interfaces {
+					if iface.Name == interfaceName {
+						mac = iface.MAC
+						break
+					}
+				}
+				return mac, nil
+			}).WithPolling(time.Second).WithTimeout(10*time.Second).ShouldNot(BeEmpty(),
+				"VMI %s/%s should report a MAC for interface %s", vmi.Namespace, vmi.Name, interfaceName)
+			return mac
 		}
 
 		generateVM = func(vmi *kubevirtv1.VirtualMachineInstance) *kubevirtv1.VirtualMachine {
@@ -1268,15 +1256,32 @@ config:
 						IPRequest: staticIPs,
 					}
 				}
-				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, []string{"bash", "-c"}, map[string]string{}, func(pod *corev1.Pod) {
+				trafficPod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Image: deploymentconfig.Get().GetImage(images.Netshoot), Command: []string{"bash", "-c"},
+					Args: []string{iperfServerScript + "\n sleep infinity"},
+				}}}}
+				if provider, ok := infraprovider.Get().(iperf3Provider); ok {
+					if err := provider.ConfigureIPerf3Pod(trafficPod); err != nil {
+						return nil, err
+					}
+				}
+				pod, err := createPod(fr, "testpod-"+sanitizeNodeName(node.Name), node.Name, namespace, trafficPod.Spec.Containers[0].Command, map[string]string{}, func(pod *corev1.Pod) {
 					if nse != nil {
 						pod.Annotations = networkSelectionElements(*nse)
 					}
-					pod.Spec.Containers[0].Image = images.Netshoot()
-					pod.Spec.Containers[0].Args = []string{iperfServerScript + "\n sleep infinity"}
+					name := pod.Spec.Containers[0].Name
+					pod.Spec.Containers[0] = trafficPod.Spec.Containers[0]
+					pod.Spec.Containers[0].Name = name
 				})
 				if err != nil {
 					return nil, err
+				}
+				if trafficPod.Spec.Containers[0].ReadinessProbe != nil {
+					if err := e2epod.WaitTimeoutForPodReadyInNamespace(context.Background(), fr.ClientSet, pod.Name, namespace, 4*time.Minute); err != nil {
+						logs, _ := e2epod.GetPodLogs(context.Background(), fr.ClientSet, namespace, pod.Name, pod.Spec.Containers[0].Name)
+						e2eframework.Logf("iperf3 preparation logs for %s/%s:\n%s", namespace, pod.Name, logs)
+						return nil, fmt.Errorf("iperf3 endpoint %s/%s did not become ready: %w", namespace, pod.Name, err)
+					}
 				}
 				pods = append(pods, pod)
 			}
@@ -1395,7 +1400,7 @@ config:
 		})
 
 		AfterAll(func() {
-			Expect(removeImagesInNodes(kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesInNodes(deploymentconfig.Get().GetImage(images.FedoraContainerDisk))).To(Succeed())
 		})
 
 		DescribeTable("when live migration", func(td liveMigrationTestData) {
@@ -1415,7 +1420,7 @@ config:
 			By("Create external container to run the iperf3 clients")
 			externalContainer := infraapi.ExternalContainer{
 				Name:    namespace + "-iperf",
-				Image:   images.Netshoot(),
+				Image:   deploymentconfig.Get().GetImage(images.Netshoot),
 				CmdArgs: []string{"sleep", "infinity"},
 				ExtPort: infraprovider.Get().GetExternalContainerPort(),
 			}
@@ -1501,7 +1506,7 @@ config:
 	})
 	Context("with user defined networks and persistent ips configured", Ordered, func() {
 		AfterAll(func() {
-			Expect(removeImagesInNodes(kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesInNodes(deploymentconfig.Get().GetImage(images.FedoraContainerDisk))).To(Succeed())
 		})
 		type testCommand struct {
 			description string
@@ -1520,9 +1525,7 @@ config:
 			vmi                     *kubevirtv1.VirtualMachineInstance
 			cidrIPv4, cidrIPv6      string
 			staticIPv4, staticIPv6  string
-			staticMAC               = "02:00:00:00:00:01"
 			externalMACVRFContainer = infraapi.ExternalContainer{
-				Image:   images.Netshoot(),
 				CmdArgs: []string{"sleep", "infinity"},
 			}
 
@@ -1619,6 +1622,10 @@ write_files:
 
 					annotations, err := kubevirt.GenerateAddressesAnnotations("net1", filterIPs(fr.ClientSet, staticIPv4, staticIPv6))
 					Expect(err).NotTo(HaveOccurred())
+					// Keep the requested MAC stable within this VM, but independent
+					// of other static-address cases running concurrently.
+					staticMAC, err := util.GenerateRandMAC()
+					Expect(err).NotTo(HaveOccurred())
 
 					vm = fedoraWithTestToolingVM(nil /*labels*/, annotations, nil, /*nodeSelector*/
 						kubevirtv1.NetworkSource{
@@ -1626,7 +1633,7 @@ write_files:
 						}, userDataWithIperfServer, networkDataDualStack)
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Bridge = nil
 					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].Binding = &kubevirtv1.PluginBinding{Name: "l2bridge"}
-					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = staticMAC
+					vm.Spec.Template.Spec.Domain.Devices.Interfaces[0].MacAddress = staticMAC.String()
 					createVirtualMachine(vm)
 					return vm.Name
 				},
@@ -1744,6 +1751,7 @@ write_files:
 				td.evpn.MACVRF.VNI = int32(bgpAlloc.MACVRFVNI)
 				td.evpn.IPVRF.VNI = int32(bgpAlloc.IPVRFVNI)
 				externalMACVRFContainer.Name = fmt.Sprintf("iperf3-macvrf-%d", bgpAlloc.MACVRFVNI)
+				externalMACVRFContainer.Image = deploymentconfig.Get().GetImage(images.Netshoot)
 				// Shorten the CUDN name to fit Linux interface name limits.
 				// The name is used as testName for runEVPNNetworkAndServers which
 				// derives bridge/SVI names: worst-case SVI is "br<name>.4094"
@@ -1784,7 +1792,7 @@ write_files:
 
 				externalContainer = infraapi.ExternalContainer{
 					Name:    namespace + "-iperf",
-					Image:   images.Netshoot(),
+					Image:   deploymentconfig.Get().GetImage(images.Netshoot),
 					CmdArgs: []string{"sleep", "infinity"},
 					ExtPort: infraprovider.Get().GetExternalContainerPort(),
 				}
@@ -1862,14 +1870,18 @@ write_files:
 				externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 				externalContainer = infraapi.ExternalContainer{
 					Name:    externalContainerName,
-					Image:   images.Netshoot(),
+					Image:   deploymentconfig.Get().GetImage(images.Netshoot),
 					CmdArgs: []string{"sleep", "infinity"},
 					ExtPort: externalContainerPort,
 				}
 				providerNetwork, err := containerNetwork(td)
 				Expect(err).ShouldNot(HaveOccurred(), "primary network must be available to attach containers")
 				externalContainer.Network = providerNetwork
-				externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
+				if provider, ok := infraprovider.Get().(iperf3Provider); ok {
+					externalContainer, err = provider.PrepareIPerf3Container(providerCtx, externalContainer)
+				} else {
+					externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
+				}
 				Expect(err).ShouldNot(HaveOccurred(), "creation of external container is test dependency")
 			} else if td.role == udnv1.NetworkRolePrimary && td.evpn != nil {
 				// Containers were set up by runEVPNNetworkAndServers; collect MAC-VRF IPs.
@@ -1938,8 +1950,10 @@ ip route add %[3]s via %[4]s
 			if _, hasIPRequests := vmi.Annotations[kubevirt.AddressesAnnotation]; hasIPRequests {
 				Expect(expectedAddreses).To(ConsistOf(filterIPs(fr.ClientSet, staticIPv4, staticIPv6)), "expected addresses should be consistent with the static IPs")
 			}
-			if vmi.Spec.Domain.Devices.Interfaces[0].MacAddress != "" {
-				Expect(vmi.Spec.Domain.Devices.Interfaces[0].MacAddress).To(Equal(vmi.Status.Interfaces[0].MAC), "expected mac address should be consistent with the static MAC")
+			requestedInterface := vmi.Spec.Domain.Devices.Interfaces[0]
+			expectedMAC := virtualMachineMACFromStatus(vmi, requestedInterface.Name)
+			if requestedInterface.MacAddress != "" {
+				Expect(expectedMAC).To(Equal(requestedInterface.MacAddress), "expected MAC should be consistent with the requested MAC")
 			}
 
 			expectedAddresesAtGuest := expectedAddreses
@@ -1961,6 +1975,12 @@ ip route add %[3]s via %[4]s
 				WithTimeout(5*time.Second).
 				WithPolling(time.Second).
 				Should(ConsistOf(expectedAddresesAtGuest), step)
+
+			Eventually(kubevirt.RetrieveAllMACAddressesFromGuest).
+				WithArguments(virtClient, vmi).
+				WithTimeout(5*time.Second).
+				WithPolling(time.Second).
+				Should(ConsistOf(expectedMAC), "guest %s/%s should use the expected MAC before %s", namespace, vmi.Name, td.test.description)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic before %s %s", td.resource.description, td.test.description))
 			Expect(startEastWestIperfTraffic(vmi, testPodsIPs, step)).To(Succeed(), step)
@@ -2013,13 +2033,21 @@ ip route add %[3]s via %[4]s
 			Expect(virtClient.LoginToFedora(vmi, "fedora", "fedora")).To(Succeed(), step)
 
 			obtainedAddresses := virtualMachineAddressesFromStatus(vmi, expectedNumberOfAddresses)
+			obtainedMAC := virtualMachineMACFromStatus(vmi, requestedInterface.Name)
 
 			Expect(obtainedAddresses).To(Equal(expectedAddreses))
+			Expect(obtainedMAC).To(Equal(expectedMAC), "VMI %s/%s should preserve its MAC after %s", namespace, vmi.Name, td.test.description)
 			Eventually(kubevirt.RetrieveAllGlobalAddressesFromGuest).
 				WithArguments(virtClient, vmi).
 				WithTimeout(5*time.Second).
 				WithPolling(time.Second).
 				Should(ConsistOf(expectedAddresesAtGuest), step)
+
+			Eventually(kubevirt.RetrieveAllMACAddressesFromGuest).
+				WithArguments(virtClient, vmi).
+				WithTimeout(5*time.Second).
+				WithPolling(time.Second).
+				Should(ConsistOf(expectedMAC), "guest %s/%s should preserve its MAC after %s", namespace, vmi.Name, td.test.description)
 
 			step = by(vmi.Name, fmt.Sprintf("Check east/west traffic after %s %s", td.resource.description, td.test.description))
 			if td.test.description == restart.description {
@@ -2225,7 +2253,7 @@ ip route add %[3]s via %[4]s
 			}
 		)
 		AfterAll(func() {
-			Expect(removeImagesInNodes(kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesInNodes(deploymentconfig.Get().GetImage(images.FedoraContainerDisk))).To(Succeed())
 		})
 		BeforeEach(func() {
 			ns, err := fr.CreateNamespace(context.TODO(), fr.BaseName, map[string]string{
@@ -2328,7 +2356,7 @@ ethernets:
 			namespace = fr.Namespace.Name
 		})
 		AfterAll(func() {
-			Expect(removeImagesInNodes(kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesInNodes(deploymentconfig.Get().GetImage(images.FedoraContainerDisk))).To(Succeed())
 		})
 		var (
 			ipv4CIDR             = "172.31.0.0/24"
@@ -2579,11 +2607,10 @@ chpasswd: { expire: False }
 	Context("duplicate addresses validation", func() {
 		const networkName = "net1"
 		var (
-			cudn          *udnv1.ClusterUserDefinedNetwork
-			duplicateIPv4 = "10.128.0.200" // Static IP that will be used by both VMs
-			duplicateIPv6 = "2010:100:200::200"
-			cidrIPv4      = "10.128.0.0/24"
-			cidrIPv6      = "2010:100:200::0/60"
+			cudn               *udnv1.ClusterUserDefinedNetwork
+			cidrIPv4, cidrIPv6 = allocators.GetFirstUDNSubnets()
+			duplicateIPv4      = subnetOffsetIP(cidrIPv4, 200)
+			duplicateIPv6      = subnetOffsetIP(cidrIPv6, 200)
 		)
 
 		BeforeEach(func() {
@@ -2654,7 +2681,10 @@ chpasswd: { expire: False }
 		}
 
 		It("should fail when creating second VM with duplicate user requested MAC", func() {
-			const testMAC = "02:a1:b2:c3:d4:e5"
+			mac, err := util.GenerateRandMAC()
+			Expect(err).NotTo(HaveOccurred())
+			// Reuse this MAC only for the two VMs whose collision is under test.
+			testMAC := mac.String()
 			vmi1 := newVMIWithPrimaryIfaceMAC(testMAC)
 			vm1 := generateVM(vmi1)
 			createVirtualMachine(vm1)
@@ -2706,6 +2736,7 @@ chpasswd: { expire: False }
 	})
 
 	Context("IP family validation for layer2 primary networks", func() {
+		cidrIPv4, cidrIPv6 := allocators.GetFirstUDNSubnets()
 		BeforeEach(func() {
 			if !isPreConfiguredUdnAddressesEnabled() {
 				Skip("ENABLE_PRE_CONF_UDN_ADDR not configured")
@@ -2722,9 +2753,7 @@ chpasswd: { expire: False }
 		})
 
 		It("should fail when dual-stack network requests only IPv4", func() {
-			cidrIPv4 := "10.130.0.0/24"
-			cidrIPv6 := "2010:100:201::0/60"
-			staticIPv4 := "10.130.0.101"
+			staticIPv4 := subnetOffsetIP(cidrIPv4, 101)
 
 			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
 			if len(dualCIDRs) < 2 {
@@ -2740,9 +2769,7 @@ chpasswd: { expire: False }
 		})
 
 		It("should fail when dual-stack network requests only IPv6", func() {
-			cidrIPv4 := "10.131.0.0/24"
-			cidrIPv6 := "2010:100:202::0/60"
-			staticIPv6 := "2010:100:202::101"
+			staticIPv6 := subnetOffsetIP(cidrIPv6, 101)
 
 			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
 			if len(dualCIDRs) < 2 {
@@ -2758,9 +2785,8 @@ chpasswd: { expire: False }
 		})
 
 		It("should fail when single-stack IPv4 network requests multiple IPv4 IPs", func() {
-			cidrIPv4 := "10.132.0.0/24"
-			staticIPv4_1 := "10.132.0.101"
-			staticIPv4_2 := "10.132.0.102"
+			staticIPv4_1 := subnetOffsetIP(cidrIPv4, 101)
+			staticIPv4_2 := subnetOffsetIP(cidrIPv4, 102)
 
 			singleStackIPv4CIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4)})
 
@@ -2773,9 +2799,8 @@ chpasswd: { expire: False }
 		})
 
 		It("should fail when single-stack IPv6 network requests multiple IPv6 IPs", func() {
-			cidrIPv6 := "2010:100:204::0/60"
-			staticIPv6_1 := "2010:100:204::101"
-			staticIPv6_2 := "2010:100:204::102"
+			staticIPv6_1 := subnetOffsetIP(cidrIPv6, 101)
+			staticIPv6_2 := subnetOffsetIP(cidrIPv6, 102)
 
 			singleStackIPv6CIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv6)})
 			if len(singleStackIPv6CIDRs) == 0 {
@@ -2791,10 +2816,8 @@ chpasswd: { expire: False }
 		})
 
 		It("should succeed when dual-stack network requests correct IPs (1 IPv4 + 1 IPv6)", func() {
-			cidrIPv4 := "10.134.0.0/24"
-			cidrIPv6 := "2010:100:205::0/60"
-			staticIPv4 := "10.134.0.101"
-			staticIPv6 := "2010:100:205::101"
+			staticIPv4 := subnetOffsetIP(cidrIPv4, 101)
+			staticIPv6 := subnetOffsetIP(cidrIPv6, 101)
 
 			dualCIDRs := filterDualStackCIDRs(fr.ClientSet, []udnv1.CIDR{udnv1.CIDR(cidrIPv4), udnv1.CIDR(cidrIPv6)})
 			if len(dualCIDRs) < 2 {
@@ -2828,11 +2851,14 @@ chpasswd: { expire: False }
 		const networkName = "net1"
 		var (
 			cudn     *udnv1.ClusterUserDefinedNetwork
-			cidrIPv4 = "10.130.0.0/30" // subnet with no usable IPs
+			cidrIPv4 string
 			cidrIPv6 = "2011:100:200::0/120"
 		)
 
 		BeforeEach(func() {
+			// Keep the /30 exhaustion pool outside the cluster network. Read the
+			// override at execution time, after providers have been initialized.
+			cidrIPv4 = envOrDefault("OVN_TEST_KV_SUBNET_EXHAUSTION_CIDR_IPV4", "10.130.0.0/30")
 			l := map[string]string{
 				"e2e-framework":           fr.BaseName,
 				RequiredUDNNamespaceLabel: "",

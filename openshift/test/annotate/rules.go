@@ -9,6 +9,9 @@ var (
 	// LabelToLabelMaps label -> label (ginkgo label)
 	// E2E tests are written with the support of ginkgo. ginkgo tests may contain Labels.
 	LabelToLabelMaps = map[string][]string{
+		"[Suite:openshift/network/virtualization]": {
+			`[Feature:VirtualMachineSupport]`,
+		},
 		"[Disabled:Unimplemented]": {
 			`[Feature:Service]`,
 			`[Feature:NetworkPolicy]`,
@@ -20,7 +23,6 @@ var (
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
-			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
 			`[Feature:Multicast]`,
 			`[Feature:MultiHoming]`,
@@ -33,6 +35,31 @@ var (
 	// if a test name partially or fully contains one of the map value strings, then add the label to the test
 	// label -> partial or full test name or regex to match a test name
 	LabelToTestNameMatchMaps = map[string][]string{
+		"[Suite:openshift/network/virtualization]": {},
+		// These VM cases create CUDNs. Keep OpenShift feature-gate metadata
+		// downstream so Origin filtering and Sippy can associate their results.
+		"[OCPFeatureGate:NetworkSegmentation]": {
+			`^Kubevirt Virtual Machines with user defined networks and persistent ips configured.*(Primary|Secondary)/Layer2 ingress snat`,
+			`^Kubevirt Virtual Machines with user defined networks with ipamless localnet topology`,
+			`^Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN`,
+			`^Kubevirt Virtual Machines duplicate addresses validation`,
+			`^Kubevirt Virtual Machines IP family validation for layer2 primary networks`,
+			`^Kubevirt Virtual Machines ipv4 subnet exhaustion`,
+		},
+		// GenerateCUDN configures persistent IPAM for these subnet-backed
+		// networks. Guest-configured IPAM-less localnet addresses are excluded.
+		"[OCPFeatureGate:PersistentIPsForVirtualization]": {
+			`^Kubevirt Virtual Machines with user defined networks and persistent ips configured.*(Primary|Secondary)/Layer2 ingress snat`,
+			`^Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN`,
+			`^Kubevirt Virtual Machines duplicate addresses validation`,
+			`^Kubevirt Virtual Machines IP family validation for layer2 primary networks`,
+			`^Kubevirt Virtual Machines ipv4 subnet exhaustion`,
+		},
+		"[OCPFeatureGate:PreconfiguredUDNAddresses]": {
+			`^Kubevirt Virtual Machines with user defined networks and persistent ips configured.*statics IPs and MAC with Primary/Layer2 ingress snat`,
+			`^Kubevirt Virtual Machines duplicate addresses validation`,
+			`^Kubevirt Virtual Machines IP family validation for layer2 primary networks`,
+		},
 		// alpha features that are not gated
 		"[Disabled:Alpha]": {},
 		// tests for features that are not implemented in openshift
@@ -115,13 +142,26 @@ var (
 		// tests that need to be temporarily disabled while the rebase is in progress.
 		"[Disabled:RebaseInProgress]": {},
 		// tests that may work, but we don't support them
-		"[Disabled:Unsupported]": {},
+		"[Disabled:Unsupported]": {
+			// OpenShift does not support Localnet with OVN-managed IPAM.
+			// These persistence cases use IPAM; the separate IPAM-less localnet
+			// cases remain enabled.
+			`Kubevirt Virtual Machines with user defined networks and persistent ips configured.*Secondary/Localnet`,
+		},
 		// tests too slow to be part of conformance
 		"[Slow]": {},
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			// Localnet kubevirt tests call SetupUnderlay which mutates the
+			// shared OVN bridge-mappings (br-ex) on every node and restores
+			// them on cleanup. Concurrent localnet tests would clobber each
+			// other's mappings and reuse the same physical-network addresses,
+			// so they must not run in parallel.
+			`ipamless localnet topology`,
+			`Secondary/Localnet`,
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)

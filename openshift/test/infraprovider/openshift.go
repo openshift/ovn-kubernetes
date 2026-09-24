@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"time"
@@ -16,6 +17,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
@@ -26,6 +30,7 @@ import (
 )
 
 type OpenshiftInfraProvider struct {
+	restConfig              *rest.Config
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
@@ -41,6 +46,7 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
+		restConfig:   config,
 		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
 	}
@@ -75,6 +81,8 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 	}
 	// check ovn gateway mode and export required env variable
 	o.configureOVNGatewayMode()
+	// export a subnet-exhaustion CIDR that does not overlap the cluster network
+	o.configureKubevirtSubnetExhaustionCIDR()
 	if o.clusterInfra != nil {
 		// check for frr external container availability
 		frrContainer := api.ExternalContainer{Name: externalFRRContainerName}
@@ -86,6 +94,8 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 
 // configureOVNGatewayMode detects and configures the OVN gateway mode for tests
 func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
+	// Add the agnhost image to the required images
+	deploymentconfig.Get().AddImage(images.Agnhost)
 	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
 		return
 	}
@@ -97,6 +107,51 @@ func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 		// satisfy this condition; otherwise, they will be skipped.
 		_ = os.Setenv("OVN_GATEWAY_MODE", "local")
 	}
+}
+
+// kubevirtSubnetExhaustionCIDRIPv4Env is the environment variable the upstream
+// kubevirt "ipv4 subnet exhaustion" test reads to override its default IPv4
+// CUDN subnet. Must stay in sync with test/e2e/kubevirt.go.
+const kubevirtSubnetExhaustionCIDRIPv4Env = "OVN_TEST_KV_SUBNET_EXHAUSTION_CIDR_IPV4"
+
+// configureKubevirtSubnetExhaustionCIDR points the kubevirt subnet-exhaustion
+// test at a /30 that does not overlap the cluster default network. The upstream
+// default (10.130.0.0/30) overlaps OpenShift's default cluster network
+// (10.128.0.0/14), which makes CUDN creation fail upfront with a
+// NetworkAttachmentDefinitionSyncError before the allocation path under test is
+// reached. A /30 has no usable host IPs once the gateway and broadcast/network
+// addresses are reserved, so it still forces exhaustion.
+func (o *OpenshiftInfraProvider) configureKubevirtSubnetExhaustionCIDR() {
+	const candidate = "192.168.222.0/30"
+	if o.clusterNetworkOverlaps(candidate) {
+		// Extremely unlikely for the cluster network to use this RFC1918 /24;
+		// leave the upstream default in place rather than guessing further.
+		return
+	}
+	_ = os.Setenv(kubevirtSubnetExhaustionCIDRIPv4Env, candidate)
+}
+
+// clusterNetworkOverlaps reports whether cidr overlaps any configured cluster
+// network entry. On any parsing problem it conservatively returns true so the
+// caller keeps the upstream default.
+func (o *OpenshiftInfraProvider) clusterNetworkOverlaps(cidr string) bool {
+	_, candidate, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return true
+	}
+	if o.operNetwork == nil {
+		return false
+	}
+	for _, entry := range o.operNetwork.Spec.ClusterNetwork {
+		_, clusterNet, err := net.ParseCIDR(entry.CIDR)
+		if err != nil {
+			return true
+		}
+		if clusterNet.Contains(candidate.IP) || candidate.Contains(clusterNet.IP) {
+			return true
+		}
+	}
+	return false
 }
 
 // CheckForEVPN checks all EVPN prerequisites
@@ -170,7 +225,11 @@ func (o *OpenshiftInfraProvider) GetDefaultTimeoutContext() *framework.TimeoutCo
 	return timeouts
 }
 
-func (o OpenshiftInfraProvider) PreloadImages(images []string) {
+func (o OpenshiftInfraProvider) ShouldPruneKubeVirtImages() bool {
+	return false
+}
+
+func (o OpenshiftInfraProvider) PreloadImages(images []deploymentconfigapi.ImageConfig) {
 	// no-op: OpenShift clusters pull images at runtime
 }
 
@@ -313,8 +372,4 @@ func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 		panic("not implemented")
 	}
 	return o.externalContainerContextProvider.DeleteNetwork(network)
-}
-
-func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
-	panic("not implemented")
 }
