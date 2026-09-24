@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 
 	imageutils "k8s.io/kubernetes/test/utils/image"
 

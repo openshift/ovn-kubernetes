@@ -101,8 +101,8 @@ func main() {
 
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
-	// Do this before building the Ginkgo tree: tests such as KubeVirt subnet
-	// exhaustion capture provider-configured environment variables during construction.
+	// Install the provider before building the Ginkgo tree so discovery can
+	// use the deployment's configuration.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
