@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
-	"os"
 	"strings"
 	"time"
 
@@ -32,12 +31,6 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	utilnet "k8s.io/utils/net"
 )
-
-func init() {
-	if os.Getenv("ENABLE_NO_OVERLAY") == "true" {
-		deploymentconfig.Get().AddImage(images.Netshoot)
-	}
-}
 
 var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay", feature.NoOverlay, func() {
 	f := wrappedTestFramework("no-overlay-default-network")

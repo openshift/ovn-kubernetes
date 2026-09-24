@@ -28,12 +28,6 @@ import (
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 )
 
-func init() {
-	if os.Getenv("OVN_NETWORK_QOS_ENABLE") == "true" {
-		deploymentconfig.Get().AddImage(images.Netshoot)
-	}
-}
-
 var _ = ginkgo.Describe("e2e NetworkQoS validation", feature.NetworkQos, func() {
 	const (
 		networkQoSYaml = "networkqos.yaml"

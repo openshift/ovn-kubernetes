@@ -2632,12 +2632,6 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 
 })
 
-func init() {
-	if os.Getenv("KIND_INSTALL_METALLB") == "true" {
-		deploymentconfig.Get().AddImage(images.Nginx, images.MetalLBLBService, images.UDPServerSrcIPPrinter)
-	}
-}
-
 var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", feature.Service, func() {
 
 	const (

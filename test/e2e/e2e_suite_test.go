@@ -14,6 +14,7 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/diagnostics"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/label"
@@ -72,6 +73,23 @@ func TestMain(m *testing.M) {
 	// So TestMain is expected to run only there.
 	infraprovider.Set(infraproviderkind.New())
 	deploymentconfig.Set(deploymentkind.New())
+	if os.Getenv("OVN_NETWORK_QOS_ENABLE") == "true" ||
+		os.Getenv("ENABLE_NO_OVERLAY") == "true" ||
+		os.Getenv("KIND_INSTALL_KUBEVIRT") == "true" {
+		deploymentconfig.Get().AddImage(images.Netshoot)
+	}
+	if os.Getenv("KIND_INSTALL_KUBEVIRT") == "true" {
+		deploymentconfig.Get().AddImage(images.FedoraContainerDisk)
+	}
+	if os.Getenv("OVN_ENABLE_EX_GW_NETWORK_BRIDGE") == "true" {
+		deploymentconfig.Get().AddImage(images.IPerf3)
+	}
+	if os.Getenv("ENABLE_ROUTE_ADVERTISEMENTS") == "true" {
+		deploymentconfig.Get().AddImage(images.FRR)
+	}
+	if os.Getenv("KIND_INSTALL_METALLB") == "true" {
+		deploymentconfig.Get().AddImage(images.Nginx, images.MetalLBLBService, images.UDPServerSrcIPPrinter)
+	}
 
 	os.Exit(m.Run())
 }
