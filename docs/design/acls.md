@@ -97,7 +97,7 @@ options             : {}
 priority            : 9999
 severity            : []
 
-action              : drop
+action              : reject
 direction           : to-lport
 external_ids        : {
     "k8s.ovn.org/id"="default-network-controller:EgressFirewall:default:9998", 
@@ -116,8 +116,14 @@ priority            : 9998
 severity            : []
 ```
 
-Egress firewall should be applied after egress network policy independently, to make sure that connection that are
-allowed by network policy, but denied by egress firewall will be dropped.
+Deny rules use OVN ACL action `reject` instead of `drop`. Unlike `drop`, which silently
+discards packets and leaves clients waiting for TCP timeouts, `reject` notifies the
+initiating pod immediately: TCP connections receive a TCP RST, and other IPv4/IPv6
+traffic receives an ICMP unreachable response.
+
+Egress firewall should be applied after egress network policy independently, to make sure that connections that are
+allowed by network policy, but denied by egress firewall will be rejected with the
+protocol-specific responses above instead of being silently dropped.
 
 ## Multicast
 
