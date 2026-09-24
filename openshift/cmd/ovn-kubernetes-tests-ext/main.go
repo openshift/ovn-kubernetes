@@ -26,7 +26,30 @@ import (
 	_ "k8s.io/component-base/logs/testinit"
 )
 
+// upstreamFeatureEnv mirrors the environment variables the upstream KinD test
+// lanes export. The upstream suite reads them to decide whether a feature is
+// available, and skips whole contexts when they are unset. OpenShift always
+// runs OVN interconnect and ships user defined networks, so declare both as
+// enabled here. Existing values win so a caller can still turn a feature off.
+var upstreamFeatureEnv = map[string]string{
+	"OVN_ENABLE_INTERCONNECT":     "true",
+	"ENABLE_NETWORK_SEGMENTATION": "true",
+}
+
+func setUpstreamFeatureEnv() {
+	for k, v := range upstreamFeatureEnv {
+		if _, present := os.LookupEnv(k); present {
+			continue
+		}
+		if err := os.Setenv(k, v); err != nil {
+			panic(err)
+		}
+	}
+}
+
 func main() {
+	setUpstreamFeatureEnv()
+
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
 	ovnTestsExtension := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
