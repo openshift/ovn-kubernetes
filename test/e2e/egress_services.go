@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -38,11 +39,11 @@ import (
 
 var _ = ginkgo.Describe("EgressService", feature.EgressService, func() {
 	const (
-		egressServiceYAML     = "egress_service.yaml"
-		externalContainerName = "external-container-for-egress-service"
-		podHTTPPort           = "8080"
-		serviceName           = "test-egress-service"
-		blackholeRoutingTable = "100"
+		egressServiceYAML         = "egress_service.yaml"
+		externalContainerBaseName = "external-container-for-egress-service"
+		podHTTPPort               = "8080"
+		serviceName               = "test-egress-service"
+		blackholeRoutingTable     = "100"
 	)
 
 	var (
@@ -86,6 +87,9 @@ var _ = ginkgo.Describe("EgressService", feature.EgressService, func() {
 		ginkgo.By("Creating the external component to send the traffic to/from")
 		primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "failed to get primary provider network")
+		// ponytail: unique name avoids collisions with other parallel Ginkgo workers reusing the same fixed
+		// container name on the shared external host; bump portalloc-style uniqueness if collisions recur.
+		externalContainerName := fmt.Sprintf("%s-%s", externalContainerBaseName, rand.String(5))
 		externalContainer = infraapi.ExternalContainer{Name: externalContainerName, Image: images.AgnHost(),
 			Network: primaryProviderNetwork, ExtPort: 8080,
 			CmdArgs: getAgnHostHTTPPortBindCMDArgs(8080)}
