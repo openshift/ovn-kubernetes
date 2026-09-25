@@ -30,6 +30,7 @@ import (
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
@@ -708,6 +709,13 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 		if isSupported, reason := isNetworkSupported(nodes, netConfigParams); !isSupported {
 			ginkgo.Skip(reason)
 		}
+		// Hold the cluster wide lock for the whole spec, see
+		// acquireEgressIPTestLock for why these tests cannot overlap.
+		lockHolder := fmt.Sprintf("pid-%d-%d", os.Getpid(), time.Now().UnixNano())
+		acquireEgressIPTestLock(f.ClientSet, lockHolder)
+		ginkgo.DeferCleanup(func() {
+			releaseEgressIPTestLock(f.ClientSet, lockHolder)
+		})
 		// tests are configured to introspect the Nodes Internal IP address family and then create an EgressIP of
 		// the same IP family. If dual stack, we default to IPv4 because the tests aren't configured to handle dual stack.
 		ips := getNodeIPs(nodes, netConfigParams)
@@ -868,7 +876,7 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 	   0. Set two nodes as available for egress
 	   1. Create an EgressIP object with two egress IPs defined
 	   2. Check that the status is of length two and both are assigned to different nodes
-	   3. Create two pods matching the EgressIP: one running on each of the egress nodes
+	   3. Create two pods matching the EgressIP: pod1 on a non-egress node and pod2 on an egress node
 	   4. Check connectivity from both to an external "node" and verify that the IPs are both of the above
 	   5. Check connectivity from one pod to the other and verify that the connection is achieved
 	   6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved
@@ -953,7 +961,7 @@ spec:
 					framework.Failf("Step 2. Check that the status is of length two and both are assigned to different nodess, failed, err: both egress IPs have been assigned to the same node")
 				}
 
-				ginkgo.By("3. Create two pods matching the EgressIP: one running on each of the egress nodes")
+				ginkgo.By("3. Create two pods matching the EgressIP: pod1 on a non-egress node and pod2 on an egress node")
 				_, err = createGenericPodWithLabel(f, pod1Name, pod1Node.name, f.Namespace.Name, getAgnHostHTTPPortBindFullCMD(clusterNetworkHTTPPort), podEgressLabel)
 				framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod1Name)
 				_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, getAgnHostHTTPPortBindFullCMD(clusterNetworkHTTPPort), podEgressLabel)
@@ -970,10 +978,23 @@ spec:
 					return true, nil
 				})
 				framework.ExpectNoError(err, "Step 3. Create two pods matching the EgressIP: one running on each of the egress nodes, failed, err: %v", err)
-				var pod2IP string
+				var pod1IP, pod2IP string
 				if isClusterDefaultNetwork(netConfigParams) {
-					pod2IP = getPodAddress(pod2Name, f.Namespace.Name)
+					pod1IPNet, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod1Name)
+					framework.ExpectNoError(err, "Step 3. failed to get pod1 IP, err: %v", err)
+					pod1IP = pod1IPNet.String()
+					pod2IPNet, err := getPodIPWithRetry(f.ClientSet, isIPv6TestRun, f.Namespace.Name, pod2Name)
+					framework.ExpectNoError(err, "Step 3. failed to get pod2 IP, err: %v", err)
+					pod2IP = pod2IPNet.String()
 				} else {
+					pod1IP, err = getPodAnnotationIPsForAttachmentByIndex(
+						f.ClientSet,
+						f.Namespace.Name,
+						pod1Name,
+						namespacedName(f.Namespace.Name, netConfigParams.name),
+						0,
+					)
+					framework.ExpectNoError(err, "Step 3. Create two UDN pods matching the EgressIP: one running on each of the egress nodes, failed, err: %v", err)
 					pod2IP, err = getPodAnnotationIPsForAttachmentByIndex(
 						f.ClientSet,
 						f.Namespace.Name,
@@ -992,9 +1013,13 @@ spec:
 					podNamespace.Name, pod2Name, true, []string{egressIP1.String(), egressIP2.String()}))
 				framework.ExpectNoError(err, "Step 4. Check connectivity from second to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
 
-				ginkgo.By("5. Check connectivity from one pod to the other and verify that the connection is achieved")
+				ginkgo.By("5. Check connectivity from non-egress node pod to egress node pod and verify that the connection is achieved")
 				err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod1Name, pod2Name, pod2IP, clusterNetworkHTTPPort))
-				framework.ExpectNoError(err, "Step 5. Check connectivity from one pod to the other and verify that the connection is achieved, failed, err: %v", err)
+				framework.ExpectNoError(err, "Step 5. Check connectivity from non-egress node pod to egress node pod, failed, err: %v", err)
+
+				ginkgo.By("5. Check connectivity from egress node pod to non-egress node pod and verify that the connection is achieved")
+				err = wait.PollImmediate(retryInterval, retryTimeout, targetPodAndTest(f.Namespace.Name, pod2Name, pod1Name, pod1IP, clusterNetworkHTTPPort))
+				framework.ExpectNoError(err, "Step 5. Check connectivity from egress node pod to non-egress node pod, failed, err: %v", err)
 
 				ginkgo.By("6. Check connectivity from both pods to the api-server (running hostNetwork:true) and verifying that the connection is achieved")
 				// CDN exposes either IPv4 and/or IPv6 API endpoint depending on cluster configuration. The network which we are testing may not support this IP family. Skip if unsupported.
@@ -3627,3 +3652,88 @@ spec:
 		},
 	),
 )
+
+const (
+	egressIPTestLockNamespace = "default"
+	egressIPTestLockName      = "ovn-kubernetes-ote-egressip-lock"
+	// egressIPTestLockTTL is how long a lock may be held before another spec
+	// treats it as abandoned by a spec that crashed without releasing it.
+	egressIPTestLockTTL = 25 * time.Minute
+	// egressIPTestLockTimeout bounds how long a spec waits for its turn.
+	egressIPTestLockTimeout = 90 * time.Minute
+)
+
+// acquireEgressIPTestLock serializes the EgressIP tests against each other.
+//
+// Every one of these tests mutates state that the whole cluster shares: a
+// single EgressIP object name, the egress-assignable label of the same nodes,
+// the ovnkube node health check port on the DaemonSet and a fixed file name in
+// the working directory. OpenShift runs them from a parallel suite, where
+// overlapping specs delete each other's EgressIP objects, strip each other's
+// node labels and block each other's DaemonSet rollouts, so take a cluster wide
+// lock and hold it for the whole spec.
+func acquireEgressIPTestLock(c clientset.Interface, holder string) {
+	configMaps := c.CoreV1().ConfigMaps(egressIPTestLockNamespace)
+	start := time.Now()
+	err := wait.PollImmediate(5*time.Second, egressIPTestLockTimeout, func() (bool, error) {
+		lock := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      egressIPTestLockName,
+				Namespace: egressIPTestLockNamespace,
+			},
+			Data: map[string]string{"holder": holder},
+		}
+		_, err := configMaps.Create(context.Background(), lock, metav1.CreateOptions{})
+		if err == nil {
+			return true, nil
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return false, err
+		}
+		existing, err := configMaps.Get(context.Background(), egressIPTestLockName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if time.Since(existing.CreationTimestamp.Time) < egressIPTestLockTTL {
+			return false, nil
+		}
+		framework.Logf("Taking over the EgressIP test lock held by %q since %s", existing.Data["holder"], existing.CreationTimestamp)
+		err = configMaps.Delete(context.Background(), egressIPTestLockName, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &existing.UID},
+		})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+		return false, nil
+	})
+	framework.ExpectNoError(err, "unable to acquire the EgressIP test lock")
+	framework.Logf("Acquired the EgressIP test lock as %q after %s", holder, time.Since(start))
+}
+
+// releaseEgressIPTestLock gives up a lock taken by acquireEgressIPTestLock. It
+// never fails the spec, because the lock also expires on its own.
+func releaseEgressIPTestLock(c clientset.Interface, holder string) {
+	configMaps := c.CoreV1().ConfigMaps(egressIPTestLockNamespace)
+	existing, err := configMaps.Get(context.Background(), egressIPTestLockName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return
+	}
+	if err != nil {
+		framework.Logf("Unable to read the EgressIP test lock while releasing it: %v", err)
+		return
+	}
+	if existing.Data["holder"] != holder {
+		framework.Logf("Not releasing the EgressIP test lock, it is held by %q", existing.Data["holder"])
+		return
+	}
+	err = configMaps.Delete(context.Background(), egressIPTestLockName, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &existing.UID},
+	})
+	if err != nil && !apierrors.IsNotFound(err) {
+		framework.Logf("Unable to release the EgressIP test lock: %v", err)
+	}
+	framework.Logf("Released the EgressIP test lock held as %q", holder)
+}
