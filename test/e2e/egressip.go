@@ -30,6 +30,7 @@ import (
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
@@ -708,6 +709,13 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 		if isSupported, reason := isNetworkSupported(nodes, netConfigParams); !isSupported {
 			ginkgo.Skip(reason)
 		}
+		// Hold the cluster wide lock for the whole spec, see
+		// acquireEgressIPTestLock for why these tests cannot overlap.
+		lockHolder := fmt.Sprintf("pid-%d-%d", os.Getpid(), time.Now().UnixNano())
+		acquireEgressIPTestLock(f.ClientSet, lockHolder)
+		ginkgo.DeferCleanup(func() {
+			releaseEgressIPTestLock(f.ClientSet, lockHolder)
+		})
 		// tests are configured to introspect the Nodes Internal IP address family and then create an EgressIP of
 		// the same IP family. If dual stack, we default to IPv4 because the tests aren't configured to handle dual stack.
 		ips := getNodeIPs(nodes, netConfigParams)
@@ -3644,3 +3652,88 @@ spec:
 		},
 	),
 )
+
+const (
+	egressIPTestLockNamespace = "default"
+	egressIPTestLockName      = "ovn-kubernetes-ote-egressip-lock"
+	// egressIPTestLockTTL is how long a lock may be held before another spec
+	// treats it as abandoned by a spec that crashed without releasing it.
+	egressIPTestLockTTL = 25 * time.Minute
+	// egressIPTestLockTimeout bounds how long a spec waits for its turn.
+	egressIPTestLockTimeout = 90 * time.Minute
+)
+
+// acquireEgressIPTestLock serializes the EgressIP tests against each other.
+//
+// Every one of these tests mutates state that the whole cluster shares: a
+// single EgressIP object name, the egress-assignable label of the same nodes,
+// the ovnkube node health check port on the DaemonSet and a fixed file name in
+// the working directory. OpenShift runs them from a parallel suite, where
+// overlapping specs delete each other's EgressIP objects, strip each other's
+// node labels and block each other's DaemonSet rollouts, so take a cluster wide
+// lock and hold it for the whole spec.
+func acquireEgressIPTestLock(c clientset.Interface, holder string) {
+	configMaps := c.CoreV1().ConfigMaps(egressIPTestLockNamespace)
+	start := time.Now()
+	err := wait.PollImmediate(5*time.Second, egressIPTestLockTimeout, func() (bool, error) {
+		lock := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      egressIPTestLockName,
+				Namespace: egressIPTestLockNamespace,
+			},
+			Data: map[string]string{"holder": holder},
+		}
+		_, err := configMaps.Create(context.Background(), lock, metav1.CreateOptions{})
+		if err == nil {
+			return true, nil
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return false, err
+		}
+		existing, err := configMaps.Get(context.Background(), egressIPTestLockName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if time.Since(existing.CreationTimestamp.Time) < egressIPTestLockTTL {
+			return false, nil
+		}
+		framework.Logf("Taking over the EgressIP test lock held by %q since %s", existing.Data["holder"], existing.CreationTimestamp)
+		err = configMaps.Delete(context.Background(), egressIPTestLockName, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &existing.UID},
+		})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+		return false, nil
+	})
+	framework.ExpectNoError(err, "unable to acquire the EgressIP test lock")
+	framework.Logf("Acquired the EgressIP test lock as %q after %s", holder, time.Since(start))
+}
+
+// releaseEgressIPTestLock gives up a lock taken by acquireEgressIPTestLock. It
+// never fails the spec, because the lock also expires on its own.
+func releaseEgressIPTestLock(c clientset.Interface, holder string) {
+	configMaps := c.CoreV1().ConfigMaps(egressIPTestLockNamespace)
+	existing, err := configMaps.Get(context.Background(), egressIPTestLockName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return
+	}
+	if err != nil {
+		framework.Logf("Unable to read the EgressIP test lock while releasing it: %v", err)
+		return
+	}
+	if existing.Data["holder"] != holder {
+		framework.Logf("Not releasing the EgressIP test lock, it is held by %q", existing.Data["holder"])
+		return
+	}
+	err = configMaps.Delete(context.Background(), egressIPTestLockName, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &existing.UID},
+	})
+	if err != nil && !apierrors.IsNotFound(err) {
+		framework.Logf("Unable to release the EgressIP test lock: %v", err)
+	}
+	framework.Logf("Released the EgressIP test lock held as %q", holder)
+}

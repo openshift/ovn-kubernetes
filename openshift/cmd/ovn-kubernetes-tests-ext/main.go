@@ -47,6 +47,27 @@ func setUpstreamFeatureEnv() {
 	}
 }
 
+// egressIPStep5bSpec names the EgressIP spec that carries the pod to pod
+// assertion this branch validates.
+const egressIPStep5bSpec = "Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label"
+
+// keepSpec decides whether a spec is offered to OpenShift.
+//
+// The EgressIP suite is narrowed down to the spec that exercises step 5b. Every
+// EgressIP spec mutates state the whole cluster shares, and OpenShift runs them
+// from a parallel suite, so the rest of the suite only produces failures in
+// which one spec has torn down another spec's EgressIP object, node labels or
+// DaemonSet rollout. What is left is serialized in test/e2e/egressip.go.
+func keepSpec(name string) bool {
+	if strings.Contains(name, "[Disabled:") {
+		return false
+	}
+	if !strings.Contains(name, "e2e egress IP validation") {
+		return true
+	}
+	return strings.Contains(name, egressIPStep5bSpec)
+}
+
 func main() {
 	setUpstreamFeatureEnv()
 
@@ -96,7 +117,7 @@ func main() {
 	})
 
 	specs = specs.Select(func(spec *extensiontests.ExtensionTestSpec) bool {
-		return !strings.Contains(spec.Name, "[Disabled:")
+		return keepSpec(spec.Name)
 	})
 
 	ovnTestsExtension.AddSpecs(specs)
