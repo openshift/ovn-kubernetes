@@ -125,6 +125,13 @@ func (c *addressManager) delAddr(ipnet net.IPNet) bool {
 }
 
 // ListAddresses returns all the addresses we know about
+// GetManagementPort returns the management port interface in a thread-safe manner
+func (c *addressManager) GetManagementPort() managementport.Interface {
+	c.Lock()
+	defer c.Unlock()
+	return c.mgmtPort
+}
+
 func (c *addressManager) ListAddresses() ([]net.IP, []*net.IPNet) {
 	c.Lock()
 	defer c.Unlock()
