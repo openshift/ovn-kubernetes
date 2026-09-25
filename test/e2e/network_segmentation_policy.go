@@ -283,7 +283,7 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				}, 2*time.Minute, 6*time.Second).Should(gomega.Succeed())
 
 				ginkgo.By("creating a \"default deny\" network policy")
-				_, err := makeDenyAllPolicy(f, namespaceYellow, "deny-all")
+				_, err = makeDenyAllPolicy(f, namespaceYellow, "deny-all")
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ginkgo.By("asserting the *client* pod can not contact the allow server pod exposed endpoint")

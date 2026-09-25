@@ -227,6 +227,40 @@ func isSupportedAgnhostForEIP(externalContainer infraapi.ExternalContainer) bool
 	return true
 }
 
+// Create EgressIP Manifest
+func createEIPManifest(name string, podLabel, namespaceLabel map[string]string, egressIPs ...string) string {
+	var ipsYAML string
+	for _, ip := range egressIPs {
+		ipsYAML += fmt.Sprintf("\n    - %s", ip)
+	}
+
+	var podLabelYaml string
+	for k, v := range podLabel {
+		podLabelYaml = fmt.Sprintf("%s: %s", k, v)
+	}
+
+	var namespaceLabelYaml string
+	for k, v := range namespaceLabel {
+		namespaceLabelYaml = fmt.Sprintf("%s: %s", k, v)
+	}
+	egressIPConfig := fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
+kind: EgressIP
+metadata:
+    name: %s
+spec:
+    egressIPs:%s
+    podSelector:
+        matchLabels:
+            %s
+    namespaceSelector:
+        matchLabels:
+            %s
+`, name, ipsYAML, podLabelYaml, namespaceLabelYaml)
+
+	return egressIPConfig
+
+}
+
 // targetHostNetworkContainerAndTest targets the internal host network test container from
 // our test pods, collects its logs and verifies that the logs have traces
 // of the `verifyIPs` provided. We need to target the test

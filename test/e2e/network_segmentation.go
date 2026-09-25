@@ -11,6 +11,8 @@ import (
 	"time"
 
 	udnv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	ovntypes "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
+	ovnkubeutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
@@ -1967,7 +1969,7 @@ spec:
 			name:      cudnName,
 			namespace: f.Namespace.Name,
 			topology:  "layer3",
-			cidr:      primaryLayer3MultiCIDRs(),
+			cidr:      joinStrings(userDefinedNetworkIPv4Subnet, userDefinedNetworkIPv6Subnet),
 			role:      "primary",
 		}, cs)
 		cleanup, err := createManifest("", cudnManifest)
