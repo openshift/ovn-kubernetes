@@ -13,6 +13,7 @@ import (
 	ocpinfraprovider "github.com/ovn-org/ovn-kubernetes/openshift/test/infraprovider"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-org/ovn-kubernetes/test/e2e/ipalloc"
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/reporters"
@@ -91,6 +92,19 @@ func initializeTestFramework(provider string) error {
 	ocpDeployment := ocpdeploymentconfig.New()
 	gomega.Expect(ocpDeployment).NotTo(gomega.BeNil())
 	deploymentconfig.SetConfig(ocpDeployment)
+	client, err := kclientset.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create kubernetes client: %v", err)
+	}
+	if err := initEgressIPAllocator(client); err != nil {
+		framework.Logf("WARNING: unable to set up the scoped egress IP allocator: %v", err)
+		// Fall back to the upstream initializer. It leaves a usable allocator
+		// behind even when it reports an error, which at least keeps the
+		// EgressIP tests from panicking on a nil allocator.
+		if err := ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+			framework.Logf("WARNING: unable to set up the upstream egress IP allocator: %v", err)
+		}
+	}
 	return nil
 }
 
