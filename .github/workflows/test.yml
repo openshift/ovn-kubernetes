@@ -601,8 +601,12 @@ jobs:
       ENABLE_UPLINK: "${{ startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation' }}"
       ENABLE_PRE_CONF_UDN_ADDR: "${{ matrix.ic == 'ic-single-node-zones' && (startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation') }}"
       ADVERTISED_UDN_ISOLATION_MODE: "${{ matrix.advertised-udn-isolation-mode }}"
-      # Override PARALLEL=true for Serial tests target to run Serial tests
-      PARALLEL: "${{ matrix.target != 'serial' }}"
+      # Override PARALLEL=true for Serial tests target to run Serial tests.
+      # The ARP/NDP flood lane carries Serial specs that PARALLEL=true would skip,
+      # and they are the only CI coverage of the MAC binding mirroring controller.
+      # Compared against 'true' rather than negated: any non-empty string, "false"
+      # included, is truthy in a GitHub expression.
+      PARALLEL: "${{ matrix.target != 'serial' && matrix.disable-udn-arp-ndp-flood != 'true' }}"
       OVN_UNPRIVILEGED_MODE: "${{ matrix.cni-mode == 'unprivileged' }}"
       MULTI_POD_SUBNET: true
       DYNAMIC_UDN_ALLOCATION: "${{ endsWith(matrix.target, '-dynamic') }}"
