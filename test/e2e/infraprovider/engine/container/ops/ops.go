@@ -409,7 +409,13 @@ func (o *ContainerOps) DeleteNetwork(network api.Network) error {
 	})
 }
 
-func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
+func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) (res api.ExternalContainer, retErr error) {
+	// External containers default to agnhost but may need an image from a
+	// registry the host can reach; normalize the default here so individual
+	// callers keep requesting images.AgnHost().
+	if container.Image == images.AgnHost() {
+		container.Image = images.ExternalAgnHost()
+	}
 	if valid, err := container.IsValidPreCreateContainer(); !valid {
 		return container, err
 	}
@@ -435,7 +441,7 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 	if len(container.CmdArgs) > 0 {
 		cmd = append(cmd, container.CmdArgs...)
 	} else {
-		if images.AgnHost() == container.Image {
+		if images.ExternalAgnHost() == container.Image {
 			cmd = append(cmd, "pause")
 		}
 	}
@@ -444,6 +450,17 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 	if err != nil {
 		return container, fmt.Errorf("failed to create external container %s: %s (%s)", container, err, stdOut)
 	}
+	// The container exists from here on, but callers only register their normal
+	// cleanup once this function succeeds, so remove it on any later failure.
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		if delErr := o.DeleteExternalContainer(container); delErr != nil {
+			framework.Logf("failed to remove external container %s after create failure: %v (original error: %v)",
+				container.Name, delErr, retErr)
+		}
+	}()
 	// fetch IPs for the attached container network. Host networked and --network none containers do not expose IP information.
 	if container.Network != nil && !isHostNetworked(container.Network.Name()) {
 		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 360*time.Second, true, func(ctx context.Context) (done bool, err error) {
