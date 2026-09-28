@@ -510,8 +510,8 @@ golang.org/x/crypto/sha3
 ## explicit; go 1.20
 golang.org/x/exp/constraints
 golang.org/x/exp/maps
-# golang.org/x/net v0.38.0
-## explicit; go 1.23.0
+# golang.org/x/net v0.38.0 => github.com/openshift-sustaining/net v0.35.0-sec.4
+## explicit; go 1.18
 golang.org/x/net/bpf
 golang.org/x/net/context
 golang.org/x/net/html
@@ -1360,3 +1360,4 @@ sigs.k8s.io/yaml/goyaml.v2
 # github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 # github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 # github.com/j-keck/arping => github.com/JacobTanenbaum/arping v0.0.0-20240209152419-3987db83bd51
+# golang.org/x/net => github.com/openshift-sustaining/net v0.35.0-sec.4
