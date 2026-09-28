@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -33,16 +34,14 @@ import (
 	_ "k8s.io/component-base/logs/testinit"
 )
 
-var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
-
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 )
 
-// shouldIncludeTest determines if a test should be included based on cluster capabilities
-// and test labels. When ocpInfra is nil (no cluster access), all tests are included.
+// shouldIncludeTest determines if a test should be included. Selection here is
+// cluster independent: which features actually run is decided by the test suites.
 func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// Disable specs that are not explicitly assigned a lifecycle
 	if spec.Lifecycle == "" {
@@ -52,23 +51,6 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, "[Disabled:") {
 		return false
 	}
-
-	// Without cluster access, include all eligible tests
-	if ocpInfra == nil {
-		return true
-	}
-
-	// EVPN tests: only include if EVPN is enabled in the cluster
-	evpnEnabled := ocpInfra.CheckForEVPN()
-	if !evpnEnabled && spec.Labels.Has(featureLabelEVPN) {
-		return false
-	}
-
-	// Future feature-based filters can be added here
-
-	// FUP: not having to detect the environment, and just be able to
-	// run what we want through the definition of the appropriate test
-	// suites
 
 	return true
 }
@@ -85,14 +67,37 @@ func main() {
 	// by default, we treat all tests as parallel and only expose tests as Serial if the appropriate label is added - "Serial"
 	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
 	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
+	//
+	// Layout: "serial" holds the Serial tests. EVPN needs a cluster that is set up for it (feature gate,
+	// FRR provider, local gateway mode), so it lives in its own "evpn" suite and is excluded from
+	// "parallel"; lanes that can run both use "parallel-evpn", the union of the two. That suite is
+	// registered as a global suite (AddGlobalSuite), so it carries its own explicit source qualifier.
+	notSerialQualifier := `!labels.exists(l, l == "Serial")`
+	evpnQualifier := fmt.Sprintf(`labels.exists(l, l == %q)`, featureLabelEVPN)
+
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name:       "ovn-kubernetes/conformance/serial",
-		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
+		Name:        "ovn-kubernetes/conformance/serial",
+		Description: "OVN-Kubernetes conformance tests that must run serially.",
+		Qualifiers:  []string{`labels.exists(l, l == "Serial")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Name:        "ovn-kubernetes/conformance/parallel",
+		Description: "OVN-Kubernetes conformance tests that can run in parallel, excluding EVPN tests.",
+		Qualifiers:  []string{fmt.Sprintf(`%s && !%s`, notSerialQualifier, evpnQualifier)},
+	})
+
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name:        "ovn-kubernetes/conformance/evpn",
+		Description: "OVN-Kubernetes EVPN conformance tests. Requires a cluster configured for EVPN.",
+		Qualifiers:  []string{evpnQualifier},
+	})
+
+	ovnTestsExtension.AddGlobalSuite(extension.Suite{
+		Name:        "ovn-kubernetes/conformance/parallel-evpn",
+		Description: "OVN-Kubernetes conformance tests that can run in parallel, including EVPN tests.",
+		Qualifiers: []string{fmt.Sprintf(`source == %q && %s`,
+			ovnTestsExtension.Component.Identifier(), notSerialQualifier)},
 	})
 
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
@@ -101,17 +106,16 @@ func main() {
 	}
 
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
-	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
+	// (e.g. during "info" or "list tests"), no infra provider is set; tests need it at run time.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
 	var infraErr error
 	if cfgErr == nil {
-		infra, err := ocpinfraprovider.New(cfg)
+		ocpInfra, err := ocpinfraprovider.New(cfg)
 		if err != nil {
 			infraErr = err
 		} else {
-			ocpInfra = infra
 			infraprovider.Set(ocpInfra)
 		}
 	}
