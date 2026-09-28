@@ -36,6 +36,71 @@ func NewPrimaryIPv6() (net.IP, error) {
 	return pia.AllocateNextV6()
 }
 
+// perNode holds one allocator per node subnet, keyed by the subnet of a node's
+// primary interface.
+var perNode = struct {
+	mu     sync.Mutex
+	allocs map[string]*ipAllocator
+}{allocs: map[string]*ipAllocator{}}
+
+// NewPrimaryIPv4ForNode returns an unused IPv4 address from the subnet of the
+// named node's primary interface.
+//
+// NewPrimaryIPv4 derives one range from the first node it lists and assumes
+// every other node shares that subnet. A KinD cluster does, but a cloud
+// provider gives each availability zone its own subnet, and an address from the
+// wrong subnet can never be attached to the node that is meant to host it.
+// Callers that know which node must host the address ask for it by node.
+func NewPrimaryIPv4ForNode(nodeName string) (net.IP, error) {
+	return newPrimaryIPForNode(nodeName, false)
+}
+
+// NewPrimaryIPv6ForNode is NewPrimaryIPv4ForNode for IPv6.
+func NewPrimaryIPv6ForNode(nodeName string) (net.IP, error) {
+	return newPrimaryIPForNode(nodeName, true)
+}
+
+func newPrimaryIPForNode(nodeName string, isIPv6 bool) (net.IP, error) {
+	if pia == nil || pia.nodeClient == nil {
+		return nil, fmt.Errorf("IP allocator is not initialized")
+	}
+	node, err := pia.nodeClient.Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node %s: %v", nodeName, err)
+	}
+	nodePrimaryIPs, err := util.ParseNodePrimaryIfAddr(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse node primary interface address from Node %s: %v", nodeName, err)
+	}
+	ifAddr := nodePrimaryIPs.V4
+	family := "IPv4"
+	if isIPv6 {
+		ifAddr = nodePrimaryIPs.V6
+		family = "IPv6"
+	}
+	if ifAddr.IP == nil || ifAddr.Net == nil {
+		return nil, fmt.Errorf("node %s has no %s primary interface address", nodeName, family)
+	}
+	perNode.mu.Lock()
+	defer perNode.mu.Unlock()
+	key := family + "/" + ifAddr.Net.String()
+	alloc, ok := perNode.allocs[key]
+	if !ok {
+		// Start from the node's own address with the second last octet
+		// incremented, which is what newPrimaryIPAllocator does, and keep the
+		// node's mask so every address stays inside the node's own subnet.
+		start := make(net.IP, len(ifAddr.IP))
+		copy(start, ifAddr.IP)
+		start[len(start)-2]++
+		if !ifAddr.Net.Contains(start) {
+			return nil, fmt.Errorf("start address %s for node %s is outside its subnet %s", start, nodeName, ifAddr.Net)
+		}
+		alloc = newIPAllocator(&net.IPNet{IP: start, Mask: ifAddr.Net.Mask})
+		perNode.allocs[key] = alloc
+	}
+	return allocateIP(pia.nodeClient, alloc.AllocateNextIP)
+}
+
 // newPrimaryIPAllocator gets a Nodes primary interfaces network info, increments the 2 octet and checks if the IP is still
 // within the subnet of all the K8 nodes.
 func newPrimaryIPAllocator(nodeClient v1.NodeInterface) (*primaryIPAllocator, error) {

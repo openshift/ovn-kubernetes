@@ -86,8 +86,10 @@ func (s scopedNodeInterface) List(_ context.Context, _ metav1.ListOptions) (*cor
 }
 
 // egressIPAllocatorNodes returns the nodes the allocator may use. The first
-// entry carries a rewritten primary interface address that places the allocator
-// in this process' own window of the subnet.
+// entry is a copy of the node the EgressIP tests make egress assignable, with a
+// rewritten primary interface address that places the default range in this
+// process' own window of that node's subnet. The real nodes follow, so that the
+// allocator still avoids the addresses they already own.
 func egressIPAllocatorNodes(client kclientset.Interface) ([]corev1.Node, error) {
 	egressNode, err := egressAssignableNode(client)
 	if err != nil {
@@ -101,20 +103,12 @@ func egressIPAllocatorNodes(client kclientset.Interface) ([]corev1.Node, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
-	var scoped []corev1.Node
-	for i := range all.Items {
-		ip, _, err := nodePrimaryIPv4(&all.Items[i])
-		if err != nil {
-			framework.Logf("Egress IP allocator skipping node %s: %v", all.Items[i].Name, err)
-			continue
-		}
-		if subnet.Contains(ip) {
-			scoped = append(scoped, all.Items[i])
-		}
+	if len(all.Items) == 0 {
+		return nil, fmt.Errorf("no nodes found")
 	}
-	if len(scoped) == 0 {
-		return nil, fmt.Errorf("no node found in subnet %s", subnet)
-	}
+	// Report every node, so that the allocator still refuses an address that any
+	// node already owns. Only the first entry, the synthetic one below, decides
+	// which range the addresses come from.
 	index, err := claimEgressIPWindow(client)
 	if err != nil {
 		return nil, err
@@ -126,11 +120,11 @@ func egressIPAllocatorNodes(client kclientset.Interface) ([]corev1.Node, error) 
 	// The allocator increments the second to last octet of the address it reads
 	// and starts allocating from there, so hand it the window start minus one
 	// octet step.
-	first := scoped[0].DeepCopy()
+	first := egressNode.DeepCopy()
 	if err := setNodePrimaryIPv4(first, uint32ToIP(base-256), subnet.Mask); err != nil {
 		return nil, err
 	}
-	return append([]corev1.Node{*first}, scoped...), nil
+	return append([]corev1.Node{*first}, all.Items...), nil
 }
 
 // egressAssignableNode returns the node the EgressIP tests make egress

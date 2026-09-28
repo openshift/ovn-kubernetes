@@ -918,12 +918,18 @@ var _ = ginkgo.DescribeTableSubtree("e2e egress IP validation", feature.EgressIP
 				ginkgo.By("1. Create an EgressIP object with two egress IPs defined")
 				var egressIP1, egressIP2 net.IP
 				var err error
+				// Allocate each egress IP from the subnet of the node that is
+				// meant to host it. On a cloud provider the two egress nodes can
+				// sit in different availability zones, and therefore in
+				// different subnets, so a single range cannot serve both.
 				if utilnet.IsIPv6String(egress1Node.nodeIP) {
-					egressIP1, err = ipalloc.NewPrimaryIPv6()
-					egressIP2, err = ipalloc.NewPrimaryIPv6()
+					egressIP1, err = ipalloc.NewPrimaryIPv6ForNode(egress1Node.name)
+					gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate an IP for node %s", egress1Node.name)
+					egressIP2, err = ipalloc.NewPrimaryIPv6ForNode(egress2Node.name)
 				} else {
-					egressIP1, err = ipalloc.NewPrimaryIPv4()
-					egressIP2, err = ipalloc.NewPrimaryIPv4()
+					egressIP1, err = ipalloc.NewPrimaryIPv4ForNode(egress1Node.name)
+					gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate an IP for node %s", egress1Node.name)
+					egressIP2, err = ipalloc.NewPrimaryIPv4ForNode(egress2Node.name)
 				}
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
