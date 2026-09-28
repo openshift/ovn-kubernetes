@@ -114,7 +114,6 @@ var (
 		OVSDBTxnTimeout:              DefaultDBTxnTimeout,
 		LFlowCacheEnable:             true,
 		RawClusterSubnets:            "10.128.0.0/14/23",
-		Zone:                         types.OvnDefaultZone,
 		RawUDNAllowedDefaultServices: "default/kubernetes,kube-system/kube-dns",
 		Transport:                    "",
 	}
@@ -359,9 +358,6 @@ type DefaultConfig struct {
 	// of small UDP packets by allowing them to be aggregated before passing through
 	// the kernel network stack. This requires a new-enough kernel (5.15 or RHEL 8.5).
 	EnableUDPAggregation bool `gcfg:"enable-udp-aggregation"`
-
-	// Zone name to which ovnkube-node/ovnkube-controller belongs to
-	Zone string `gcfg:"zone"`
 
 	// RawUDNAllowedDefaultServices holds the unparsed UDNAllowedDefaultServices. Should only be
 	// used inside config module.
@@ -955,11 +951,15 @@ var CommonFlags = []cli.Flag{
 	},
 	&cli.StringFlag{
 		Name:  "init-ovnkube-controller",
-		Usage: "initialize ovnkube-controller (but not cluster-manager), requires the hostname as argument",
+		Usage: "initialize ovnkube-controller (but not cluster-manager), requires the Kubernetes node name as argument",
 	},
 	&cli.StringFlag{
 		Name:  "init-node",
 		Usage: "initialize node, requires the name that node is registered with in kubernetes cluster",
+	},
+	&cli.StringFlag{
+		Name:  "zone",
+		Usage: "DEPRECATED; no longer used and ignored. Will be removed in 2 releases.",
 	},
 	&cli.StringFlag{
 		Name:  "cleanup-node",
@@ -1158,12 +1158,6 @@ var CommonFlags = []cli.Flag{
 		Usage:       "The largest number of messages per second that gets logged before drop",
 		Destination: &cliConfig.Logging.ACLLoggingRateLimit,
 		Value:       20,
-	},
-	&cli.StringFlag{
-		Name:        "zone",
-		Usage:       "zone name to which ovnkube-node/ovnkube-controller belongs to",
-		Value:       Default.Zone,
-		Destination: &cliConfig.Default.Zone,
 	},
 	&cli.StringFlag{
 		Name: "udn-allowed-default-services",
@@ -2626,10 +2620,6 @@ func buildDefaultConfig(cli, file *config) error {
 	}
 	if Default.RawClusterSubnets == "" {
 		return fmt.Errorf("cluster subnet is required")
-	}
-
-	if Default.Zone == "" {
-		Default.Zone = types.OvnDefaultZone
 	}
 
 	return nil
