@@ -182,7 +182,7 @@ func (pr *PodRequest) cmdAdd(kubeAuth *KubeAPIAuth, clientset *ClientSet, ovsCli
 			return nil, err
 		}
 	} else if dpuConnDetails != nil {
-		if err := pr.updatePodDPUConnDetailsWithRetry(kubecli, clientset.podLister, dpuConnDetails); err != nil {
+		if err := pr.updatePodDPUConnDetailsWithRetry(kubecli, clientset.podLister, pod, dpuConnDetails); err != nil {
 			return nil, fmt.Errorf("failed to update the DPU connection details annotation of pod %s/%s: %w",
 				pr.PodNamespace, pr.PodName, err)
 		}
@@ -386,6 +386,8 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 			}
 			if dpuCD == nil {
 				if !util.IsSimulatedDPU() {
+					// a PCI VF returns to the initial network namespace when the
+					// pod namespace is removed, nothing to do
 					return response, nil
 				}
 				// A simulated device is a veth and is destroyed with the pod namespace unless it is moved back first.
@@ -416,7 +418,7 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 					)
 				} else {
 					// Delete the DPU connection-details annotation for this NAD
-					err = pr.updatePodDPUConnDetailsWithRetry(&kube.Kube{KClient: clientset.kclient}, clientset.podLister, nil)
+					err = pr.updatePodDPUConnDetailsWithRetry(&kube.Kube{KClient: clientset.kclient}, clientset.podLister, pod, nil)
 				}
 				// not an error if pod has already been deleted
 				if err != nil && !apierrors.IsNotFound(err) {
@@ -456,8 +458,9 @@ func (pr *PodRequest) cmdDel(clientset *ClientSet) (*Response, error) {
 	}
 
 	podInterfaceInfo := &PodInterfaceInfo{
-		IsDPUHostMode: config.IsModeDPUHost(),
-		NetdevName:    netdevName,
+		IsDPUHostMode:  config.IsModeDPUHost(),
+		IsSimulatedDPU: util.IsSimulatedDPU(),
+		NetdevName:     netdevName,
 	}
 	if !config.UnprivilegedMode {
 		err := podRequestInterfaceOps.UnconfigureInterface(pr, podInterfaceInfo, clientset.podLister, pod)
