@@ -16,6 +16,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
@@ -86,6 +89,8 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 
 // configureOVNGatewayMode detects and configures the OVN gateway mode for tests
 func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
+	// Add the agnhost image to the required images
+	deploymentconfig.Get().AddImage(images.Agnhost)
 	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
 		return
 	}
@@ -170,7 +175,7 @@ func (o *OpenshiftInfraProvider) GetDefaultTimeoutContext() *framework.TimeoutCo
 	return timeouts
 }
 
-func (o OpenshiftInfraProvider) PreloadImages(images []string) {
+func (o OpenshiftInfraProvider) PreloadImages(images []deploymentconfigapi.ImageConfig) {
 	// no-op: OpenShift clusters pull images at runtime
 }
 
