@@ -1473,6 +1473,10 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Disabled:Unimplemented]",
 
+	"Network Segmentation Uplink DPU VF lifecycle recovers the management port device after an ovnkube-node restart": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation Uplink DPU VF lifecycle returns simulated VF netdevices to the host when the pod is deleted": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"Network Segmentation Uplink default-VRF egress does not restore gateway readiness on an UplinkState recreated after deselection": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation Uplink default-VRF egress maps multiple CUDNs to the same Uplink bridge": "[Suite:ovn-kubernetes/conformance/parallel]",
