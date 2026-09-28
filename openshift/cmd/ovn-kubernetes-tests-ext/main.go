@@ -87,6 +87,15 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsCloudPlatform() {
 		return false
 	}
+
+	// Duplicate MAC test uses arping/ndisc6 from the external container to
+	// resolve the EgressIP. On cloud platforms the external container runs on
+	// the bastion host, which is on a different subnet from the cluster nodes,
+	// so ARP cannot reach the node interfaces.
+	if strings.Contains(spec.Name, "should prevent duplicate MAC responses when egress node is rebooted") && ocpInfra.IsCloudPlatform() {
+		return false
+	}
+
 	// On GCP, nodes have a /32 primary interface address
 	// (k8s.ovn.org/node-primary-ifaddr: {"ipv4":"10.0.128.x/32"}), so
 	// isOVNNetworkIP returns false for any EgressIP because no IP other

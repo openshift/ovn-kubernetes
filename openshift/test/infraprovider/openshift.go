@@ -3,9 +3,11 @@ package infraprovider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
@@ -267,7 +269,50 @@ func (o *OpenshiftInfraProvider) GetK8HostPort() uint16 {
 }
 
 func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
-	panic("not implemented")
+	v4Subnet, v6Subnet, err := network.IPv4IPv6Subnets()
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get subnets for network %s: %w", network.Name(), err)
+	}
+	result, err := o.ExecK8NodeCommand(instance, []string{"ip", "-j", "addr"})
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get network addresses from node %s: %w", instance, err)
+	}
+	var links []linkInfo
+	if err := json.Unmarshal([]byte(result), &links); err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to parse network addresses from node %s: %w", instance, err)
+	}
+	// Try finding an interface matching the network's subnets. This works
+	// for secondary networks and baremetal primary network where the node
+	// interface is on the same subnet as the infra provider network.
+	for _, link := range links {
+		if netInfo := tryMatchLink(link, v4Subnet, v6Subnet); netInfo != nil {
+			return *netInfo, nil
+		}
+	}
+	// On cloud platforms the primary network's subnet comes from the bastion
+	// host and won't match any cluster node interface. Fall back to br-ex
+	// which carries the node's primary addresses.
+	for _, link := range links {
+		if link.IfName == "br-ex" {
+			netInfo := api.NetworkInterface{InfName: link.IfName, MAC: link.Mac}
+			for _, addr := range link.AddrInfo {
+				switch addr.Family {
+				case "inet":
+					if netInfo.IPv4 == "" {
+						netInfo.IPv4 = addr.Local
+						netInfo.IPv4Prefix = fmt.Sprintf("%s/%d", addr.Local, addr.PrefixLen)
+					}
+				case "inet6":
+					if netInfo.IPv6 == "" && !strings.HasPrefix(addr.Local, "fe80") {
+						netInfo.IPv6 = addr.Local
+						netInfo.IPv6Prefix = fmt.Sprintf("%s/%d", addr.Local, addr.PrefixLen)
+					}
+				}
+			}
+			return netInfo, nil
+		}
+	}
+	return api.NetworkInterface{}, fmt.Errorf("no network interface found on node %s matching network %s (v4=%s, v6=%s)", instance, network.Name(), v4Subnet, v6Subnet)
 }
 
 func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
@@ -418,3 +463,4 @@ func initializePlatformInfra(config *rest.Config) (platformInfra, configv1.Platf
 		return nil, platformType, nil
 	}
 }
+

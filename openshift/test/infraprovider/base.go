@@ -95,6 +95,8 @@ func (h *baseInfra) GetExternalContainerNetworkInterface(ec api.ExternalContaine
 			IPv6:       cached.IPv6,
 			IPv4Prefix: h.hostNetworkInfo.IPv4Prefix,
 			IPv6Prefix: h.hostNetworkInfo.IPv6Prefix,
+			InfName:    h.hostNetworkInfo.InfName,
+			MAC:        h.hostNetworkInfo.MAC,
 		}, nil
 	}
 	return h.engine.GetNetworkInterface(ec.Name, network.Name())

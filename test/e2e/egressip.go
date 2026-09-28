@@ -4230,7 +4230,8 @@ spec:
 			gomega.Expect(macBeforeMigration).To(gomega.Equal(expectedMAC1), "Egress IP should resolve to node 1 MAC before migration")
 
 			ginkgo.By("8. Getting ovnkube-node pod name on egress node 1")
-			ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+			ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+			ovnkubeNodePods, err := f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 				FieldSelector: fmt.Sprintf("spec.nodeName=%s", egress1Node.name),
 				LabelSelector: "app=ovnkube-node",
 			})
@@ -4267,7 +4268,7 @@ spec:
 
 			ginkgo.By("10. Deleting ovnkube-node pod and intentionally dropping EgressIP health check packets to trigger egress IP migration")
 			framework.Logf("Deleting ovnkube-node pod %s to trigger egress IP migration", ovnkubeNodePod)
-			err = deletePodWithWaitByName(context.TODO(), f.ClientSet, ovnkubeNodePod, "ovn-kubernetes")
+			err = deletePodWithWaitByName(context.TODO(), f.ClientSet, ovnkubeNodePod, ovnNamespace)
 			framework.ExpectNoError(err, "failed to delete ovnkube-node pod and wait for termination")
 			framework.Logf("✓ ovnkube-node pod %s deleted and fully terminated", ovnkubeNodePod)
 			framework.Logf("Dropping EgressIP health check packets on node %s to trigger EgressIP migration", egress1Node.name)
@@ -4308,7 +4309,7 @@ spec:
 			framework.ExpectNoError(err, "OVN-Kubernetes cluster should be healthy after ovnkube-node pod restart")
 
 			ginkgo.By("15. Verifying nftables cleanup on node 1 after pod restart")
-			ovnkubeNodePods, err = f.ClientSet.CoreV1().Pods("ovn-kubernetes").List(context.TODO(), metav1.ListOptions{
+			ovnkubeNodePods, err = f.ClientSet.CoreV1().Pods(ovnNamespace).List(context.TODO(), metav1.ListOptions{
 				FieldSelector: fmt.Sprintf("spec.nodeName=%s", egress1Node.name),
 				LabelSelector: "app=ovnkube-node",
 			})
@@ -4316,7 +4317,7 @@ spec:
 			if len(ovnkubeNodePods.Items) > 0 {
 				podName := ovnkubeNodePods.Items[0].Name
 				nftCmd := "nft list table netdev ovn-kubernetes-egressip 2>&1"
-				_, err := e2ekubectl.RunKubectl("ovn-kubernetes", "exec", podName, "-c", "ovnkube-controller", "--", "sh", "-c", nftCmd)
+				_, err := e2ekubectl.RunKubectl(ovnNamespace, "exec", podName, "-c", "ovnkube-controller", "--", "sh", "-c", nftCmd)
 				// Command should fail because table should be deleted
 				gomega.Expect(err).ToNot(gomega.BeNil(), "nft command should fail because table should be deleted")
 				gomega.Expect(err.Error()).To(gomega.Or(
