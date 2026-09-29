@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"math/big"
 	"net"
 	"sync"
 )
@@ -41,7 +42,22 @@ func NewPrimaryIPv6() (net.IP, error) {
 var perNode = struct {
 	mu     sync.Mutex
 	allocs map[string]*ipAllocator
+	offset int
 }{allocs: map[string]*ipAllocator{}}
+
+// SetPerNodeOffset moves the start of every per node range by the given number
+// of addresses.
+//
+// Each test process builds its own allocators, so without an offset they all
+// start at the same address and hand out the same egress IPs. That matters even
+// when the tests are serialized: a cloud provider needs time to detach an egress
+// IP from a node, and the next test reusing the same address right away fails to
+// have it assigned. Callers give each process a distinct offset.
+func SetPerNodeOffset(offset int) {
+	perNode.mu.Lock()
+	defer perNode.mu.Unlock()
+	perNode.offset = offset
+}
 
 // NewPrimaryIPv4ForNode returns an unused IPv4 address from the subnet of the
 // named node's primary interface.
@@ -92,6 +108,7 @@ func newPrimaryIPForNode(nodeName string, isIPv6 bool) (net.IP, error) {
 		start := make(net.IP, len(ifAddr.IP))
 		copy(start, ifAddr.IP)
 		start[len(start)-2]++
+		start = addToIP(start, perNode.offset)
 		if !ifAddr.Net.Contains(start) {
 			return nil, fmt.Errorf("start address %s for node %s is outside its subnet %s", start, nodeName, ifAddr.Net)
 		}
@@ -282,4 +299,21 @@ func isConflictWithExistingHostIPs(nodes []corev1.Node, ip net.IP) (bool, error)
 		}
 	}
 	return false, nil
+}
+
+// addToIP returns the address the given number of addresses above ip, keeping
+// the length of the input.
+func addToIP(ip net.IP, delta int) net.IP {
+	if delta == 0 {
+		return ip
+	}
+	sum := big.NewInt(0).SetBytes(ip)
+	sum.Add(sum, big.NewInt(int64(delta)))
+	out := make(net.IP, len(ip))
+	bytes := sum.Bytes()
+	if len(bytes) > len(out) {
+		bytes = bytes[len(bytes)-len(out):]
+	}
+	copy(out[len(out)-len(bytes):], bytes)
+	return out
 }

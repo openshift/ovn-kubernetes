@@ -35,6 +35,9 @@ const (
 	// egressIPWindowAttempts bounds the optimistic locking retries when
 	// claiming a window.
 	egressIPWindowAttempts = 30
+	// egressIPMaxWindows bounds how far a per node range is moved, so a long run
+	// with many test processes stays inside the node's subnet.
+	egressIPMaxWindows = 64
 )
 
 // initEgressIPAllocator prepares the upstream egress IP allocator for this
@@ -117,6 +120,9 @@ func egressIPAllocatorNodes(client kclientset.Interface) ([]corev1.Node, error) 
 	if err != nil {
 		return nil, err
 	}
+	// Give this process its own window for the per node ranges too, so that two
+	// processes never hand out the same egress IP for the same node.
+	ipalloc.SetPerNodeOffset(int(index%egressIPMaxWindows) * egressIPWindowSize)
 	// The allocator increments the second to last octet of the address it reads
 	// and starts allocating from there, so hand it the window start minus one
 	// octet step.

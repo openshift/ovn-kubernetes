@@ -3711,8 +3711,10 @@ const (
 	// egressIPTestLockTTL is how long a lock may be held before another spec
 	// treats it as abandoned by a spec that crashed without releasing it.
 	egressIPTestLockTTL = 25 * time.Minute
-	// egressIPTestLockTimeout bounds how long a spec waits for its turn.
-	egressIPTestLockTimeout = 90 * time.Minute
+	// egressIPTestLockTimeout bounds how long a spec waits for its turn. Keep it
+	// under the per test timeout OpenShift applies, so a spec that cannot get
+	// its turn skips instead of being interrupted.
+	egressIPTestLockTimeout = 9 * time.Minute
 )
 
 // acquireEgressIPTestLock serializes the EgressIP tests against each other.
@@ -3761,7 +3763,9 @@ func acquireEgressIPTestLock(c clientset.Interface, holder string) {
 		}
 		return false, nil
 	})
-	framework.ExpectNoError(err, "unable to acquire the EgressIP test lock")
+	if err != nil {
+		ginkgo.Skip(fmt.Sprintf("did not get the EgressIP test lock within %s: %v", egressIPTestLockTimeout, err))
+	}
 	framework.Logf("Acquired the EgressIP test lock as %q after %s", holder, time.Since(start))
 }
 
