@@ -67,6 +67,7 @@ func init() {
 		api.UDPServerSrcIPPrinter: udpServerSrcIPPrinter,
 		api.FRR:                   frr,
 		api.DNSMasq:               dnsmasq,
+		api.FedoraContainerDisk:   "quay.io/kubevirtci/fedora-with-test-tooling:v20250416-e37573e",
 	}
 }
 

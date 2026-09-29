@@ -31,6 +31,7 @@ const (
 	UDPServerSrcIPPrinter
 	FRR
 	DNSMasq
+	FedoraContainerDisk
 	MaxDefaultImageIDs
 )
 

@@ -78,6 +78,9 @@ func TestMain(m *testing.M) {
 		os.Getenv("KIND_INSTALL_KUBEVIRT") == "true" {
 		deploymentconfig.Get().AddRequiredImage(api.Netshoot)
 	}
+	if os.Getenv("KIND_INSTALL_KUBEVIRT") == "true" {
+		deploymentconfig.Get().AddRequiredImage(api.FedoraContainerDisk)
+	}
 	if os.Getenv("OVN_ENABLE_EX_GW_NETWORK_BRIDGE") == "true" {
 		deploymentconfig.Get().AddRequiredImage(api.IPerf3)
 	}
