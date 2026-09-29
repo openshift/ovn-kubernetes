@@ -973,6 +973,14 @@ spec:
 				_, err = createGenericPodWithLabel(f, pod2Name, pod2Node.name, f.Namespace.Name, getAgnHostHTTPPortBindFullCMD(clusterNetworkHTTPPort), podEgressLabel)
 				framework.ExpectNoError(err, "failed to create pod %s/%s", f.Namespace.Name, pod2Name)
 
+				// The network annotation is written when the pod is created, well
+				// before its container serves traffic, so wait for both pods to run
+				// before any connectivity check reads their addresses.
+				for _, podName := range []string{pod1Name, pod2Name} {
+					gomega.Expect(pod.WaitForPodRunningInNamespace(context.TODO(), f.ClientSet, &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: f.Namespace.Name},
+					})).Should(gomega.Succeed(), "pod %s/%s must run", f.Namespace.Name, podName)
+				}
 				// A pod whose primary network is a user defined network has no
 				// status.podIP, so wait for the address on the network under test
 				// rather than for the default network address.
@@ -1026,7 +1034,7 @@ spec:
 				}
 
 				ginkgo.By("4. Check connectivity from both to an external \"node\" and verify that the IPs are both of the above")
-				if externalContainerSeesEgressIP() {
+				if externalContainerSourceIPIsObservable() {
 					err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(primaryTargetExternalContainer,
 						podNamespace.Name, pod1Name, true, []string{egressIP1.String(), egressIP2.String()}))
 					framework.ExpectNoError(err, "Step 4. Check connectivity from first to an external \"node\" and verify that the IPs are both of the above, failed: %v", err)
@@ -1062,12 +1070,16 @@ spec:
 				updatePod(f, pod2)
 
 				ginkgo.By("8. Check connectivity from that one to an external \"node\" and verify that the IP is the node IP.")
-				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(primaryTargetExternalContainer,
-					podNamespace.Name, pod2Name, true, []string{pod2Node.nodeIP}))
-				framework.ExpectNoError(err, "Step 8. Check connectivity from that one to an external \"node\" and verify that the IP is the node IP, failed, err: %v", err)
+				if externalContainerSourceIPIsObservable() {
+					err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(primaryTargetExternalContainer,
+						podNamespace.Name, pod2Name, true, []string{pod2Node.nodeIP}))
+					framework.ExpectNoError(err, "Step 8. Check connectivity from that one to an external \"node\" and verify that the IP is the node IP, failed, err: %v", err)
+				} else {
+					framework.Logf("Step 8. %s", externalContainerEgressIPSkipReason)
+				}
 
 				ginkgo.By("9. Check connectivity from the other one to an external \"node\" and verify that the IPs are both of the above")
-				if externalContainerSeesEgressIP() {
+				if externalContainerSourceIPIsObservable() {
 					err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(primaryTargetExternalContainer,
 						podNamespace.Name, pod1Name, true, []string{egressIP1.String(), egressIP2.String()}))
 					framework.ExpectNoError(err, "Step 9. Check connectivity from the other one to an external \"node\" and verify that the IP is one of the egress IPs, failed, err: %v", err)
@@ -1082,7 +1094,7 @@ spec:
 				statuses = verifyEgressIPStatusLengthEquals(1, nil)
 
 				ginkgo.By("12. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP")
-				if externalContainerSeesEgressIP() {
+				if externalContainerSourceIPIsObservable() {
 					err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(primaryTargetExternalContainer,
 						podNamespace.Name, pod1Name, true, []string{statuses[0].EgressIP}))
 					framework.ExpectNoError(err, "Step 12. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP, failed, err: %v", err)
@@ -1097,9 +1109,13 @@ spec:
 				statuses = verifyEgressIPStatusLengthEquals(0, nil)
 
 				ginkgo.By("15. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the node IP.")
-				err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(primaryTargetExternalContainer,
-					podNamespace.Name, pod1Name, true, []string{pod1Node.nodeIP}))
-				framework.ExpectNoError(err, "Step  15. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the node IP, failed, err: %v", err)
+				if externalContainerSourceIPIsObservable() {
+					err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(primaryTargetExternalContainer,
+						podNamespace.Name, pod1Name, true, []string{pod1Node.nodeIP}))
+					framework.ExpectNoError(err, "Step  15. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the node IP, failed, err: %v", err)
+				} else {
+					framework.Logf("Step 15. %s", externalContainerEgressIPSkipReason)
+				}
 
 				ginkgo.By("16. Setting one node as available for egress")
 				usedEgressNodeAvailabilityHandler.Enable(egress2Node.name)
@@ -1108,7 +1124,7 @@ spec:
 				statuses = verifyEgressIPStatusLengthEquals(1, nil)
 
 				ginkgo.By("18. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP")
-				if externalContainerSeesEgressIP() {
+				if externalContainerSourceIPIsObservable() {
 					err = wait.PollImmediate(retryInterval, retryTimeout, targetExternalContainerAndTest(primaryTargetExternalContainer,
 						podNamespace.Name, pod1Name, true, []string{statuses[0].EgressIP}))
 					framework.ExpectNoError(err, "Step 18. Check connectivity from the remaining pod to an external \"node\" and verify that the IP is the remaining egress IP, failed, err: %v", err)
@@ -3785,6 +3801,6 @@ const externalContainerEgressIPSkipReason = "skipping the check that an external
 // is therefore a cluster node address, and OVN-Kubernetes installs no reroute
 // policies for traffic from a pod to a node, which keeps the node address as the
 // source. Any check that expects to see an egress IP instead cannot pass there.
-func externalContainerSeesEgressIP() bool {
+func externalContainerSourceIPIsObservable() bool {
 	return infraprovider.Get().Name() != "openshift"
 }
