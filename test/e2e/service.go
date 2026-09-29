@@ -46,7 +46,6 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
 	testutils "k8s.io/kubernetes/test/utils"
-	imageutils "k8s.io/kubernetes/test/utils/image"
 	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 	"k8s.io/utils/ptr"
@@ -175,7 +174,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		targetPort := infraprovider.Get().GetK8HostPort()
 		config := testutils.RCConfig{
 			Client:               cs,
-			Image:                imageutils.GetE2EImage(imageutils.Agnhost),
+			Image:                images.AgnHost(),
 			Command:              []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", targetPort)},
 			Name:                 "backend",
 			Labels:               jig.Labels,
@@ -1005,7 +1004,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get primary network")
 			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
-			externalContainer := infraapi.ExternalContainer{Name: clientContainerName, Image: deploymentconfig.Get().GetImage(images.Agnhost), Network: primaryProviderNetwork,
+			externalContainer := infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
 				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "external container %s must be created", externalContainer.Name)
@@ -1211,7 +1210,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			serverExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			serverExternalContainerSpec := infraapi.ExternalContainer{
 				Name:    targetSecondaryContainerName,
-				Image:   deploymentconfig.Get().GetImage(images.Agnhost),
+				Image:   images.AgnHost(),
 				Network: secondaryProviderNetwork,
 				CmdArgs: getAgnHostHTTPPortBindCMDArgs(serverExternalContainerPort),
 				ExtPort: serverExternalContainerPort,
@@ -1530,7 +1529,7 @@ spec:
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Creating an external client")
-			externalContainer := infraapi.ExternalContainer{Name: clientContainerName, Image: deploymentconfig.Get().GetImage(images.Agnhost), Network: primaryProviderNetwork,
+			externalContainer := infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
 				CmdArgs: []string{"pause"}, ExtPort: infraprovider.Get().GetExternalContainerPort()}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "failed to create external container", externalContainer)
@@ -1668,7 +1667,7 @@ spec:
 						Containers: []v1.Container{
 							{
 								Name:    "agnhost",
-								Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+								Image:   images.AgnHost(),
 								Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", oldTargetPort)},
 								Ports: []v1.ContainerPort{
 									{
@@ -1969,7 +1968,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", port1)},
 						Ports: []v1.ContainerPort{
 							{
@@ -1996,7 +1995,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "serve-hostname", fmt.Sprintf("--port=%d", port2)},
 						Ports: []v1.ContainerPort{
 							{
@@ -2132,7 +2131,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port1), "--udp-port=-1"},
 						Ports: []v1.ContainerPort{
 							{
@@ -2161,7 +2160,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port2), "--udp-port=-1"},
 						Ports: []v1.ContainerPort{
 							{
@@ -2307,7 +2306,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port1), "--udp-port=-1"},
 						Ports: []v1.ContainerPort{
 							{
@@ -2336,7 +2335,7 @@ spec:
 				Containers: []v1.Container{
 					{
 						Name:    "agnhost",
-						Image:   imageutils.GetE2EImage(imageutils.Agnhost),
+						Image:   images.AgnHost(),
 						Command: []string{"/agnhost", "netexec", fmt.Sprintf("--http-port=%d", port2), "--udp-port=-1"},
 						Ports: []v1.ContainerPort{
 							{
@@ -2632,12 +2631,6 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 
 })
 
-func init() {
-	if os.Getenv("KIND_INSTALL_METALLB") == "true" {
-		deploymentconfig.Get().AddImage(images.Nginx, images.MetalLBLBService, images.UDPServerSrcIPPrinter)
-	}
-}
-
 var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", feature.Service, func() {
 
 	const (
@@ -2702,14 +2695,14 @@ spec:
            claimName: dynamic-claim
       initContainers:
       - name: get-big-file
-        image: ` + deploymentconfig.Get().GetImage(images.MetalLBLBService) + `
+        image: ` + images.MetalLBLBService() + `
         command: ['sh', '-c', "dd if=/dev/zero of=/usr/share/nginx/html/big.iso  bs=1024 count=0 seek=102400"]
         volumeMounts:
         - name: data
           mountPath: "/usr/share/nginx/html"
       containers:
       - name: nginx
-        image: ` + deploymentconfig.Get().GetImage(images.Nginx) + `
+        image: ` + images.Nginx() + `
         volumeMounts:
         - name: data
           mountPath: "/usr/share/nginx/html"
@@ -2717,13 +2710,13 @@ spec:
         - name: http
           containerPort: 80
       - name: agnhost
-        image: ` + deploymentconfig.Get().GetImage(images.Agnhost) + `
+        image: ` + images.AgnHost() + `
         command: ["/agnhost", "netexec", "--http-port=10000"]
         ports:
         - name: agnhost
           containerPort: 10000
       - name: udp-server
-        image: ` + deploymentconfig.Get().GetImage(images.UDPServerSrcIPPrinter) + `
+        image: ` + images.UDPServerSrcIPPrinter() + `
         imagePullPolicy: Always
         ports:
         - containerPort: 10001

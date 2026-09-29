@@ -74,12 +74,6 @@ var (
 	bgpExternalNetworkName         = envOrDefault("OVN_TEST_BGP_SERVER_NETWORK", "bgpnet")
 )
 
-func init() {
-	if os.Getenv("ENABLE_ROUTE_ADVERTISEMENTS") == "true" {
-		deploymentconfig.Get().AddImage(images.FRR)
-	}
-}
-
 var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.RouteAdvertisements, func() {
 	var serverContainerIPs []string
 	var frrContainerIPv4, frrContainerIPv6 string
@@ -2642,13 +2636,13 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 
 			macVRFContainer := infraapi.ExternalContainer{
 				Name:    networkName + "-macvrf-agnhost",
-				Image:   deploymentconfig.Get().GetImage(images.Agnhost),
+				Image:   images.AgnHost(),
 				CmdArgs: []string{"netexec", fmt.Sprintf("--http-port=%d", agnhostHTTPPort)},
 			}
 			macVRFNetworkName := macVRFContainer.Name
 			ipVRFContainer := infraapi.ExternalContainer{
 				Name:    networkName + "-ipvrf-agnhost",
-				Image:   deploymentconfig.Get().GetImage(images.Agnhost),
+				Image:   images.AgnHost(),
 				CmdArgs: []string{"netexec", fmt.Sprintf("--http-port=%d", agnhostHTTPPort)},
 			}
 			ipVRFNetworkName := ipVRFContainer.Name
@@ -3848,7 +3842,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{{
 						Name:            "tcpdump",
-						Image:           deploymentconfig.Get().GetImage(images.Netshoot),
+						Image:           images.Netshoot(),
 						Command:         []string{"sleep", "3600"},
 						SecurityContext: &corev1.SecurityContext{Privileged: ptr.To(true)},
 					}},
@@ -4259,7 +4253,7 @@ func runBGPNetworkAndServerWithFRRVRF(
 	ictx.AddCleanUpFn(func() error { return os.RemoveAll(frrConfig) })
 	frr := infraapi.ExternalContainer{
 		Name:        networkName + "-frr",
-		Image:       deploymentconfig.Get().GetImage(images.FRR),
+		Image:       images.FRR(),
 		Network:     bgpPeerNetwork,
 		RuntimeArgs: []string{"--volume", frrConfig + ":" + filepath.Join(filepath.FromSlash("/"), "etc", "frr")},
 	}
@@ -4284,7 +4278,7 @@ func runBGPNetworkAndServerWithFRRVRF(
 	// run server container
 	server := infraapi.ExternalContainer{
 		Name:    serverName,
-		Image:   deploymentconfig.Get().GetImage(images.Agnhost),
+		Image:   images.AgnHost(),
 		CmdArgs: []string{"netexec"},
 		Network: serverNetwork,
 	}

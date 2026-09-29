@@ -18,7 +18,6 @@ import (
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
@@ -90,7 +89,7 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 // configureOVNGatewayMode detects and configures the OVN gateway mode for tests
 func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 	// Add the agnhost image to the required images
-	deploymentconfig.Get().AddImage(images.Agnhost)
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
 	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
 		return
 	}

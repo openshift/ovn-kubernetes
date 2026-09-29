@@ -6,7 +6,6 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -16,7 +15,7 @@ import (
 var (
 	deploymentConfig api.DeploymentConfig
 	imageIDMapping   map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
-		images.Agnhost: imageutils.Agnhost,
+		api.Agnhost: imageutils.Agnhost,
 	}
 	imageConfigMap map[api.ImageID]string
 )
@@ -29,7 +28,7 @@ func init() {
 
 	// Add images that are needed by the test suite.
 	imageConfigMap = map[api.ImageID]string{
-		images.Agnhost: imageutils.GetE2EImage(imageutils.Agnhost),
+		api.Agnhost: imageutils.GetE2EImage(imageutils.Agnhost),
 	}
 }
 
@@ -85,11 +84,11 @@ func (m *openshift) NBDBContainerName() string {
 	return "nbdb"
 }
 
-func (m *openshift) GetImage(imageID api.ImageID) string {
-	return imageConfigMap[imageID]
+func (m *openshift) GetImage(imageID api.ImageID) api.ImageConfig {
+	return api.ImageConfig{ImageID: imageID, PullSpec: imageConfigMap[imageID]}
 }
 
-func (m *openshift) AddImage(imageID ...api.ImageID) {
+func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {
 	for _, imgID := range imageID {
 		m.requiredImages[imgID] = struct{}{}
 	}
@@ -104,7 +103,7 @@ func (m *openshift) GetRequiredImages() []api.ImageConfig {
 		}
 		imageConfigs = append(imageConfigs, api.ImageConfig{
 			ImageID:  api.ImageID(newID),
-			PullSpec: m.GetImage(imageID),
+			PullSpec: m.GetImage(imageID).PullSpec,
 		})
 	}
 	return imageConfigs

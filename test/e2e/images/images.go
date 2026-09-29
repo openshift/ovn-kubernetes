@@ -4,82 +4,40 @@
 package images
 
 import (
-	"os"
-
-	imageutils "k8s.io/kubernetes/test/utils/image"
-
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 )
 
-var (
-	agnHost = imageutils.GetE2EImage(imageutils.Agnhost)
-	// We limit the set of images used by e2e to reduce duplication and to allow us to provide offline mirroring of images
-	// for customers and restricted test environments.
-	// Ideally, every image used in e2e must be part of this package.
-	// New test images should ideally be sourced from the upstream k8s.io/kubernetes/test/utils/image package.
-	// Failing to find an image from upstream k8s, please get community approval because downstream consumers must
-	// pre-approve new images.
-	// FIXME: iperf3 image should not be retrieved from a users repo and should not have latest tag
-	iperf3                = "quay.io/sronanrh/iperf:latest"
-	netshoot              = "ghcr.io/nicolaka/netshoot:v0.13"
-	nginx                 = "nginx:1"
-	metallbLBService      = "quay.io/itssurya/dev-images:metallb-lbservice"
-	udpServerSrcIPPrinter = "quay.io/itssurya/dev-images:udp-server-srcip-printer"
-	frr                   = "quay.io/frrouting/frr:10.5.3"
-	// dnsmasq 2.83; pinned by digest for CI reproducibility.
-	// TODO: mirror to a project-controlled registry (ghcr/quay) — docker.io
-	// pulls are rate-limited in CI and this is a personal repository.
-	dnsmasq = "docker.io/andyshinn/dnsmasq:2.83@sha256:e937327fede666e55ba4c2ab8e715a2ce561945363016d42f9d698d1b18ff1be"
-
-	imageConfigs map[api.ImageID]string
-)
-
-const (
-	Agnhost api.ImageID = iota
-	IPerf3
-	Netshoot
-	Nginx
-	MetalLBLBService
-	UDPServerSrcIPPrinter
-	FRR
-	Dnsmasq
-)
-
-func init() {
-	if agnHostOverride := os.Getenv("AGNHOST_IMAGE"); agnHostOverride != "" {
-		agnHost = agnHostOverride
-	}
-	if iperf3Override := os.Getenv("IPERF3_IMAGE"); iperf3Override != "" {
-		iperf3 = iperf3Override
-	}
-	if netshootOverride := os.Getenv("NETSHOOT_IMAGE"); netshootOverride != "" {
-		netshoot = netshootOverride
-	}
-	if nginxOverride := os.Getenv("NGINX_IMAGE"); nginxOverride != "" {
-		nginx = nginxOverride
-	}
-	if metallbLBServiceOverride := os.Getenv("METALLB_LB_SERVICE_IMAGE"); metallbLBServiceOverride != "" {
-		metallbLBService = metallbLBServiceOverride
-	}
-	if udpServerOverride := os.Getenv("UDP_SERVER_SRCIP_PRINTER_IMAGE"); udpServerOverride != "" {
-		udpServerSrcIPPrinter = udpServerOverride
-	}
-	if frrOverride := os.Getenv("FRR_IMAGE"); frrOverride != "" {
-		frr = frrOverride
-	}
-
-	imageConfigs = map[api.ImageID]string{
-		Agnhost:               agnHost,
-		IPerf3:                iperf3,
-		Netshoot:              netshoot,
-		Nginx:                 nginx,
-		MetalLBLBService:      metallbLBService,
-		UDPServerSrcIPPrinter: udpServerSrcIPPrinter,
-		FRR:                   frr,
-		Dnsmasq:               dnsmasq,
-	}
+func AgnHost() string {
+	return deploymentconfig.Get().GetImage(api.Agnhost).PullSpec
 }
 
-func GetImageConfigs() map[api.ImageID]string {
-	return imageConfigs
+func IPerf3() string {
+	return deploymentconfig.Get().GetImage(api.IPerf3).PullSpec
+}
+
+// DNSMasq returns an image containing the dnsmasq DHCP server, used as the
+// external DHCP server on the underlay for DHCP-IPAM localnet tests.
+func DNSMasq() string {
+	return deploymentconfig.Get().GetImage(api.DNSMasq).PullSpec
+}
+
+func Netshoot() string {
+	return deploymentconfig.Get().GetImage(api.Netshoot).PullSpec
+}
+
+func Nginx() string {
+	return deploymentconfig.Get().GetImage(api.Nginx).PullSpec
+}
+
+func MetalLBLBService() string {
+	return deploymentconfig.Get().GetImage(api.MetalLBLBService).PullSpec
+}
+
+func UDPServerSrcIPPrinter() string {
+	return deploymentconfig.Get().GetImage(api.UDPServerSrcIPPrinter).PullSpec
+}
+
+func FRR() string {
+	return deploymentconfig.Get().GetImage(api.FRR).PullSpec
 }

@@ -216,7 +216,7 @@ func containsIPInLastEntry(data, ip string) bool {
 
 // support for agnhost image is limited to netexec command
 func isSupportedAgnhostForEIP(externalContainer infraapi.ExternalContainer) bool {
-	if externalContainer.Image != deploymentconfig.Get().GetImage(images.Agnhost) {
+	if externalContainer.Image != images.AgnHost() {
 		return false
 	}
 	if !util.SliceHasStringItem(externalContainer.CmdArgs, "netexec") {
@@ -372,7 +372,7 @@ func targetExternalContainerAndTest(externalContainer infraapi.ExternalContainer
 		// we determine the src IP based on the target image
 		// agnhost netexec will return the source IP as payload
 		switch externalContainer.Image {
-		case deploymentconfig.Get().GetImage(images.Agnhost):
+		case images.AgnHost():
 			for _, expectedIP := range verifyIPs {
 				if containsIPInLastEntry(clientStdOut, expectedIP) {
 					verifyIPs = util.RemoveItemFromSliceUnstable(verifyIPs, expectedIP)
@@ -903,13 +903,13 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 
 			// attach containers to the primary network
 			primaryTargetExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
-			primaryTargetExternalContainerSpec := infraapi.ExternalContainer{Name: targetNodeName, Image: deploymentconfig.Get().GetImage(images.Agnhost),
+			primaryTargetExternalContainerSpec := infraapi.ExternalContainer{Name: targetNodeName, Image: images.AgnHost(),
 				Network: primaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(primaryTargetExternalContainerPort), ExtPort: primaryTargetExternalContainerPort}
 			primaryTargetExternalContainer, err = providerCtx.CreateExternalContainer(primaryTargetExternalContainerSpec)
 			framework.ExpectNoError(err, "failed to create external target container on primary network", primaryTargetExternalContainerSpec.String())
 
 			primaryDeniedExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
-			primaryDeniedExternalContainerSpec := infraapi.ExternalContainer{Name: deniedTargetNodeName, Image: deploymentconfig.Get().GetImage(images.Agnhost),
+			primaryDeniedExternalContainerSpec := infraapi.ExternalContainer{Name: deniedTargetNodeName, Image: images.AgnHost(),
 				Network: primaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(primaryDeniedExternalContainerPort), ExtPort: primaryDeniedExternalContainerPort}
 			primaryDeniedExternalContainer, err = providerCtx.CreateExternalContainer(primaryDeniedExternalContainerSpec)
 			framework.ExpectNoError(err, "failed to create external denied container on primary network", primaryDeniedExternalContainer.String())
@@ -931,7 +931,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 			secondaryTargetExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			secondaryTargetExternalContainerSpec := infraapi.ExternalContainer{
 				Name:    targetSecondaryNodeName,
-				Image:   deploymentconfig.Get().GetImage(images.Agnhost),
+				Image:   images.AgnHost(),
 				Network: secondaryProviderNetwork,
 				CmdArgs: getAgnHostHTTPPortBindCMDArgs(secondaryTargetExternalContainerPort),
 				ExtPort: secondaryTargetExternalContainerPort,
@@ -1295,7 +1295,7 @@ spec:
 			ginkgo.By("2. Creating host-networked pod, on non-egress node acting as \"another node\"")
 			p, err := createPod(f, hostNetPodName, egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
 				p.Spec.HostNetwork = true
-				p.Spec.Containers[0].Image = deploymentconfig.Get().GetImage(images.Agnhost)
+				p.Spec.Containers[0].Image = images.AgnHost()
 				p.Spec.Containers[0].Args = getAgnHostHTTPPortBindCMDArgs(hostNetPort)
 			})
 			framework.ExpectNoError(err)
@@ -2297,7 +2297,7 @@ spec:
 			udpPort := fmt.Sprintf("--udp-port=%d", externalContainerPrimaryPort)
 			providerPrimaryNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get providers primary network")
-			externalContainerPrimary := infraapi.ExternalContainer{Name: "external-container-for-egressip-mtu-test", Image: deploymentconfig.Get().GetImage(images.Agnhost),
+			externalContainerPrimary := infraapi.ExternalContainer{Name: "external-container-for-egressip-mtu-test", Image: images.AgnHost(),
 				Network: providerPrimaryNetwork, RuntimeArgs: []string{"--sysctl", "net.ipv4.ip_no_pmtu_disc=2"},
 				CmdArgs: []string{"netexec", httpPort, udpPort}, ExtPort: externalContainerPrimaryPort}
 			externalContainerPrimary, err = providerCtx.CreateExternalContainer(externalContainerPrimary)
@@ -3356,7 +3356,7 @@ spec:
 								Containers: []corev1.Container{
 									{
 										Name:    "continuous-ping",
-										Image:   deploymentconfig.Get().GetImage(images.Agnhost),
+										Image:   images.AgnHost(),
 										Command: mainCommand,
 									},
 								},

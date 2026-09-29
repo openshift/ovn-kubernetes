@@ -136,7 +136,7 @@ func createExternalRouter(providerCtx infraapi.Context, cs clientset.Interface, 
 
 	externalContainerSpec := infraapi.ExternalContainer{
 		Name:       externalContainerName,
-		Image:      deploymentconfig.Get().GetImage(images.Agnhost),
+		Image:      images.AgnHost(),
 		Network:    primaryProviderNetwork,
 		Entrypoint: "bash",
 		CmdArgs:    []string{"-c", commandBuilder.String()},

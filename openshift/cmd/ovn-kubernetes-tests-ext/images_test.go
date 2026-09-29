@@ -8,7 +8,6 @@ import (
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 )
 
 func TestSplitImagePullSpec(t *testing.T) {
@@ -158,7 +157,7 @@ func TestExtensionImageFromPullSpec(t *testing.T) {
 }
 
 func TestRegisterTestImages(t *testing.T) {
-	deploymentconfig.Get().AddImage(images.Agnhost)
+	deploymentconfig.Get().AddRequiredImage(api.Agnhost)
 	if len(deploymentconfig.Get().GetRequiredImages()) == 0 {
 		t.Fatal("requiredImages is empty")
 	}

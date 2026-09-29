@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"hash/fnv"
 	"net"
-	"os"
 	"strings"
 	"time"
 
@@ -32,12 +31,6 @@ import (
 	e2eservice "k8s.io/kubernetes/test/e2e/framework/service"
 	utilnet "k8s.io/utils/net"
 )
-
-func init() {
-	if os.Getenv("ENABLE_NO_OVERLAY") == "true" {
-		deploymentconfig.Get().AddImage(images.Netshoot)
-	}
-}
 
 var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay", feature.NoOverlay, func() {
 	f := wrappedTestFramework("no-overlay-default-network")
@@ -110,7 +103,7 @@ var _ = ginkgo.Describe("No-Overlay: Default network is enabled with no-overlay"
 			map[string]string{},
 			func(p *corev1.Pod) {
 				p.Spec.HostNetwork = true
-				p.Spec.Containers[0].Image = deploymentconfig.Get().GetImage(images.Netshoot)
+				p.Spec.Containers[0].Image = images.Netshoot()
 				p.Spec.Containers[0].SecurityContext = &corev1.SecurityContext{
 					Capabilities: &corev1.Capabilities{
 						Add: []corev1.Capability{"NET_RAW", "NET_ADMIN"},
