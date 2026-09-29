@@ -61,6 +61,7 @@ var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:openshift/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:openshift/conformance/parallel]",
+	"[Serial][ovn-kubernetes-ote][sig-network] CUDN Localnet [JIRA:Networking][OTP] 81190 Verify IP Block network policy with CUDN with localnet topology",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
@@ -110,5 +111,4 @@ var BlockingTests = []string{
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations [Suite:openshift/conformance/parallel]",
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] EVPN: VTEP API validations api-server should reject invalid VTEP updates Invalid VTEP update configurations [Suite:openshift/conformance/parallel]",
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4 [Suite:openshift/conformance/parallel]",
-	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv6 [Suite:openshift/conformance/parallel]",
 }
