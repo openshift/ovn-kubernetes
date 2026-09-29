@@ -1516,7 +1516,6 @@ config:
 			staticIPv4, staticIPv6  string
 			staticMAC               = "02:00:00:00:00:01"
 			externalMACVRFContainer = infraapi.ExternalContainer{
-				Image:   images.Netshoot(),
 				CmdArgs: []string{"sleep", "infinity"},
 			}
 
@@ -1738,6 +1737,7 @@ write_files:
 				td.evpn.MACVRF.VNI = int32(bgpAlloc.MACVRFVNI)
 				td.evpn.IPVRF.VNI = int32(bgpAlloc.IPVRFVNI)
 				externalMACVRFContainer.Name = fmt.Sprintf("iperf3-macvrf-%d", bgpAlloc.MACVRFVNI)
+				externalMACVRFContainer.Image = images.Netshoot()
 				// Shorten the CUDN name to fit Linux interface name limits.
 				// The name is used as testName for runEVPNNetworkAndServers which
 				// derives bridge/SVI names: worst-case SVI is "br<name>.4094"
