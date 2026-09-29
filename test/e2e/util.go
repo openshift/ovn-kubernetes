@@ -1756,78 +1756,36 @@ func getNetworkInterfaceName(pod *v1.Pod, podConfig podConfiguration, netConfigN
 // and ovnkube-control-plane pods are running
 func waitOVNKubernetesHealthy(f *framework.Framework) error {
 	return wait.PollImmediate(5*time.Second, 300*time.Second, func() (bool, error) {
-		// Check that all nodes are ready and schedulable
-		nodes, err := e2enode.GetReadySchedulableNodes(context.TODO(), f.ClientSet)
+		ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+
+		// Check ovnkube-node daemonset: all desired pods must be ready
+		// and no pods should be unavailable.
+		ds, err := f.ClientSet.AppsV1().DaemonSets(ovnNamespace).Get(context.Background(), "ovnkube-node", metav1.GetOptions{})
 		if err != nil {
-			framework.Logf("Error getting ready schedulable nodes: %v", err)
+			framework.Logf("Error getting ovnkube-node daemonset: %v", err)
+			return false, nil
+		}
+		if ds.Status.DesiredNumberScheduled == 0 || ds.Status.NumberReady != ds.Status.DesiredNumberScheduled || ds.Status.NumberUnavailable > 0 {
+			framework.Logf("ovnkube-node daemonset not ready: desired=%d, ready=%d, unavailable=%d",
+				ds.Status.DesiredNumberScheduled, ds.Status.NumberReady, ds.Status.NumberUnavailable)
 			return false, nil
 		}
 
-		framework.Logf("Found %d ready schedulable nodes", len(nodes.Items))
-
-		// Check ovnkube-node pods
-		podClient := f.ClientSet.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace())
-		ovnNodePods, err := podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
-		})
+		// Check ovnkube-control-plane deployment: all replicas must be ready
+		// and available.
+		deploy, err := f.ClientSet.AppsV1().Deployments(ovnNamespace).Get(context.Background(), "ovnkube-control-plane", metav1.GetOptions{})
 		if err != nil {
-			framework.Logf("Error listing ovnkube-node pods: %v", err)
+			framework.Logf("Error getting ovnkube-control-plane deployment: %v", err)
+			return false, nil
+		}
+		if deploy.Status.Replicas == 0 || deploy.Status.ReadyReplicas != deploy.Status.Replicas || deploy.Status.UnavailableReplicas > 0 {
+			framework.Logf("ovnkube-control-plane deployment not ready: replicas=%d, ready=%d, unavailable=%d",
+				deploy.Status.Replicas, deploy.Status.ReadyReplicas, deploy.Status.UnavailableReplicas)
 			return false, nil
 		}
 
-		expectedNodePods := len(nodes.Items)
-		if len(ovnNodePods.Items) != expectedNodePods {
-			framework.Logf("Expected %d ovnkube-node pods, found %d", expectedNodePods, len(ovnNodePods.Items))
-			return false, nil
-		}
-
-		// Check that all ovnkube-node pods are running and ready
-		for _, pod := range ovnNodePods.Items {
-			isReady, err := testutils.PodRunningReady(&pod)
-			if err != nil {
-				framework.Logf("Error checking if ovnkube-node pod %s is ready: %v", pod.Name, err)
-				return false, nil
-			}
-			if !isReady {
-				framework.Logf("ovnkube-node pod %s is not running and ready (phase: %s)", pod.Name, pod.Status.Phase)
-				return false, nil
-			}
-		}
-
-		// Check ovnkube-control-plane pods
-		ovnControlPlanePods, err := podClient.List(context.Background(), metav1.ListOptions{
-			LabelSelector: "name=ovnkube-control-plane",
-		})
-		if err != nil {
-			framework.Logf("Error listing ovnkube-control-plane pods: %v", err)
-			return false, nil
-		}
-
-		if len(ovnControlPlanePods.Items) == 0 {
-			framework.Logf("No ovnkube-control-plane pods found")
-			return false, nil
-		}
-
-		// Check that at least one control-plane pod is running and ready
-		runningControlPlanePods := 0
-		for _, pod := range ovnControlPlanePods.Items {
-			isReady, err := testutils.PodRunningReady(&pod)
-			if err != nil {
-				framework.Logf("Error checking if ovnkube-control-plane pod %s is ready: %v", pod.Name, err)
-				continue
-			}
-			if isReady {
-				runningControlPlanePods++
-			}
-		}
-
-		if runningControlPlanePods == 0 {
-			framework.Logf("No ovnkube-control-plane pods are running")
-			return false, nil
-		}
-
-		framework.Logf("OVN-Kubernetes cluster is healthy: %d nodes, %d ovnkube-node pods, %d running control-plane pods",
-			len(nodes.Items), len(ovnNodePods.Items), runningControlPlanePods)
+		framework.Logf("OVN-Kubernetes cluster is healthy: %d ovnkube-node ready, %d ovnkube-control-plane ready",
+			ds.Status.NumberReady, deploy.Status.ReadyReplicas)
 		return true, nil
 	})
 }

@@ -14,7 +14,6 @@ var (
 			`[Feature:NetworkPolicy]`,
 			`[Feature:AdminNetworkPolicy]`,
 			`[Feature:BaselineNetworkPolicy]`,
-			`[Feature:EgressIP]`,
 			`[Feature:EgressService]`,
 			`[Feature:EgressFirewall]`,
 			`[Feature:EgressQos]`,
@@ -121,7 +120,9 @@ var (
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			"e2e egress IP validation",
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)
