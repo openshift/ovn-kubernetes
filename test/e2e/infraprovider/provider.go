@@ -16,9 +16,18 @@ func (n Name) String() string {
 
 var provider api.Provider
 
+// SetProvider injects an infrastructure provider. Used by the OpenShift tests
+// extension, which must set the provider before e2e BeforeSuite runs.
+func SetProvider(p api.Provider) {
+	provider = p
+}
+
 // Set detects which infrastructure provider. Arg config is not needed for KinD provider but downstream implementations
 // will require access to the kapi to infer what platform k8 is running on.
 func Set(_ *rest.Config) error {
+	if provider != nil {
+		return nil
+	}
 	// detect if the provider is KinD
 	if kind.IsProvider() {
 		provider = kind.New()
