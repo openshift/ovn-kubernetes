@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
+	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
 )
 
 var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.NetworkSegmentation, func() {
@@ -26,17 +27,15 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 	ginkgo.Context("on a user defined primary network", func() {
 		const (
 			nadName                      = "tenant-red"
-			userDefinedNetworkIPv4Subnet = "10.128.0.0/16"
+			userDefinedNetworkIPv4Subnet = "10.132.0.0/16"
 			userDefinedNetworkIPv6Subnet = "2014:100:200::0/60"
-			customL2IPv4Gateway                 = "10.128.0.3"
+			customL2IPv4Gateway                 = "10.132.0.3"
 			customL2IPv6Gateway                 = "2014:100:200::3"
-			customL2IPv4ReservedCIDR            = "10.128.1.0/24"
+			customL2IPv4ReservedCIDR            = "10.132.1.0/24"
 			customL2IPv6ReservedCIDR            = "2014:100:200::100/120"
-			customL2IPv4InfraCIDR               = "10.128.0.0/30"
+			customL2IPv4InfraCIDR               = "10.132.0.0/30"
 			customL2IPv6InfraCIDR               = "2014:100:200::/122"
 			nodeHostnameKey              = "kubernetes.io/hostname"
-			workerOneNodeName            = "ovn-worker"
-			workerTwoNodeName            = "ovn-worker2"
 			port                         = 9000
 			randomStringLength           = 5
 			nameSpaceYellowSuffix        = "yellow"
@@ -88,11 +87,20 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				clientPodConfig podConfiguration,
 				serverPodConfig podConfiguration,
 			) {
+				ginkgo.By("ensure 2 schedulable Nodes")
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
+				framework.ExpectNoError(err)
+				if len(nodes.Items) < 2 {
+					ginkgo.Skip("requires at least 2 Nodes")
+				}
+				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].Name}
+				serverPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].Name}
+
 				ginkgo.By("Creating the attachment configuration")
 				netConfig := newNetworkAttachmentConfig(netConfigParams)
 				netConfig.namespace = f.Namespace.Name
 				netConfig.cidr = filterCIDRsAndJoin(cs, netConfig.cidr)
-				_, err := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
+				_, err = nadClient.NetworkAttachmentDefinitions(f.Namespace.Name).Create(
 					context.Background(),
 					generateNAD(netConfig, f.ClientSet),
 					metav1.CreateOptions{},
@@ -149,14 +157,12 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				},
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 				),
 			),
 			ginkgo.Entry(
@@ -172,14 +178,12 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				},
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 				),
 			),
 			ginkgo.Entry(
@@ -192,14 +196,12 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				},
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 				),
 			),
 		)
@@ -212,6 +214,15 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				allowServerPodConfig podConfiguration,
 				denyServerPodConfig podConfiguration,
 			) {
+				ginkgo.By("ensure 2 schedulable Nodes")
+				nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), cs, 2)
+				framework.ExpectNoError(err)
+				if len(nodes.Items) < 2 {
+					ginkgo.Skip("requires at least 2 Nodes")
+				}
+				clientPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[0].Name}
+				allowServerPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].Name}
+				denyServerPodConfig.nodeSelector = map[string]string{nodeHostnameKey: nodes.Items[1].Name}
 
 				namespaceYellow := getNamespaceName(f, nameSpaceYellowSuffix)
 				namespaceBlue := getNamespaceName(f, namespaceBlueSuffix)
@@ -384,14 +395,12 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				"layer2",
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"allow-server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(allowServerPodLabel),
 				),
 				*podConfig(
@@ -399,7 +408,6 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(denyServerPodLabel),
 				),
 			),
@@ -408,14 +416,12 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 				"layer3",
 				*podConfig(
 					"client-pod",
-					withNodeSelector(map[string]string{nodeHostnameKey: workerOneNodeName}),
 				),
 				*podConfig(
 					"allow-server-pod",
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(allowServerPodLabel),
 				),
 				*podConfig(
@@ -423,7 +429,6 @@ var _ = ginkgo.Describe("Network Segmentation: Network Policies", feature.Networ
 					withCommand(func() []string {
 						return httpServerContainerCmd(port)
 					}),
-					withNodeSelector(map[string]string{nodeHostnameKey: workerTwoNodeName}),
 					withLabels(denyServerPodLabel),
 				),
 			))
