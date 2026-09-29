@@ -11,6 +11,8 @@ import (
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	// import OTE migrated tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
