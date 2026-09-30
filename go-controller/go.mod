@@ -159,4 +159,5 @@ replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
 	github.com/j-keck/arping => github.com/JacobTanenbaum/arping v0.0.0-20240209152419-3987db83bd51
+	golang.org/x/net => github.com/openshift-sustaining/net v0.35.0-sec.4
 )
