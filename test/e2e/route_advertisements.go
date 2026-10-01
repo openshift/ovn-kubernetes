@@ -2616,7 +2616,7 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				),
 			).To(gomega.Succeed())
 			servers = append(servers, agnhostName)
-		case cudnAdvertisedEVPNUnmanagedSharedVTEP, cudnAdvertisedEVPNUnmanagedRandomVTEP, cudnAdvertisedEVPNOverlappingCIDRSharedVTEP:
+		case cudnAdvertisedEVPNUnmanagedSharedVTEP, cudnAdvertisedEVPNUnmanagedRandomVTEP, cudnAdvertisedEVPNOverlappingCIDRSharedVTEP, cudnAdvertisedEVPNShared:
 			ginkgo.By("Running an external EVPN network")
 
 			bridgeName := "br" + networkName
@@ -2624,7 +2624,9 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 			vtepName := networkName + "-vtep"
 			// IPv6 VTEPs are not yet supported
 			bgpAlloc.VTEPSubnet6 = ""
-			if networkType != cudnAdvertisedEVPNUnmanagedRandomVTEP {
+			if networkType == cudnAdvertisedEVPNUnmanagedRandomVTEP {
+				bgpAlloc.VTEPSubnet = randomVTEPSubnets()
+			} else {
 				// KIND network subnet: node InternalIPs fall within this range,
 				// so the node-side controller can discover them via host-cidrs.
 				kindNetwork, err := infraprovider.Get().PrimaryNetwork()
@@ -2652,25 +2654,29 @@ var _ = ginkgo.Describe("BGP: For BGP configured networks", feature.RouteAdverti
 				CmdArgs: []string{"netexec", fmt.Sprintf("--http-port=%d", agnhostHTTPPort)},
 			}
 			ipVRFNetworkName := ipVRFContainer.Name
-			gomega.Expect(
-				runEVPNNetworkAndServers(
-					f,
-					ictx,
-					networkName,
-					ipFamilySet,
-					networkSpec,
-					bgpAlloc,
-					bgpASN,
-					bridgeName,
-					vxlanName,
-					vtepName,
-					&macVRFContainer,
-					macVRFNetworkName,
-					&ipVRFContainer,
-					ipVRFNetworkName,
-					networkType == cudnAdvertisedEVPNOverlappingCIDRSharedVTEP,
-				),
-			).To(gomega.Succeed())
+			evpnFRRConfigName := networkName
+			if networkType == cudnAdvertisedEVPNShared {
+				// Shared FRRConfiguration: name/label must match RouteAdvertisements (network: testName).
+				evpnFRRConfigName = testName
+			}
+			_, err := runEVPNNetworkAndServers(
+				f,
+				ictx,
+				evpnFRRConfigName,
+				ipFamilySet,
+				networkSpec,
+				bgpAlloc,
+				bgpASN,
+				bridgeName,
+				vxlanName,
+				vtepName,
+				&macVRFContainer,
+				macVRFNetworkName,
+				&ipVRFContainer,
+				ipVRFNetworkName,
+				networkType == cudnAdvertisedEVPNOverlappingCIDRSharedVTEP,
+			)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			if networkSpec.EVPN.MACVRF != nil {
 				servers = append(servers, macVRFContainer.Name)
 			}
@@ -4341,6 +4347,7 @@ const (
 	cudnAdvertisedEVPNUnmanagedSharedVTEP       networkType = "CUDN_ADVERTISED_EVPN_UNMANAGED_SHARED_VTEP"
 	cudnAdvertisedEVPNUnmanagedRandomVTEP       networkType = "CUDN_ADVERTISED_EVPN_UNMANAGED_RANDOM_VTEP"
 	cudnAdvertisedEVPNOverlappingCIDRSharedVTEP networkType = "CUDN_ADVERTISED_EVPN_OVERLAPPING_CIDR_SHARED_VTEP"
+	cudnAdvertisedEVPNShared                    networkType = "CUDN_ADVERTISED_EVPN_SHARED"
 )
 
 // createNamespaceWithPrimaryNetworkOfType helper function configures a
@@ -4367,6 +4374,10 @@ func createNamespaceWithPrimaryNetworkOfType(
 		targetVRF = networkName
 		networkLabels = map[string]string{"advertise": networkName}
 		frrConfigurationLabels = map[string]string{"network": networkName}
+	case cudnAdvertisedEVPNShared:
+		targetVRF = networkName
+		networkLabels = map[string]string{"advertise": networkName}
+		frrConfigurationLabels = map[string]string{"network": testName}
 	}
 
 	nsLabels := map[string]string{

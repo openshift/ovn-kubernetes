@@ -12,8 +12,10 @@ import (
 	operv1 "github.com/openshift/api/operator/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -21,6 +23,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
@@ -31,6 +34,7 @@ type OpenshiftInfraProvider struct {
 	hasFRRExternalContainer bool
 	hostPort                *portalloc.PortAllocator
 	clusterInfra            *baremetalInfra
+	kubeClient              kubernetes.Interface
 }
 
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
@@ -40,9 +44,14 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	if err != nil {
 		return nil, err
 	}
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
 	o := &OpenshiftInfraProvider{
 		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
+		kubeClient:   kubeClient,
 	}
 	if err = o.initClusterObjects(config); err != nil {
 		return nil, err
@@ -162,6 +171,66 @@ func (o *OpenshiftInfraProvider) ShutdownNode(nodeName string) error {
 
 func (o *OpenshiftInfraProvider) StartNode(nodeName string) error {
 	panic("not implemented")
+}
+
+const (
+	nodeRebootNotReadyTimeout = 5 * time.Minute
+	nodeRebootReadyTimeout    = 10 * time.Minute
+	nodeRebootPollInterval    = 10 * time.Second
+)
+
+// RebootNode restarts the OpenShift node via `oc debug node/<name> -- chroot /host systemctl reboot`
+// and blocks until the node returns to Ready.
+//
+// The Kubernetes API is used to confirm the node is Ready before issuing the reboot,
+// then to wait for it to go NotReady (reboot in progress) and come back Ready.
+// systemctl reboot kills the oc debug session immediately, so the command always
+// returns a non-zero exit; that error is logged but not returned.
+func (o *OpenshiftInfraProvider) RebootNode(nodeName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	node, err := o.kubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get node %q before reboot: %w", nodeName, err)
+	}
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeReady && condition.Status != corev1.ConditionTrue {
+			return fmt.Errorf("node %q is not Ready (status: %s), refusing to reboot", nodeName, condition.Status)
+		}
+	}
+	// systemctl reboot tears down the node immediately, killing the oc debug session,
+	// so ExecK8NodeCommand will always return an error here — log it, don't fail on it.
+	if _, err := o.ExecK8NodeCommand(nodeName, []string{"systemctl", "reboot"}); err != nil {
+		framework.Logf("reboot command for node %q returned (expected due to session teardown): %v", nodeName, err)
+	}
+	framework.Logf("waiting for node %q to go NotReady", nodeName)
+	if err := o.waitForNodeReadyState(nodeName, false, nodeRebootNotReadyTimeout); err != nil {
+		return fmt.Errorf("node %q did not go NotReady within %s after reboot: %w", nodeName, nodeRebootNotReadyTimeout, err)
+	}
+	framework.Logf("waiting for node %q to return to Ready", nodeName)
+	if err := o.waitForNodeReadyState(nodeName, true, nodeRebootReadyTimeout); err != nil {
+		return fmt.Errorf("node %q did not return to Ready within %s after reboot: %w", nodeName, nodeRebootReadyTimeout, err)
+	}
+	return nil
+}
+
+// waitForNodeReadyState polls the Kubernetes API until the node reaches the desired Ready condition.
+func (o *OpenshiftInfraProvider) waitForNodeReadyState(nodeName string, desiredReady bool, timeout time.Duration) error {
+	return wait.PollUntilContextTimeout(context.Background(), nodeRebootPollInterval, timeout, true,
+		func(ctx context.Context) (bool, error) {
+			node, err := o.kubeClient.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+			if err != nil {
+				framework.Logf("error getting node %q: %v", nodeName, err)
+				return false, nil
+			}
+			for _, condition := range node.Status.Conditions {
+				if condition.Type == corev1.NodeReady {
+					return (condition.Status == corev1.ConditionTrue) == desiredReady, nil
+				}
+			}
+			return false, nil
+		},
+	)
 }
 
 func (o *OpenshiftInfraProvider) GetDefaultTimeoutContext() *framework.TimeoutContext {

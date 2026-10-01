@@ -9,6 +9,7 @@ require (
 	github.com/openshift/api v0.0.0-20260715165912-72066cc9718b
 	github.com/openshift/client-go v0.0.0-20260715172546-dac61734e0ec
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
+	// Placeholder pseudo-version; the real module path is wired via replace ../test/e2e below.
 	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.10.2
 	k8s.io/api v0.36.2
@@ -228,6 +229,10 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
+// k8s.io/* versions in the require block above are nominal constraints. The
+// replace directives below point k8s.io/api, k8s.io/apimachinery,
+// k8s.io/client-go, k8s.io/component-base, and the other listed staging modules
+// at openshift/kubernetes forks — those pins are authoritative for OpenShift builds.
 replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/docker/docker => github.com/docker/docker v26.1.5+incompatible

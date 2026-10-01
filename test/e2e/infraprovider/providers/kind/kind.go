@@ -158,6 +158,16 @@ func (k *kind) StartNode(nodeName string) error {
 	return k.engine.StartContainer(nodeName)
 }
 
+func (k *kind) RebootNode(nodeName string) error {
+	if err := k.engine.StopContainer(nodeName); err != nil {
+		return fmt.Errorf("failed to stop KinD node %q during reboot: %w", nodeName, err)
+	}
+	if err := k.engine.StartContainer(nodeName); err != nil {
+		return fmt.Errorf("failed to start KinD node %q during reboot: %w", nodeName, err)
+	}
+	return nil
+}
+
 func (k *kind) NewTestContext() api.Context {
 	context := &testcontext.TestContext{}
 	ginkgo.DeferCleanup(context.CleanUp)
