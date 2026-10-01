@@ -459,7 +459,7 @@ func (o *ContainerOps) CreateExternalContainer(container api.ExternalContainer) 
 		return container, cause
 	}
 	// fetch IPs for the attached container network. Host networked and --network none containers do not expose IP information.
-	if container.Network != nil && !isHostNetworked(container.Network.Name()) {
+	if container.Network != nil && !isHostNetworked(container.Network.Name()) && !container.SkipInterfaceWait {
 		err = wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 360*time.Second, true, func(ctx context.Context) (done bool, err error) {
 			ni, err := o.GetNetworkInterface(container.Name, container.Network.Name())
 			if err != nil {

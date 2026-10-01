@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	configv1 "github.com/openshift/api/config/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
@@ -38,6 +40,97 @@ type baremetalInfra struct {
 	engine               *container.Engine
 	machineNetwork       api.Network           // contains subnet details about cluster machine network
 	machineNetworkGwInfo *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	primaryNetworkIPs    *primaryNetworkIPAllocator
+}
+
+// primaryNetworkIPAllocator hands out static IPv4/IPv6 addresses for containers
+// attached to the primary network. That network is created with
+// --ipam-driver=none, so podman never assigns or reports an address for it;
+// the allocator and the SkipInterfaceWait flag on ExternalContainer replace
+// podman's normal "inspect after create" address discovery for this network.
+// ponytail: sequential counter, no bounds/reuse tracking; fine for the
+// handful of containers an OTE run creates, add release-on-delete if a
+// subnet this small starts running out of addresses.
+type primaryNetworkIPAllocator struct {
+	mu     sync.Mutex
+	nextV4 netip.Addr
+	nextV6 netip.Addr
+	gwInfo *api.NetworkInterface
+	byName map[string]api.NetworkInterface
+}
+
+// firstAllocatableAddr returns the first address in subnet offset far enough
+// past the network address to avoid colliding with statically configured
+// infra (gateway, the frr container's hard-coded address, and so on).
+func firstAllocatableAddr(subnet string) (netip.Addr, error) {
+	prefix, err := netip.ParsePrefix(subnet)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("failed to parse subnet %q: %w", subnet, err)
+	}
+	addr := prefix.Masked().Addr()
+	for i := 0; i < 20; i++ {
+		addr = addr.Next()
+	}
+	return addr, nil
+}
+
+func newPrimaryNetworkIPAllocator(v4Subnet, v6Subnet string, gwInfo *api.NetworkInterface) (*primaryNetworkIPAllocator, error) {
+	a := &primaryNetworkIPAllocator{gwInfo: gwInfo, byName: map[string]api.NetworkInterface{}}
+	if v4Subnet != "" {
+		var err error
+		if a.nextV4, err = firstAllocatableAddr(v4Subnet); err != nil {
+			return nil, err
+		}
+	}
+	if v6Subnet != "" {
+		var err error
+		if a.nextV6, err = firstAllocatableAddr(v6Subnet); err != nil {
+			return nil, err
+		}
+	}
+	// the frr container uses a hard-coded static address outside this
+	// allocator's range; register it so GetExternalContainerNetworkInterface
+	// has a single lookup path for every container on the primary network.
+	a.byName[externalFRRContainerName] = api.NetworkInterface{
+		IPv4:        frrContainerPrimaryNetIPv4,
+		IPv6:        frrContainerPrimaryNetIPv6,
+		IPv4Gateway: gwInfo.IPv4,
+		IPv6Gateway: gwInfo.IPv6,
+		InfName:     "eth0",
+		IPv4Prefix:  gwInfo.IPv4Prefix,
+		IPv6Prefix:  gwInfo.IPv6Prefix,
+	}
+	return a, nil
+}
+
+// Allocate reserves the next free static address(es) for containerName.
+func (a *primaryNetworkIPAllocator) Allocate(containerName string) api.NetworkInterface {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ni := api.NetworkInterface{
+		IPv4Gateway: a.gwInfo.IPv4,
+		IPv6Gateway: a.gwInfo.IPv6,
+		IPv4Prefix:  a.gwInfo.IPv4Prefix,
+		IPv6Prefix:  a.gwInfo.IPv6Prefix,
+	}
+	if a.nextV4.IsValid() {
+		ni.IPv4 = a.nextV4.String()
+		a.nextV4 = a.nextV4.Next()
+	}
+	if a.nextV6.IsValid() {
+		ni.IPv6 = a.nextV6.String()
+		a.nextV6 = a.nextV6.Next()
+	}
+	a.byName[containerName] = ni
+	return ni
+}
+
+// Get returns the previously allocated address(es) for containerName.
+func (a *primaryNetworkIPAllocator) Get(containerName string) (api.NetworkInterface, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	ni, ok := a.byName[containerName]
+	return ni, ok
 }
 
 func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
@@ -94,6 +187,10 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve hypervisor node interface for machine network: %w", err)
 	}
+	ci.primaryNetworkIPs, err = newPrimaryNetworkIPAllocator(v4, v6, ci.machineNetworkGwInfo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize primary network IP allocator: %w", err)
+	}
 	return ci, nil
 }
 
@@ -137,33 +234,33 @@ func (ci *baremetalInfra) ListNetworks() ([]string, error) {
 }
 
 func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
-	if container.Name == externalFRRContainerName && network.Name() == primaryNetworkName {
-		// frr container uses static ip configuration for ostestbm_net,
-		// querying it with podman inspect returns empty values, so build
-		// it explicitly.
-		if ci.machineNetworkGwInfo == nil {
-			return api.NetworkInterface{}, fmt.Errorf("can not find primary network gateway node for frr container")
+	if network.Name() == primaryNetworkName {
+		// the primary network has no podman IPAM, so podman inspect never
+		// reports an address for containers on it; return the statically
+		// allocated address instead (see primaryNetworkIPAllocator).
+		if ni, ok := ci.primaryNetworkIPs.Get(container.Name); ok {
+			return ni, nil
 		}
-		return api.NetworkInterface{
-				IPv4:        frrContainerPrimaryNetIPv4,
-				IPv6:        frrContainerPrimaryNetIPv6,
-				IPv4Gateway: ci.machineNetworkGwInfo.IPv4,
-				IPv6Gateway: ci.machineNetworkGwInfo.IPv6,
-				InfName:     "eth0",
-				IPv4Prefix:  ci.machineNetworkGwInfo.IPv4Prefix,
-				IPv6Prefix:  ci.machineNetworkGwInfo.IPv6Prefix},
-			nil
+		return api.NetworkInterface{}, fmt.Errorf("no static IP allocated for container %q on network %q", container.Name, network.Name())
 	}
 	return ci.engine.GetNetworkInterface(container.Name, network.Name())
 }
 
 func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
 	ciWithTestContext := &baremetalInfra{
-		engine: ci.engine.WithTestContext(context)}
+		engine:            ci.engine.WithTestContext(context),
+		primaryNetworkIPs: ci.primaryNetworkIPs,
+	}
 	return ciWithTestContext
 }
 
 func (ci *baremetalInfra) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
+	if container.Network != nil && container.Network.Name() == primaryNetworkName && container.IPv4 == "" && container.IPv6 == "" {
+		ni := ci.primaryNetworkIPs.Allocate(container.Name)
+		container.IPv4 = ni.IPv4
+		container.IPv6 = ni.IPv6
+		container.SkipInterfaceWait = true
+	}
 	return ci.engine.CreateExternalContainer(container)
 }
 
