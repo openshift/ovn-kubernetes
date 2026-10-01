@@ -1073,9 +1073,9 @@ var AppendedAnnotations = map[string]string{
 
 	"EVPN: VTEP API validations api-server should reject invalid VTEP updates Invalid VTEP update configurations": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Disabled:Unimplemented]",
 
-	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv6 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv6 pods": "[Disabled:Unimplemented]",
 
 	"EgressService Should validate a node with a local ep is selected when ETP=Local ipv4 pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 

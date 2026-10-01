@@ -38,8 +38,12 @@ import (
 )
 
 var _ = ginkgo.Describe("EgressService", feature.EgressService, func() {
+	// egressServiceYAML lives in TMPDIR, not the test binary's working
+	// directory: some OTE environments run the binary from a directory the
+	// test process can't write to, and os.CreateTemp also gives every spec
+	// its own unique path for free (no collisions between parallel workers).
+	egressServiceYAML := tempEgressServiceYAMLPath()
 	const (
-		egressServiceYAML         = "egress_service.yaml"
 		externalContainerBaseName = "external-container-for-egress-service"
 		podHTTPPort               = "8080"
 		serviceName               = "test-egress-service"
@@ -1015,6 +1019,7 @@ spec:
 
 	ginkgo.DescribeTable("[LGW] Should validate ingress reply traffic uses the Network",
 		func(protocol v1.IPFamily, isIPv6 bool) {
+			skipIfProtoNotAvailableFn(protocol, externalContainer)
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
 			createdPods := []*v1.Pod{}
@@ -1675,6 +1680,16 @@ func setBlackholeRoutesOnRoutingTable(providerCtx infraapi.Context, nodeName, ip
 		return nil
 	})
 	framework.ExpectNoError(err, fmt.Sprintf("failed to set blackhole route to %s on node %s table %s, out: %s", ip, nodeName, table, out))
+}
+
+// tempEgressServiceYAMLPath returns a unique, guaranteed-writable path
+// (under TMPDIR) for an EgressService CRD manifest.
+func tempEgressServiceYAMLPath() string {
+	f, err := os.CreateTemp("", "egress_service-*.yaml")
+	framework.ExpectNoError(err, "failed to create temp file for egress service yaml")
+	path := f.Name()
+	f.Close()
+	return path
 }
 
 // Removes the blackhole route to the external container on the nodes.
