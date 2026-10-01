@@ -417,6 +417,29 @@ reviews:
           required for this change, document the reasoning in the PR
           description and then use "@coderabbitai ignore pre-merge
           checks" to override.
+      - name: "Metrics Documentation"
+        mode: "warning"
+        instructions: >-
+          Check whether this PR adds, changes, renames, or removes a
+          Prometheus metric, including its name, type, labels, help text,
+          units, feature gate, or registration conditions.
+
+          If metrics change, verify that the relevant page under
+          docs/observability/metrics/ is updated in the same PR:
+
+          - cluster-manager metrics:
+            ovnkube-control-plane.md
+          - ovnkube-controller, ovnkube-node, NetworkQoS,
+            AdminNetworkPolicy, and libovsdb client metrics:
+            ovnkube-node.md
+          - OVN database, ovn-northd, and ovn-controller metrics:
+            ovn.md
+          - Open vSwitch metrics:
+            ovs.md
+
+          Pass if the PR does not change exported metrics or includes the
+          required documentation update. Warn if metric behavior changes
+          without a corresponding documentation change.
       - name: "Stale Project Docs and Config"
         mode: "error"
         instructions: >-
