@@ -16,6 +16,46 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
+func TestFedoraImageUsesConfiguredRepository(t *testing.T) {
+	const tag = "e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-v1-8-2-DmMayTpvDZVswLv0"
+	ocpConfig := ocpdeploymentconfig.New(nil)
+	deploymentconfig.Set(ocpConfig)
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.FedoraKubevirtContainerDisk)
+
+	for _, repo := range []string{
+		"",
+		"quay.io/openshift/community-e2e-images",
+		"mirror.example.com:5000/e2e",
+	} {
+		t.Run(repo, func(t *testing.T) {
+			t.Setenv("KUBE_TEST_REPO", repo)
+			if err := ocpConfig.SetupImages(); err != nil {
+				t.Fatalf("failed to set up test images: %v", err)
+			}
+
+			want := ocpdeploymentconfig.FedoraKubevirtContainerDiskImage
+			if repo != "" {
+				want = repo + ":" + tag
+			}
+
+			got := deploymentconfig.Get().
+				GetImage(deploymentconfigapi.FedoraKubevirtContainerDisk).PullSpec
+			if got != want {
+				t.Fatalf("repo %q: got %q, want %q", repo, got, want)
+			}
+			found := false
+			for _, image := range deploymentconfig.Get().GetRequiredImages() {
+				if image.ImageID == deploymentconfigapi.FedoraKubevirtContainerDisk && image.PullSpec == want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("required images must include the configured Fedora pull spec %q", want)
+			}
+		})
+	}
+}
+
 func TestSplitImagePullSpec(t *testing.T) {
 	t.Parallel()
 
@@ -168,16 +208,20 @@ func TestRegisterTestImages(t *testing.T) {
 	if err := ocpConfig.SetupImages(); err != nil {
 		t.Fatalf("failed to set up test images: %v", err)
 	}
-	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+	deploymentconfig.Get().AddRequiredImage(
+		deploymentconfigapi.Agnhost,
+		deploymentconfigapi.FedoraKubevirtContainerDisk)
 
 	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
 	if err := registerTestImages(ext); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Mirrored tags use the Kubernetes image ID as numeric prefix.
+	// Mirrored tags use the Kubernetes image ID as numeric prefix. Images
+	// outside the Kubernetes image list have no prefix.
 	want := map[string]int{
-		ocpConfig.GetImage(deploymentconfigapi.Agnhost).PullSpec: int(imageutils.Agnhost),
+		ocpConfig.GetImage(deploymentconfigapi.Agnhost).PullSpec:                     int(imageutils.Agnhost),
+		ocpConfig.GetImage(deploymentconfigapi.FedoraKubevirtContainerDisk).PullSpec: int(imageutils.None),
 	}
 	if got := len(ext.Images); got != len(want) {
 		t.Fatalf("registered %d images, want %d", got, len(want))

@@ -166,8 +166,10 @@ func main() {
 		panic(err)
 	}
 
-	// Add the agnhost image to the required images
-	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+	// Add the agnhost and Fedora KubeVirt container disk images to the required images
+	deploymentconfig.Get().AddRequiredImage(
+		deploymentconfigapi.Agnhost,
+		deploymentconfigapi.FedoraKubevirtContainerDisk)
 
 	// Register OVN-Kubernetes e2e images to the openshift-tests extension
 	err = registerTestImages(ovnTestsExtension)

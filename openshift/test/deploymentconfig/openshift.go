@@ -6,6 +6,7 @@ package deploymentconfig
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -18,6 +19,9 @@ import (
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
+
+// FedoraKubevirtContainerDiskImage is the source image for virtualization tests.
+const FedoraKubevirtContainerDiskImage = "quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2"
 
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -58,6 +62,14 @@ func (m *openshift) SetupImages() error {
 			ImageID:  api.Agnhost,
 			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
 		},
+	}
+
+	var err error
+	imageConfigMap[api.FedoraKubevirtContainerDisk], err = imageConfigWithPullSpecFromMirror(
+		api.FedoraKubevirtContainerDisk,
+		FedoraKubevirtContainerDiskImage)
+	if err != nil {
+		return err
 	}
 
 	m.imageConfigMap = imageConfigMap
@@ -104,6 +116,22 @@ func (m *openshift) IsConfigurationEnabled(config api.Config) bool {
 
 func (m *openshift) NBDBContainerName() string {
 	return "nbdb"
+}
+
+func imageConfigWithPullSpecFromMirror(imageID api.ImageID, pullSpec string) (api.ImageConfig, error) {
+	// The repository mapping supports images outside the Kubernetes registry
+	// list. Without it, discovery uses the source pull spec.
+	if os.Getenv("KUBE_TEST_REPO") != "" {
+		mirroredPullSpec, err := imageutils.ReplaceRegistryInImageURL(pullSpec)
+		if err != nil {
+			return api.ImageConfig{}, fmt.Errorf("failed resolving pull spec %q from mirror: %w", pullSpec, err)
+		}
+		pullSpec = mirroredPullSpec
+	}
+	return api.ImageConfig{
+		ImageID:  imageID,
+		PullSpec: pullSpec,
+	}, nil
 }
 
 func (m *openshift) GetImage(imageID api.ImageID) api.ImageConfig {
