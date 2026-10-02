@@ -451,7 +451,11 @@ func TestFindNetworkInterfaceForSubnets(t *testing.T) {
 func boolPtr(b bool) *bool { return &b }
 
 func TestConfigureTestEnvs(t *testing.T) {
-	deploymentconfig.Set(ocpdeploymentconfig.New(nil))
+	ocpDeploymentConfig, err := ocpdeploymentconfig.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deploymentconfig.Set(ocpDeploymentConfig)
 	tests := []struct {
 		name            string
 		operNetwork     *operv1.Network
