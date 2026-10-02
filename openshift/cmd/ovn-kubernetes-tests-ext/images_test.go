@@ -12,6 +12,8 @@ import (
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+
+	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
 func TestSplitImagePullSpec(t *testing.T) {
@@ -161,39 +163,88 @@ func TestExtensionImageFromPullSpec(t *testing.T) {
 }
 
 func TestRegisterTestImages(t *testing.T) {
-	deploymentconfig.Set(ocpdeploymentconfig.New(nil))
-	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+	for _, repo := range []string{"", "quay.io/openshift/community-e2e-images", "mirror.example.com:5000/e2e"} {
+		t.Run(repo, func(t *testing.T) {
+			t.Setenv("KUBE_TEST_REPO", repo)
+			ocpConfig, err := ocpdeploymentconfig.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deploymentconfig.Set(ocpConfig)
+			ocpConfig.AddRequiredImage(deploymentconfigapi.Agnhost)
+			ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
+			if err := registerTestImages(ext); err != nil {
+				t.Fatalf("failed to register test images: %v", err)
+			}
+			images := ext.Images
 
-	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
-	err := registerTestImages(ext)
+			agnhost := imageutils.GetOriginalImageConfigs()[imageutils.Agnhost]
+			want := map[string]int{
+				agnhost.GetE2EImage(): int(imageutils.Agnhost),
+			}
+			if got := len(images); got != len(want) {
+				t.Fatalf("returned %d images, want %d", got, len(want))
+			}
+			for _, img := range images {
+				pullSpec := fmt.Sprintf("%s/%s:%s", img.Registry, img.Name, img.Version)
+				expected, ok := want[pullSpec]
+				if !ok {
+					t.Errorf("unexpected source image %q", pullSpec)
+					continue
+				}
+				if img.Index != expected {
+					t.Errorf("image %q index: got %d, want %d", pullSpec, img.Index, expected)
+				}
+				if img.Mapped != nil {
+					t.Errorf("source image %q must not have an explicit mirror mapping", pullSpec)
+				}
+				delete(want, pullSpec)
+			}
+			for pullSpec := range want {
+				t.Errorf("missing image %q", pullSpec)
+			}
+		})
+	}
+}
+
+func TestRegisterOnlyRequiredImages(t *testing.T) {
+	t.Setenv("KUBE_TEST_REPO", "mirror.example.com:5000/e2e")
+	ocpConfig, err := ocpdeploymentconfig.New(nil)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
+	deploymentconfig.Set(ocpConfig)
+	if images := ocpConfig.GetRequiredImages(); len(images) != 0 {
+		t.Fatalf("new configuration must have no selected images, got %+v", images)
+	}
+	ocpConfig.AddRequiredImage(deploymentconfigapi.Agnhost, deploymentconfigapi.Agnhost)
+	required := ocpConfig.GetRequiredImages()
+	agnhost := imageutils.GetOriginalImageConfigs()[imageutils.Agnhost]
+	if len(required) != 1 || required[0].ImageID != deploymentconfigapi.Agnhost || required[0].PullSpec != agnhost.GetE2EImage() {
+		t.Fatalf("expected only the selected source Agnhost image with its OVN ID, got %+v", required)
+	}
+	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
+	if err := registerTestImages(ext); err != nil {
+		t.Fatal(err)
+	}
+	if len(ext.Images) != 1 || ext.Images[0].Index != int(imageutils.Agnhost) {
+		t.Fatalf("expected only Agnhost with its Kubernetes index, got %+v", ext.Images)
+	}
+}
 
-	if got, want := len(ext.Images), len(deploymentconfig.Get().GetRequiredImages()); got != want {
-		t.Fatalf("registered %d images, want %d from requiredImages", got, want)
+func TestAgnhostUsesKubernetesRuntimeImage(t *testing.T) {
+	ocpConfig, err := ocpdeploymentconfig.New(nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	type imageKey struct {
-		index    int
-		pullSpec string
+	ocpConfig.AddRequiredImage(deploymentconfigapi.Agnhost)
+	image := ocpConfig.GetImage(deploymentconfigapi.Agnhost)
+	if image.ImageID != deploymentconfigapi.Agnhost || image.PullSpec != imageutils.GetE2EImage(imageutils.Agnhost) {
+		t.Fatalf("Agnhost must use the Kubernetes-configured runtime image, got %+v", image)
 	}
-	want := make(map[imageKey]int)
-	for _, ri := range deploymentconfig.Get().GetRequiredImages() {
-		want[imageKey{int(ri.ImageID), ri.PullSpec}]++
-	}
-
-	got := make(map[imageKey]int, len(ext.Images))
-	for _, img := range ext.Images {
-		got[imageKey{img.Index, fmt.Sprintf("%s/%s:%s", img.Registry, img.Name, img.Version)}]++
-	}
-
-	if len(got) != len(want) {
-		t.Fatalf("registered %d unique images, want %d", len(got), len(want))
-	}
-	for key, count := range want {
-		if got[key] != count {
-			t.Errorf("image %+v: got count %d, want %d", key, got[key], count)
-		}
+	source := imageutils.GetOriginalImageConfigs()[imageutils.Agnhost]
+	required := ocpConfig.GetRequiredImages()
+	if len(required) != 1 || required[0].ImageID != deploymentconfigapi.Agnhost || required[0].PullSpec != source.GetE2EImage() {
+		t.Fatalf("required images must retain the original Agnhost pull spec and OVN ID, got %+v", required)
 	}
 }
