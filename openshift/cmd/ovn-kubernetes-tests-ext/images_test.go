@@ -16,6 +16,43 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
+func TestFedoraImageUsesConfiguredRepository(t *testing.T) {
+	const tag = "e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-v1-8-2-DmMayTpvDZVswLv0"
+	const source = "quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2"
+
+	for _, tc := range []struct {
+		name string
+		repo string
+	}{
+		{name: "source"},
+		{name: "community mirror", repo: "quay.io/openshift/community-e2e-images"},
+		{name: "custom repository", repo: "mirror.example.com:5000/e2e"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KUBE_TEST_REPO", tc.repo)
+			ocpConfig, err := ocpdeploymentconfig.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ocpConfig.AddRequiredImage(deploymentconfigapi.FedoraKubevirtContainerDisk)
+
+			want := source
+			if tc.repo != "" {
+				want = tc.repo + ":" + tag
+			}
+			got := ocpConfig.GetImage(deploymentconfigapi.FedoraKubevirtContainerDisk).PullSpec
+			if got != want {
+				t.Fatalf("repo %q: got %q, want %q", tc.repo, got, want)
+			}
+
+			images := ocpConfig.GetRequiredImages()
+			if len(images) != 1 || images[0].ImageID != deploymentconfigapi.FedoraKubevirtContainerDisk || images[0].PullSpec != source {
+				t.Fatalf("required images must contain only the original Fedora image with its OVN ID, got %+v", images)
+			}
+		})
+	}
+}
+
 func TestSplitImagePullSpec(t *testing.T) {
 	t.Parallel()
 
@@ -171,7 +208,8 @@ func TestRegisterTestImages(t *testing.T) {
 				t.Fatal(err)
 			}
 			deploymentconfig.Set(ocpConfig)
-			ocpConfig.AddRequiredImage(deploymentconfigapi.Agnhost)
+			ocpConfig.AddRequiredImage(deploymentconfigapi.Agnhost,
+				deploymentconfigapi.FedoraKubevirtContainerDisk)
 			ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
 			if err := registerTestImages(ext); err != nil {
 				t.Fatalf("failed to register test images: %v", err)
@@ -181,6 +219,7 @@ func TestRegisterTestImages(t *testing.T) {
 			agnhost := imageutils.GetOriginalImageConfigs()[imageutils.Agnhost]
 			want := map[string]int{
 				agnhost.GetE2EImage(): int(imageutils.Agnhost),
+				"quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2": int(imageutils.None),
 			}
 			if got := len(images); got != len(want) {
 				t.Fatalf("returned %d images, want %d", got, len(want))
