@@ -33,7 +33,6 @@ require (
 	github.com/clarketm/json v1.17.1 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containernetworking/cni v1.1.2 // indirect
-	github.com/containernetworking/plugins v1.2.0 // indirect
 	github.com/coreos/go-iptables v0.6.0 // indirect
 	github.com/coreos/go-json v0.0.0-20230131223807-18775e0fb4fb // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
@@ -104,11 +103,11 @@ require (
 	github.com/spf13/cobra v1.7.0 // indirect
 	github.com/spf13/pflag v1.0.6-0.20210604193023-d5e0c0615ace // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
-	github.com/stretchr/testify v1.9.0 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/urfave/cli/v2 v2.2.0 // indirect
 	github.com/vincent-petithory/dataurl v1.0.0 // indirect
-	github.com/vishvananda/netlink v1.2.1-beta.2.0.20230420174744-55c8b9515a01 // indirect
-	github.com/vishvananda/netns v0.0.4 // indirect
+	github.com/vishvananda/netlink v1.3.2-0.20260320193013-72a8cd7e0a73 // indirect
+	github.com/vishvananda/netns v0.0.5 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.10 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.10 // indirect
 	go.etcd.io/etcd/client/v3 v3.5.10 // indirect
@@ -166,6 +165,7 @@ require (
 )
 
 require (
+	github.com/containernetworking/plugins v1.2.0
 	github.com/coreos/butane v0.18.0
 	github.com/docker/docker v25.0.6+incompatible
 	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f

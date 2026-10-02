@@ -1,14 +1,26 @@
 package netlink
 
 import (
+	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"syscall"
 
 	"github.com/vishvananda/netlink/nl"
 	"github.com/vishvananda/netns"
 	"golang.org/x/sys/unix"
+)
+
+// IFA_PROTO is a netlink attribute for address protocol/origin (kernel 5.18+).
+// It indicates which component/protocol added the address.
+const IFA_PROTO = 0xb // 11
+
+// Address protocol values for IFA_PROTO attribute.
+const (
+	IFAPROT_UNSPEC    = 0 // unspecified
+	IFAPROT_KERNEL_LO = 1 // loopback
+	IFAPROT_KERNEL_RA = 2 // set by kernel from router announcement
+	IFAPROT_KERNEL_LL = 3 // link-local set by kernel
 )
 
 // AddrAdd will add an IP address to a link device.
@@ -17,6 +29,7 @@ import (
 //
 // If `addr` is an IPv4 address and the broadcast address is not given, it
 // will be automatically computed based on the IP mask if /30 or larger.
+// If `net.IPv4zero` is given as the broadcast address, broadcast is disabled.
 func AddrAdd(link Link, addr *Addr) error {
 	return pkgHandle.AddrAdd(link, addr)
 }
@@ -27,6 +40,7 @@ func AddrAdd(link Link, addr *Addr) error {
 //
 // If `addr` is an IPv4 address and the broadcast address is not given, it
 // will be automatically computed based on the IP mask if /30 or larger.
+// If `net.IPv4zero` is given as the broadcast address, broadcast is disabled.
 func (h *Handle) AddrAdd(link Link, addr *Addr) error {
 	req := h.newNetlinkRequest(unix.RTM_NEWADDR, unix.NLM_F_CREATE|unix.NLM_F_EXCL|unix.NLM_F_ACK)
 	return h.addrHandle(link, addr, req)
@@ -38,6 +52,7 @@ func (h *Handle) AddrAdd(link Link, addr *Addr) error {
 //
 // If `addr` is an IPv4 address and the broadcast address is not given, it
 // will be automatically computed based on the IP mask if /30 or larger.
+// If `net.IPv4zero` is given as the broadcast address, broadcast is disabled.
 func AddrReplace(link Link, addr *Addr) error {
 	return pkgHandle.AddrReplace(link, addr)
 }
@@ -48,6 +63,7 @@ func AddrReplace(link Link, addr *Addr) error {
 //
 // If `addr` is an IPv4 address and the broadcast address is not given, it
 // will be automatically computed based on the IP mask if /30 or larger.
+// If `net.IPv4zero` is given as the broadcast address, broadcast is disabled.
 func (h *Handle) AddrReplace(link Link, addr *Addr) error {
 	req := h.newNetlinkRequest(unix.RTM_NEWADDR, unix.NLM_F_CREATE|unix.NLM_F_REPLACE|unix.NLM_F_ACK)
 	return h.addrHandle(link, addr, req)
@@ -56,35 +72,29 @@ func (h *Handle) AddrReplace(link Link, addr *Addr) error {
 // AddrDel will delete an IP address from a link device.
 //
 // Equivalent to: `ip addr del $addr dev $link`
-//
-// If `addr` is an IPv4 address and the broadcast address is not given, it
-// will be automatically computed based on the IP mask if /30 or larger.
 func AddrDel(link Link, addr *Addr) error {
 	return pkgHandle.AddrDel(link, addr)
 }
 
 // AddrDel will delete an IP address from a link device.
-// Equivalent to: `ip addr del $addr dev $link`
 //
-// If `addr` is an IPv4 address and the broadcast address is not given, it
-// will be automatically computed based on the IP mask if /30 or larger.
+// Equivalent to: `ip addr del $addr dev $link`
 func (h *Handle) AddrDel(link Link, addr *Addr) error {
 	req := h.newNetlinkRequest(unix.RTM_DELADDR, unix.NLM_F_ACK)
 	return h.addrHandle(link, addr, req)
 }
 
 func (h *Handle) addrHandle(link Link, addr *Addr, req *nl.NetlinkRequest) error {
-	base := link.Attrs()
-	if addr.Label != "" && !strings.HasPrefix(addr.Label, base.Name) {
-		return fmt.Errorf("label must begin with interface name")
-	}
-	h.ensureIndex(base)
-
 	family := nl.GetIPFamily(addr.IP)
-
 	msg := nl.NewIfAddrmsg(family)
-	msg.Index = uint32(base.Index)
 	msg.Scope = uint8(addr.Scope)
+	if link == nil {
+		msg.Index = uint32(addr.LinkIndex)
+	} else {
+		base := link.Attrs()
+		h.ensureIndex(base)
+		msg.Index = uint32(base.Index)
+	}
 	mask := addr.Mask
 	if addr.Peer != nil {
 		mask = addr.Peer.Mask
@@ -139,6 +149,10 @@ func (h *Handle) addrHandle(link Link, addr *Addr, req *nl.NetlinkRequest) error
 			addr.Broadcast = calcBroadcast
 		}
 
+		if net.IPv4zero.Equal(addr.Broadcast) {
+			addr.Broadcast = nil
+		}
+
 		if addr.Broadcast != nil {
 			req.AddData(nl.NewRtAttr(unix.IFA_BROADCAST, addr.Broadcast))
 		}
@@ -160,6 +174,12 @@ func (h *Handle) addrHandle(link Link, addr *Addr, req *nl.NetlinkRequest) error
 		req.AddData(nl.NewRtAttr(unix.IFA_CACHEINFO, cachedata.Serialize()))
 	}
 
+	// Add IFA_PROTO if set (kernel 5.18+). This marks the address origin/owner.
+	// On older kernels, this attribute will be silently ignored.
+	if addr.Protocol != 0 {
+		req.AddData(nl.NewRtAttr(IFA_PROTO, []byte{uint8(addr.Protocol)}))
+	}
+
 	_, err := req.Execute(unix.NETLINK_ROUTE, 0)
 	return err
 }
@@ -167,6 +187,9 @@ func (h *Handle) addrHandle(link Link, addr *Addr, req *nl.NetlinkRequest) error
 // AddrList gets a list of IP addresses in the system.
 // Equivalent to: `ip addr show`.
 // The list can be filtered by link and ip family.
+//
+// If the returned error is [ErrDumpInterrupted], results may be inconsistent
+// or incomplete.
 func AddrList(link Link, family int) ([]Addr, error) {
 	return pkgHandle.AddrList(link, family)
 }
@@ -174,21 +197,26 @@ func AddrList(link Link, family int) ([]Addr, error) {
 // AddrList gets a list of IP addresses in the system.
 // Equivalent to: `ip addr show`.
 // The list can be filtered by link and ip family.
+//
+// If the returned error is [ErrDumpInterrupted], results may be inconsistent
+// or incomplete.
 func (h *Handle) AddrList(link Link, family int) ([]Addr, error) {
 	req := h.newNetlinkRequest(unix.RTM_GETADDR, unix.NLM_F_DUMP)
 	msg := nl.NewIfAddrmsg(family)
-	req.AddData(msg)
-
-	msgs, err := req.Execute(unix.NETLINK_ROUTE, unix.RTM_NEWADDR)
-	if err != nil {
-		return nil, err
-	}
 
 	indexFilter := 0
 	if link != nil {
 		base := link.Attrs()
 		h.ensureIndex(base)
 		indexFilter = base.Index
+		msg.Index = uint32(indexFilter)
+	}
+
+	req.AddData(msg)
+
+	msgs, executeErr := req.Execute(unix.NETLINK_ROUTE, unix.RTM_NEWADDR)
+	if executeErr != nil && !errors.Is(executeErr, ErrDumpInterrupted) {
+		return nil, executeErr
 	}
 
 	var res []Addr
@@ -210,7 +238,7 @@ func (h *Handle) AddrList(link Link, family int) ([]Addr, error) {
 		res = append(res, addr)
 	}
 
-	return res, nil
+	return res, executeErr
 }
 
 func parseAddr(m []byte) (addr Addr, family int, err error) {
@@ -257,6 +285,10 @@ func parseAddr(m []byte) (addr Addr, family int, err error) {
 			ci := nl.DeserializeIfaCacheInfo(attr.Value)
 			addr.PreferedLft = int(ci.Prefered)
 			addr.ValidLft = int(ci.Valid)
+		case IFA_PROTO:
+			if len(attr.Value) > 0 {
+				addr.Protocol = int(attr.Value[0])
+			}
 		}
 	}
 
