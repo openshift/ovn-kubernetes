@@ -222,6 +222,11 @@ type ExternalContainer struct {
 	IPv4        string
 	IPv6        string
 	RuntimeArgs []string
+	// SkipInterfaceWait skips polling the runtime for an assigned IP after
+	// creation. Set this when IPv4/IPv6 are already known statically (for
+	// example on networks created with no IPAM, where the runtime never
+	// reports an address via inspect).
+	SkipInterfaceWait bool
 }
 
 func (ec ExternalContainer) GetName() string {
