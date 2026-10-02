@@ -80,10 +80,10 @@ func TestSplitImagePullSpec(t *testing.T) {
 		},
 		{
 			name:         "ghcr image",
-			pullSpec:     "ghcr.io/nicolaka/netshoot:v0.13",
+			pullSpec:     "ghcr.io/nicolaka/netshoot:v0.16",
 			wantRegistry: "ghcr.io",
 			wantName:     "nicolaka/netshoot",
-			wantVersion:  "v0.13",
+			wantVersion:  "v0.16",
 		},
 		{
 			name:         "docker library short name",
@@ -209,7 +209,8 @@ func TestRegisterTestImages(t *testing.T) {
 			}
 			deploymentconfig.Set(ocpConfig)
 			ocpConfig.AddRequiredImage(deploymentconfigapi.Agnhost,
-				deploymentconfigapi.FedoraKubevirtContainerDisk)
+				deploymentconfigapi.FedoraKubevirtContainerDisk,
+				deploymentconfigapi.Netshoot)
 			ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
 			if err := registerTestImages(ext); err != nil {
 				t.Fatalf("failed to register test images: %v", err)
@@ -220,6 +221,7 @@ func TestRegisterTestImages(t *testing.T) {
 			want := map[string]int{
 				agnhost.GetE2EImage(): int(imageutils.Agnhost),
 				"quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2": int(imageutils.None),
+				"ghcr.io/nicolaka/netshoot:v0.16":                                 int(imageutils.None),
 			}
 			if got := len(images); got != len(want) {
 				t.Fatalf("returned %d images, want %d", got, len(want))
@@ -285,5 +287,37 @@ func TestAgnhostUsesKubernetesRuntimeImage(t *testing.T) {
 	required := ocpConfig.GetRequiredImages()
 	if len(required) != 1 || required[0].ImageID != deploymentconfigapi.Agnhost || required[0].PullSpec != source.GetE2EImage() {
 		t.Fatalf("required images must retain the original Agnhost pull spec and OVN ID, got %+v", required)
+	}
+}
+
+func TestNetshootUsesCommunityMirror(t *testing.T) {
+	const source = "ghcr.io/nicolaka/netshoot:v0.16"
+	const mirrored = "quay.io/openshift/community-e2e-images:e2e-ghcr-io-nicolaka-netshoot-v0-16-dJoD5NGEFxLwUP4n"
+
+	for _, tc := range []struct {
+		name string
+		repo string
+		want string
+	}{
+		{name: "source", want: source},
+		{name: "community mirror", repo: "quay.io/openshift/community-e2e-images", want: mirrored},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KUBE_TEST_REPO", tc.repo)
+			ocpConfig, err := ocpdeploymentconfig.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ocpConfig.AddRequiredImage(deploymentconfigapi.Netshoot)
+
+			image := ocpConfig.GetImage(deploymentconfigapi.Netshoot)
+			if image.ImageID != deploymentconfigapi.Netshoot || image.PullSpec != tc.want {
+				t.Fatalf("repo %q: got %+v, want pull spec %q", tc.repo, image, tc.want)
+			}
+			required := ocpConfig.GetRequiredImages()
+			if len(required) != 1 || required[0].ImageID != deploymentconfigapi.Netshoot || required[0].PullSpec != source {
+				t.Fatalf("required images must retain the original netshoot pull spec and OVN ID, got %+v", required)
+			}
+		})
 	}
 }
