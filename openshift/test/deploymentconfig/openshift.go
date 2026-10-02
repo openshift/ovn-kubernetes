@@ -19,23 +19,6 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
-var (
-	imageIDMapping map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
-		api.Agnhost: imageutils.Agnhost,
-	}
-	imageConfigMap map[api.ImageID]api.ImageConfig
-)
-
-func init() {
-	// Add images that are needed by the test suite.
-	imageConfigMap = map[api.ImageID]api.ImageConfig{
-		api.Agnhost: {
-			ImageID:  api.Agnhost,
-			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
-		},
-	}
-}
-
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
@@ -57,11 +40,28 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 type openshift struct {
 	kubeConfig     *rest.Config
 	requiredImages map[api.ImageID]struct{}
+	imageConfigMap map[api.ImageID]api.ImageConfig
 }
 
-func New(config *rest.Config) api.DeploymentConfig {
-	return &openshift{kubeConfig: config,
-		requiredImages: make(map[api.ImageID]struct{})}
+func New(config *rest.Config) *openshift {
+	return &openshift{
+		kubeConfig:     config,
+		requiredImages: make(map[api.ImageID]struct{}),
+	}
+}
+
+// SetupImages resolves the test images for this deployment configuration.
+func (m *openshift) SetupImages() error {
+	// Add images that are needed by the test suite.
+	imageConfigMap := map[api.ImageID]api.ImageConfig{
+		api.Agnhost: {
+			ImageID:  api.Agnhost,
+			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
+		},
+	}
+
+	m.imageConfigMap = imageConfigMap
+	return nil
 }
 
 func (m *openshift) OVNKubernetesNamespace() string {
@@ -107,7 +107,7 @@ func (m *openshift) NBDBContainerName() string {
 }
 
 func (m *openshift) GetImage(imageID api.ImageID) api.ImageConfig {
-	return imageConfigMap[imageID]
+	return m.imageConfigMap[imageID]
 }
 
 func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {
@@ -119,14 +119,7 @@ func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {
 func (m *openshift) GetRequiredImages() []api.ImageConfig {
 	imageConfigs := []api.ImageConfig{}
 	for imageID := range m.requiredImages {
-		newID, ok := imageIDMapping[imageID]
-		if !ok {
-			newID = imageutils.None
-		}
-		imageConfigs = append(imageConfigs, api.ImageConfig{
-			ImageID:  api.ImageID(newID),
-			PullSpec: m.GetImage(imageID).PullSpec,
-		})
+		imageConfigs = append(imageConfigs, m.GetImage(imageID))
 	}
 	return imageConfigs
 }

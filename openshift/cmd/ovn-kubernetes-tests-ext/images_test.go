@@ -12,6 +12,8 @@ import (
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+
+	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
 func TestSplitImagePullSpec(t *testing.T) {
@@ -161,39 +163,38 @@ func TestExtensionImageFromPullSpec(t *testing.T) {
 }
 
 func TestRegisterTestImages(t *testing.T) {
-	deploymentconfig.Set(ocpdeploymentconfig.New(nil))
+	ocpConfig := ocpdeploymentconfig.New(nil)
+	deploymentconfig.Set(ocpConfig)
+	if err := ocpConfig.SetupImages(); err != nil {
+		t.Fatalf("failed to set up test images: %v", err)
+	}
 	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
 
 	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
-	err := registerTestImages(ext)
-	if err != nil {
+	if err := registerTestImages(ext); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if got, want := len(ext.Images), len(deploymentconfig.Get().GetRequiredImages()); got != want {
-		t.Fatalf("registered %d images, want %d from requiredImages", got, want)
+	// Mirrored tags use the Kubernetes image ID as numeric prefix.
+	want := map[string]int{
+		ocpConfig.GetImage(deploymentconfigapi.Agnhost).PullSpec: int(imageutils.Agnhost),
 	}
-
-	type imageKey struct {
-		index    int
-		pullSpec string
+	if got := len(ext.Images); got != len(want) {
+		t.Fatalf("registered %d images, want %d", got, len(want))
 	}
-	want := make(map[imageKey]int)
-	for _, ri := range deploymentconfig.Get().GetRequiredImages() {
-		want[imageKey{int(ri.ImageID), ri.PullSpec}]++
-	}
-
-	got := make(map[imageKey]int, len(ext.Images))
 	for _, img := range ext.Images {
-		got[imageKey{img.Index, fmt.Sprintf("%s/%s:%s", img.Registry, img.Name, img.Version)}]++
-	}
-
-	if len(got) != len(want) {
-		t.Fatalf("registered %d unique images, want %d", len(got), len(want))
-	}
-	for key, count := range want {
-		if got[key] != count {
-			t.Errorf("image %+v: got count %d, want %d", key, got[key], count)
+		pullSpec := fmt.Sprintf("%s/%s:%s", img.Registry, img.Name, img.Version)
+		wantIndex, ok := want[pullSpec]
+		if !ok {
+			t.Errorf("unexpected image %q", pullSpec)
+			continue
 		}
+		if img.Index != wantIndex {
+			t.Errorf("image %q index: got %d, want %d", pullSpec, img.Index, wantIndex)
+		}
+		delete(want, pullSpec)
+	}
+	for pullSpec := range want {
+		t.Errorf("missing image %q", pullSpec)
 	}
 }

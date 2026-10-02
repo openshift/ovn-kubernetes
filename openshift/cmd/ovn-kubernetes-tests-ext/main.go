@@ -138,7 +138,8 @@ func main() {
 	cfg, cfgErr := getKubeConfig()
 	// Set deployment config before infra provider initialization, because
 	// ocpinfraprovider.New → configureTestEnvs calls deploymentconfig.Get().
-	deploymentconfig.Set(ocpdeploymentconfig.New(cfg))
+	ocpDeploymentConfig := ocpdeploymentconfig.New(cfg)
+	deploymentconfig.Set(ocpDeploymentConfig)
 	var infraErr error
 	if cfgErr == nil {
 		infra, err := ocpinfraprovider.New(cfg)
@@ -161,8 +162,13 @@ func main() {
 		panic(err)
 	}
 
+	if err := ocpDeploymentConfig.SetupImages(); err != nil {
+		panic(err)
+	}
+
 	// Add the agnhost image to the required images
 	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+
 	// Register OVN-Kubernetes e2e images to the openshift-tests extension
 	err = registerTestImages(ovnTestsExtension)
 	if err != nil {
