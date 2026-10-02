@@ -25,6 +25,9 @@ var (
 		api.FedoraKubevirtContainerDisk: {
 			PullSpec: "quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2",
 		},
+		api.Netshoot: {
+			PullSpec: "ghcr.io/nicolaka/netshoot:v0.16",
+		},
 	}
 )
 
