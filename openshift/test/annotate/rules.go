@@ -20,7 +20,6 @@ var (
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
-			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
 			`[Feature:Multicast]`,
 			`[Feature:MultiHoming]`,
@@ -33,6 +32,20 @@ var (
 	// if a test name partially or fully contains one of the map value strings, then add the label to the test
 	// label -> partial or full test name or regex to match a test name
 	LabelToTestNameMatchMaps = map[string][]string{
+		"[OCPFeatureGate:MACSecurity]": {
+			`^Network Segmentation: MAC security`,
+			`^Kubevirt Virtual Machines user-defined network port-security disabled,`,
+			`^Network Segmentation: API validations api-server should (accept valid CRs|reject invalid CRs) ClusterUserDefinedNetwork, layer2`,
+			`^Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, localnet`,
+			`^Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid macSecurity`,
+		},
+		"[Suite:ovn-kubernetes/conformance/serial/virtualization]": {
+			`\[OCPFeatureGate:MACSecurity\]`,
+		},
+		// MAC security VM cases create secondary CUDNs with IPAM disabled.
+		"[OCPFeatureGate:NetworkSegmentation]": {
+			`^Kubevirt Virtual Machines user-defined network port-security disabled,`,
+		},
 		// alpha features that are not gated
 		"[Disabled:Alpha]": {},
 		// tests for features that are not implemented in openshift
@@ -74,8 +87,15 @@ var (
 			`e2e NetworkQoS validation`,
 			// ClusterNetworkConnect CR is not in downstream yet
 			`ClusterNetworkConnect: API validations`,
-			// unknown rc 7 code
-			`Network Segmentation: API validations`,
+			// Keep API entries outside the macSecurity paired-testing scope disabled.
+			// UDN validation cases inherit a kubeconfig namespace that does not
+			// exist on the target cluster; they need explicit namespace setup.
+			`^Network Segmentation: API validations api-server should (accept valid CRs|reject invalid CRs|reject invalid updates) UserDefinedNetwork, layer2`,
+			// CNO rejects these updates with "Network spec is immutable" rather
+			// than the upstream Layer2/Localnet-specific messages.
+			`^Network Segmentation: API validations api-server should reject invalid updates ClusterUserDefinedNetwork, (layer2|localnet), mac-security`,
+			`^Network Segmentation: API validations.*ClusterUserDefinedNetwork, (evpn|no-overlay|layer3, multi-subnets|mismatch topology and config)`,
+			`^Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid (role|physicalNetworkName|subnets|mtu|vlan)$`,
 			// 'Network allocation failed for at least one node'
 			`Network Segmentation UserDefinedNetwork CRD Controller should correctly report subsystem error on node subnet allocation`,
 			// requires implementation of overlay method (provider API)
@@ -121,7 +141,11 @@ var (
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			// Localnet cases modify shared br-ex mappings and reuse static IPs.
+			`^Kubevirt Virtual Machines user-defined network port-security disabled,.*over localnet`,
+			`^Network Segmentation: MAC security.*over localnet,`,
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)

@@ -136,7 +136,7 @@ ethernets:
 		})
 
 		AfterAll(func() {
-			Expect(removeImagesFromNodes(fr.ClientSet, kubevirt.FedoraWithTestToolingContainerDiskImage)).To(Succeed())
+			Expect(removeImagesFromNodes(fr.ClientSet, images.FedoraContainerDisk())).To(Succeed())
 		})
 
 		// startVM boots a fedora VM attached to the DHCP CUDN. The role label
@@ -153,7 +153,7 @@ ethernets:
 			vmi := &kubevirtv1.VirtualMachineInstance{
 				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: vm.Name},
 			}
-			waitForVMIReadinessWithClient(crClient, vmi, corev1.ConditionTrue)
+			waitForVMIReadinessWithClient(crClient, vmi, kubevirtv1.VirtualMachineInstanceReady, corev1.ConditionTrue)
 			Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
 			return vmi
 		}
