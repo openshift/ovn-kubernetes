@@ -18,6 +18,7 @@ import (
 	current "github.com/containernetworking/cni/pkg/types/100"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	apimachinerytypes "k8s.io/apimachinery/pkg/types"
@@ -62,6 +63,40 @@ func (stub *podRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, _ cli
 }
 func (stub *podRequestInterfaceOpsStub) UnconfigureInterface(_ *PodRequest, ifInfo *PodInterfaceInfo, _ corev1listers.PodLister, _ *corev1.Pod) error {
 	stub.unconfiguredInterfaces = append(stub.unconfiguredInterfaces, ifInfo)
+	return nil
+}
+
+// parallelPodRequestInterfaceOpsStub blocks each network's interface setup
+// until the other has started. It detects a regression to serial default-then-
+// primary UDN CNI adds without relying on timing between goroutines.
+type parallelPodRequestInterfaceOpsStub struct {
+	defaultStarted chan struct{}
+	udnStarted     chan struct{}
+}
+
+func (stub *parallelPodRequestInterfaceOpsStub) ConfigureInterface(pr *PodRequest, _ client.Client, _ PodInfoGetter, _ *PodInterfaceInfo) ([]*current.Interface, error) {
+	if pr.nadKey == ovntypes.DefaultNetworkName {
+		close(stub.defaultStarted)
+		select {
+		case <-stub.udnStarted:
+		case <-time.After(time.Second):
+			return nil, fmt.Errorf("primary UDN CNI add did not start while default network CNI add was running")
+		}
+	} else {
+		select {
+		case <-stub.defaultStarted:
+		case <-time.After(time.Second):
+			return nil, fmt.Errorf("default network CNI add did not start while primary UDN CNI add was running")
+		}
+		close(stub.udnStarted)
+	}
+	return []*current.Interface{
+		{Name: "host_" + pr.IfName},
+		{Name: pr.IfName, Sandbox: "/var/run/netns/" + pr.PodNamespace + "_" + pr.PodName},
+	}, nil
+}
+
+func (*parallelPodRequestInterfaceOpsStub) UnconfigureInterface(_ *PodRequest, _ *PodInterfaceInfo, _ corev1listers.PodLister, _ *corev1.Pod) error {
 	return nil
 }
 
@@ -228,8 +263,9 @@ var _ = Describe("Network Segmentation", func() {
 			handlePodRequest()
 
 			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(ConsistOf(&PodInterfaceInfo{
-				IsDPUHostMode: true,
-				NetdevName:    pr.CNIConf.DeviceID,
+				IsDPUHostMode:  true,
+				IsSimulatedDPU: true,
+				NetdevName:     pr.CNIConf.DeviceID,
 			}))
 		})
 
@@ -246,8 +282,9 @@ var _ = Describe("Network Segmentation", func() {
 			handlePodRequest()
 
 			Expect(prInterfaceOpsStub.unconfiguredInterfaces).To(ConsistOf(&PodInterfaceInfo{
-				IsDPUHostMode: true,
-				NetdevName:    pr.CNIConf.DeviceID,
+				IsDPUHostMode:  true,
+				IsSimulatedDPU: true,
+				NetdevName:     pr.CNIConf.DeviceID,
 			}))
 		})
 	})
@@ -370,6 +407,18 @@ var _ = Describe("Network Segmentation", func() {
 			})
 
 			Context("with CNI Privileged Mode", func() {
+				It("configures the default network and primary UDN concurrently", func() {
+					parallelOps := &parallelPodRequestInterfaceOpsStub{
+						defaultStarted: make(chan struct{}),
+						udnStarted:     make(chan struct{}),
+					}
+					podRequestInterfaceOps = parallelOps
+					startCNIServer(testing.NewNamespace(pod.Namespace), pod, nadMegaNet)
+
+					response := handlePodRequest()
+					Expect(response.Result.Interfaces).To(HaveLen(4))
+				})
+
 				It("should return the information of both the default net and the primary UDN in the result", func() {
 					startCNIServer(testing.NewNamespace(pod.Namespace), pod, nadMegaNet)
 					response := handlePodRequest()
@@ -390,8 +439,8 @@ var _ = Describe("Network Segmentation", func() {
 							Interfaces: []*current.Interface{
 								{Name: "host_eth0"},
 								{Name: "eth0", Sandbox: sandbox},
-								{Name: "host_ovn-udn1"},
-								{Name: "ovn-udn1", Sandbox: sandbox},
+								{Name: "host_" + primaryUDNIfName},
+								{Name: primaryUDNIfName, Sandbox: sandbox},
 							},
 							IPs: []*current.IPConfig{
 								{
@@ -445,7 +494,7 @@ var _ = Describe("Network Segmentation", func() {
 							NetName:       "tenantred",
 							NADKey:        "foo-ns/meganet",
 						}))
-					Expect(response.PrimaryUDNPodReq.IfName).To(Equal("ovn-udn1"))
+					Expect(response.PrimaryUDNPodReq.IfName).To(Equal(primaryUDNIfName))
 					Expect(response.PodIFInfo.NetName).To(Equal("default"))
 				})
 			})
@@ -1025,7 +1074,7 @@ var _ = Describe("updateDHCPAndDPUAnnotations pod identity guard", func() {
 		pr := &PodRequest{PodNamespace: podNamespace, PodName: podName, PodUID: "uid-a", nadKey: nadKey, Netns: newTestNetns()}
 
 		err := pr.updateDHCPAndDPUAnnotations(cs, kubecli, stalePod, newDHCPEntry(), nil)
-		Expect(err).To(MatchError(ContainSubstring("was replaced while staging CNI annotations")))
+		Expect(err).To(MatchError(apierrors.IsNotFound, "IsNotFound"))
 
 		got, err := cs.kclient.CoreV1().Pods(podNamespace).Get(context.Background(), podName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
