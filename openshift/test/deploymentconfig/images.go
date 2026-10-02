@@ -22,6 +22,9 @@ var (
 		api.Agnhost: {
 			K8SImageID: imageutils.Agnhost,
 		},
+		api.FedoraKubevirtContainerDisk: {
+			PullSpec: "quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2",
+		},
 	}
 )
 
