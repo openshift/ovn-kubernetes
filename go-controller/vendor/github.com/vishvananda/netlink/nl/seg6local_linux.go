@@ -13,6 +13,7 @@ const (
 	SEG6_LOCAL_IIF
 	SEG6_LOCAL_OIF
 	SEG6_LOCAL_BPF
+	SEG6_LOCAL_VRFTABLE
 	__SEG6_LOCAL_MAX
 )
 const (
@@ -36,6 +37,7 @@ const (
 	SEG6_LOCAL_ACTION_END_AS                   // 13
 	SEG6_LOCAL_ACTION_END_AM                   // 14
 	SEG6_LOCAL_ACTION_END_BPF                  // 15
+	SEG6_LOCAL_ACTION_END_DT46                 // 16
 	__SEG6_LOCAL_ACTION_MAX
 )
 const (
