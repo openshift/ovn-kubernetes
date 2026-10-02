@@ -161,7 +161,6 @@ func (r *labelAppender) appendLabelsToTestName(name string, node types.TestSpec)
 func (r *labelAppender) generate(name string, node types.TestSpec) {
 	newLabels := ""
 	newName := name
-
 	for {
 		count := 0
 		for _, label := range r.labels {
@@ -177,6 +176,7 @@ func (r *labelAppender) generate(name string, node types.TestSpec) {
 					break
 				}
 			}
+
 			// check if there is a match from the test name using a regex
 			if !isLabelRequired {
 				if re := r.matches[label]; re != nil {
