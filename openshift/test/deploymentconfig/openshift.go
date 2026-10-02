@@ -2,8 +2,12 @@ package deploymentconfig
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
+	"sync"
+
+	imageclient "github.com/openshift/client-go/image/clientset/versioned"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
@@ -12,9 +16,6 @@ import (
 	"k8s.io/client-go/rest"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
-
-// FedoraContainerDiskImage matches Origin's approved live-migration test image.
-const FedoraContainerDiskImage = "quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2"
 
 var (
 	deploymentConfig api.DeploymentConfig
@@ -33,8 +34,23 @@ func init() {
 
 	// Add images that are needed by the test suite.
 	imageConfigMap = map[api.ImageID]string{
-		api.Agnhost:             imageutils.GetE2EImage(imageutils.Agnhost),
-		api.FedoraContainerDisk: FedoraContainerDiskImage,
+		api.Agnhost:               imageutils.GetE2EImage(imageutils.Agnhost),
+		api.FedoraContainerDisk:   FedoraContainerDiskImage,
+		api.IPerf3:                "quay.io/sronanrh/iperf:latest",
+		api.Nginx:                 "nginx:1",
+		api.MetalLBLBService:      "quay.io/itssurya/dev-images:metallb-lbservice",
+		api.UDPServerSrcIPPrinter: "quay.io/itssurya/dev-images:udp-server-srcip-printer",
+		api.FRR:                   "quay.io/frrouting/frr:10.5.3",
+		api.DNSMasq:               "docker.io/andyshinn/dnsmasq:2.83@sha256:e937327fede666e55ba4c2ab8e715a2ce561945363016d42f9d698d1b18ff1be",
+	}
+	for id, env := range map[api.ImageID]string{
+		api.IPerf3: "IPERF3_IMAGE", api.Nginx: "NGINX_IMAGE",
+		api.MetalLBLBService:      "METALLB_LB_SERVICE_IMAGE",
+		api.UDPServerSrcIPPrinter: "UDP_SERVER_SRCIP_PRINTER_IMAGE", api.FRR: "FRR_IMAGE",
+	} {
+		if override := os.Getenv(env); override != "" {
+			imageConfigMap[id] = override
+		}
 	}
 	deploymentConfig.AddRequiredImage(api.Agnhost, api.FedoraContainerDisk)
 }
@@ -58,7 +74,10 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 }
 
 type openshift struct {
-	requiredImages map[api.ImageID]struct{}
+	requiredImages    map[api.ImageID]struct{}
+	imageLock         sync.Mutex
+	imageClient       imageclient.Interface
+	networkToolsImage string
 }
 
 func New() api.DeploymentConfig {
@@ -91,10 +110,6 @@ func (m *openshift) NBDBContainerName() string {
 	return "nbdb"
 }
 
-func (m *openshift) GetImage(imageID api.ImageID) api.ImageConfig {
-	return api.ImageConfig{ImageID: imageID, PullSpec: imageConfigMap[imageID]}
-}
-
 func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {
 	if m.requiredImages == nil {
 		m.requiredImages = make(map[api.ImageID]struct{})
@@ -115,13 +130,19 @@ func (m *openshift) GetRequiredImages() []api.ImageConfig {
 	sort.Ints(ids)
 	for _, id := range ids {
 		imageID := api.ImageID(id)
+		if imageID == api.Netshoot {
+			// network-tools is supplied by the payload, not community-e2e-images.
+			continue
+		}
+		// Advertise original pullspecs; GetImage may return a runtime mirror.
+		pullSpec := imageConfigMap[imageID]
 		newID, ok := imageIDMapping[imageID]
 		if !ok {
 			newID = imageutils.None
 		}
 		imageConfigs = append(imageConfigs, api.ImageConfig{
 			ImageID:  api.ImageID(newID),
-			PullSpec: m.GetImage(imageID).PullSpec,
+			PullSpec: pullSpec,
 		})
 	}
 	return imageConfigs
