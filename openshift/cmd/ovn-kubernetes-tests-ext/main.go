@@ -83,12 +83,19 @@ func main() {
 	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/serial",
-		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`labels.exists(l, l == "Serial") && !name.contains("[Suite:ovn-kubernetes/conformance/serial/virtualization]")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`!labels.exists(l, l == "Serial") && !name.contains("[Suite:ovn-kubernetes/conformance/serial/virtualization]")`},
+	})
+
+	// The dedicated virtualization OTE lane selects this suite directly.
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name:        "ovn-kubernetes/conformance/serial/virtualization",
+		Qualifiers:  []string{`name.contains("[Suite:ovn-kubernetes/conformance/serial/virtualization]")`},
+		Parallelism: 1,
 	})
 
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
@@ -135,7 +142,7 @@ func main() {
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
 		// These tests require at least 2 nodes and will fail on single-node deployments
-		if spec.Labels.Has(featureLabelNetworkSegmentation) {
+		if spec.Labels.Has(featureLabelNetworkSegmentation) || spec.Labels.Has("Feature:VirtualMachineSupport") {
 			spec.Exclude(extensiontests.TopologyEquals("SingleReplica"))
 		}
 
