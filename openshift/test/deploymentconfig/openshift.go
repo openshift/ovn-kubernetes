@@ -2,6 +2,7 @@ package deploymentconfig
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
@@ -12,10 +13,14 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
+// FedoraContainerDiskImage matches Origin's approved live-migration test image.
+const FedoraContainerDiskImage = "quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2"
+
 var (
 	deploymentConfig api.DeploymentConfig
 	imageIDMapping   map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
-		api.Agnhost: imageutils.Agnhost,
+		api.Agnhost:             imageutils.Agnhost,
+		api.FedoraContainerDisk: imageutils.None,
 	}
 	imageConfigMap map[api.ImageID]string
 )
@@ -28,8 +33,10 @@ func init() {
 
 	// Add images that are needed by the test suite.
 	imageConfigMap = map[api.ImageID]string{
-		api.Agnhost: imageutils.GetE2EImage(imageutils.Agnhost),
+		api.Agnhost:             imageutils.GetE2EImage(imageutils.Agnhost),
+		api.FedoraContainerDisk: FedoraContainerDiskImage,
 	}
+	deploymentConfig.AddRequiredImage(api.Agnhost, api.FedoraContainerDisk)
 }
 
 func IsOpenShift(config *rest.Config) (bool, error) {
@@ -89,14 +96,25 @@ func (m *openshift) GetImage(imageID api.ImageID) api.ImageConfig {
 }
 
 func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {
+	if m.requiredImages == nil {
+		m.requiredImages = make(map[api.ImageID]struct{})
+	}
 	for _, imgID := range imageID {
 		m.requiredImages[imgID] = struct{}{}
 	}
 }
 
 func (m *openshift) GetRequiredImages() []api.ImageConfig {
+	// OTE discovery runs without KIND_INSTALL_KUBEVIRT or cluster access.
+	m.AddRequiredImage(api.Agnhost, api.FedoraContainerDisk)
 	imageConfigs := []api.ImageConfig{}
-	for imageID := range m.requiredImages {
+	ids := make([]int, 0, len(m.requiredImages))
+	for id := range m.requiredImages {
+		ids = append(ids, int(id))
+	}
+	sort.Ints(ids)
+	for _, id := range ids {
+		imageID := api.ImageID(id)
 		newID, ok := imageIDMapping[imageID]
 		if !ok {
 			newID = imageutils.None

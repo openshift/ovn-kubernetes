@@ -5,10 +5,42 @@ import (
 	"strings"
 	"testing"
 
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+
+	imageutils "k8s.io/kubernetes/test/utils/image"
+
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 )
+
+func TestVirtualizationImageRegistration(t *testing.T) {
+	t.Setenv("KUBE_TEST_REPO", "registry.example.com/e2e")
+	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
+	if err := registerTestImages(ext); err != nil {
+		t.Fatal(err)
+	}
+	if len(ext.Images) != 2 {
+		t.Fatalf("expected agnhost and Fedora, got %d", len(ext.Images))
+	}
+	if ext.Images[1].Registry != "quay.io" {
+		t.Fatal("image discovery must advertise original pullspecs, not mirror locations")
+	}
+	if ext.Images[1].Index != int(imageutils.None) || ext.Images[1].Name != "kubevirt/fedora-with-test-tooling-container-disk" || ext.Images[1].Version != "v1.8.2" {
+		t.Fatalf("Fedora registration must match Origin's approved image: %+v", ext.Images[1])
+	}
+}
+
+func TestFedoraImageUsesConfiguredPullSpec(t *testing.T) {
+	for _, repo := range []string{"", "quay.io/openshift/community-e2e-images", "mirror.example.com:5000/e2e"} {
+		t.Setenv("KUBE_TEST_REPO", repo)
+		got := deploymentconfig.Get().GetImage(api.FedoraContainerDisk).PullSpec
+		want := ocpdeploymentconfig.FedoraContainerDiskImage
+		if got != want {
+			t.Fatalf("repo %q: got %q, want %q", repo, got, want)
+		}
+	}
+}
 
 func TestSplitImagePullSpec(t *testing.T) {
 	t.Parallel()
