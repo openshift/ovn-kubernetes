@@ -318,7 +318,3 @@ func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 	}
 	return o.externalContainerContextProvider.DeleteNetwork(network)
 }
-
-func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
-	panic("not implemented")
-}
