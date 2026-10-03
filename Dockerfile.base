@@ -25,9 +25,9 @@ RUN INSTALL_PKGS="iptables nftables" && \
     [ "${ID}" == "centos" ] && ovsver=$ovsver_okd && ovnver=$ovnver_okd; \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
-	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn$ovnver" "ovn$ovnver-central" "ovn$ovnver-host" && \
+	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn${ovnver}-26.03.1-49.el9fdp" "ovn${ovnver}-central-26.03.1-49.el9fdp" "ovn${ovnver}-host-26.03.1-49.el9fdp" && \
 	dnf clean all && rm -rf /var/cache/* && \
-	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver-vtep%" > /more-pkgs
+	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn${ovnver}-vtep-26.03.1-49.el9fdp%" > /more-pkgs
 
 RUN mkdir -p /var/run/openvswitch && \
     mkdir -p /var/run/ovn && \
