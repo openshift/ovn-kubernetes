@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strings"
 	"time"
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
@@ -538,6 +539,151 @@ func checkConnectionToLoadBalancersFromExternalContainer(f *framework.Framework,
 			Should(Equal(expectedOutput), "Failed to verify that %s", msg)
 	}
 }
+
+// OCP CARRY: validateDNSDefaultRouterLBLocality verifies that each node's gateway router LB
+// for the dns-default service targets only the local dns-default pod, not all pods cluster-wide.
+// This validates the OCP CARRY fix that extends preferLocal to router LB targets for UDN traffic.
+//
+// The fix is in go-controller/pkg/ovn/controller/services/lb_config.go and is removed when
+// upstream internalTrafficPolicy: preferLocal is implemented.
+var _ = Describe("Network Segmentation: UDN DNS locality", feature.NetworkSegmentation, func() {
+	const (
+		udnDNSNADName = "udn-dns-locality"
+	)
+
+	f := wrappedTestFramework("udn-dns-locality")
+	f.SkipNamespaceCreation = true
+
+	BeforeEach(func() {
+		// This test requires the OCP dns-default service in the openshift-dns namespace.
+		// Skip on upstream kind clusters where openshift-dns does not exist.
+		_, err := f.ClientSet.CoreV1().Namespaces().Get(context.TODO(), "openshift-dns", metav1.GetOptions{})
+		if err != nil {
+			Skip("openshift-dns namespace not found; skipping OCP-specific UDN DNS locality test")
+		}
+	})
+
+	It("should route dns-default traffic from a primary UDN pod to the local dns-default pod only", func() {
+		cs := f.ClientSet
+		ovnNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+
+		By("selecting a schedulable node that has a running dns-default pod")
+		dnsPodList, err := cs.CoreV1().Pods("openshift-dns").List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "dns.operator.openshift.io/daemonset-dns=default",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		schedulableNodes, err := e2enode.GetReadySchedulableNodes(context.TODO(), cs)
+		Expect(err).NotTo(HaveOccurred())
+		schedulableSet := make(map[string]bool)
+		for _, n := range schedulableNodes.Items {
+			schedulableSet[n.Name] = true
+		}
+		var targetNode string
+		for _, pod := range dnsPodList.Items {
+			if pod.Status.Phase == kapi.PodRunning && schedulableSet[pod.Spec.NodeName] {
+				targetNode = pod.Spec.NodeName
+				break
+			}
+		}
+		if targetNode == "" {
+			Skip("no schedulable node with a running dns-default pod found; skipping test")
+		}
+
+		By("creating a primary UDN namespace")
+		nadClient, err := nadclient.NewForConfig(f.ClientConfig())
+		Expect(err).NotTo(HaveOccurred())
+		namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{
+			"e2e-framework":           f.BaseName,
+			RequiredUDNNamespaceLabel: "",
+		})
+		f.Namespace = namespace
+		Expect(err).NotTo(HaveOccurred())
+
+		By("creating a primary Layer3 UDN")
+		netConfig := newNetworkAttachmentConfig(networkAttachmentConfigParams{
+			topology:  "layer3",
+			role:      "primary",
+			name:      udnDNSNADName,
+			namespace: namespace.Name,
+			cidr:      "172.16.0.0/16",
+		})
+		_, err = nadClient.NetworkAttachmentDefinitions(namespace.Name).Create(
+			context.Background(),
+			generateNAD(netConfig, cs),
+			metav1.CreateOptions{},
+		)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("creating a UDN pod on " + targetNode)
+		udnPod, err := createPod(f, "udn-dns-client", targetNode, namespace.Name,
+			[]string{"sleep", "3600"}, map[string]string{"app": "udn-dns-client"})
+		Expect(err).NotTo(HaveOccurred())
+		err = e2epod.WaitForPodRunningInNamespace(context.TODO(), cs, udnPod)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("verifying DNS works from the UDN pod")
+		nslookupOut, _, err := ExecShellInPodWithFullOutput(f, namespace.Name, udnPod.Name,
+			"nslookup kubernetes.default.svc.cluster.local")
+		Expect(err).NotTo(HaveOccurred(), "nslookup should succeed from UDN pod")
+		Expect(nslookupOut).To(ContainSubstring("Address"), "expected valid DNS response")
+
+		By("finding the dns-default pod on " + targetNode)
+		dnsPods, err := cs.CoreV1().Pods("openshift-dns").List(context.TODO(), metav1.ListOptions{
+			LabelSelector: "dns.operator.openshift.io/daemonset-dns=default",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		var localDNSPodIP string
+		for _, pod := range dnsPods.Items {
+			if pod.Spec.NodeName == targetNode && pod.Status.Phase == kapi.PodRunning {
+				localDNSPodIP = pod.Status.PodIP
+				break
+			}
+		}
+		Expect(localDNSPodIP).NotTo(BeEmpty(), "expected a running dns-default pod on node "+targetNode)
+
+		By("collecting dns-default pod IPs on other nodes")
+		var remoteDNSPodIPs []string
+		for _, pod := range dnsPods.Items {
+			if pod.Spec.NodeName != targetNode && pod.Status.Phase == kapi.PodRunning && pod.Status.PodIP != "" {
+				remoteDNSPodIPs = append(remoteDNSPodIPs, pod.Status.PodIP)
+			}
+		}
+
+		By("verifying the GR router LB for dns-default on " + targetNode + " targets only the local pod")
+		// The OVN NB router LB for dns-default on each node should have exactly 1 backend
+		// (the local dns-default pod IP) — not all dns-default pods cluster-wide.
+		// LB name format: Service_openshift-dns/dns-default_*_router+switch_<node>
+		ovnNBPod, err := findOVNNBDBPod(cs, ovnNamespace)
+		Expect(err).NotTo(HaveOccurred())
+		lbOutput, _, err := ExecCommandInContainerWithFullOutput(f, ovnNamespace, ovnNBPod.Name, "nb-ovsdb",
+			"ovn-nbctl", "--data=bare", "--no-heading", "--columns=name,vips",
+			"find", "Load_Balancer",
+			fmt.Sprintf(`external_ids:"k8s.ovn.org/owner"="openshift-dns/dns-default"`),
+		)
+		Expect(err).NotTo(HaveOccurred())
+
+		foundMatch := false
+		for _, line := range strings.Split(lbOutput, "\n") {
+			if line == "" {
+				continue
+			}
+			// Only check the per-node router LBs (names containing targetNode and "router")
+			if !strings.Contains(line, targetNode) || !strings.Contains(line, "router") {
+				continue
+			}
+			foundMatch = true
+			// Verify local dns-default pod IP is present
+			Expect(line).To(ContainSubstring(localDNSPodIP),
+				"router LB on node %s should target local dns-default pod %s", targetNode, localDNSPodIP)
+			// Verify remote dns-default pod IPs are NOT present
+			for _, remoteIP := range remoteDNSPodIPs {
+				Expect(line).NotTo(ContainSubstring(remoteIP),
+					"router LB on node %s should not target remote dns-default pod %s", targetNode, remoteIP)
+			}
+		}
+		Expect(foundMatch).To(BeTrue(), "expected at least one router LB line for node %s in dns-default LB output", targetNode)
+	})
+})
 
 func filterLoadBalancerIngressByIPFamily(f *framework.Framework, service *v1.Service) []v1.LoadBalancerIngress {
 	GinkgoHelper()
