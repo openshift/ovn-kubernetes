@@ -239,6 +239,7 @@ var (
 		Mode:                      types.NodeModeFull,
 		DPUNodeLeaseRenewInterval: 10,
 		DPUNodeLeaseDuration:      40,
+		StartupReadinessTimeout:   300,
 	}
 
 	ClusterManager = ClusterManagerConfig{
@@ -642,6 +643,11 @@ type OvnKubeNodeConfig struct {
 	MgmtPortDPResourceName    string `gcfg:"mgmt-port-dp-resource-name"`
 	DPUNodeLeaseRenewInterval int    `gcfg:"dpu-node-lease-renew-interval"`
 	DPUNodeLeaseDuration      int    `gcfg:"dpu-node-lease-duration"`
+	// StartupReadinessTimeout is how long, in seconds, ovnkube-node waits at startup for its
+	// gateway and management port to be created in OVN. It may need increasing on clusters with
+	// many user-defined networks or network policies, where ovnkube-controller syncs all of them
+	// before it creates this node's gateway and management port.
+	StartupReadinessTimeout int `gcfg:"startup-readiness-timeout"`
 }
 
 // ClusterManagerConfig holds configuration for ovnkube-cluster-manager
@@ -1854,6 +1860,14 @@ var OvnKubeNodeFlags = []cli.Flag{
 		Usage:       "Lease duration in seconds before the DPU is considered unhealthy",
 		Value:       OvnKubeNode.DPUNodeLeaseDuration,
 		Destination: &cliConfig.OvnKubeNode.DPUNodeLeaseDuration,
+	},
+	&cli.IntFlag{
+		Name: "startup-readiness-timeout",
+		Usage: "Time in seconds ovnkube-node waits at startup for its gateway and management port " +
+			"to be created in OVN, may be useful to increase for clusters with many user-defined " +
+			"networks or network policies.",
+		Value:       OvnKubeNode.StartupReadinessTimeout,
+		Destination: &cliConfig.OvnKubeNode.StartupReadinessTimeout,
 	},
 }
 
@@ -3217,6 +3231,9 @@ func buildOvnKubeNodeConfig(cli, file *config) error {
 	if OvnKubeNode.DPUNodeLeaseDuration <= OvnKubeNode.DPUNodeLeaseRenewInterval {
 		return fmt.Errorf("invalid dpu-node-lease-duration '%d'. must be > dpu-node-lease-renew-interval '%d'",
 			OvnKubeNode.DPUNodeLeaseDuration, OvnKubeNode.DPUNodeLeaseRenewInterval)
+	}
+	if OvnKubeNode.StartupReadinessTimeout <= 0 {
+		return fmt.Errorf("invalid startup-readiness-timeout '%d'. must be > 0", OvnKubeNode.StartupReadinessTimeout)
 	}
 
 	// Warn the user if both MgmtPortNetdev and MgmtPortDPResourceName are specified since they

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 )
 
 type startupWaiter struct {
@@ -32,7 +34,7 @@ func newStartupWaiterWithTimeout(timeout time.Duration) *startupWaiter {
 }
 
 func newStartupWaiter() *startupWaiter {
-	return newStartupWaiterWithTimeout(300 * time.Second)
+	return newStartupWaiterWithTimeout(time.Duration(config.OvnKubeNode.StartupReadinessTimeout) * time.Second)
 }
 
 func (w *startupWaiter) AddWait(waitFn waitFunc, postFn postWaitFunc) {
