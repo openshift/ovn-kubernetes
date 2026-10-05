@@ -1234,8 +1234,10 @@ install_kubevirt() {
     if [ "$(kubectl get kubevirts -n kubevirt kubevirt -ojsonpath='{.status.phase}')" != "Deployed" ]; then
       local kubevirt_release_url=$(get_kubevirt_release_url "$KUBEVIRT_VERSION")
       echo "Deploying Kubevirt from $kubevirt_release_url"
-      kubectl apply -f "${kubevirt_release_url}/kubevirt-operator.yaml"
-      kubectl apply -f "${kubevirt_release_url}/kubevirt-cr.yaml"
+      # Server-side apply avoids kubectl.kubernetes.io/last-applied-configuration.
+      # That annotation duplicates the KubeVirt CRD and exceeds the 256KiB annotation limit.
+      kubectl apply --server-side --force-conflicts -f "${kubevirt_release_url}/kubevirt-operator.yaml"
+      kubectl apply --server-side --force-conflicts -f "${kubevirt_release_url}/kubevirt-cr.yaml"
       if ! is_nested_virt_enabled; then
         kubectl -n kubevirt patch kubevirt kubevirt --type=merge --patch '{"spec":{"configuration":{"developerConfiguration":{"useEmulation":true}}}}'
       fi
