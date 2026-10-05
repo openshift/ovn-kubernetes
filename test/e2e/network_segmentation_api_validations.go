@@ -33,7 +33,7 @@ var _ = Describe("Network Segmentation: API validations", feature.NetworkSegment
 		Entry("ClusterUserDefinedNetwork, localnet, invalid subnets", testscenariocudn.LocalnetInvalidSubnets),
 		Entry("ClusterUserDefinedNetwork, localnet, invalid mtu", testscenariocudn.LocalnetInvalidMTU),
 		Entry("ClusterUserDefinedNetwork, localnet, invalid vlan", testscenariocudn.LocalnetInvalidVLAN),
-		Entry("ClusterUserDefinedNetwork, localnet, invalid macSecurity", testscenariocudn.LocalnetInvalidMACSecurity),
+		Entry("ClusterUserDefinedNetwork, localnet, invalid macSecurity", feature.MACSecurity, testscenariocudn.LocalnetInvalidMACSecurity),
 		Entry("ClusterUserDefinedNetwork, layer2", testscenariocudn.Layer2CUDNInvalid),
 		Entry("ClusterUserDefinedNetwork, evpn", testscenariocudn.EVPNCUDNInvalid),
 		Entry("UserDefinedNetwork, layer2", testscenariocudn.Layer2UDNInvalid),
@@ -77,9 +77,9 @@ var _ = Describe("Network Segmentation: API validations", feature.NetworkSegment
 				Expect(stderr).To(ContainSubstring(s.ExpectedErr))
 			}
 		},
-		Entry("ClusterUserDefinedNetwork, localnet, mac-security", testscenariocudn.LocalnetUpdatesRejected),
-		Entry("ClusterUserDefinedNetwork, layer2, mac-security", testscenariocudn.Layer2CUDNUpdatesRejected),
-		Entry("UserDefinedNetwork, layer2, mac-security", testscenariocudn.Layer2UDNUpdatesRejected),
+		Entry("ClusterUserDefinedNetwork, localnet, mac-security", feature.MACSecurity, testscenariocudn.LocalnetUpdatesRejected),
+		Entry("ClusterUserDefinedNetwork, layer2, mac-security", feature.MACSecurity, testscenariocudn.Layer2CUDNUpdatesRejected),
+		Entry("UserDefinedNetwork, layer2, mac-security", feature.MACSecurity, testscenariocudn.Layer2UDNUpdatesRejected),
 	)
 })
 

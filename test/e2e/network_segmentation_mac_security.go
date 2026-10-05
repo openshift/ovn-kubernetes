@@ -28,7 +28,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 )
 
-var _ = Describe("Network Segmentation: MAC security", feature.NetworkSegmentation, func() {
+var _ = Describe("Network Segmentation: MAC security", feature.NetworkSegmentation, feature.MACSecurity, func() {
 	f := wrappedTestFramework("network-segmentation-mac-sec")
 
 	// test cases for layer2 secondary network

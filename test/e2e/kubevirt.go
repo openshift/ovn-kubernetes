@@ -2533,7 +2533,7 @@ chpasswd: { expire: False }
 		)
 	})
 
-	DescribeTable("user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration",
+	DescribeTable("user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration", feature.MACSecurity,
 		func(topology udnv1.NetworkTopology) {
 			const (
 				serverCIDRv4 = "10.10.10.20/24"
