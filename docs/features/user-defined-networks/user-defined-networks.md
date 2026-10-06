@@ -160,6 +160,15 @@ See the [api-specification-docs] for information on each of the fields
 
 ### OVN-Kubernetes Implementation Details
 
+OVN-Kubernetes copies UDN and CUDN annotations to the NADs it creates, except
+for annotations with the `k8s.ovn.org` prefix. On update, annotations present
+on the UDN or CUDN take precedence, while annotations added only to a NAD are
+preserved. Annotation reconciliation uses server-side apply: removing a
+previously copied annotation from a UDN or CUDN removes it from its NADs unless
+another field manager also owns the key. When upgrading existing NADs, current
+parent annotations are adopted, but annotations already absent from the parent
+cannot be distinguished from NAD-local annotations and are preserved.
+
 `UserDefinedNetworks` is an opinionated implementation
 of multi-networking in Kubernetes. There are two types of
 UserDefinedNetworks:

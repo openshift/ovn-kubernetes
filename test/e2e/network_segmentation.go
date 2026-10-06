@@ -30,6 +30,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	v1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -41,6 +42,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/util/podutils"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2ekubectl "k8s.io/kubernetes/test/e2e/framework/kubectl"
@@ -1512,6 +1514,18 @@ var _ = Describe("Network Segmentation", feature.NetworkSegmentation, func() {
 				assertL2SecondaryNetAttachDefManifest(nadClient, defaultNetNamespace.Name, testUdnName, testUdnUID)
 			})
 
+			It("should preserve NAD annotations when UDN annotations change", func() {
+				checkNADAnnotationReconciliation(nadClient,
+					f.DynamicClient.Resource(udnGVR).Namespace(defaultNetNamespace.Name),
+					testUdnName, []string{defaultNetNamespace.Name})
+			})
+
+			DescribeTable("should migrate annotations written by the old NAD update path", func(interrupted bool) {
+				checkNADAnnotationMigration(cs, nadClient,
+					f.DynamicClient.Resource(udnGVR).Namespace(defaultNetNamespace.Name),
+					testUdnName, []string{defaultNetNamespace.Name}, interrupted)
+			}, Entry("when apply succeeds", false), Entry("when the first apply fails", true))
+
 			It("should delete NetworkAttachmentDefinition when UserDefinedNetwork is deleted", func() {
 				By("delete UserDefinedNetwork")
 				_, err := e2ekubectl.RunKubectl(defaultNetNamespace.Name, "delete", userDefinedNetworkResource, testUdnName)
@@ -1704,6 +1718,61 @@ spec:
 		}))
 	})
 
+	DescribeTable("should manage annotations present when a network is created", func(clusterScoped bool) {
+		name := randomNetworkMetaName()
+		networkSpec := map[string]any{
+			"topology": "Layer2",
+			"layer2":   map[string]any{"role": "Secondary", "subnets": []string{"10.100.0.0/16"}},
+		}
+		obj := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "k8s.ovn.org/v1",
+			"kind":       "UserDefinedNetwork",
+			"metadata": map[string]any{
+				"name": name,
+				"annotations": map[string]any{
+					"example.com/initial": "parent-value",
+					"k8s.ovn.org/ignore":  "parent-value",
+				},
+			},
+			"spec": networkSpec,
+		}}
+		var parent dynamic.ResourceInterface = f.DynamicClient.Resource(udnGVR).Namespace(f.Namespace.Name)
+		if clusterScoped {
+			parent = f.DynamicClient.Resource(clusterUDNGVR)
+			obj.SetKind("ClusterUserDefinedNetwork")
+			obj.Object["spec"] = map[string]any{
+				"network": networkSpec,
+				"namespaceSelector": map[string]any{
+					"matchLabels": map[string]any{"kubernetes.io/metadata.name": f.Namespace.Name},
+				},
+			}
+		}
+		_, err := parent.Create(context.Background(), obj, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred(), "create the annotated network")
+		DeferCleanup(func() {
+			Expect(parent.Delete(context.Background(), name, metav1.DeleteOptions{})).To(Succeed(), "delete the annotated network")
+			Eventually(func() bool {
+				_, err := parent.Get(context.Background(), name, metav1.GetOptions{})
+				return kerrors.IsNotFound(err)
+			}, time.Minute, time.Second).Should(BeTrue(), "wait for network deletion")
+		})
+		Eventually(networkReadyFunc(parent, name), 15*time.Second, time.Second).Should(Succeed())
+		nads := nadClient.NetworkAttachmentDefinitions(f.Namespace.Name)
+		nad, err := nads.Get(context.Background(), name, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred(), "get the generated NAD")
+		Expect(nad.Annotations).To(HaveKeyWithValue("example.com/initial", "parent-value"), "copy the initial parent annotation")
+		Expect(nad.Annotations).NotTo(HaveKey("k8s.ovn.org/ignore"), "exclude reserved parent annotations")
+
+		_, err = parent.Patch(context.Background(), name, types.MergePatchType,
+			[]byte(`{"metadata":{"annotations":null}}`), metav1.PatchOptions{})
+		Expect(err).NotTo(HaveOccurred(), "remove the initial parent annotations")
+		Eventually(func(g Gomega) {
+			nad, err := nads.Get(context.Background(), name, metav1.GetOptions{})
+			g.Expect(err).NotTo(HaveOccurred(), "get the generated NAD")
+			g.Expect(nad.Annotations).NotTo(HaveKey("example.com/initial"), "remove the initially copied annotation")
+		}, 15*time.Second, time.Second).Should(Succeed())
+	}, Entry("UDN", false), Entry("CUDN", true))
+
 	Context("ClusterUserDefinedNetwork CRD Controller", func() {
 		const clusterUserDefinedNetworkResource = "clusteruserdefinednetwork"
 
@@ -1775,6 +1844,16 @@ spec:
 				assertClusterNADManifest(nadClient, testNsName, testClusterUdnName, testUdnUID)
 			}
 		})
+
+		It("should preserve namespace-specific NAD annotations when CUDN annotations change", func() {
+			checkNADAnnotationReconciliation(nadClient, f.DynamicClient.Resource(clusterUDNGVR),
+				testClusterUdnName, testTenantNamespaces)
+		})
+
+		DescribeTable("should migrate annotations written by the old NAD update path in each namespace", func(interrupted bool) {
+			checkNADAnnotationMigration(cs, nadClient, f.DynamicClient.Resource(clusterUDNGVR),
+				testClusterUdnName, testTenantNamespaces, interrupted)
+		}, Entry("when apply succeeds", false), Entry("when the first apply fails", true))
 
 		It("when CR is deleted, should delete all managed NAD in each target namespace", func() {
 			By("delete test CR")
@@ -3093,6 +3172,257 @@ func applyManifest(namespace, manifest string) (func(), error) {
 		return cleanup, err
 	}
 	return cleanup, nil
+}
+
+const nadAnnotationRequestTimeout = 5 * time.Second
+
+func checkNADAnnotationReconciliation(nads nadclient.K8sCniCncfIoV1Interface, parent dynamic.ResourceInterface, name string, namespaces []string) {
+	GinkgoHelper()
+	By("adding namespace-specific NAD annotations")
+	for _, namespace := range namespaces {
+		data, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{
+			"example.com/local": namespace, "example.com/shared": "nad-value",
+		}}})
+		Expect(err).NotTo(HaveOccurred(), "marshal local annotations in %s", namespace)
+		ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+		_, err = nads.NetworkAttachmentDefinitions(namespace).Patch(ctx, name,
+			types.MergePatchType, data, metav1.PatchOptions{})
+		cancel()
+		Expect(err).NotTo(HaveOccurred(), "annotate NAD %s/%s", namespace, name)
+
+		data, err = json.Marshal(map[string]any{
+			"apiVersion": nadapi.SchemeGroupVersion.String(),
+			"kind":       "NetworkAttachmentDefinition",
+			"metadata": map[string]any{"name": name, "annotations": map[string]string{
+				"example.com/coowned": "shared-value",
+			}},
+		})
+		Expect(err).NotTo(HaveOccurred(), "marshal a shared annotation in %s", namespace)
+		ctx, cancel = context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+		_, err = nads.NetworkAttachmentDefinitions(namespace).Patch(ctx, name,
+			types.ApplyPatchType, data, metav1.PatchOptions{FieldManager: "another-nad-controller"})
+		cancel()
+		Expect(err).NotTo(HaveOccurred(), "apply a shared annotation to NAD %s/%s", namespace, name)
+	}
+
+	checkNADAnnotationChanges(nads, parent, name, namespaces,
+		map[string]string{"example.com/coowned": "shared-value"}, []nadAnnotationChange{
+			{
+				description: "adding parent annotations that take precedence",
+				patch:       `{"metadata":{"annotations":{"example.com/shared":"parent-value","example.com/remove":"parent-only","example.com/coowned":"shared-value"}}}`,
+				present:     map[string]string{"example.com/shared": "parent-value", "example.com/remove": "parent-only"},
+			},
+			{
+				description: "changing one parent annotation and removing another",
+				patch:       `{"metadata":{"annotations":{"example.com/shared":"updated-parent-value","example.com/remove":null}}}`,
+				present:     map[string]string{"example.com/shared": "updated-parent-value"},
+				absent:      []string{"example.com/remove"},
+			},
+			{
+				description: "removing all parent annotations",
+				patch:       `{"metadata":{"annotations":null}}`,
+				absent:      []string{"example.com/shared", "example.com/remove"},
+			},
+		})
+}
+
+func checkNADAnnotationMigration(cs clientset.Interface, nads nadclient.K8sCniCncfIoV1Interface,
+	parent dynamic.ResourceInterface, name string, namespaces []string, interrupted bool) {
+	GinkgoHelper()
+	By("writing annotations with the old Update path before the parent specifies them")
+	for _, namespace := range namespaces {
+		err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+			defer cancel()
+
+			nad, err := nads.NetworkAttachmentDefinitions(namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+			if nad.Annotations == nil {
+				nad.Annotations = make(map[string]string)
+			}
+			nad.Annotations["example.com/unchanged"] = "same-value"
+			nad.Annotations["example.com/changed"] = "old-value"
+			nad.Annotations["example.com/historical"] = "removed-before-upgrade"
+			nad.Annotations["example.com/local"] = namespace
+			_, err = nads.NetworkAttachmentDefinitions(namespace).Update(ctx, nad,
+				metav1.UpdateOptions{FieldManager: "legacy-udn-controller"})
+			return err
+		})
+		Expect(err).NotTo(HaveOccurred(), "write legacy annotations to NAD %s/%s", namespace, name)
+	}
+
+	if interrupted {
+		rejectNADAnnotationValue(cs, nads, name, namespaces)
+		By("rejecting the first apply after ownership has transferred")
+		ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+		_, err := parent.Patch(ctx, name, types.MergePatchType,
+			[]byte(`{"metadata":{"annotations":{"example.com/unchanged":"same-value","example.com/changed":"parent-value"}}}`), metav1.PatchOptions{})
+		cancel()
+		Expect(err).NotTo(HaveOccurred(), "set parent annotations before the failed apply")
+		Eventually(func(g Gomega) {
+			ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+			defer cancel()
+
+			obj, err := parent.Get(ctx, name, metav1.GetOptions{})
+			g.Expect(err).NotTo(HaveOccurred())
+			conditions, _, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(conditions).To(ContainElement(And(
+				HaveKeyWithValue("type", "NetworkCreated"),
+				HaveKeyWithValue("status", "False"),
+				HaveKeyWithValue("message", WithTransform(func(message string) int {
+					return strings.Count(message, "injected NAD annotation apply failure")
+				}, Equal(len(namespaces)))),
+			)))
+		}, 15*time.Second, time.Second).Should(Succeed(), "report the injected apply failure")
+		for _, namespace := range namespaces {
+			ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+			nad, err := nads.NetworkAttachmentDefinitions(namespace).Get(ctx, name, metav1.GetOptions{})
+			cancel()
+			Expect(err).NotTo(HaveOccurred(), "get NAD after the failed apply in %s", namespace)
+			Expect(nad.Annotations).To(HaveKeyWithValue("example.com/unchanged", "same-value"))
+			Expect(nad.Annotations).To(HaveKeyWithValue("example.com/changed", "old-value"), "preserve values until apply succeeds")
+		}
+
+		checkNADAnnotationChanges(nads, parent, name, namespaces,
+			map[string]string{"example.com/historical": "removed-before-upgrade"}, []nadAnnotationChange{
+				{
+					description: "removing parent annotations after the failed first apply",
+					patch:       `{"metadata":{"annotations":null}}`,
+					absent:      []string{"example.com/unchanged", "example.com/changed"},
+				},
+			})
+		Eventually(networkReadyFunc(parent, name), 15*time.Second, time.Second).Should(Succeed(), "recover after the failed apply")
+		return
+	}
+
+	checkNADAnnotationChanges(nads, parent, name, namespaces,
+		map[string]string{"example.com/historical": "removed-before-upgrade"}, []nadAnnotationChange{
+			{
+				description: "adopting unchanged annotations and overriding changed annotations",
+				patch:       `{"metadata":{"annotations":{"example.com/unchanged":"same-value","example.com/changed":"parent-value"}}}`,
+				present:     map[string]string{"example.com/unchanged": "same-value", "example.com/changed": "parent-value"},
+			},
+			{
+				description: "removing an annotation adopted without a value change",
+				patch:       `{"metadata":{"annotations":{"example.com/unchanged":null}}}`,
+				present:     map[string]string{"example.com/changed": "parent-value"},
+				absent:      []string{"example.com/unchanged"},
+			},
+			{
+				description: "removing the last adopted annotation",
+				patch:       `{"metadata":{"annotations":null}}`,
+				absent:      []string{"example.com/unchanged", "example.com/changed"},
+			},
+		})
+}
+
+// Reject value changes while allowing the ownership-only migration patch.
+// Keeping the policy active during recovery proves removal does not depend on
+// completing the original apply before the parent changes.
+func rejectNADAnnotationValue(cs clientset.Interface, nads nadclient.K8sCniCncfIoV1Interface, name string, namespaces []string) {
+	GinkgoHelper()
+	policyName := randomNetworkMetaName()
+	failurePolicy := admissionv1.Fail
+	policy := &admissionv1.ValidatingAdmissionPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: policyName},
+		Spec: admissionv1.ValidatingAdmissionPolicySpec{
+			FailurePolicy: &failurePolicy,
+			MatchConstraints: &admissionv1.MatchResources{
+				NamespaceSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
+					Key: "kubernetes.io/metadata.name", Operator: metav1.LabelSelectorOpIn, Values: namespaces,
+				}}},
+				ResourceRules: []admissionv1.NamedRuleWithOperations{{RuleWithOperations: admissionv1.RuleWithOperations{
+					Operations: []admissionv1.OperationType{admissionv1.Update},
+					Rule: admissionv1.Rule{
+						APIGroups: []string{nadapi.SchemeGroupVersion.Group}, APIVersions: []string{nadapi.SchemeGroupVersion.Version},
+						Resources: []string{"network-attachment-definitions"},
+					},
+				}}},
+			},
+			Validations: []admissionv1.Validation{{
+				Expression: "!has(object.metadata.annotations) || !('example.com/changed' in object.metadata.annotations) || object.metadata.annotations['example.com/changed'] != 'parent-value'",
+				Message:    "injected NAD annotation apply failure",
+			}},
+		},
+	}
+	policies := cs.AdmissionregistrationV1().ValidatingAdmissionPolicies()
+	ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+	_, err := policies.Create(ctx, policy, metav1.CreateOptions{})
+	cancel()
+	Expect(err).NotTo(HaveOccurred(), "create the apply failure policy")
+	DeferCleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+		defer cancel()
+
+		Expect(policies.Delete(ctx, policyName, metav1.DeleteOptions{})).To(Succeed())
+	})
+	bindings := cs.AdmissionregistrationV1().ValidatingAdmissionPolicyBindings()
+	ctx, cancel = context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+	_, err = bindings.Create(ctx, &admissionv1.ValidatingAdmissionPolicyBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: policyName},
+		Spec: admissionv1.ValidatingAdmissionPolicyBindingSpec{
+			PolicyName: policyName, ValidationActions: []admissionv1.ValidationAction{admissionv1.Deny},
+		},
+	}, metav1.CreateOptions{})
+	cancel()
+	Expect(err).NotTo(HaveOccurred(), "bind the apply failure policy")
+	DeferCleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+		defer cancel()
+
+		Expect(bindings.Delete(ctx, policyName, metav1.DeleteOptions{})).To(Succeed())
+	})
+	for _, namespace := range namespaces {
+		Eventually(func(g Gomega) {
+			ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+			defer cancel()
+
+			_, err := nads.NetworkAttachmentDefinitions(namespace).Patch(ctx, name, types.MergePatchType,
+				[]byte(`{"metadata":{"annotations":{"example.com/changed":"parent-value"}}}`), metav1.PatchOptions{DryRun: []string{metav1.DryRunAll}})
+			g.Expect(err).To(MatchError(ContainSubstring("injected NAD annotation apply failure")))
+		}, 15*time.Second, time.Second).Should(Succeed())
+	}
+}
+
+type nadAnnotationChange struct {
+	description string
+	patch       string
+	present     map[string]string
+	absent      []string
+}
+
+func checkNADAnnotationChanges(nads nadclient.K8sCniCncfIoV1Interface, parent dynamic.ResourceInterface, name string, namespaces []string,
+	preserved map[string]string, changes []nadAnnotationChange) {
+	GinkgoHelper()
+	for _, phase := range changes {
+		By(phase.description)
+		ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+		_, err := parent.Patch(ctx, name, types.MergePatchType, []byte(phase.patch), metav1.PatchOptions{})
+		cancel()
+		Expect(err).NotTo(HaveOccurred(), "update parent %s: %s", name, phase.description)
+		for _, namespace := range namespaces {
+			Eventually(func(g Gomega) {
+				ctx, cancel := context.WithTimeout(context.Background(), nadAnnotationRequestTimeout)
+				defer cancel()
+
+				nad, err := nads.NetworkAttachmentDefinitions(namespace).Get(ctx, name, metav1.GetOptions{})
+				g.Expect(err).NotTo(HaveOccurred(), "get NAD %s/%s", namespace, name)
+				g.Expect(nad.Annotations).To(HaveKeyWithValue("example.com/local", namespace), "preserve local annotation in %s", namespace)
+				for key, value := range preserved {
+					g.Expect(nad.Annotations).To(HaveKeyWithValue(key, value), "preserve annotation %s in %s", key, namespace)
+				}
+				for key, value := range phase.present {
+					g.Expect(nad.Annotations).To(HaveKeyWithValue(key, value), "adopt parent annotation %s in %s", key, namespace)
+				}
+				for _, key := range phase.absent {
+					g.Expect(nad.Annotations).NotTo(HaveKey(key), "remove adopted annotation %s in %s", key, namespace)
+				}
+			}, 15*time.Second, time.Second).Should(Succeed(), "%s in %s", phase.description, namespace)
+		}
+	}
 }
 
 func assertL2SecondaryNetAttachDefManifest(nadClient nadclient.K8sCniCncfIoV1Interface, namespace, udnName, udnUID string) {
