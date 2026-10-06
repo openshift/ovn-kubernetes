@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+//
 // base.go provides shared infrastructure for platforms that manage external
 // containers on a remote host via SSH and podman (baremetal, AWS, Azure, GCP).
 // It implements the common InfraProvider operations:  host networked container
