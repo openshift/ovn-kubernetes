@@ -143,7 +143,6 @@ conntrack-zone=64321
 cluster-subnets=10.132.0.0/14/23
 lflow-cache-limit=1000
 lflow-cache-limit-kb=100000
-zone=global
 
 [kubernetes]
 kubeconfig=/path/to/kubeconfig
@@ -193,20 +192,18 @@ conf-dir=/etc/cni/net.d22
 plugin=ovn-k8s-cni-overlay22
 
 [ovnnorth]
-client-privkey=/path/to/nb-client-private.key
-client-cert=/path/to/nb-client.crt
-client-cacert=/path/to/nb-client-ca.crt
-cert-common-name=cfg-nbcommonname
 run-dir=/custom/ovn/run/
 db-location=/custom/ovn/nb.db
 
 [ovnsouth]
-client-privkey=/path/to/sb-client-private.key
-client-cert=/path/to/sb-client.crt
-client-cacert=/path/to/sb-client-ca.crt
-cert-common-name=cfg-sbcommonname
 run-dir=/custom/ovn/run/
 db-location=/custom/ovn/sb.db
+
+[egressip-healthcheck-tls]
+client-privkey=/path/to/nb-client-private.key
+client-cert=/path/to/nb-client.crt
+client-cacert=/path/to/nb-client-ca.crt
+cert-common-name=cfg-nbcommonname
 
 [ovspaths]
 run-dir=/custom/ovs/run/
@@ -240,6 +237,7 @@ enable-multi-network=false
 enable-multi-networkpolicy=false
 enable-network-segmentation=false
 enable-network-connect=false
+enable-uplink=false
 enable-preconfigured-udn-addresses=false
 enable-route-advertisements=false
 advertised-udn-isolation-mode=strict
@@ -339,13 +337,13 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.128.0.0/14"), 23},
 			}))
-			gomega.Expect(Default.Zone).To(gomega.Equal("global"))
 			gomega.Expect(IPv4Mode).To(gomega.BeTrue())
 			gomega.Expect(IPv6Mode).To(gomega.BeFalse())
 			gomega.Expect(HybridOverlay.Enabled).To(gomega.BeFalse())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeFull))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal(""))
 			gomega.Expect(OvnKubeNode.MgmtPortDPResourceName).To(gomega.Equal(""))
+			gomega.Expect(OvnKubeNode.RoutingTableIDStart).To(gomega.Equal(DefaultRoutingTableIDStart))
 			gomega.Expect(Gateway.RouterSubnet).To(gomega.Equal(""))
 			gomega.Expect(Gateway.SingleNode).To(gomega.BeFalse())
 			gomega.Expect(Gateway.DisableForwarding).To(gomega.BeFalse())
@@ -355,6 +353,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkConnect).To(gomega.BeFalse())
+			gomega.Expect(OVNKubernetesFeature.EnableUplink).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnablePreconfiguredUDNAddresses).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetworkPolicy).To(gomega.BeFalse())
@@ -363,13 +362,9 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnablePersistentIPs).To(gomega.BeFalse())
 			gomega.Expect(OVNKubernetesFeature.AdvertisedUDNIsolationMode).To(gomega.Equal(AdvertisedUDNIsolationModeStrict))
 
-			for _, a := range []OvnAuthConfig{OvnNorth, OvnSouth} {
-				gomega.Expect(a.PrivKey).To(gomega.Equal(""))
-				gomega.Expect(a.Cert).To(gomega.Equal(""))
-				gomega.Expect(a.CACert).To(gomega.Equal(""))
-				gomega.Expect(a.GetURL()).To(gomega.MatchRegexp("unix:/var/run/ovn/ovn[sn]b_db.sock"))
-				gomega.Expect(a.CertCommonName).To(gomega.Equal(""))
-			}
+			gomega.Expect(OvnNorth.GetURL()).To(gomega.Equal("unix:/var/run/ovn/ovnnb_db.sock"))
+			gomega.Expect(OvnSouth.GetURL()).To(gomega.Equal("unix:/var/run/ovn/ovnsb_db.sock"))
+			gomega.Expect(EgressIPHealthCheckTLS).To(gomega.Equal(EgressIPHealthCheckTLSConfig{}))
 			return nil
 		}
 		err := app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
@@ -398,6 +393,41 @@ var _ = Describe("Config Operations", func() {
 		err2 := app.Run([]string{app.Name})
 		gomega.Expect(err2).NotTo(gomega.HaveOccurred())
 
+	})
+
+	It("parses routing table ID start from config file", func() {
+		err := os.WriteFile(cfgFile.Name(), []byte(`[ovnkubenode]
+routing-table-id-start=2002
+`), 0o644)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		app.Action = func(ctx *cli.Context) error {
+			cfgPath, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cfgPath).To(gomega.Equal(cfgFile.Name()))
+			gomega.Expect(OvnKubeNode.RoutingTableIDStart).To(gomega.Equal(2002))
+			return nil
+		}
+
+		err = app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+	})
+
+	It("parses routing table ID start from CLI", func() {
+		app.Action = func(ctx *cli.Context) error {
+			cfgPath, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(cfgPath).To(gomega.Equal(cfgFile.Name()))
+			gomega.Expect(OvnKubeNode.RoutingTableIDStart).To(gomega.Equal(2003))
+			return nil
+		}
+
+		err := app.Run([]string{
+			app.Name,
+			"--config-file=" + cfgFile.Name(),
+			"--ovnkube-node-routing-table-id-start=2003",
+		})
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
 	It("uses environment variables", func() {
@@ -471,13 +501,13 @@ var _ = Describe("Config Operations", func() {
 			"enable-multi-networkpolicy=true",
 			"enable-network-segmentation=true",
 			"enable-network-connect=true",
+			"enable-uplink=true",
 			"enable-preconfigured-udn-addresses=true",
 			"enable-route-advertisements=true",
 			"advertised-udn-isolation-mode=loose",
 			"enable-multi-external-gateway=true",
 			"enable-admin-network-policy=true",
 			"enable-persistent-ips=true",
-			"zone=foo",
 		)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
@@ -518,8 +548,6 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.132.0.0/14"), 23},
 			}))
-			gomega.Expect(Default.Zone).To(gomega.Equal("foo"))
-
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("1.1.1.1:8080"))
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("1.1.1.2:8081"))
 			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.BeTrue())
@@ -535,18 +563,14 @@ var _ = Describe("Config Operations", func() {
 				"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
 			}))
 
-			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
-			gomega.Expect(OvnNorth.Cert).To(gomega.Equal("/path/to/nb-client.crt"))
-			gomega.Expect(OvnNorth.CACert).To(gomega.Equal("/path/to/nb-client-ca.crt"))
-			gomega.Expect(OvnNorth.CertCommonName).To(gomega.Equal("cfg-nbcommonname"))
+			gomega.Expect(EgressIPHealthCheckTLS.PrivKey).To(gomega.Equal("/path/to/nb-client-private.key"))
+			gomega.Expect(EgressIPHealthCheckTLS.Cert).To(gomega.Equal("/path/to/nb-client.crt"))
+			gomega.Expect(EgressIPHealthCheckTLS.CACert).To(gomega.Equal("/path/to/nb-client-ca.crt"))
+			gomega.Expect(EgressIPHealthCheckTLS.CertCommonName).To(gomega.Equal("cfg-nbcommonname"))
 			gomega.Expect(OvnNorth.RunDir).To(gomega.Equal("/custom/ovn/run/"))
 			gomega.Expect(OvnNorth.DbLocation).To(gomega.Equal("/custom/ovn/nb.db"))
 			gomega.Expect(OvnNorth.GetURL()).To(gomega.Equal("unix:/custom/ovn/run/ovnnb_db.sock"))
 
-			gomega.Expect(OvnSouth.PrivKey).To(gomega.Equal("/path/to/sb-client-private.key"))
-			gomega.Expect(OvnSouth.Cert).To(gomega.Equal("/path/to/sb-client.crt"))
-			gomega.Expect(OvnSouth.CACert).To(gomega.Equal("/path/to/sb-client-ca.crt"))
-			gomega.Expect(OvnSouth.CertCommonName).To(gomega.Equal("cfg-sbcommonname"))
 			gomega.Expect(OvnSouth.RunDir).To(gomega.Equal("/custom/ovn/run/"))
 			gomega.Expect(OvnSouth.DbLocation).To(gomega.Equal("/custom/ovn/sb.db"))
 			gomega.Expect(OvnSouth.GetURL()).To(gomega.Equal("unix:/custom/ovn/run/ovnsb_db.sock"))
@@ -571,6 +595,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkConnect).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableUplink).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnablePreconfiguredUDNAddresses).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.AdvertisedUDNIsolationMode).To(gomega.Equal(AdvertisedUDNIsolationModeLoose))
@@ -640,8 +665,6 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Default.ClusterSubnets).To(gomega.Equal([]CIDRNetworkEntry{
 				{ovntest.MustParseIPNet("10.130.0.0/15"), 24},
 			}))
-			gomega.Expect(Default.Zone).To(gomega.Equal("bar"))
-
 			gomega.Expect(Metrics.BindAddress).To(gomega.Equal("2.2.2.2:8080"))
 			gomega.Expect(Metrics.OVNMetricsBindAddress).To(gomega.Equal("2.2.2.3:8081"))
 			gomega.Expect(Metrics.ExportOVSMetrics).To(gomega.BeTrue())
@@ -650,6 +673,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(Metrics.NodeServerCert).To(gomega.Equal("/tls/nodecert"))
 			gomega.Expect(Metrics.EnableConfigDuration).To(gomega.BeTrue())
 			gomega.Expect(Metrics.EnableScaleMetrics).To(gomega.BeTrue())
+			gomega.Expect(Metrics.CollectionInterval).To(gomega.Equal(15))
 
 			gomega.Expect(TLS.MinVersion).To(gomega.Equal("VersionTLS13"))
 			gomega.Expect(TLS.ParseCipherSuites()).To(gomega.Equal([]string{
@@ -657,15 +681,10 @@ var _ = Describe("Config Operations", func() {
 				"TLS_AES_256_GCM_SHA384",
 			}))
 
-			gomega.Expect(OvnNorth.PrivKey).To(gomega.Equal("/client/privkey"))
-			gomega.Expect(OvnNorth.Cert).To(gomega.Equal("/client/cert"))
-			gomega.Expect(OvnNorth.CACert).To(gomega.Equal("/client/cacert"))
-			gomega.Expect(OvnNorth.CertCommonName).To(gomega.Equal("testnbcommonname"))
-
-			gomega.Expect(OvnSouth.PrivKey).To(gomega.Equal("/path/to/sb-client-private.key"))
-			gomega.Expect(OvnSouth.Cert).To(gomega.Equal("/path/to/sb-client.crt"))
-			gomega.Expect(OvnSouth.CACert).To(gomega.Equal("/path/to/sb-client-ca.crt"))
-			gomega.Expect(OvnSouth.CertCommonName).To(gomega.Equal("cfg-sbcommonname"))
+			gomega.Expect(EgressIPHealthCheckTLS.PrivKey).To(gomega.Equal("/client/privkey"))
+			gomega.Expect(EgressIPHealthCheckTLS.Cert).To(gomega.Equal("/client/cert"))
+			gomega.Expect(EgressIPHealthCheckTLS.CACert).To(gomega.Equal("/client/cacert"))
+			gomega.Expect(EgressIPHealthCheckTLS.CertCommonName).To(gomega.Equal("testnbcommonname"))
 
 			gomega.Expect(Gateway.Mode).To(gomega.Equal(GatewayModeShared))
 			gomega.Expect(Gateway.NodeportEnable).To(gomega.BeTrue())
@@ -684,6 +703,7 @@ var _ = Describe("Config Operations", func() {
 			gomega.Expect(OVNKubernetesFeature.EnableMultiNetwork).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkSegmentation).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableNetworkConnect).To(gomega.BeTrue())
+			gomega.Expect(OVNKubernetesFeature.EnableUplink).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnablePreconfiguredUDNAddresses).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.EnableRouteAdvertisements).To(gomega.BeTrue())
 			gomega.Expect(OVNKubernetesFeature.AdvertisedUDNIsolationMode).To(gomega.Equal(AdvertisedUDNIsolationModeLoose))
@@ -749,6 +769,7 @@ var _ = Describe("Config Operations", func() {
 			"-metrics-enable-pprof=false",
 			"-ofctrl-wait-before-clear=5000",
 			"-metrics-enable-config-duration=true",
+			"-metrics-collection-interval=15",
 			"-tls-min-version=VersionTLS13",
 			"-tls-cipher-suites=TLS_AES_128_GCM_SHA256,TLS_AES_256_GCM_SHA384",
 			"-egressip-reachability-total-timeout=5",
@@ -757,6 +778,7 @@ var _ = Describe("Config Operations", func() {
 			"-enable-multi-networkpolicy=true",
 			"-enable-network-segmentation=true",
 			"-enable-network-connect=true",
+			"-enable-uplink=true",
 			"-enable-preconfigured-udn-addresses=true",
 			"-enable-route-advertisements=true",
 			"-advertised-udn-isolation-mode=loose",
@@ -764,7 +786,6 @@ var _ = Describe("Config Operations", func() {
 			"-enable-admin-network-policy=true",
 			"-enable-persistent-ips=true",
 			"-healthz-bind-address=0.0.0.0:4321",
-			"-zone=bar",
 			"-dns-service-namespace=kube-system-2",
 			"-dns-service-name=kube-dns-2",
 			"-disable-requestedchassis=true",
@@ -774,6 +795,75 @@ var _ = Describe("Config Operations", func() {
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
+
+	DescribeTable("loads Egress IP health-check TLS settings with compatibility precedence",
+		func(configData string, cliArgs []string, expected EgressIPHealthCheckTLSConfig) {
+			err := os.WriteFile(cfgFile.Name(), []byte(configData), 0o644)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+			app.Action = func(ctx *cli.Context) error {
+				_, err := InitConfig(ctx, kexec.New(), nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(EgressIPHealthCheckTLS).To(gomega.Equal(expected))
+				return nil
+			}
+			args := []string{app.Name, "-config-file=" + cfgFile.Name()}
+			args = append(args, cliArgs...)
+			err = app.Run(args)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		},
+		Entry("accepts the legacy ovnnorth section", `[ovnnorth]
+client-privkey=/legacy/client.key
+client-cert=/legacy/client.crt
+client-cacert=/legacy/client-ca.crt
+cert-common-name=legacy.example.com
+`, nil, EgressIPHealthCheckTLSConfig{
+			PrivKey:        "/legacy/client.key",
+			Cert:           "/legacy/client.crt",
+			CACert:         "/legacy/client-ca.crt",
+			CertCommonName: "legacy.example.com",
+		}),
+		Entry("accepts the canonical section", `[egressip-healthcheck-tls]
+client-privkey=/canonical/client.key
+client-cert=/canonical/client.crt
+client-cacert=/canonical/client-ca.crt
+cert-common-name=canonical.example.com
+`, nil, EgressIPHealthCheckTLSConfig{
+			PrivKey:        "/canonical/client.key",
+			Cert:           "/canonical/client.crt",
+			CACert:         "/canonical/client-ca.crt",
+			CertCommonName: "canonical.example.com",
+		}),
+		Entry("lets canonical fields override legacy fields independently", `[ovnnorth]
+client-privkey=/legacy/client.key
+client-cert=/legacy/client.crt
+client-cacert=/legacy/client-ca.crt
+cert-common-name=legacy.example.com
+
+[egressip-healthcheck-tls]
+client-cert=/canonical/client.crt
+cert-common-name=canonical.example.com
+`, nil, EgressIPHealthCheckTLSConfig{
+			PrivKey:        "/legacy/client.key",
+			Cert:           "/canonical/client.crt",
+			CACert:         "/legacy/client-ca.crt",
+			CertCommonName: "canonical.example.com",
+		}),
+		Entry("lets historical CLI flags override canonical fields independently", `[egressip-healthcheck-tls]
+client-privkey=/canonical/client.key
+client-cert=/canonical/client.crt
+client-cacert=/canonical/client-ca.crt
+cert-common-name=canonical.example.com
+`, []string{
+			"--nb-client-cert=/cli/client.crt",
+			"--nb-cert-common-name=cli.example.com",
+		}, EgressIPHealthCheckTLSConfig{
+			PrivKey:        "/canonical/client.key",
+			Cert:           "/cli/client.crt",
+			CACert:         "/canonical/client-ca.crt",
+			CertCommonName: "cli.example.com",
+		}),
+	)
 
 	It("overrides config file and defaults with CLI legacy service-cluster-ip-range option", func() {
 		err := os.WriteFile(cfgFile.Name(), []byte(`[kubernetes]
@@ -1446,36 +1536,99 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		err = app.Run(cliArgs)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
-	Describe("OvnDBAuth operations", func() {
-		It("configures client southbound DB auth to unix socket via external_ids", func() {
+
+	Describe("parseClusterDefaultNAD", func() {
+		It("parses a namespace/name value", func() {
+			nad, err := parseClusterDefaultNAD("custom-namespace/custom-nad")
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(nad.Namespace).To(gomega.Equal("custom-namespace"))
+			gomega.Expect(nad.Name).To(gomega.Equal("custom-nad"))
+		})
+
+		DescribeTable("rejects malformed values",
+			func(value string) {
+				nad, err := parseClusterDefaultNAD(value)
+
+				gomega.Expect(err).To(gomega.MatchError(
+					fmt.Sprintf(`cluster-default-nad %q must be in the format of "namespace/name"`, value),
+				))
+				gomega.Expect(nad).To(gomega.BeNil())
+			},
+			Entry("empty value", ""),
+			Entry("missing namespace", "/name"),
+			Entry("missing name", "namespace/"),
+			Entry("missing separator", "name"),
+			Entry("too many separators", "namespace/name/extra"),
+			Entry("empty component between separators", "namespace//name"),
+			Entry("leading and trailing separators", "/namespace/name/"),
+			Entry("only separators", "//"),
+		)
+
+		It("rejects an invalid namespace", func() {
+			nad, err := parseClusterDefaultNAD("BadNS/default")
+
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+				`cluster-default-nad "BadNS/default" has an invalid namespace`,
+			)))
+			gomega.Expect(nad).To(gomega.BeNil())
+		})
+
+		DescribeTable("rejects a name that is not a DNS-1123 subdomain",
+			func(value string) {
+				nad, err := parseClusterDefaultNAD(value)
+
+				gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring(
+					fmt.Sprintf(`cluster-default-nad %q has an invalid name`, value),
+				)))
+				gomega.Expect(nad).To(gomega.BeNil())
+			},
+			Entry("underscore", "namespace/invalid_name"),
+			Entry("uppercase", "namespace/UpperCase"),
+			Entry("dot", "namespace/."),
+			Entry("dot dot", "namespace/.."),
+			Entry("percent", "namespace/a%b"),
+			Entry("leading dash", "namespace/-name"),
+		)
+
+		It("accepts a dotted name", func() {
+			nad, err := parseClusterDefaultNAD("namespace/my.nad")
+
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(nad.Namespace).To(gomega.Equal("namespace"))
+			gomega.Expect(nad.Name).To(gomega.Equal("my.nad"))
+		})
+	})
+
+	Describe("OvnDBConfig operations", func() {
+		It("configures ovn-controller to use the local southbound DB socket", func() {
 			fexec := ovntest.NewFakeExec()
 			expectedURL := "unix:/var/run/ovn/ovnsb_db.sock"
 			fexec.AddFakeCmdsNoOutputNoError([]string{
 				"ovs-vsctl --timeout=15 set Open_vSwitch . external_ids:ovn-remote=\"" + expectedURL + "\"",
 			})
 
-			cli := &OvnAuthConfig{RunDir: "/var/run/ovn/"}
-			a, err := buildOvnAuth(fexec, false, cli, &OvnAuthConfig{RunDir: "/var/run/ovn/"})
+			cli := &OvnDBConfig{RunDir: "/var/run/ovn/"}
+			a, err := buildOvnDBConfig(fexec, false, cli, &OvnDBConfig{RunDir: "/var/run/ovn/"})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(a.northbound).To(gomega.BeFalse())
 			gomega.Expect(a.GetURL()).To(gomega.Equal(expectedURL))
 
-			err = a.SetDBAuth()
+			err = a.SetOVNRemote()
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
 		})
 
-		It("northbound SetDBAuth is a no-op", func() {
+		It("rejects configuring ovn-controller with the northbound DB", func() {
 			fexec := ovntest.NewFakeExec()
-			cli := &OvnAuthConfig{RunDir: "/var/run/ovn/"}
-			a, err := buildOvnAuth(fexec, true, cli, &OvnAuthConfig{RunDir: "/var/run/ovn/"})
+			cli := &OvnDBConfig{RunDir: "/var/run/ovn/"}
+			a, err := buildOvnDBConfig(fexec, true, cli, &OvnDBConfig{RunDir: "/var/run/ovn/"})
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 			gomega.Expect(a.northbound).To(gomega.BeTrue())
 			gomega.Expect(a.GetURL()).To(gomega.Equal("unix:/var/run/ovn/ovnnb_db.sock"))
 
-			err = a.SetDBAuth()
-			gomega.Expect(err).NotTo(gomega.HaveOccurred())
-			gomega.Expect(fexec.CalledMatchesExpected()).To(gomega.BeTrue(), fexec.ErrorDesc)
+			err = a.SetOVNRemote()
+			gomega.Expect(err).To(gomega.MatchError("cannot configure ovn-controller with the northbound database"))
 		})
 	})
 
@@ -1536,39 +1689,33 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 	})
 
 	Describe("OVN Kube Node config", func() {
+		nodeConfig := func() OvnKubeNodeConfig {
+			return OvnKubeNode
+		}
+
 		// NOTE: We test this here as the test that overrides values also sets hybridOverlay to true
 		// which yields an invalid configuration.
 		It("Overrides value from Config file", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeFull,
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
-				},
-			}
-			file := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeDPU,
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
-				},
-			}
+			fileNodeConfig := nodeConfig()
+			fileNodeConfig.Mode = types.NodeModeDPU
+
+			cliConfig := config{OvnKubeNode: nodeConfig()}
+			file := config{OvnKubeNode: fileNodeConfig}
 			err := buildOvnKubeNodeConfig(&cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPU))
 		})
 
 		It("Overrides value from CLI", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeDPUHost,
-					MgmtPortNetdev:            "enp1s0f0v0",
-					MgmtPortDPResourceName:    "openshift.io/mgmtvf",
-					DPUNodeLeaseRenewInterval: 5,
-					DPUNodeLeaseDuration:      20,
-				},
-			}
-			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.Mode = types.NodeModeDPUHost
+			cliNodeConfig.MgmtPortNetdev = "enp1s0f0v0"
+			cliNodeConfig.MgmtPortDPResourceName = "openshift.io/mgmtvf"
+			cliNodeConfig.DPUNodeLeaseRenewInterval = 5
+			cliNodeConfig.DPUNodeLeaseDuration = 20
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.Mode).To(gomega.Equal(types.NodeModeDPUHost))
 			gomega.Expect(OvnKubeNode.MgmtPortNetdev).To(gomega.Equal("enp1s0f0v0"))
@@ -1577,51 +1724,93 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 			gomega.Expect(OvnKubeNode.DPUNodeLeaseDuration).To(gomega.Equal(20))
 		})
 
+		It("Overrides routing table ID start from Config file", func() {
+			cliConfig := config{OvnKubeNode: nodeConfig()}
+			file := config{OvnKubeNode: nodeConfig()}
+			file.OvnKubeNode.RoutingTableIDStart = 2000
+
+			err := buildOvnKubeNodeConfig(&cliConfig, &file)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.RoutingTableIDStart).To(gomega.Equal(2000))
+		})
+
+		It("Overrides routing table ID start from CLI", func() {
+			cliConfig := config{OvnKubeNode: nodeConfig()}
+			cliConfig.OvnKubeNode.RoutingTableIDStart = 2001
+			file := config{OvnKubeNode: nodeConfig()}
+			file.OvnKubeNode.RoutingTableIDStart = 2000
+
+			err := buildOvnKubeNodeConfig(&cliConfig, &file)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.RoutingTableIDStart).To(gomega.Equal(2001))
+		})
+
+		It("Fails if routing table ID start is below the reserved range", func() {
+			cliConfig := config{OvnKubeNode: nodeConfig()}
+			cliConfig.OvnKubeNode.RoutingTableIDStart = MinimumRoutingTableIDStart - 1
+
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: nodeConfig()})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("routing-table-id-start"))
+		})
+
+		It("Succeeds if routing table ID start is at the maximum", func() {
+			cliConfig := config{OvnKubeNode: nodeConfig()}
+			cliConfig.OvnKubeNode.RoutingTableIDStart = MaximumRoutingTableIDStart
+
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: nodeConfig()})
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.RoutingTableIDStart).To(gomega.Equal(MaximumRoutingTableIDStart))
+		})
+
+		It("Fails if routing table ID start is above the maximum", func() {
+			cliConfig := config{OvnKubeNode: nodeConfig()}
+			cliConfig.OvnKubeNode.RoutingTableIDStart = MaximumRoutingTableIDStart + 1
+
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: nodeConfig()})
+			gomega.Expect(err).To(gomega.HaveOccurred())
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("routing-table-id-start"))
+			gomega.Expect(err.Error()).To(gomega.ContainSubstring("must be <="))
+		})
+
 		It("Fails with unsupported mode", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: "invalid",
-				},
-			}
-			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.Mode = "invalid"
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("unexpected ovnkube-node-mode"))
 		})
 
 		It("Fails if hybrid overlay is enabled and ovnkube node mode is not full", func() {
 			HybridOverlay.Enabled = true
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode: types.NodeModeDPU,
-				},
-			}
-			err := buildOvnKubeNodeConfig(&cliConfig, &config{})
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.Mode = types.NodeModeDPU
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
+			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring(
 				"hybrid overlay is not supported with ovnkube-node mode"))
 		})
 
 		It("Fails if DPU node lease renew interval is negative", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeFull,
-					DPUNodeLeaseRenewInterval: -1,
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-				},
-			}
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.DPUNodeLeaseRenewInterval = -1
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
 			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("dpu-node-lease-renew-interval"))
 		})
 
 		It("Succeeds if DPU node lease renew interval is zero", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeFull,
-					DPUNodeLeaseRenewInterval: 0,
-					DPUNodeLeaseDuration:      10,
-				},
-			}
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.DPUNodeLeaseRenewInterval = 0
+			cliNodeConfig.DPUNodeLeaseDuration = 10
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
 			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(OvnKubeNode.DPUNodeLeaseRenewInterval).To(gomega.Equal(0))
@@ -1629,25 +1818,21 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		})
 
 		It("Fails if DPU node lease duration is non-positive", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                 types.NodeModeFull,
-					DPUNodeLeaseDuration: 0,
-				},
-			}
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.DPUNodeLeaseDuration = 0
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
 			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("dpu-node-lease-duration"))
 		})
 
 		It("Fails if DPU node lease duration is less than or equal to renew interval", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeFull,
-					DPUNodeLeaseRenewInterval: 10,
-					DPUNodeLeaseDuration:      10,
-				},
-			}
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.DPUNodeLeaseRenewInterval = 10
+			cliNodeConfig.DPUNodeLeaseDuration = 10
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
 			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.Or(
@@ -1657,68 +1842,42 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		})
 
 		It("Fails if management port is provided and ovnkube node mode is dpu", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeDPU,
-					MgmtPortNetdev:            "enp1s0f0v0",
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
-				},
-			}
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.Mode = types.NodeModeDPU
+			cliNodeConfig.MgmtPortNetdev = "enp1s0f0v0"
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
 			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must not be provided"))
 		})
 
 		It("Fails if management port is not provided and ovnkube node mode is dpu-host", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeDPUHost,
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
-				},
-			}
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.Mode = types.NodeModeDPUHost
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
 			err := buildOvnKubeNodeConfig(&cliConfig, &config{OvnKubeNode: OvnKubeNode})
 			gomega.Expect(err).To(gomega.HaveOccurred())
 			gomega.Expect(err.Error()).To(gomega.ContainSubstring("ovnkube-node-mgmt-port-netdev or ovnkube-node-mgmt-port-dp-resource-name must be provided"))
 		})
 
 		It("Succeeds if management netdev provided in the full mode", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeFull,
-					MgmtPortNetdev:            "ens1f0v0",
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
-				},
-			}
-			file := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeFull,
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
-				},
-			}
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.MgmtPortNetdev = "ens1f0v0"
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
+			file := config{OvnKubeNode: nodeConfig()}
 			err := buildOvnKubeNodeConfig(&cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
 
 		It("Succeeds if management port device plugin resource name provided in the full mode", func() {
-			cliConfig := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeFull,
-					MgmtPortDPResourceName:    "openshift.io/mgmtvf",
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
-				},
-			}
-			file := config{
-				OvnKubeNode: OvnKubeNodeConfig{
-					Mode:                      types.NodeModeFull,
-					DPUNodeLeaseDuration:      OvnKubeNode.DPUNodeLeaseDuration,
-					DPUNodeLeaseRenewInterval: OvnKubeNode.DPUNodeLeaseRenewInterval,
-				},
-			}
+			cliNodeConfig := nodeConfig()
+			cliNodeConfig.MgmtPortDPResourceName = "openshift.io/mgmtvf"
+
+			cliConfig := config{OvnKubeNode: cliNodeConfig}
+			file := config{OvnKubeNode: nodeConfig()}
 			err := buildOvnKubeNodeConfig(&cliConfig, &file)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
@@ -1732,6 +1891,7 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 		It("has correct default OvnNorth values", func() {
 			gomega.Expect(OvnNorth.RunDir).To(gomega.Equal("/var/run/ovn/"))
 			gomega.Expect(OvnNorth.DbLocation).To(gomega.Equal("/etc/ovn/ovnnb_db.db"))
+			gomega.Expect(OvnNorth.GetURL()).To(gomega.Equal("unix:/var/run/ovn/ovnnb_db.sock"))
 		})
 
 		It("has correct default OvnSouth values", func() {
@@ -2022,5 +2182,112 @@ udn-allowed-default-services= ns/svc, ns1/svc1
 			err = validateManagedBGPConfig()
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		})
+	})
+})
+
+var _ = Describe("completeOvnKubeNodeConfig", func() {
+	AfterEach(func() {
+		OvnKubeNode.KubeletCgroupPath = ""
+	})
+
+	DescribeTable("normalizes the kubelet cgroup path",
+		func(configured, expected string) {
+			OvnKubeNode.KubeletCgroupPath = configured
+
+			gomega.Expect(completeOvnKubeNodeConfig()).To(gomega.Succeed())
+			gomega.Expect(OvnKubeNode.KubeletCgroupPath).To(gomega.Equal(expected))
+		},
+		Entry("unset", "", ""),
+		Entry("relative path", "kubelet.slice/kubelet.service", "kubelet.slice/kubelet.service"),
+		Entry("leading slash is trimmed", "/podruntime/kubelet", "podruntime/kubelet"),
+		// a leftover leading slash would be counted as another level by the nftables
+		// match, producing a rule that never matches.
+		Entry("repeated leading slashes are trimmed", "//podruntime/kubelet", "podruntime/kubelet"),
+		Entry("duplicate separators are cleaned", "podruntime//kubelet", "podruntime/kubelet"),
+		Entry("trailing slash is cleaned", "podruntime/kubelet/", "podruntime/kubelet"),
+		Entry("single component", "kubelet.slice", "kubelet.slice"),
+	)
+
+	DescribeTable("rejects a kubelet cgroup path that cannot be matched safely",
+		func(configured, expectedError string) {
+			OvnKubeNode.KubeletCgroupPath = configured
+
+			gomega.Expect(completeOvnKubeNodeConfig()).To(gomega.MatchError(gomega.ContainSubstring(expectedError)))
+		},
+		// the cgroup root holds every host process, so matching on it would let all of
+		// them reach primary UDN pods.
+		Entry("cgroup root", "/", "must not be the cgroup root"),
+		Entry("cgroup root as dot", ".", "must not be the cgroup root"),
+		Entry("escapes further down", "kubelet.slice/../..", `must not contain ".."`),
+		// cleaning would resolve this to "/etc" and hide the escape, so ".." has to be
+		// rejected before the path is cleaned.
+		Entry("escape that cleaning would resolve", "../../etc", `must not contain ".."`),
+	)
+})
+
+var _ = Describe("kubelet cgroup path config", func() {
+	var app *cli.App
+
+	BeforeEach(func() {
+		gomega.Expect(PrepareTestConfig()).To(gomega.Succeed())
+		app = cli.NewApp()
+		app.Name = "test"
+		app.Flags = Flags
+	})
+
+	It("is read from the config file", func() {
+		cfgFile, err := os.CreateTemp("", "config-*.conf")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer os.Remove(cfgFile.Name())
+		_, err = cfgFile.WriteString("[ovnkubenode]\nkubelet-cgroup-path=/podruntime/kubelet\n")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(cfgFile.Close()).To(gomega.Succeed())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.KubeletCgroupPath).To(gomega.Equal("podruntime/kubelet"))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name, "-config-file=" + cfgFile.Name()})).To(gomega.Succeed())
+	})
+
+	It("is read from the command line", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.KubeletCgroupPath).To(gomega.Equal("kubelet.slice/kubelet.service"))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name, "-kubelet-cgroup-path=kubelet.slice/kubelet.service"})).To(gomega.Succeed())
+	})
+
+	It("prefers the command line over the config file", func() {
+		cfgFile, err := os.CreateTemp("", "config-*.conf")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		defer os.Remove(cfgFile.Name())
+		_, err = cfgFile.WriteString("[ovnkubenode]\nkubelet-cgroup-path=from-file/kubelet\n")
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		gomega.Expect(cfgFile.Close()).To(gomega.Succeed())
+
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(OvnKubeNode.KubeletCgroupPath).To(gomega.Equal("from-cli/kubelet"))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name,
+			"-config-file=" + cfgFile.Name(),
+			"-kubelet-cgroup-path=from-cli/kubelet",
+		})).To(gomega.Succeed())
+	})
+
+	It("rejects the cgroup root", func() {
+		app.Action = func(ctx *cli.Context) error {
+			_, err := InitConfig(ctx, kexec.New(), nil)
+			gomega.Expect(err).To(gomega.MatchError(gomega.ContainSubstring("must not be the cgroup root")))
+			return nil
+		}
+		gomega.Expect(app.Run([]string{app.Name, "-kubelet-cgroup-path=/"})).To(gomega.Succeed())
 	})
 })

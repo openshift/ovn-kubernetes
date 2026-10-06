@@ -32,7 +32,7 @@ and set the environmental variable `K8S_VERSION` to the same value. Also make su
 your go directory with `export GOPATH=(...)`.
 
 ```
-K8S_VERSION=v1.35.0
+K8S_VERSION=v1.36.4
 git clone --single-branch --branch $K8S_VERSION https://github.com/kubernetes/kubernetes.git $GOPATH/src/k8s.io/kubernetes/
 pushd $GOPATH/src/k8s.io/kubernetes/
 make WHAT="test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo cmd/kubectl"
@@ -69,7 +69,6 @@ export JOB_NAME=(... job name ...)
 export OVN_HYBRID_OVERLAY_ENABLE=[true|false]
 export OVN_MULTICAST_ENABLE=[true|false]
 export OVN_EMPTY_LB_EVENTS=[true|false]
-export OVN_HA=[true|false]
 export OVN_DISABLE_SNAT_MULTIPLE_GWS=[true|false]
 export OVN_GATEWAY_MODE=["local"|"shared"]
 export PLATFORM_IPV4_SUPPORT=[true|false]
@@ -80,17 +79,16 @@ export OVN_SECOND_BRIDGE=[true|false]
 
 You can refer to a recent CI run from any pull request in [https://github.com/ovn-kubernetes/ovn-kubernetes/actions](https://github.com/ovn-kubernetes/ovn-kubernetes/actions) to get a valid set of settings.
 
-As an example for the `control-plane-noHA-local-ipv4-snatGW-1br` job, the settings are at time of this writing:
+As an example for the `control-plane-local-ipv4-snatGW-1br` job, the settings are at time of this writing:
 ```
 export KIND_CLUSTER_NAME=ovn
 export KIND_INSTALL_INGRESS=true
 export KIND_ALLOW_SYSTEM_WRITES=true
 export PARALLEL=true
-export JOB_NAME=control-plane-noHA-local-ipv4-snatGW-1br
+export JOB_NAME=control-plane-local-ipv4-snatGW-1br
 export OVN_HYBRID_OVERLAY_ENABLE=true
 export OVN_MULTICAST_ENABLE=true
 export OVN_EMPTY_LB_EVENTS=true
-export OVN_HA=false
 export OVN_DISABLE_SNAT_MULTIPLE_GWS=false
 export OVN_GATEWAY_MODE="local"
 export PLATFORM_IPV4_SUPPORT=true
@@ -106,7 +104,7 @@ container is created per Kubernetes node. The CI tests run on this Kubernetes
 deployment. Therefore, KIND will need to be installed locally.
 
 Generic instructions for installing and running OVN-Kubernetes with KIND can be found at:
-[OVN-Kubernetes KIND Setup](https://ovn-kubernetes.io/installation/launching-ovn-kubernetes-on-kind/)
+[OVN-Kubernetes KIND Setup](../installation/launching-ovn-kubernetes-on-kind.md)
 
 Make sure to set the required environment variables first (see section above). Then, deploy kind:
 ```
@@ -213,6 +211,63 @@ Ginkgo ran 1 suite in 38.489055861s
 Test Suite Passed
 ~~~
 
+## CRD Integration Tests
+
+CRD integration tests live in `test/crd-integration/` and run against a real
+kube-apiserver + etcd started by [envtest](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest).
+They verify CRD admission behaviour — defaulting, validation, and CEL rules —
+without requiring a full Kind cluster.
+
+The tests are the intended future home for scenarios currently living in
+`test/e2e/testscenario/` that do not need live pod networking. This migration
+is tracked in
+[ovn-kubernetes#6932](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6932).
+
+### Prerequisites
+
+No cluster is needed.  `setup-envtest` downloads the required kube-apiserver
+and etcd binaries automatically on the first run.
+
+Go 1.26+ must be on `$PATH` (same requirement as the rest of the project).
+
+### Running the CRD integration tests
+
+```bash
+cd $REPO/test
+make test-crd
+```
+
+To pin a specific Kubernetes API version for the embedded API server:
+
+```bash
+make test-crd ENVTEST_K8S_VERSION=1.37.0
+```
+
+### Running a single CRD integration test
+
+`go test -run` matches against the Go test function name (`TestCRDIntegration`),
+not the Ginkgo `It` description.  Use Ginkgo's `--focus` flag after `--` to
+filter by description:
+
+```bash
+cd $REPO/test/crd-integration
+KUBEBUILDER_ASSETS="$(go tool setup-envtest \
+    use 1.36.2 --bin-dir /tmp/envtest-bin -p path)" \
+  go test -v ./... -- --focus "fills in the egress-assignable default"
+```
+
+### Adding new CRD integration tests
+
+All CRDs share a single Ginkgo suite. `suite_test.go` is the one bootstrap: its
+`BeforeSuite` points `envtest.Environment.CRDDirectoryPaths` at
+`helm/ovn-kubernetes/crds/` so every committed CRD manifest is loaded
+automatically, and it registers the CRD schemes the suite exercises.
+
+1. Register its types in the scheme in `suite_test.go`, e.g.
+   `utilruntime.Must(egressipv1.AddToScheme(scheme))`.
+2. Add a `test/crd-integration/<feature>_test.go` with a top-level Ginkgo
+   `Describe` for that CRD.
+
 ### Running a control-plane test
 
 All local tests are defined as `control-plane` tests. To run a single `control-plane` test, target the `control-plane`
@@ -238,7 +293,7 @@ For example:
 ./e2e/multicast.go:	ginkgo.It("should be able to send multicast UDP traffic between nodes", func() {
 # make control-plane WHAT="should be able to send multicast UDP traffic between nodes"
 (...)
-+ go test -timeout=0 -v . -ginkgo.v -ginkgo.focus 'should\sbe\sable\sto\ssend\smulticast\sUDP\straffic\sbetween\snodes' -ginkgo.flakeAttempts 2 '-ginkgo.skip=recovering from deleting db files while maintain connectivity|Should validate connectivity before and after deleting all the db-pods at once in HA mode|Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|e2e ingress to host-networked pods traffic validation|host to host-networked pods traffic validation' -provider skeleton -kubeconfig /root/ovn.conf --num-nodes=2 --report-dir=/root/ovn-kubernetes/test/_artifacts --report-prefix=control-plane_
++ go test -timeout=0 -v . -ginkgo.v -ginkgo.focus 'should\sbe\sable\sto\ssend\smulticast\sUDP\straffic\sbetween\snodes' -ginkgo.flakeAttempts 2 '-ginkgo.skip=Should be allowed to node local cluster-networked endpoints by nodeport services with externalTrafficPolicy=local|e2e ingress to host-networked pods traffic validation|host to host-networked pods traffic validation' -provider skeleton -kubeconfig /root/ovn.conf --num-nodes=2 --report-dir=/root/ovn-kubernetes/test/_artifacts --report-prefix=control-plane_
 I0817 15:26:21.762483 1197731 test_context.go:457] Tolerating taints "node-role.kubernetes.io/control-plane" when considering if nodes are ready
 === RUN   TestE2e
 I0817 15:26:21.762635 1197731 e2e_suite_test.go:67] Saving reports to /root/ovn-kubernetes/test/_artifacts

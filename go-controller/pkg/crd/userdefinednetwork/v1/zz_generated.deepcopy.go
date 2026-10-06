@@ -94,6 +94,11 @@ func (in *ClusterUserDefinedNetworkList) DeepCopyObject() runtime.Object {
 func (in *ClusterUserDefinedNetworkSpec) DeepCopyInto(out *ClusterUserDefinedNetworkSpec) {
 	*out = *in
 	in.NamespaceSelector.DeepCopyInto(&out.NamespaceSelector)
+	if in.Uplinks != nil {
+		in, out := &in.Uplinks, &out.Uplinks
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	in.Network.DeepCopyInto(&out.Network)
 	return
 }
@@ -117,6 +122,11 @@ func (in *ClusterUserDefinedNetworkStatus) DeepCopyInto(out *ClusterUserDefinedN
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.VRFName != nil {
+		in, out := &in.VRFName, &out.VRFName
+		*out = new(string)
+		**out = **in
 	}
 	return
 }
@@ -490,6 +500,11 @@ func (in *UserDefinedNetworkStatus) DeepCopyInto(out *UserDefinedNetworkStatus) 
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.VRFName != nil {
+		in, out := &in.VRFName, &out.VRFName
+		*out = new(string)
+		**out = **in
 	}
 	return
 }

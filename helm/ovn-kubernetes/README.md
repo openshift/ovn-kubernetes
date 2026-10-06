@@ -2,7 +2,7 @@
 
 -----------------------
 
-![Version: 1.3.0](https://img.shields.io/badge/Version-1.3.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.3.0](https://img.shields.io/badge/AppVersion-1.3.0-informational?style=flat-square)
+![Version: 1.4.0](https://img.shields.io/badge/Version-1.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.4.0](https://img.shields.io/badge/AppVersion-1.4.0-informational?style=flat-square)
 
 **Homepage:** <https://ovn-kubernetes.io/>
 
@@ -78,6 +78,15 @@ false
 </pre>
 </td>
 			<td>The secret used for pulling image. Use only if needed. Set create to have have secret created by helm</td>
+		</tr>
+		<tr>
+			<td>global.dummyGatewayBridge</td>
+			<td>bool</td>
+			<td><pre lang="json">
+false
+</pre>
+</td>
+			<td>Create a gateway bridge without a system uplink (for development and CI)</td>
 		</tr>
 		<tr>
 			<td>global.egressIpHealthCheckPort</td>
@@ -440,15 +449,6 @@ unlimited
 			<td>Enable monitoring all data from SB DB instead of conditionally monitoring the data relevant to this node only @default true</td>
 		</tr>
 		<tr>
-			<td>global.nbPort</td>
-			<td>int</td>
-			<td><pre lang="json">
-6641
-</pre>
-</td>
-			<td>Port of north bound ovsdb</td>
-		</tr>
-		<tr>
 			<td>global.netFlowTargets</td>
 			<td>string</td>
 			<td><pre lang="json">
@@ -474,15 +474,6 @@ unlimited
 </pre>
 </td>
 			<td>OVN remote probe interval in ms  @default 100000</td>
-		</tr>
-		<tr>
-			<td>global.sbPort</td>
-			<td>int</td>
-			<td><pre lang="json">
-6642
-</pre>
-</td>
-			<td>Port of south bound ovsdb</td>
 		</tr>
 		<tr>
 			<td>global.sflowTargets</td>

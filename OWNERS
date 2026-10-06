@@ -1,16 +1,12 @@
 reviewers:
   - jcaamano
   - kyrtapz
-  - martinkennelly
-  - trozet
   - tssurya
 approvers:
   - abhat
   - jcaamano
   - kyrtapz
-  - martinkennelly
   - knobunc
-  - trozet
   - tssurya
 
 # Bugzilla info

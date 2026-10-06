@@ -74,6 +74,7 @@ type Spec struct {
 	// determined by the order in which the rule is written. Thus, a rule that appears
 	// first in the list of egress rules would take the lower precedence.
 	// +kubebuilder:validation:MaxItems=20
+	// +listType=atomic
 	Egress []Rule `json:"egress"`
 }
 
@@ -96,9 +97,11 @@ type Rule struct {
 
 type Classifier struct {
 	// +optional
+	// +listType=atomic
 	To []Destination `json:"to"`
 
 	// +optional
+	// +listType=atomic
 	Ports []*Port `json:"ports"`
 }
 
@@ -109,6 +112,7 @@ type Bandwidth struct {
 	// will be dropped.
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=4294967295
+	// +kubebuilder:validation:Format=int64
 	// +optional
 	Rate uint32 `json:"rate"`
 
@@ -116,6 +120,7 @@ type Bandwidth struct {
 	// This also needs rate to be specified.
 	// +kubebuilder:validation:Minimum:=1
 	// +kubebuilder:validation:Maximum:=4294967295
+	// +kubebuilder:validation:Format=int64
 	// +optional
 	Burst uint32 `json:"burst"`
 }

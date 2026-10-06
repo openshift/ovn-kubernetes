@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 	knet "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -603,7 +604,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			} else if objType == CloudPrivateIPConfigType || objType == IPAMClaimsType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -627,7 +628,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			} else if objType == CloudPrivateIPConfigType || objType == IPAMClaimsType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -757,7 +758,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			} else if objType == CloudPrivateIPConfigType {
 				wf, err = NewClusterManagerWatchFactory(ovnCMClientset)
 			} else {
-				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+				wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			}
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
@@ -859,7 +860,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			for i := uint32(1); i <= defaultNumEventQueues*15; i++ {
 				pods = append(pods, newPod(fmt.Sprintf("pod%d", i), "default"))
 			}
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -878,7 +879,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when EgressIP is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -891,7 +892,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressFirewall is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -904,7 +905,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressQoS is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -917,7 +918,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when EgressService is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -930,7 +931,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 	Context("when Admin Network Policy is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -962,7 +963,7 @@ var _ = Describe("Watch Factory Operations", func() {
 
 	Context("when NetworkQoS is disabled", func() {
 		testExisting := func(objType reflect.Type) {
-			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+			wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 			Expect(err).NotTo(HaveOccurred())
 			err = wf.Start()
 			Expect(err).NotTo(HaveOccurred())
@@ -1007,7 +1008,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	}
 
 	It("responds to pod add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1043,7 +1044,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to pod replace with create/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1086,7 +1087,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple pod add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1169,7 +1170,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to namespace add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1205,7 +1206,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to node add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1241,7 +1242,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to multiple node add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1339,7 +1340,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			nodes = append(nodes, node)
 		}
 
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1418,7 +1419,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespaces = append(namespaces, namespace)
 		}
 
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1504,7 +1505,7 @@ var _ = Describe("Watch Factory Operations", func() {
 			namespaces = append(namespaces, namespace)
 		}
 
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1646,7 +1647,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to policy add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1720,7 +1721,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to service add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1756,7 +1757,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to egressFirewall add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1791,7 +1792,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressFirewallHandler(h)
 	})
 	It("responds to egressIP add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1861,7 +1862,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveCloudPrivateIPConfigHandler(h)
 	})
 	It("responds to egressQoS add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1896,7 +1897,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressQoSHandler(h)
 	})
 	It("responds to egressService add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1939,7 +1940,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveEgressServiceHandler(h)
 	})
 	It("responds to admin network policy add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -1974,7 +1975,7 @@ var _ = Describe("Watch Factory Operations", func() {
 		wf.RemoveAdminNetworkPolicyHandler(h)
 	})
 	It("responds to baseline admin network policy add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2056,7 +2057,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("responds to networkQoS add/update/delete events", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2092,7 +2093,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("stops processing events after the handler is removed", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2123,7 +2124,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("filters correctly by label and namespace", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2195,7 +2196,7 @@ var _ = Describe("Watch Factory Operations", func() {
 	})
 
 	It("correctly handles object updates that cause filter changes", func() {
-		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset)
+		wf, err = NewOVNKubeControllerWatchFactory(ovnClientset, "test-node")
 		Expect(err).NotTo(HaveOccurred())
 		err = wf.Start()
 		Expect(err).NotTo(HaveOccurred())
@@ -2253,5 +2254,112 @@ var _ = Describe("Watch Factory Operations", func() {
 		Consistently(c.getUpdated, 2).Should(Equal(0))
 
 		wf.RemovePodHandler(h)
+	})
+})
+
+var _ = Describe("informerObjectTrim", func() {
+	It("strips unnecessary node fields", func() {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-node",
+				Labels: map[string]string{
+					"kubernetes.io/hostname": "test-node",
+				},
+				Annotations: map[string]string{
+					"k8s.ovn.org/node-subnets": `{"default":"10.128.0.0/23"}`,
+				},
+				ManagedFields: []metav1.ManagedFieldsEntry{
+					{Manager: "kubelet"},
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{Name: "owner"},
+				},
+				Finalizers: []string{"ovn-kubernetes.io/node-cleanup"},
+			},
+			Status: corev1.NodeStatus{
+				Images: []corev1.ContainerImage{
+					{Names: []string{"registry.io/image:latest"}, SizeBytes: 100000},
+				},
+				VolumesAttached: []corev1.AttachedVolume{
+					{Name: "vol1", DevicePath: "/dev/sda"},
+				},
+				VolumesInUse: []corev1.UniqueVolumeName{"vol1"},
+				Addresses: []corev1.NodeAddress{
+					{Type: corev1.NodeInternalIP, Address: "10.0.0.1"},
+				},
+				Conditions: []corev1.NodeCondition{
+					{
+						Type:    corev1.NodeReady,
+						Status:  corev1.ConditionTrue,
+						Reason:  "KubeletReady",
+						Message: "kubelet is posting ready status",
+					},
+				},
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("4"),
+				},
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("3"),
+				},
+				DaemonEndpoints: corev1.NodeDaemonEndpoints{
+					KubeletEndpoint: corev1.DaemonEndpoint{Port: 10250},
+				},
+				NodeInfo: corev1.NodeSystemInfo{
+					KernelVersion: "5.14.0",
+				},
+				Config: &corev1.NodeConfigStatus{
+					Active: &corev1.NodeConfigSource{
+						ConfigMap: &corev1.ConfigMapNodeConfigSource{
+							Name:      "kubelet-config",
+							Namespace: "kube-system",
+						},
+					},
+				},
+				RuntimeHandlers: []corev1.NodeRuntimeHandler{
+					{Name: "runc", Features: &corev1.NodeRuntimeHandlerFeatures{}},
+				},
+				Features: &corev1.NodeFeatures{},
+			},
+			Spec: corev1.NodeSpec{
+				PodCIDR:  "10.128.0.0/23",
+				PodCIDRs: []string{"10.128.0.0/23"},
+				Taints: []corev1.Taint{
+					{Key: "node-role.kubernetes.io/master", Effect: corev1.TaintEffectNoSchedule},
+				},
+			},
+		}
+
+		trimmed, err := informerObjectTrim(node)
+		Expect(err).NotTo(HaveOccurred())
+		n := trimmed.(*corev1.Node)
+
+		// Verify fields that SHOULD be cleared
+		Expect(n.Status.Images).To(BeNil(), "Status.Images should be cleared")
+		Expect(n.Status.VolumesAttached).To(BeNil(), "Status.VolumesAttached should be cleared")
+		Expect(n.Status.VolumesInUse).To(BeNil(), "Status.VolumesInUse should be cleared")
+		Expect(n.OwnerReferences).To(BeNil(), "OwnerReferences should be cleared")
+		Expect(n.ManagedFields).To(BeNil(), "ManagedFields should be cleared")
+		Expect(n.Finalizers).To(BeNil(), "Finalizers should be cleared")
+		Expect(n.Status.DaemonEndpoints).To(Equal(corev1.NodeDaemonEndpoints{}), "Status.DaemonEndpoints should be cleared")
+		Expect(n.Status.NodeInfo).To(Equal(corev1.NodeSystemInfo{KernelVersion: "5.14.0"}), "Status.NodeInfo must be preserved")
+		Expect(n.Status.Capacity).To(BeNil(), "Status.Capacity should be cleared")
+		Expect(n.Status.Allocatable).To(BeNil(), "Status.Allocatable should be cleared")
+		Expect(n.Status.Config).To(BeNil(), "Status.Config should be cleared")
+		Expect(n.Status.RuntimeHandlers).To(BeNil(), "Status.RuntimeHandlers should be cleared")
+		Expect(n.Status.Features).To(BeNil(), "Status.Features should be cleared")
+		Expect(n.Spec.Taints).To(BeNil(), "Spec.Taints should be cleared")
+		Expect(n.Spec.PodCIDRs).To(BeNil(), "Spec.PodCIDRs should be cleared")
+
+		// Verify condition subfields: Type/Status/Reason/Message preserved
+		Expect(n.Status.Conditions).To(HaveLen(1))
+		Expect(n.Status.Conditions[0].Reason).To(Equal("KubeletReady"), "Condition.Reason must be preserved")
+		Expect(n.Status.Conditions[0].Message).To(Equal("kubelet is posting ready status"), "Condition.Message must be preserved")
+
+		// Verify fields that MUST be preserved
+		Expect(n.Name).To(Equal("test-node"))
+		Expect(n.Labels).To(HaveKey("kubernetes.io/hostname"))
+		Expect(n.Annotations).To(HaveKey("k8s.ovn.org/node-subnets"))
+		Expect(n.Status.Addresses).To(HaveLen(1))
+		Expect(n.Spec.PodCIDR).To(Equal("10.128.0.0/23"))
 	})
 })

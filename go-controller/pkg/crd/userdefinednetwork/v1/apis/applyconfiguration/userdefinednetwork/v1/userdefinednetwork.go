@@ -6,8 +6,11 @@
 package v1
 
 import (
+	userdefinednetworkv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -31,6 +34,47 @@ func UserDefinedNetwork(name, namespace string) *UserDefinedNetworkApplyConfigur
 	b.WithKind("UserDefinedNetwork")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractUserDefinedNetworkFrom extracts the applied configuration owned by fieldManager from
+// userDefinedNetwork for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// userDefinedNetwork must be a unmodified UserDefinedNetwork API object that was retrieved from the Kubernetes API.
+// ExtractUserDefinedNetworkFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractUserDefinedNetworkFrom(userDefinedNetwork *userdefinednetworkv1.UserDefinedNetwork, fieldManager string, subresource string) (*UserDefinedNetworkApplyConfiguration, error) {
+	b := &UserDefinedNetworkApplyConfiguration{}
+	err := managedfields.ExtractInto(userDefinedNetwork, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.userdefinednetwork.v1.UserDefinedNetwork"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(userDefinedNetwork.Name)
+	b.WithNamespace(userDefinedNetwork.Namespace)
+
+	b.WithKind("UserDefinedNetwork")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractUserDefinedNetwork extracts the applied configuration owned by fieldManager from
+// userDefinedNetwork. If no managedFields are found in userDefinedNetwork for fieldManager, a
+// UserDefinedNetworkApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// userDefinedNetwork must be a unmodified UserDefinedNetwork API object that was retrieved from the Kubernetes API.
+// ExtractUserDefinedNetwork provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractUserDefinedNetwork(userDefinedNetwork *userdefinednetworkv1.UserDefinedNetwork, fieldManager string) (*UserDefinedNetworkApplyConfiguration, error) {
+	return ExtractUserDefinedNetworkFrom(userDefinedNetwork, fieldManager, "")
+}
+
+// ExtractUserDefinedNetworkStatus extracts the applied configuration owned by fieldManager from
+// userDefinedNetwork for the status subresource.
+func ExtractUserDefinedNetworkStatus(userDefinedNetwork *userdefinednetworkv1.UserDefinedNetwork, fieldManager string) (*UserDefinedNetworkApplyConfiguration, error) {
+	return ExtractUserDefinedNetworkFrom(userDefinedNetwork, fieldManager, "status")
 }
 
 func (b UserDefinedNetworkApplyConfiguration) IsApplyConfiguration() {}

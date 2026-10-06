@@ -81,6 +81,7 @@ spec:
                         - protocol
                         type: object
                       type: array
+                      x-kubernetes-list-type: atomic
                     to:
                       description: to is the target that traffic is allowed/denied
                         to
@@ -158,6 +159,7 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-type: atomic
             required:
             - egress
             type: object

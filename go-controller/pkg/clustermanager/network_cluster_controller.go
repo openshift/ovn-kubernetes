@@ -18,6 +18,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/kubernetes"
 	cache "k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
@@ -51,8 +52,11 @@ type NetworkStatusReporter func(networkName string, fieldManager string, conditi
 type networkClusterController struct {
 	watchFactory *factory.WatchFactory
 	kube         kube.InterfaceOVN
-	stopChan     chan struct{}
-	wg           *sync.WaitGroup
+	// nodeClient is used only for the rare live apiserver node read in the node
+	// allocator; normal reads go through the informer/lister.
+	nodeClient kubernetes.Interface
+	stopChan   chan struct{}
+	wg         *sync.WaitGroup
 
 	nodeReconciler *sharednode.NodeController
 
@@ -206,6 +210,7 @@ func newNetworkClusterController(
 		ReconcilableNetInfo: util.NewReconcilableNetInfo(netInfo),
 		watchFactory:        wf,
 		kube:                kube,
+		nodeClient:          ovnClient.KubeClient,
 		stopChan:            make(chan struct{}),
 		wg:                  wg,
 		recorder:            recorder,
@@ -406,7 +411,7 @@ func (ncc *networkClusterController) init() error {
 		if err = ncc.tunnelIDAllocator.ReserveID("zero", types.NoTunnelID); err != nil {
 			return err
 		}
-		if util.IsNetworkSegmentationSupportEnabled() && ncc.IsPrimaryNetwork() {
+		if util.IsNetworkSegmentationSupportEnabled() && ncc.IsPrimaryNetwork() && !config.Layer2UsesTransitRouter {
 			// if the network is a primary L2 UDN network, then we need to reserve
 			// the IDs used by each node in this network's pod allocator
 			nodes, err := ncc.watchFactory.GetNodes()
@@ -434,7 +439,7 @@ func (ncc *networkClusterController) init() error {
 	}
 
 	if ncc.hasNodeAllocation() {
-		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.GetNetInfo(), ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.tunnelIDAllocator)
+		ncc.nodeAllocator = node.NewNodeAllocator(networkID, ncc.GetNetInfo(), ncc.watchFactory.NodeCoreInformer().Lister(), ncc.kube, ncc.nodeClient, ncc.tunnelIDAllocator)
 		err := ncc.nodeAllocator.Init()
 		if err != nil {
 			return fmt.Errorf("failed to initialize host subnet ip allocator: %w", err)
@@ -700,7 +705,8 @@ func (ncc *networkClusterController) shouldReconcileNode(
 	return ncc.relevantNodeAnnotationsChanged(oldState, newState)
 }
 
-func (ncc *networkClusterController) relevantNodeAnnotationsChanged(oldState, newState *sharednode.NodeAnnotationState) bool {
+func (ncc *networkClusterController) relevantNodeAnnotationsChanged(
+	oldState, newState *sharednode.NodeAnnotationState) bool {
 	if ncc.nodeAllocator.HasNodeSubnetAllocation() &&
 		sharednode.NodeSubnetAnnotationChangedForNetworkWithState(oldState, newState, ncc.GetNetworkName()) {
 		return true
@@ -1068,7 +1074,7 @@ func (ncc *networkClusterController) clearInitialNodeNetworkUnavailableCondition
 					condition.Reason = "RouteCreated"
 					condition.Message = "ovn-kube cleared kubelet-set NoRouteCreated"
 					condition.LastTransitionTime = metav1.Now()
-					if err = ncc.kube.UpdateNodeStatus(node); err == nil {
+					if err = ncc.kube.PatchNodeStatus(oldNode, node); err == nil {
 						cleared = true
 					}
 				}

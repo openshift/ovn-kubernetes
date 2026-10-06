@@ -127,6 +127,7 @@ spec:
                 maxItems: 2
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: connectSubnets is immutable
                   rule: self == oldSelf
@@ -153,6 +154,7 @@ spec:
                 maxItems: 2
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: connectivity cannot contain duplicate values
                   rule: self.all(x, self.exists_one(y, x == y))

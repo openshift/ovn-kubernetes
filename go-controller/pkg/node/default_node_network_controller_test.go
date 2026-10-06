@@ -28,6 +28,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteclient "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube/mocks"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/bridgeconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
@@ -60,6 +61,79 @@ add set inet ovn-kubernetes remote-node-ips-v6 { type ipv6_addr ; comment "Block
 `
 
 var _ = Describe("Node", func() {
+	Describe("removing stale DPU-host address annotations", func() {
+		const nodeName = "my-node"
+
+		newController := func(kubeInterface kube.Interface) *DefaultNodeNetworkController {
+			return &DefaultNodeNetworkController{
+				BaseNodeNetworkController: BaseNodeNetworkController{
+					CommonNodeNetworkControllerInfo: CommonNodeNetworkControllerInfo{
+						name: nodeName,
+						Kube: kubeInterface,
+					},
+				},
+			}
+		}
+
+		BeforeEach(func() {
+			Expect(config.PrepareTestConfig()).To(Succeed())
+		})
+
+		It("removes the annotation during full-mode startup", func() {
+			config.OvnKubeNode.Mode = types.NodeModeFull
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					util.OVNNodePrimaryDPUHostAddr: `{"ipv4":"10.1.1.10/24"}`,
+				},
+			}}
+			client := fake.NewSimpleClientset(node)
+			nc := newController(&kube.Kube{KClient: client})
+
+			Expect(nc.removeStaleDPUHostAddressAnnotation()).To(Succeed())
+
+			updatedNode, err := client.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedNode.Annotations).NotTo(HaveKey(util.OVNNodePrimaryDPUHostAddr))
+		})
+
+		DescribeTable("preserves the annotation outside full mode", func(mode string) {
+			config.OvnKubeNode.Mode = mode
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					util.OVNNodePrimaryDPUHostAddr: `{"ipv4":"10.1.1.10/24"}`,
+				},
+			}}
+			client := fake.NewSimpleClientset(node)
+			nc := newController(&kube.Kube{KClient: client})
+
+			Expect(nc.removeStaleDPUHostAddressAnnotation()).To(Succeed())
+
+			updatedNode, err := client.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updatedNode.Annotations).To(HaveKey(util.OVNNodePrimaryDPUHostAddr))
+		},
+			Entry("in DPU mode", types.NodeModeDPU),
+			Entry("in DPU-host mode", types.NodeModeDPUHost),
+		)
+
+		It("returns an error when the annotation cannot be removed", func() {
+			config.OvnKubeNode.Mode = types.NodeModeFull
+			kubeMock := new(mocks.Interface)
+			kubeMock.On("SetAnnotationsOnNode", nodeName, map[string]interface{}{
+				util.OVNNodePrimaryDPUHostAddr: nil,
+			}).Return(fmt.Errorf("patch failed"))
+			nc := newController(kubeMock)
+
+			err := nc.removeStaleDPUHostAddressAnnotation()
+			Expect(err).To(MatchError(And(
+				ContainSubstring("failed to remove stale"),
+				ContainSubstring("patch failed"),
+			)))
+			kubeMock.AssertExpectations(GinkgoT())
+		})
+	})
 
 	Describe("validateMTU", func() {
 		var (
@@ -825,8 +899,8 @@ var _ = Describe("Node", func() {
 					Expect(err).NotTo(HaveOccurred())
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
+							uplinkBridges: map[string]*openflowBridge{},
 						},
 					}
 
@@ -936,8 +1010,8 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.254.61 }
 					Expect(err).NotTo(HaveOccurred())
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
+							uplinkBridges: map[string]*openflowBridge{},
 						},
 					}
 
@@ -1089,8 +1163,8 @@ add element inet ovn-kubernetes remote-node-ips-v4 { 169.254.253.61 }
 					Expect(err).NotTo(HaveOccurred())
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
+							uplinkBridges: map[string]*openflowBridge{},
 						},
 					}
 
@@ -1199,8 +1273,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2001:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
+							uplinkBridges: map[string]*openflowBridge{},
 						},
 					}
 
@@ -1360,8 +1434,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
+							uplinkBridges: map[string]*openflowBridge{},
 						},
 					}
 
@@ -1481,8 +1555,8 @@ add element inet ovn-kubernetes remote-node-ips-v6 { 2002:db8:1::4 }
 					Expect(err).NotTo(HaveOccurred())
 					nc.Gateway = &gateway{
 						openflowManager: &openflowManager{
-							flowCache:     map[string][]string{},
-							defaultBridge: bridgeconfig.TestDefaultBridgeConfig(),
+							defaultBridge: newOpenflowBridge(bridgeconfig.TestDefaultBridgeConfig()),
+							uplinkBridges: map[string]*openflowBridge{},
 						},
 					}
 

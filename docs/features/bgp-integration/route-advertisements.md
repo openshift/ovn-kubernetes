@@ -75,6 +75,41 @@ configuration. Please use the `Feature Config` option
 `enable-route-advertisements` under `OVNKubernetesFeatureConfig` config to
 enable it.
 
+## Local kind demo
+
+A local kind cluster can enable route advertisements with
+`contrib/kind.sh -mne -rae`.
+For FRR-k8s development, apply the patches in
+`contrib/frr-k8s/patches` to an FRR-k8s checkout and run the patched
+`hack/demo/demo.sh` script from that checkout.
+
+Without arguments, the demo configures the main BGP session only. It discovers
+the kind node `InternalIP` addresses and the external FRR peer address for each
+available IP family. In a dual-stack cluster, the rendered FRR and Kubernetes
+configuration includes both IPv4 and IPv6 peers.
+
+To add a second BGP session over a VLAN, pass the positional arguments in this
+order:
+
+```shell
+$ cd hack/demo && ./demo.sh <second-session-interface> <second-session-vrf> [<second-session-vlan> [<ipv4-sed> [<ipv6-sed>]]]
+```
+
+- `<second-session-interface>`: VLAN-capable host interface used as the VLAN
+  parent. If omitted, no second BGP session is configured.
+- `<second-session-vrf>`: VRF used by the node-side FRR-k8s session. The demo
+  creates the external FRR peer VRF as `<second-session-vrf>-ext`.
+- `<second-session-vlan>`: VLAN ID for the second session. Default: `221`.
+- `<ipv4-sed>`: sed expression applied to the main IPv4 BGP session IPs to
+  derive the second-session IPv4 addresses. Default: `s|111|221|g`.
+- `<ipv6-sed>`: sed expression applied to the main IPv6 BGP session IPs to
+  derive the second-session IPv6 addresses. Default: `s|c956|ca56|g`.
+
+Because the values are positional, pass the VLAN ID explicitly when overriding
+only the sed expressions. Second-session mode is supported only with host
+networking; it also requires passwordless `sudo` when the demo is not run as
+root, and a VLAN-capable interface connected to the second-session network.
+
 ## User-facing API Changes
 
 A new OVN-Kubernetes API is introduced for this feature:
@@ -143,6 +178,16 @@ in shared gateway mode.
 > previous example must correspond to the remote BGP router's configuration
 > (router ID, AS number, accept routes, etc...), and vice versa.
 
+> [!NOTE]
+> A neighbor can be defined by IP `address` or, for unnumbered BGP peering, by
+> node `interface`; one of the two must be specified. A neighbor defined by
+> address peers over a session of that address family and is only advertised
+> prefixes of the same family. FRR establishes an unnumbered session over an
+> IPv4 address derived from a /30 or /31 on the interface or, failing that,
+> over the peer's IPv6 link-local address; in either case the session can
+> carry prefixes of both IP families (RFC 8950), so OVN-Kubernetes advertises
+> prefixes of both families to interface-defined neighbors.
+
 ### Import routes from the default VRF into a CUDN
 
 Assuming we have a CUDN:
@@ -196,10 +241,10 @@ gateway router of the associated CUDN and hence will be used for the egress
 traffic of the pods on that network.
 
 > [!NOTE]
-> As long as the name of the CUDN is less than 16 characters, the corresponding
-> VRF name for the network will have the same name. Otherwise the name will be
-> pseudo-randomly generated and not easy to predict. Future enhancements will
-> allow for the VRF name to be configurable.
+> For CUDN names of 15 characters or fewer, the corresponding network VRF has
+> the same name. For longer CUDN names, the VRF name is derived from the network
+> ID. Read the actual VRF name from the CUDN `status.vrfName` field instead of
+> deriving it.
 
 > [!NOTE]
 > If you export routes for a CUDN over the default VRF as detailed on the next

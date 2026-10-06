@@ -111,8 +111,8 @@ spec:
                 minProperties: 1
                 properties:
                   dynamic:
-                    description: DynamicHops defines a slices of DynamicHop. This
-                      field is optional.
+                    description: DynamicHops defines a slice of DynamicHop. This field
+                      is optional.
                     items:
                       description: |-
                         DynamicHop defines the configuration for a dynamic external gateway interface.
@@ -231,6 +231,7 @@ spec:
                       - podSelector
                       type: object
                     type: array
+                    x-kubernetes-list-type: atomic
                   static:
                     description: StaticHops defines a slice of StaticHop. This field
                       is optional.
@@ -254,6 +255,7 @@ spec:
                       - ip
                       type: object
                     type: array
+                    x-kubernetes-list-type: atomic
                 type: object
             required:
             - from

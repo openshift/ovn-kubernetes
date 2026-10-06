@@ -49,6 +49,7 @@ type EgressQoS struct {
 // EgressQoSSpec defines the desired state of EgressQoS
 type EgressQoSSpec struct {
 	// a collection of Egress QoS rule objects
+	// +listType=atomic
 	Egress []EgressQoSRule `json:"egress"`
 }
 

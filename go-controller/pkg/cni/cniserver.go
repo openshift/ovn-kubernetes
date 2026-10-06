@@ -79,6 +79,9 @@ func NewCNIServer(
 	if config.IsModeDPU() {
 		return nil, fmt.Errorf("unsupported ovnkube-node mode for CNI server: %s", config.OvnKubeNode.Mode)
 	}
+	if !config.UnprivilegedMode && ovsClient == nil && !config.IsModeDPUHost() {
+		return nil, fmt.Errorf("OVS client is required in privileged mode")
+	}
 
 	router := mux.NewRouter()
 
@@ -236,6 +239,16 @@ func updateDeviceInfo(pr *PodRequest) error {
 		return nil
 	}
 	if util.IsPCIDeviceName(pr.CNIConf.DeviceID) {
+		// In case a DHCP-related VFIO handoff failed, run the repair first
+		// to get the original driver binding.
+		// Fatal on ADD and best-effort for other commands so teardown is never blocked.
+		if err := healInterruptedVFIOHandoff(pr.CNIConf.DeviceID); err != nil {
+			if pr.Command == CNIAdd {
+				return err
+			}
+			klog.Warningf("Proceeding with %s despite a failed VFIO handoff repair for device %s: %v",
+				pr.Command, pr.CNIConf.DeviceID, err)
+		}
 		// DeviceID is a PCI address
 		pr.IsVFIO = util.GetSriovnetOps().IsVfPciVfioBound(pr.CNIConf.DeviceID)
 	} else if util.IsAuxDeviceName(pr.CNIConf.DeviceID) {
@@ -259,8 +272,11 @@ func (s *Server) handleCNIRequest(r *http.Request) (result []byte, err error) {
 	if err := json.Unmarshal(b, &cr); err != nil {
 		return nil, err
 	}
-	// Match the Kubelet default CRI operation timeout of 2m.
-	ctx, cancel := context.WithTimeout(context.Background(), kubeletDefaultCRIOperationTimeout)
+	// containerd terminates the CNI shim when its sandbox request is canceled,
+	// which closes the connection and cancels r.Context(). CRI-O may keep CNI
+	// setup running under an independent timeout, so cmdAdd also detects Pod
+	// deletion and replacement explicitly.
+	ctx, cancel := context.WithTimeout(r.Context(), kubeletDefaultCRIOperationTimeout)
 	defer cancel()
 
 	cmd, ok := cr.Env["CNI_COMMAND"]

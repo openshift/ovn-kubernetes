@@ -6,8 +6,11 @@
 package v1
 
 import (
+	clusternetworkconnectv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/clusternetworkconnect/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -31,6 +34,46 @@ func ClusterNetworkConnect(name string) *ClusterNetworkConnectApplyConfiguration
 	b.WithKind("ClusterNetworkConnect")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractClusterNetworkConnectFrom extracts the applied configuration owned by fieldManager from
+// clusterNetworkConnect for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// clusterNetworkConnect must be a unmodified ClusterNetworkConnect API object that was retrieved from the Kubernetes API.
+// ExtractClusterNetworkConnectFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractClusterNetworkConnectFrom(clusterNetworkConnect *clusternetworkconnectv1.ClusterNetworkConnect, fieldManager string, subresource string) (*ClusterNetworkConnectApplyConfiguration, error) {
+	b := &ClusterNetworkConnectApplyConfiguration{}
+	err := managedfields.ExtractInto(clusterNetworkConnect, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.clusternetworkconnect.v1.ClusterNetworkConnect"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(clusterNetworkConnect.Name)
+
+	b.WithKind("ClusterNetworkConnect")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractClusterNetworkConnect extracts the applied configuration owned by fieldManager from
+// clusterNetworkConnect. If no managedFields are found in clusterNetworkConnect for fieldManager, a
+// ClusterNetworkConnectApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// clusterNetworkConnect must be a unmodified ClusterNetworkConnect API object that was retrieved from the Kubernetes API.
+// ExtractClusterNetworkConnect provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractClusterNetworkConnect(clusterNetworkConnect *clusternetworkconnectv1.ClusterNetworkConnect, fieldManager string) (*ClusterNetworkConnectApplyConfiguration, error) {
+	return ExtractClusterNetworkConnectFrom(clusterNetworkConnect, fieldManager, "")
+}
+
+// ExtractClusterNetworkConnectStatus extracts the applied configuration owned by fieldManager from
+// clusterNetworkConnect for the status subresource.
+func ExtractClusterNetworkConnectStatus(clusterNetworkConnect *clusternetworkconnectv1.ClusterNetworkConnect, fieldManager string) (*ClusterNetworkConnectApplyConfiguration, error) {
+	return ExtractClusterNetworkConnectFrom(clusterNetworkConnect, fieldManager, "status")
 }
 
 func (b ClusterNetworkConnectApplyConfiguration) IsApplyConfiguration() {}

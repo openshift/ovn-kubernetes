@@ -6,8 +6,11 @@
 package v1
 
 import (
+	adminpolicybasedroutev1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -31,6 +34,46 @@ func AdminPolicyBasedExternalRoute(name string) *AdminPolicyBasedExternalRouteAp
 	b.WithKind("AdminPolicyBasedExternalRoute")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractAdminPolicyBasedExternalRouteFrom extracts the applied configuration owned by fieldManager from
+// adminPolicyBasedExternalRoute for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// adminPolicyBasedExternalRoute must be a unmodified AdminPolicyBasedExternalRoute API object that was retrieved from the Kubernetes API.
+// ExtractAdminPolicyBasedExternalRouteFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractAdminPolicyBasedExternalRouteFrom(adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, fieldManager string, subresource string) (*AdminPolicyBasedExternalRouteApplyConfiguration, error) {
+	b := &AdminPolicyBasedExternalRouteApplyConfiguration{}
+	err := managedfields.ExtractInto(adminPolicyBasedExternalRoute, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.adminpolicybasedroute.v1.AdminPolicyBasedExternalRoute"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(adminPolicyBasedExternalRoute.Name)
+
+	b.WithKind("AdminPolicyBasedExternalRoute")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractAdminPolicyBasedExternalRoute extracts the applied configuration owned by fieldManager from
+// adminPolicyBasedExternalRoute. If no managedFields are found in adminPolicyBasedExternalRoute for fieldManager, a
+// AdminPolicyBasedExternalRouteApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// adminPolicyBasedExternalRoute must be a unmodified AdminPolicyBasedExternalRoute API object that was retrieved from the Kubernetes API.
+// ExtractAdminPolicyBasedExternalRoute provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractAdminPolicyBasedExternalRoute(adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, fieldManager string) (*AdminPolicyBasedExternalRouteApplyConfiguration, error) {
+	return ExtractAdminPolicyBasedExternalRouteFrom(adminPolicyBasedExternalRoute, fieldManager, "")
+}
+
+// ExtractAdminPolicyBasedExternalRouteStatus extracts the applied configuration owned by fieldManager from
+// adminPolicyBasedExternalRoute for the status subresource.
+func ExtractAdminPolicyBasedExternalRouteStatus(adminPolicyBasedExternalRoute *adminpolicybasedroutev1.AdminPolicyBasedExternalRoute, fieldManager string) (*AdminPolicyBasedExternalRouteApplyConfiguration, error) {
+	return ExtractAdminPolicyBasedExternalRouteFrom(adminPolicyBasedExternalRoute, fieldManager, "status")
 }
 
 func (b AdminPolicyBasedExternalRouteApplyConfiguration) IsApplyConfiguration() {}

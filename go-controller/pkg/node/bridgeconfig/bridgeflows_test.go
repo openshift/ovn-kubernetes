@@ -6,13 +6,208 @@ package bridgeconfig
 import (
 	"fmt"
 	"net"
+	"strings"
 	"testing"
+
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	udngenerator "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/generator/udn"
 	nodetypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/types"
+	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
+
+func newBridgeFlowTestOVSClient(t *testing.T, bridgeName string) libovsdbclient.Client {
+	t.Helper()
+	bridgeUUID := bridgeName + "-uuid"
+	ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{
+		OVSData: []libovsdbtest.TestData{
+			&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: []string{bridgeUUID}},
+			&vswitchd.Bridge{UUID: bridgeUUID, Name: bridgeName},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to create OVS test harness: %v", err)
+	}
+	t.Cleanup(ovsCleanup.Cleanup)
+	return ovsClient
+}
+
+func TestHostNetworkNormalActionFlowsRequireLocalnetPort(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	tests := []struct {
+		name                   string
+		gatewayMode            config.GatewayMode
+		ipv4Mode               bool
+		ipv6Mode               bool
+		localnetBridge         string
+		expectedPriority102Cnt int
+	}{
+		{
+			name:                   "shared gateway IPv4 without localnet topology port",
+			gatewayMode:            config.GatewayModeShared,
+			ipv4Mode:               true,
+			expectedPriority102Cnt: 0,
+		},
+		{
+			name:                   "shared gateway IPv4 with localnet topology port",
+			gatewayMode:            config.GatewayModeShared,
+			ipv4Mode:               true,
+			localnetBridge:         "br0",
+			expectedPriority102Cnt: 2,
+		},
+		{
+			name:                   "shared gateway IPv6 without localnet topology port",
+			gatewayMode:            config.GatewayModeShared,
+			ipv6Mode:               true,
+			expectedPriority102Cnt: 0,
+		},
+		{
+			name:                   "shared gateway IPv6 with localnet topology port",
+			gatewayMode:            config.GatewayModeShared,
+			ipv6Mode:               true,
+			localnetBridge:         "br0",
+			expectedPriority102Cnt: 6,
+		},
+		{
+			name:                   "local gateway IPv4 without localnet topology port",
+			gatewayMode:            config.GatewayModeLocal,
+			ipv4Mode:               true,
+			expectedPriority102Cnt: 0,
+		},
+		{
+			name:                   "local gateway IPv4 with localnet topology port",
+			gatewayMode:            config.GatewayModeLocal,
+			ipv4Mode:               true,
+			localnetBridge:         "br0",
+			expectedPriority102Cnt: 1,
+		},
+		{
+			name:                   "local gateway IPv6 without localnet topology port",
+			gatewayMode:            config.GatewayModeLocal,
+			ipv6Mode:               true,
+			expectedPriority102Cnt: 0,
+		},
+		{
+			name:                   "local gateway IPv6 with localnet topology port",
+			gatewayMode:            config.GatewayModeLocal,
+			ipv6Mode:               true,
+			localnetBridge:         "br0",
+			expectedPriority102Cnt: 3,
+		},
+		{
+			name:                   "localnet topology port on another bridge does not enable flows",
+			gatewayMode:            config.GatewayModeShared,
+			ipv4Mode:               true,
+			localnetBridge:         "br-other",
+			expectedPriority102Cnt: 0,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config.Gateway.Mode = test.gatewayMode
+			config.IPv4Mode = test.ipv4Mode
+			config.IPv6Mode = test.ipv6Mode
+
+			br0Ports := []string{"gateway-port-uuid", "cudn-gateway-port-uuid"}
+			rootBridges := []string{"br0-uuid"}
+			ovsData := []libovsdbtest.TestData{
+				&vswitchd.Port{
+					UUID:        "gateway-port-uuid",
+					Name:        "patch-br0_node-to-br-int",
+					Interfaces:  []string{"gateway-interface-uuid"},
+					ExternalIDs: map[string]string{"ovn-localnet-port": "br0_node"},
+				},
+				&vswitchd.Interface{UUID: "gateway-interface-uuid", Name: "patch-br0_node-to-br-int", Type: "patch"},
+				&vswitchd.Port{
+					UUID:        "cudn-gateway-port-uuid",
+					Name:        "patch-br0_blue_node-to-br-int",
+					Interfaces:  []string{"cudn-gateway-interface-uuid"},
+					ExternalIDs: map[string]string{"ovn-localnet-port": "br0_blue_node"},
+				},
+				&vswitchd.Interface{UUID: "cudn-gateway-interface-uuid", Name: "patch-br0_blue_node-to-br-int", Type: "patch"},
+			}
+
+			if test.localnetBridge != "" {
+				localnetPort := &vswitchd.Port{
+					UUID:        "localnet-port-uuid",
+					Name:        "patch-blue_ovn_localnet_port-to-br-int",
+					Interfaces:  []string{"localnet-interface-uuid"},
+					ExternalIDs: map[string]string{"ovn-localnet-port": "blue_ovn_localnet_port"},
+				}
+				ovsData = append(ovsData, localnetPort,
+					&vswitchd.Interface{UUID: "localnet-interface-uuid", Name: localnetPort.Name, Type: "patch"})
+				if test.localnetBridge == "br0" {
+					br0Ports = append(br0Ports, localnetPort.UUID)
+				} else {
+					rootBridges = append(rootBridges, "br-other-uuid")
+					ovsData = append(ovsData, &vswitchd.Bridge{
+						UUID:  "br-other-uuid",
+						Name:  "br-other",
+						Ports: []string{localnetPort.UUID},
+					})
+				}
+			}
+
+			ovsData = append(ovsData,
+				&vswitchd.OpenvSwitch{UUID: "root-ovs", Bridges: rootBridges},
+				&vswitchd.Bridge{UUID: "br0-uuid", Name: "br0", Ports: br0Ports},
+			)
+			ovsClient, ovsCleanup, err := libovsdbtest.NewOVSTestHarness(libovsdbtest.TestSetup{OVSData: ovsData})
+			if err != nil {
+				t.Fatalf("failed to create OVS test harness: %v", err)
+			}
+			t.Cleanup(ovsCleanup.Cleanup)
+
+			var bridgeIPs, hostSubnets []*net.IPNet
+			if test.ipv4Mode {
+				bridgeIPs = append(bridgeIPs, mustParseIPNet(t, "10.1.253.253/16"))
+				hostSubnets = append(hostSubnets, mustParseIPNet(t, "10.1.0.0/16"))
+			}
+			if test.ipv6Mode {
+				bridgeIPs = append(bridgeIPs, mustParseIPNet(t, "fd00::253/64"))
+				hostSubnets = append(hostSubnets, mustParseIPNet(t, "fd00::/64"))
+			}
+			bridge := &BridgeConfiguration{
+				ovsClient:  ovsClient,
+				bridgeName: "br0",
+				ofPortPhys: "ens8",
+				ofPortHost: nodetypes.OvsLocalPort,
+				ips:        bridgeIPs,
+				macAddress: mustParseMAC(t, "48:b0:2d:00:00:04"),
+				netConfig: map[string]*BridgeUDNConfiguration{
+					types.DefaultNetworkName: {
+						OfPortPatch: "patch-br0_node-to-br-int",
+						MasqCTMark:  nodetypes.CtMarkOVN,
+					},
+				},
+			}
+
+			flows, err := bridge.commonFlows(hostSubnets)
+			if err != nil {
+				t.Fatalf("failed to render bridge flows: %v", err)
+			}
+			priority102Cnt := 0
+			for _, flow := range flows {
+				if strings.Contains(flow, "priority=102") {
+					priority102Cnt++
+				}
+			}
+			if priority102Cnt != test.expectedPriority102Cnt {
+				t.Fatalf("expected %d priority-102 flows, got %d: %v",
+					test.expectedPriority102Cnt, priority102Cnt, flows)
+			}
+		})
+	}
+}
 
 func TestSharedNoOverlayNodeIPFlowUsesNATInDefaultConntrackZone(t *testing.T) {
 	if err := config.PrepareTestConfig(); err != nil {
@@ -34,6 +229,8 @@ func TestSharedNoOverlayNodeIPFlowUsesNATInDefaultConntrackZone(t *testing.T) {
 	v6ManagementMasqIP := mustParseIPNet(t, "fd69::12/128")
 
 	bridge := &BridgeConfiguration{
+		ovsClient:  newBridgeFlowTestOVSClient(t, "breth0"),
+		bridgeName: "breth0",
 		ofPortPhys: "eth0",
 		ofPortHost: nodetypes.OvsLocalPort,
 		ips:        []*net.IPNet{v4NodeIP, v6NodeIP},
@@ -76,7 +273,7 @@ func TestSharedNoOverlayNodeIPFlowUsesNATInDefaultConntrackZone(t *testing.T) {
 	expectFlow(t, flows, expectedIPv6)
 }
 
-func TestDPUHostNoOverlayPodCIDRFlowsUseHostMasqueradeIP(t *testing.T) {
+func TestUplinkBridgeServiceFlowsUseUDNMark(t *testing.T) {
 	if err := config.PrepareTestConfig(); err != nil {
 		t.Fatalf("failed to prepare test config: %v", err)
 	}
@@ -86,64 +283,95 @@ func TestDPUHostNoOverlayPodCIDRFlowsUseHostMasqueradeIP(t *testing.T) {
 	config.IPv4Mode = true
 	config.IPv6Mode = true
 	config.Gateway.Mode = config.GatewayModeShared
-	config.Default.Transport = types.NetworkTransportNoOverlay
-	config.OvnKubeNode.Mode = types.NodeModeDPU
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.Kubernetes.ServiceCIDRs = []*net.IPNet{
+		mustParseIPNet(t, "10.96.0.0/16"),
+		mustParseIPNet(t, "fd10:96::/112"),
+	}
 
 	bridgeMAC := mustParseMAC(t, "62:41:d0:54:3d:64")
-	v4NodeIP := mustParseIPNet(t, "172.18.0.3/24")
-	v6NodeIP := mustParseIPNet(t, "fd00::3/64")
+	v4NodeIP := mustParseIPNet(t, "172.28.0.3/24")
+	v6NodeIP := mustParseIPNet(t, "fd28::3/64")
+	v4GatewayMasqIP := mustParseIPNet(t, "169.254.0.11/32")
+	v4ManagementMasqIP := mustParseIPNet(t, "169.254.0.12/32")
+	v6GatewayMasqIP := mustParseIPNet(t, "fd69::11/128")
+	v6ManagementMasqIP := mustParseIPNet(t, "fd69::12/128")
 
 	bridge := &BridgeConfiguration{
-		ofPortPhys: "eth0",
+		ofPortPhys: "eth1",
 		ofPortHost: nodetypes.OvsLocalPort,
 		ips:        []*net.IPNet{v4NodeIP, v6NodeIP},
 		macAddress: bridgeMAC,
 		netConfig: map[string]*BridgeUDNConfiguration{
-			types.DefaultNetworkName: {
-				OfPortPatch: "patch-breth0_ov",
-				MasqCTMark:  nodetypes.CtMarkOVN,
-				Subnets: []config.CIDRNetworkEntry{
-					{CIDR: mustParseIPNet(t, "10.244.0.0/16")},
-					{CIDR: mustParseIPNet(t, "fd10:244::/64")},
+			"bluenet": {
+				OfPortPatch: "patch-ovsbr1_bluenet",
+				MasqCTMark:  "0x4",
+				PktMark:     "0x1001",
+				Transport:   types.NetworkTransportNoOverlay,
+				V4MasqIPs: &udngenerator.MasqueradeIPs{
+					GatewayRouter:  v4GatewayMasqIP,
+					ManagementPort: v4ManagementMasqIP,
+				},
+				V6MasqIPs: &udngenerator.MasqueradeIPs{
+					GatewayRouter:  v6GatewayMasqIP,
+					ManagementPort: v6ManagementMasqIP,
 				},
 			},
 		},
 	}
 
-	flows, err := bridge.commonFlows(nil)
+	flows, err := bridge.UplinkBridgeFlows(nil)
 	if err != nil {
 		t.Fatalf("failed to render bridge flows: %v", err)
 	}
 
-	expectedIPv4HostToOVN := fmt.Sprintf("cookie=%s, priority=510, in_port=LOCAL, ip, ip_src=%s, "+
-		"ip_dst=10.244.0.0/16, actions=goto_table:2",
-		nodetypes.DefaultOpenFlowCookie, config.Gateway.MasqueradeIPs.V4HostMasqueradeIP)
-	expectedIPv4OVNToHost := fmt.Sprintf("cookie=%s, priority=510, in_port=patch-breth0_ov, ip, "+
-		"ip_src=10.244.0.0/16, ip_dst=%s,actions=goto_table:3",
-		nodetypes.DefaultOpenFlowCookie, config.Gateway.MasqueradeIPs.V4HostMasqueradeIP)
-	expectedIPv4OVNToPhysical := fmt.Sprintf("cookie=%s, priority=510, in_port=patch-breth0_ov, "+
-		"dl_src=%s, ip, ip_src=%s, ip_dst=10.244.0.0/16, "+
-		"actions=ct(commit, zone=%d, nat(src=172.18.0.3), exec(set_field:%s->ct_mark)), output:eth0",
-		nodetypes.DefaultOpenFlowCookie, bridgeMAC, config.Gateway.MasqueradeIPs.V4HostMasqueradeIP,
-		config.Default.ConntrackZone, nodetypes.CtMarkOVN)
-	expectedIPv6HostToOVN := fmt.Sprintf("cookie=%s, priority=510, in_port=LOCAL, ipv6, ipv6_src=%s, "+
-		"ipv6_dst=fd10:244::/64, actions=goto_table:2",
-		nodetypes.DefaultOpenFlowCookie, config.Gateway.MasqueradeIPs.V6HostMasqueradeIP)
-	expectedIPv6OVNToHost := fmt.Sprintf("cookie=%s, priority=510, in_port=patch-breth0_ov, ipv6, "+
-		"ipv6_src=fd10:244::/64, ipv6_dst=%s,actions=goto_table:3",
-		nodetypes.DefaultOpenFlowCookie, config.Gateway.MasqueradeIPs.V6HostMasqueradeIP)
-	expectedIPv6OVNToPhysical := fmt.Sprintf("cookie=%s, priority=510, in_port=patch-breth0_ov, "+
-		"dl_src=%s, ipv6, ipv6_src=%s, ipv6_dst=fd10:244::/64, "+
-		"actions=ct(commit, zone=%d, nat(src=fd00::3), exec(set_field:%s->ct_mark)), output:eth0",
-		nodetypes.DefaultOpenFlowCookie, bridgeMAC, config.Gateway.MasqueradeIPs.V6HostMasqueradeIP,
-		config.Default.ConntrackZone, nodetypes.CtMarkOVN)
+	expectedIPv4HostToService := fmt.Sprintf("cookie=%s, priority=500, in_port=LOCAL, ip, "+
+		"pkt_mark=0x1001, ip_dst=10.96.0.0/16, "+
+		"actions=ct(commit,zone=%d,nat(src=%s),table=2)",
+		nodetypes.DefaultOpenFlowCookie, config.Default.HostMasqConntrackZone,
+		config.Gateway.MasqueradeIPs.V4HostMasqueradeIP)
+	expectedIPv4Dispatch := fmt.Sprintf("cookie=%s, priority=250, table=2, ip, pkt_mark=0x1001, "+
+		"actions=set_field:%s->eth_dst,output:patch-ovsbr1_bluenet",
+		nodetypes.DefaultOpenFlowCookie, bridgeMAC)
+	expectedIPv4ReplyToHost := fmt.Sprintf("cookie=%s, priority=500, in_port=patch-ovsbr1_bluenet, "+
+		"ip, ip_src=10.96.0.0/16, ip_dst=%s,actions=ct(zone=%d,nat,table=3)",
+		nodetypes.DefaultOpenFlowCookie, config.Gateway.V4MasqueradeSubnet,
+		config.Default.HostMasqConntrackZone)
+	expectedIPv4ReplyToOVN := fmt.Sprintf("cookie=%s, priority=100, table=1, ip, ct_state=+trk+est, "+
+		"ct_mark=0x4, actions=output:patch-ovsbr1_bluenet",
+		nodetypes.DefaultOpenFlowCookie)
+	expectedIPv6HostToService := fmt.Sprintf("cookie=%s, priority=500, in_port=LOCAL, ipv6, "+
+		"pkt_mark=0x1001, ipv6_dst=fd10:96::/112, "+
+		"actions=ct(commit,zone=%d,nat(src=%s),table=2)",
+		nodetypes.DefaultOpenFlowCookie, config.Default.HostMasqConntrackZone,
+		config.Gateway.MasqueradeIPs.V6HostMasqueradeIP)
+	expectedIPv6Dispatch := fmt.Sprintf("cookie=%s, priority=250, table=2, ipv6, pkt_mark=0x1001, "+
+		"actions=set_field:%s->eth_dst,output:patch-ovsbr1_bluenet",
+		nodetypes.DefaultOpenFlowCookie, bridgeMAC)
+	expectedIPv6ReplyToHost := fmt.Sprintf("cookie=%s, priority=500, in_port=patch-ovsbr1_bluenet, "+
+		"ipv6, ipv6_src=fd10:96::/112, ipv6_dst=%s,actions=ct(zone=%d,nat,table=3)",
+		nodetypes.DefaultOpenFlowCookie, config.Gateway.V6MasqueradeSubnet,
+		config.Default.HostMasqConntrackZone)
+	expectedIPv6ReplyToOVN := fmt.Sprintf("cookie=%s, priority=100, table=1, ipv6, ct_state=+trk+est, "+
+		"ct_mark=0x4, actions=output:patch-ovsbr1_bluenet",
+		nodetypes.DefaultOpenFlowCookie)
+	expectedTable3 := fmt.Sprintf("cookie=%s, table=3,  "+
+		"actions=move:NXM_OF_ETH_DST[]->NXM_OF_ETH_SRC[],set_field:%s->eth_dst,output:LOCAL",
+		nodetypes.DefaultOpenFlowCookie, bridgeMAC)
 
-	expectFlow(t, flows, expectedIPv4HostToOVN)
-	expectFlow(t, flows, expectedIPv4OVNToHost)
-	expectFlow(t, flows, expectedIPv4OVNToPhysical)
-	expectFlow(t, flows, expectedIPv6HostToOVN)
-	expectFlow(t, flows, expectedIPv6OVNToHost)
-	expectFlow(t, flows, expectedIPv6OVNToPhysical)
+	expectFlow(t, flows, expectedIPv4HostToService)
+	expectFlow(t, flows, expectedIPv4Dispatch)
+	expectFlow(t, flows, expectedIPv4ReplyToHost)
+	expectFlow(t, flows, expectedIPv4ReplyToOVN)
+	expectFlow(t, flows, expectedIPv6HostToService)
+	expectFlow(t, flows, expectedIPv6Dispatch)
+	expectFlow(t, flows, expectedIPv6ReplyToHost)
+	expectFlow(t, flows, expectedIPv6ReplyToOVN)
+	expectFlow(t, flows, expectedTable3)
+	expectNoFlow(t, flows, fmt.Sprintf("priority=500, in_port=LOCAL, ip, ip_dst=10.96.0.0/16, "+
+		"actions=ct(commit,zone=%d,nat(src=%s),table=2)",
+		config.Default.HostMasqConntrackZone, config.Gateway.MasqueradeIPs.V4HostMasqueradeIP))
 }
 
 func TestLocalNoOverlayServiceHairpinUsesUDNGatewayMasqueradeIP(t *testing.T) {
@@ -166,6 +394,8 @@ func TestLocalNoOverlayServiceHairpinUsesUDNGatewayMasqueradeIP(t *testing.T) {
 	v6ManagementMasqIP := mustParseIPNet(t, "fd69::12/128")
 
 	bridge := &BridgeConfiguration{
+		ovsClient:  newBridgeFlowTestOVSClient(t, "breth0"),
+		bridgeName: "breth0",
 		ofPortHost: nodetypes.OvsLocalPort,
 		ips:        []*net.IPNet{v4NodeIP, v6NodeIP},
 		macAddress: bridgeMAC,
@@ -228,6 +458,83 @@ func TestLocalNoOverlayServiceHairpinUsesUDNGatewayMasqueradeIP(t *testing.T) {
 	expectFlow(t, flows, expectedIPv6Table5)
 }
 
+func TestArpFanoutFilterFlowsIncludeVLAN(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatalf("failed to prepare test config: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = config.PrepareTestConfig()
+	})
+	config.IPv4Mode = true
+	config.IPv6Mode = true
+	config.Gateway.Mode = config.GatewayModeShared
+	config.Gateway.VLANID = 100
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+
+	bridgeMAC := mustParseMAC(t, "62:41:d0:54:3d:64")
+	v4NodeIP := mustParseIPNet(t, "172.18.0.3/24")
+	v6NodeIP := mustParseIPNet(t, "fd00::3/64")
+	v4GatewayMasqIP := mustParseIPNet(t, "169.254.0.11/32")
+	v4ManagementMasqIP := mustParseIPNet(t, "169.254.0.12/32")
+	v6GatewayMasqIP := mustParseIPNet(t, "fd69::11/128")
+	v6ManagementMasqIP := mustParseIPNet(t, "fd69::12/128")
+
+	bridge := &BridgeConfiguration{
+		ovsClient:  newBridgeFlowTestOVSClient(t, "breth0"),
+		bridgeName: "breth0",
+		ofPortPhys: "eth0",
+		ofPortHost: nodetypes.OvsLocalPort,
+		ips:        []*net.IPNet{v4NodeIP, v6NodeIP},
+		macAddress: bridgeMAC,
+		netConfig: map[string]*BridgeUDNConfiguration{
+			types.DefaultNetworkName: {
+				OfPortPatch: "patch-breth0_ov",
+				MasqCTMark:  nodetypes.CtMarkOVN,
+			},
+			"bluenet": {
+				OfPortPatch: "patch-breth0_bluenet",
+				MasqCTMark:  "0x4",
+				V4MasqIPs: &udngenerator.MasqueradeIPs{
+					GatewayRouter:  v4GatewayMasqIP,
+					ManagementPort: v4ManagementMasqIP,
+				},
+				V6MasqIPs: &udngenerator.MasqueradeIPs{
+					GatewayRouter:  v6GatewayMasqIP,
+					ManagementPort: v6ManagementMasqIP,
+				},
+			},
+		},
+	}
+
+	flows, err := bridge.commonFlows(nil)
+	if err != nil {
+		t.Fatalf("failed to render bridge flows: %v", err)
+	}
+
+	expectedIPv4 := fmt.Sprintf("cookie=%s, priority=12, table=0, dl_vlan=100, arp, arp_op=1, arp_tpa=172.18.0.3, "+
+		"actions=output:patch-breth0_ov,NORMAL",
+		nodetypes.DefaultOpenFlowCookie)
+	expectedIPv6 := fmt.Sprintf("cookie=%s, priority=12, table=0, dl_vlan=100, icmp6, icmpv6_type=%d, nd_target=fd00::3, "+
+		"actions=output:patch-breth0_ov,NORMAL",
+		nodetypes.DefaultOpenFlowCookie, types.NeighborSolicitationICMPType)
+
+	expectFlow(t, flows, expectedIPv4)
+	expectFlow(t, flows, expectedIPv6)
+	// Priority-11 flows forward external broadcast ARP/NA to all GR patches.
+	// Action output order is non-deterministic (map iteration), so we use
+	// substring matching instead of exact flow comparison.
+	expectFlowContainingAll(t, flows,
+		fmt.Sprintf("cookie=%s", nodetypes.DefaultOpenFlowCookie),
+		"priority=11", "in_port=eth0", "dl_vlan=100", "dl_dst=ff:ff:ff:ff:ff:ff", "arp",
+		"actions=", "output:patch-breth0_bluenet", "output:patch-breth0_ov", "NORMAL")
+	expectFlowContainingAll(t, flows,
+		fmt.Sprintf("cookie=%s", nodetypes.DefaultOpenFlowCookie),
+		"priority=11", "in_port=eth0", "dl_vlan=100", "dl_dst=33:33:00:00:00:01",
+		fmt.Sprintf("icmpv6_type=%d", types.NeighborAdvertisementICMPType),
+		"actions=", "output:patch-breth0_bluenet", "output:patch-breth0_ov", "NORMAL")
+}
+
 func mustParseMAC(t *testing.T, value string) net.HardwareAddr {
 	t.Helper()
 	mac, err := net.ParseMAC(value)
@@ -255,4 +562,30 @@ func expectFlow(t *testing.T, flows []string, expected string) {
 		}
 	}
 	t.Fatalf("expected flow not found:\n%s\n\nall flows:\n%v", expected, flows)
+}
+
+func expectFlowContainingAll(t *testing.T, flows []string, substrings ...string) {
+	t.Helper()
+	for _, flow := range flows {
+		allFound := true
+		for _, s := range substrings {
+			if !strings.Contains(flow, s) {
+				allFound = false
+				break
+			}
+		}
+		if allFound {
+			return
+		}
+	}
+	t.Fatalf("no flow contains all substrings %v\n\nall flows:\n%v", substrings, flows)
+}
+
+func expectNoFlow(t *testing.T, flows []string, unexpectedSubstring string) {
+	t.Helper()
+	for _, flow := range flows {
+		if strings.Contains(flow, unexpectedSubstring) {
+			t.Fatalf("unexpected flow found:\n%s\n\nall flows:\n%v", flow, flows)
+		}
+	}
 }

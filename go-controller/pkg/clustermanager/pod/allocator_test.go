@@ -1091,6 +1091,57 @@ func TestPodAllocator_reconcileForNAD(t *testing.T) {
 	}
 }
 
+func TestSyncReservesPlatformTunnelIDs(t *testing.T) {
+	tests := []struct {
+		name           string
+		existingPodIDs map[string]int // name -> tunnel ID already held by pods
+		wantAllocMinID int
+	}{
+		{
+			name:           "fresh cluster, all platform IDs reserved",
+			existingPodIDs: nil,
+			wantAllocMinID: transitRouterFirstPodTunnelKey,
+		},
+		{
+			name: "upgrade: pods already hold platform IDs",
+			existingPodIDs: map[string]int{
+				"pod-a": 2,
+				"pod-b": 3,
+			},
+			wantAllocMinID: transitRouterFirstPodTunnelKey,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+
+			err := config.PrepareTestConfig()
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			config.Layer2UsesTransitRouter = true
+
+			idAlloc := id.NewIDAllocator("test", types.MaxLogicalPortTunnelKey)
+			g.Expect(idAlloc.ReserveID("zero", 0)).To(gomega.Succeed())
+
+			for name, tunID := range tt.existingPodIDs {
+				g.Expect(idAlloc.ReserveID(name, tunID)).To(gomega.Succeed())
+			}
+
+			allocator := &PodAllocator{
+				netInfo:     &util.DefaultNetInfo{},
+				idAllocator: idAlloc,
+			}
+
+			g.Expect(allocator.Sync(nil)).To(gomega.Succeed())
+
+			nextID, err := idAlloc.AllocateID("test-pod")
+			g.Expect(err).ToNot(gomega.HaveOccurred())
+			g.Expect(nextID).To(gomega.BeNumerically(">=", tt.wantAllocMinID),
+				"pod tunnel IDs should start at %d when transit router is enabled", tt.wantAllocMinID)
+		})
+	}
+}
+
 func generateIPAMClaimsListerAndTeardownFunc(stopChannel <-chan struct{}, ipamClaims ...runtime.Object) (ipamclaimslister.IPAMClaimLister, func()) {
 	ipamClaimClient := fakeipamclaimclient.NewSimpleClientset(ipamClaims...)
 	informerFactory := ipamclaimsfactory.NewSharedInformerFactory(ipamClaimClient, 0)

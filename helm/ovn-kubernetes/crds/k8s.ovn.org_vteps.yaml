@@ -72,6 +72,7 @@ spec:
                 maxItems: 20
                 minItems: 1
                 type: array
+                x-kubernetes-list-type: atomic
                 x-kubernetes-validations:
                 - message: CIDRs must not overlap with each other
                   rule: self.all(i, a, self.all(j, b, i == j || !(cidr(a).containsIP(cidr(b).ip())

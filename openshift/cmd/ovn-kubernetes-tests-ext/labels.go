@@ -35,9 +35,7 @@ func generatePrependedLabelsStr(labels sets.Set[string]) string {
 func getPrependLabels(labels sets.Set[string]) []string {
 	var prependLabels []string
 	for _, label := range labels.UnsortedList() {
-		for _, prependLabel := range labelToPrependLabelsMap[label] {
-			prependLabels = append(prependLabels, prependLabel)
-		}
+		prependLabels = append(prependLabels, labelToPrependLabelsMap[label]...)
 	}
 	return prependLabels
 }

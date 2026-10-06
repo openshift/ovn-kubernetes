@@ -6,8 +6,11 @@
 package v1
 
 import (
+	egressqosv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -35,6 +38,47 @@ func EgressQoS(name, namespace string) *EgressQoSApplyConfiguration {
 	b.WithKind("EgressQoS")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractEgressQoSFrom extracts the applied configuration owned by fieldManager from
+// egressQoS for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// egressQoS must be a unmodified EgressQoS API object that was retrieved from the Kubernetes API.
+// ExtractEgressQoSFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEgressQoSFrom(egressQoS *egressqosv1.EgressQoS, fieldManager string, subresource string) (*EgressQoSApplyConfiguration, error) {
+	b := &EgressQoSApplyConfiguration{}
+	err := managedfields.ExtractInto(egressQoS, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.egressqos.v1.EgressQoS"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(egressQoS.Name)
+	b.WithNamespace(egressQoS.Namespace)
+
+	b.WithKind("EgressQoS")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractEgressQoS extracts the applied configuration owned by fieldManager from
+// egressQoS. If no managedFields are found in egressQoS for fieldManager, a
+// EgressQoSApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// egressQoS must be a unmodified EgressQoS API object that was retrieved from the Kubernetes API.
+// ExtractEgressQoS provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEgressQoS(egressQoS *egressqosv1.EgressQoS, fieldManager string) (*EgressQoSApplyConfiguration, error) {
+	return ExtractEgressQoSFrom(egressQoS, fieldManager, "")
+}
+
+// ExtractEgressQoSStatus extracts the applied configuration owned by fieldManager from
+// egressQoS for the status subresource.
+func ExtractEgressQoSStatus(egressQoS *egressqosv1.EgressQoS, fieldManager string) (*EgressQoSApplyConfiguration, error) {
+	return ExtractEgressQoSFrom(egressQoS, fieldManager, "status")
 }
 
 func (b EgressQoSApplyConfiguration) IsApplyConfiguration() {}

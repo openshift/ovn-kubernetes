@@ -30,6 +30,16 @@ const (
 	ovsVswitchd   = "ovs-vswitchd"
 
 	metricsUpdateInterval = 5 * time.Minute
+
+	// defaultCollectionInterval is how often the background loop refreshes OVS/OVN
+	// metric values when MetricServerOptions.CollectionInterval is unset.
+	defaultCollectionInterval = config.DefaultMetricsCollectionInterval
+
+	// metricsAppctlTimeout (seconds) bounds every ovs-appctl/ovn-appctl subprocess on
+	// the scrape path via --timeout=N. A saturated daemon (e.g. ovn-controller) would
+	// otherwise block the call and pin the scrape past Prometheus' scrape_timeout,
+	// flapping up to 0. Healthy appctls answer in ms, so a low bound sheds stuck calls.
+	metricsAppctlTimeout = 2
 )
 
 type metricDetails struct {
@@ -119,11 +129,11 @@ func getCoverageShowOutputMap(component string) (map[string]string, error) {
 	}()
 
 	if component == ovnController {
-		stdout, stderr, err = util.RunOVNControllerAppCtl("coverage/show")
+		stdout, stderr, err = util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
 	} else if component == ovnNorthd {
-		stdout, stderr, err = util.RunOVNNorthAppCtl("coverage/show")
+		stdout, stderr, err = util.RunOVNNorthAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
 	} else if component == ovsVswitchd {
-		stdout, stderr, err = util.RunOvsVswitchdAppCtl("coverage/show")
+		stdout, stderr, err = util.RunOvsVswitchdAppCtlWithTimeout(metricsAppctlTimeout, "coverage/show")
 	} else {
 		return nil, fmt.Errorf("component is unknown, and it isn't %s, %s, or %s",
 			ovnNorthd, ovnController, ovsVswitchd)
@@ -279,9 +289,9 @@ func getStopwatchShowOutputMap(component string) (map[string]stopwatchStatistics
 
 	switch component {
 	case ovnController:
-		stdout, stderr, err = util.RunOVNControllerAppCtl("stopwatch/show")
+		stdout, stderr, err = util.RunOVNControllerAppCtlWithTimeout(metricsAppctlTimeout, "stopwatch/show")
 	case ovnNorthd:
-		stdout, stderr, err = util.RunOVNNorthAppCtl("stopwatch/show")
+		stdout, stderr, err = util.RunOVNNorthAppCtlWithTimeout(metricsAppctlTimeout, "stopwatch/show")
 	default:
 		return nil, fmt.Errorf("unknown component %s for stopwatch/show", component)
 	}
@@ -446,6 +456,14 @@ func StartMetricsServer(opts MetricServerOptions, stopChan <-chan struct{}, wg *
 		defer wg.Done()
 		klog.Infof("Metrics Server starts to run ...")
 		metricsServer.Run(stopChan)
+	}()
+
+	// Extraction runs out of band from scraping: the loop refreshes the registry
+	// on its own interval and the scrape handler only serializes it.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		metricsServer.runCollectionLoop(stopChan)
 	}()
 
 	return metricsServer

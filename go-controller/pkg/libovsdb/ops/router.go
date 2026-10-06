@@ -306,16 +306,11 @@ func FindALogicalRouterPoliciesWithPredicate(nbClient libovsdbclient.Client, rou
 		return nil, err
 	}
 
-	newPredicate := func(item *nbdb.LogicalRouterPolicy) bool {
-		for _, policyUUID := range router.Policies {
-			if policyUUID == item.UUID && p(item) {
-				return true
-			}
-		}
-		return false
-	}
-
-	return FindLogicalRouterPoliciesWithPredicate(nbClient, newPredicate)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+	defer cancel()
+	found := []*nbdb.LogicalRouterPolicy{}
+	err = nbClient.WhereCacheByUUIDs(p, router.Policies...).List(ctx, &found)
+	return found, err
 }
 
 // GetLogicalRouterPolicy looks up a logical router policy from the cache
@@ -689,33 +684,47 @@ func GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Cli
 	if err != nil {
 		return nil, fmt.Errorf("failed to get router: %s, error: %w", router.Name, err)
 	}
+	if len(r.StaticRoutes) == 0 {
+		return []*nbdb.LogicalRouterStaticRoute{}, nil
+	}
 
-	lrsrs := []*nbdb.LogicalRouterStaticRoute{}
+	// Filter only the router's routes in the cache before cloning rows. The
+	// previous implementation performed one cache lookup per referenced UUID.
+	// Track every candidate seen because WhereCacheByUUIDs intentionally skips
+	// missing UUIDs, while this helper historically returned ErrNotFound.
+	foundRoutes := 0
+	predicate := func(route *nbdb.LogicalRouterStaticRoute) bool {
+		foundRoutes++
+		return p(route)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+	defer cancel()
+	matches := []*nbdb.LogicalRouterStaticRoute{}
+	err = nbClient.WhereCacheByUUIDs(predicate, r.StaticRoutes...).List(ctx, &matches)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list static routes for router %s: %w", router.Name, err)
+	}
+	if foundRoutes != len(r.StaticRoutes) {
+		return nil, fmt.Errorf("failed to find all static routes referenced by router %s: %w", router.Name, libovsdbclient.ErrNotFound)
+	}
+	if len(matches) < 2 {
+		return matches, nil
+	}
+
+	// Preserve the logical router's route ordering. Some callers retain the
+	// first matching route and remove later duplicates.
+	matchesByUUID := make(map[string]*nbdb.LogicalRouterStaticRoute, len(matches))
+	for _, route := range matches {
+		matchesByUUID[route.UUID] = route
+	}
+	lrsrs := make([]*nbdb.LogicalRouterStaticRoute, 0, len(matches))
 	for _, uuid := range r.StaticRoutes {
-		lrsr := &nbdb.LogicalRouterStaticRoute{UUID: uuid}
-		validRoute, err := routeExistsWithPredicate(nbClient, lrsr, p)
-		if err != nil {
-			return nil, err
-		}
-		if validRoute {
-			lrsrs = append(lrsrs, lrsr)
+		if route, ok := matchesByUUID[uuid]; ok {
+			lrsrs = append(lrsrs, route)
 		}
 	}
 
 	return lrsrs, nil
-}
-
-func routeExistsWithPredicate(nbClient libovsdbclient.Client, lrsr *nbdb.LogicalRouterStaticRoute, p logicalRouterStaticRoutePredicate) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
-	defer cancel()
-	err := nbClient.Get(ctx, lrsr)
-	if err != nil {
-		return false, err
-	}
-	if p(lrsr) {
-		return true, nil
-	}
-	return false, nil
 }
 
 // CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps looks up a logical
@@ -1156,6 +1165,16 @@ func BuildDNATAndSNATWithMatch(
 //   - Compare LogicalIP if the Type in `searched` is SNAT.
 //   - Compare LogicalPort if it is set in `searched`.
 //   - Ensure that all ExternalIDs of `searched` exist and have the same value in `existing`.
+//   - Compare AllowedExtIPs if it is set in `searched`: callers create one SNAT
+//     per allowed destination set for the same logical IP, so AllowedExtIPs is
+//     what tells those rows apart.
+//
+// ExemptedExtIPs is intentionally not compared: a NAT with exemptions is the
+// only one for its logical IP, and its exemptions are mutable configuration
+// that reconciliation may need to update in place on the existing row.
+// Comparing ExemptedExtIPs would turn every such update into a new row, and
+// mirroring the one-SNAT-per-allowed-set pattern with exempted_ext_ips would
+// not work with this equivalence.
 func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 	// Simple case: uuid was provided.
 	if searched.UUID != "" && existing.UUID == searched.UUID {
@@ -1192,11 +1211,6 @@ func isEquivalentNAT(existing *nbdb.NAT, searched *nbdb.NAT) bool {
 
 	if searched.AllowedExtIPs != nil &&
 		(existing.AllowedExtIPs == nil || *searched.AllowedExtIPs != *existing.AllowedExtIPs) {
-		return false
-	}
-
-	if searched.ExemptedExtIPs != nil &&
-		(existing.ExemptedExtIPs == nil || *searched.ExemptedExtIPs != *existing.ExemptedExtIPs) {
 		return false
 	}
 
@@ -1243,18 +1257,28 @@ func GetRouterNATs(nbClient libovsdbclient.Client, router *nbdb.LogicalRouter) (
 	}
 
 	nats := []*nbdb.NAT{}
-	for _, uuid := range r.Nat {
-		nat, err := GetNAT(nbClient, &nbdb.NAT{UUID: uuid})
-		if errors.Is(err, libovsdbclient.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to lookup NAT entry with uuid: %s, error: %w", uuid, err)
-		}
-		nats = append(nats, nat)
+	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
+	defer cancel()
+	err = nbClient.WhereCacheByUUIDs(func(*nbdb.NAT) bool { return true }, r.Nat...).List(ctx, &nats)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list NAT entries for router %s: %w", router.Name, err)
+	}
+	if len(nats) < 2 {
+		return nats, nil
 	}
 
-	return nats, nil
+	natsByUUID := make(map[string]*nbdb.NAT, len(nats))
+	for _, nat := range nats {
+		natsByUUID[nat.UUID] = nat
+	}
+	orderedNATs := make([]*nbdb.NAT, 0, len(nats))
+	for _, uuid := range r.Nat {
+		if nat, ok := natsByUUID[uuid]; ok {
+			orderedNATs = append(orderedNATs, nat)
+		}
+	}
+
+	return orderedNATs, nil
 }
 
 // CreateOrUpdateNATsOps creates or updates the provided NATs, adds them to

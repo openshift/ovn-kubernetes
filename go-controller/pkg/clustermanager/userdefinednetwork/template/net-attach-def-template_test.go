@@ -40,7 +40,7 @@ var _ = Describe("NetAttachDefTemplate", func() {
 
 	DescribeTable("should fail to render NAD spec given",
 		func(spec *udnv1.UserDefinedNetworkSpec, expectedError string) {
-			_, err := renderNADSpec("foo", "bar", spec, nil)
+			_, err := renderNADSpec("foo", "bar", spec, "", nil)
 			Expect(err).To(MatchError(ContainSubstring(expectedError)))
 		},
 		Entry("invalid layer2 subnets",
@@ -265,6 +265,36 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			&udnv1.ClusterUserDefinedNetwork{Spec: udnv1.ClusterUserDefinedNetworkSpec{Network: udnv1.NetworkSpec{
 				Topology: udnv1.NetworkTopologyLocalnet, Layer3: &udnv1.Layer3Config{}}}},
 			config.NewTopologyConfigMismatchError(string(udnv1.NetworkTopologyLocalnet)).Error(),
+		),
+		// The IPAMConfig CEL rule rejects this combination at admission; the
+		// renderer re-validates so clusters with CRDs predating the rule are
+		// covered too.
+		Entry("CUDN, localnet: invalid IPAM config: persistent lifecycle & DHCP ipam mode",
+			&udnv1.ClusterUserDefinedNetwork{Spec: udnv1.ClusterUserDefinedNetworkSpec{Network: udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLocalnet,
+				Localnet: &udnv1.LocalnetConfig{
+					Role: udnv1.NetworkRoleSecondary, PhysicalNetworkName: "localnet1",
+					IPAM: &udnv1.IPAMConfig{
+						Lifecycle: udnv1.IPAMLifecyclePersistent,
+						Mode:      udnv1.IPAMDHCP,
+					},
+				},
+			}}},
+			config.NewIPAMLifecycleNotSupportedError().Error(),
+		),
+		// The localnet CEL rule forbids subnets with DHCP ipam.mode at
+		// admission; render-time rejection covers clusters with CRDs
+		// predating the rule.
+		Entry("CUDN, localnet: invalid IPAM config: DHCP ipam mode & subnets",
+			&udnv1.ClusterUserDefinedNetwork{Spec: udnv1.ClusterUserDefinedNetworkSpec{Network: udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLocalnet,
+				Localnet: &udnv1.LocalnetConfig{
+					Role: udnv1.NetworkRoleSecondary, PhysicalNetworkName: "localnet1",
+					Subnets: udnv1.DualStackCIDRs{"172.18.0.0/16"},
+					IPAM:    &udnv1.IPAMConfig{Mode: udnv1.IPAMDHCP},
+				},
+			}}},
+			config.NewSubnetsMustBeUnsetError().Error(),
 		),
 		Entry("CUDN, localnet: IPv4 excludeSubnets not in range of subnets",
 			&udnv1.ClusterUserDefinedNetwork{Spec: udnv1.ClusterUserDefinedNetworkSpec{Network: udnv1.NetworkSpec{
@@ -642,6 +672,55 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			  "allowPersistentIPs": true
 			}`,
 		),
+		Entry("secondary network, localnet, with DHCP IPAM mode should set dhcp ipam",
+			udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLocalnet,
+				Localnet: &udnv1.LocalnetConfig{
+					Role:                udnv1.NetworkRoleSecondary,
+					PhysicalNetworkName: "mylocalnet1",
+					MTU:                 1600,
+					IPAM: &udnv1.IPAMConfig{
+						Mode: udnv1.IPAMDHCP,
+					},
+				},
+			},
+			`{
+			  "cniVersion": "1.1.0",
+			  "type": "ovn-k8s-cni-overlay",
+			  "name": "cluster_udn_test-net",
+			  "netAttachDefName": "mynamespace/test-net",
+			  "role": "secondary",
+			  "topology": "localnet",
+		      "physicalNetworkName": "mylocalnet1",
+			  "mtu": 1600,
+			  "ipam": {"type": "dhcp"}
+			}`,
+		),
+		Entry("secondary network, localnet, with Enabled IPAM mode should not set ipam key",
+			udnv1.NetworkSpec{
+				Topology: udnv1.NetworkTopologyLocalnet,
+				Localnet: &udnv1.LocalnetConfig{
+					Role:                udnv1.NetworkRoleSecondary,
+					PhysicalNetworkName: "mylocalnet1",
+					MTU:                 1600,
+					Subnets:             udnv1.DualStackCIDRs{"192.168.100.0/24", "2001:dbb::/64"},
+					IPAM: &udnv1.IPAMConfig{
+						Mode: udnv1.IPAMEnabled,
+					},
+				},
+			},
+			`{
+			  "cniVersion": "1.1.0",
+			  "type": "ovn-k8s-cni-overlay",
+			  "name": "cluster_udn_test-net",
+			  "netAttachDefName": "mynamespace/test-net",
+			  "role": "secondary",
+			  "topology": "localnet",
+		      "physicalNetworkName": "mylocalnet1",
+			  "subnets": "192.168.100.0/24,2001:dbb::/64",
+			  "mtu": 1600
+			}`,
+		),
 		Entry("primary network, layer2 with EVPN transport and MAC-VRF",
 			udnv1.NetworkSpec{
 				Topology: udnv1.NetworkTopologyLayer2,
@@ -803,6 +882,35 @@ var _ = Describe("NetAttachDefTemplate", func() {
 			}`,
 		),
 	)
+
+	It("should render CUDN uplink into the NAD CNI config", func() {
+		cudn := &udnv1.ClusterUserDefinedNetwork{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-net", UID: "1"},
+			Spec: udnv1.ClusterUserDefinedNetworkSpec{
+				Uplinks: []string{"br-test"},
+				Network: udnv1.NetworkSpec{
+					Topology: udnv1.NetworkTopologyLayer3,
+					Layer3: &udnv1.Layer3Config{
+						Role: udnv1.NetworkRolePrimary,
+						Subnets: []udnv1.Layer3Subnet{
+							{CIDR: "192.168.100.0/16"},
+						},
+					},
+				},
+			},
+		}
+
+		config.IPv4Mode = true
+		config.IPv6Mode = false
+		config.Gateway.Mode = config.GatewayModeShared
+		nad, err := RenderNetAttachDefManifest(cudn, "mynamespace")
+		Expect(err).NotTo(HaveOccurred())
+
+		netConf := map[string]interface{}{}
+		err = json.Unmarshal([]byte(nad.Spec.Config), &netConf)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(netConf).To(HaveKeyWithValue("uplink", "br-test"))
+	})
 
 	Context("EVPN VID injection", func() {
 		It("should inject VIDs into EVPN config when provided via WithEVPNVIDs", func() {

@@ -23,13 +23,13 @@ can use the same IP address ranges for pods, expanding deployment scenarios.
 
 See the [enhancement] for more details.
 
-[enhancement]: https://ovn-kubernetes.io/okeps/okep-5193-user-defined-networks/
+[enhancement]: ../../okeps/okep-5193-user-defined-networks.md
 
 ### User-Stories/Use-Cases
 
 See the [user-stories] defined in the enhancement.
 
-[user-stories]: https://ovn-kubernetes.io/okeps/okep-5193-user-defined-networks/#user-storiesuse-cases
+[user-stories]: ../../okeps/okep-5193-user-defined-networks.md#user-storiesuse-cases
 
 The two main user stories are:
 
@@ -71,6 +71,47 @@ existing CRs in the cluster.
 
 Always check the dependencies on the [Requirements page](../requirements.md)
 
+### Primary Layer2 upgrade prerequisite
+
+Primary Layer2 networks must have completed migration from the legacy topology
+before upgrading to this version. The legacy topology connects the pod switch
+directly to each node's gateway router. The current Geneve topology places a
+transit router between the pod switch and the gateway routers, providing a
+stable gateway MAC and IPv6 link-local address across nodes.
+
+Automatic migration support was introduced in **v1.2.0** and is also present in
+**v1.3.0 and v1.4.0**. If a deployment still uses the legacy topology, first use
+one of these migration-capable releases to complete the transition before
+upgrading to this version.
+
+Installing a migration-capable release alone does not complete the transition.
+Its controller selects the new topology at startup only after local primary
+Layer2 workload logical switch ports are absent from the OVN Northbound database
+and cluster-manager has allocated the network tunnel keys. Workload removal
+after startup does not rerun that selection; the controller must restart while
+those conditions hold. Verify that network reconciliation has completed on all
+participating nodes and that any surviving VMs use the stable network gateway
+MAC and IPv6 link-local address rather than the old node-specific gateway
+identities. See the
+[Layer2 transit-router design](../../okeps/okep-5094-layer2-transit-router.md#rolling-upgrade-and-traffic-disruption)
+for the transition details.
+
+Controller startup now selects the current topology unconditionally; it no
+longer defers conversion based on existing workloads or tunnel-key readiness.
+Upgrading with an unmigrated topology is unsupported: reconciliation can remove
+the old gateway router and move management-port SNAT while workloads are still
+using them, disrupting existing connections. Complete migration on an
+intermediate release rather than relying on this version to perform a safe
+transition.
+
+The node annotation `k8s.ovn.org/layer2-topology-version: "2.0"` is still published
+for compatibility with older peers during rolling upgrades. The annotation
+records topology selection, not successful completion of all network
+reconciliation. Setting it manually does not migrate an existing network.
+
+This prerequisite concerns legacy primary Layer2 deployments. Secondary Layer2
+networks and the current EVPN topology retain their existing behavior.
+
 ## Performance/Scale Optimizations for UDN
 
 UDN scale is currently constrained to a couple of hundred UDNs when every UDN is
@@ -80,6 +121,11 @@ unused per-node UDN state, and avoid per-node allocations until resources that
 need the UDN are scheduled on that node.
 See the [Dynamic UDN feature page](dynamic-udn.md) for enablement,
 observability, and limitations.
+
+For primary CUDNs that need a different external gateway path than the cluster
+default gateway bridge, see the [Uplinks feature page](uplinks.md). Uplinks
+allow a CUDN to use a pre-provisioned OVS bridge on selected nodes, including
+regular node and DPU deployments.
 
 ## Workflow Description
 
@@ -110,7 +156,7 @@ will not be considered for UDN creation.
 
 See the [api-specification-docs] for information on each of the fields
 
-[api-specification-docs]: https://ovn-kubernetes.io/api-reference/userdefinednetwork-api-spec/
+[api-specification-docs]: ../../api-reference/userdefinednetwork-api-spec.md
 
 ### OVN-Kubernetes Implementation Details
 
@@ -197,6 +243,10 @@ the NADs and creates the required OVN logical constructs in the OVN database.
 The ovnkube-node also adds the required gateway plumbing such as openflows and
 VRF tables and routes to provide networking to these networks.
 
+Localnet secondary networks also support delegating IP assignment to an
+external DHCP server instead of an OVN-Kubernetes-managed pool. See the
+[DHCP IPAM for Localnet Networks](dhcp-ipam-localnet.md) page for details.
+
 ### Creating UserDefinedNetworks
 
 Now that we understand what a UDN is, let's get handson!
@@ -256,6 +306,51 @@ spec:
     - cidr: 203.203.0.0/16
       hostSubnet: 24
 ```
+
+### Expanding a Primary Layer3 UDN with additional cluster subnets
+
+A Primary Layer3 UDN or CUDN can have multiple cluster subnets in each IP
+family. This allows an operator to add address space when the existing cluster
+subnet no longer has enough host subnets for additional nodes.
+
+Each node is allocated one host subnet per IP family from the configured
+cluster subnet pool.
+
+To expand the pool, append a subnet to `spec.layer3.subnets`. For example, the
+`blue-network` UDN from the previous section can be expanded with another IPv4
+cluster subnet:
+
+```yaml
+apiVersion: k8s.ovn.org/v1
+kind: UserDefinedNetwork
+metadata:
+  name: blue-network
+  namespace: blue
+spec:
+  topology: Layer3
+  layer3:
+    role: Primary
+    subnets:
+    - cidr: 103.103.0.0/16
+      hostSubnet: 24
+    - cidr: 103.104.0.0/16
+      hostSubnet: 24
+```
+
+Existing node and pod assignments remain unchanged. The added range is
+available for nodes that do not yet have a host subnet, including newly added
+nodes.
+
+The following restrictions apply:
+
+* Multiple cluster subnets are supported only for Primary Layer3 UDNs and
+  CUDNs.
+* Existing subnet entries cannot be removed or modified; expansion is
+  append-only.
+* Cluster subnets must not overlap or contain one another.
+* All cluster subnets in the same IP family must use the same `hostSubnet`
+  value. IPv4 and IPv6 can use different values and can be expanded
+  independently.
 
 ### Inspecting a UDN Pod
 
@@ -497,6 +592,109 @@ k8s.ovn.org/open-default-ports: |
 which means we open up allow ACLs and nftrules to allow traffic
 to reach at those ports.
 
+#### Locating the kubelet cgroup
+
+The rule above matches traffic by the cgroup kubelet runs in, so that
+cgroup has to be known. By default ovnkube-node looks for a
+`kubelet.service` directory under `/sys/fs/cgroup`, which finds it on
+hosts where systemd runs kubelet.
+
+Hosts that do not run kubelet under systemd have no such directory. Set
+`kubelet-cgroup-path` in the `[ovnkubenode]` section, or
+`global.kubeletCgroupPath` in the helm chart, to the cgroup kubelet runs
+in, relative to `/sys/fs/cgroup`. It can be read from the running kubelet:
+
+```text
+$ cat /proc/$(pidof kubelet)/cgroup
+0::/podruntime/kubelet
+```
+
+which on that host means:
+
+```ini
+kubelet-cgroup-path = podruntime/kubelet
+```
+
+Point this at the cgroup of kubelet itself. Every process in the cgroup
+that is matched is allowed to reach primary UDN pods, so a parent cgroup
+opens that access to everything under it. On the host above, using
+`podruntime` instead would also allow the container runtime and every
+container shim it runs, not just kubelet. The cgroup root is rejected for
+the same reason.
+
+#### When kubelet probes are not supported
+
+The cgroup match cannot always be installed. When it cannot, host
+isolation is still applied and only the rule that lets kubelet through is
+left out, so ovnkube-node keeps running. The node reports a
+`UDNKubeletProbesNotSupported` event describing which of these applies:
+
+* the host uses cgroup v1, which has no cgroup v2 path to match on
+* the kubelet cgroup is not found, and no usable path is configured
+* the kernel is built without `CONFIG_NFT_SOCKET`, so it has no `socket`
+  expression and the rule cannot load
+
+`httpGet`, `tcpSocket` and `grpc` probes to primary UDN pods are dropped
+in that case. The rules drop rather than reject, so a probe times out
+instead of being refused:
+
+```text
+Readiness probe failed: Get "http://[fd00:42:0:a::4]:8080/healthz":
+context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+```
+
+which looks like a slow or unhealthy pod rather than a policy decision, so
+the event on the node is what identifies the cause. There are two ways
+around it:
+
+* use `exec` probes, which run inside the pod and do not cross the host
+  boundary
+* open the probe ports with the `open-default-ports` annotation shown
+  above
+
+#### Kubelet restarts
+
+The `socket cgroupv2` match resolves the cgroup path to a numeric cgroup
+ID when the rule is loaded, and the kernel does not update it afterward.
+If kubelet restarts and its cgroup is recreated, the ID changes and the
+rule stops matching. ovnkube-node watches systemd for kubelet restarts
+and reloads the rule.
+
+That watch needs systemd, and it needs the configured cgroup to belong to
+a unit, so it is derived from the last component of the cgroup path,
+`kubelet.service` for `kubelet.slice/kubelet.service`. On a host without
+systemd, or when the configured path does not name a unit, restarts are
+not tracked and the node reports a `UDNKubeletRestartTrackingUnavailable`
+event.
+
+Where restarts are not tracked, point `kubelet-cgroup-path` at the nearest
+ancestor cgroup that is not recreated when kubelet restarts. On the host
+above that is `podruntime` rather than `podruntime/kubelet`, which keeps
+the rule valid across restarts but also lets everything else in that
+cgroup, the container runtime and its shims, reach primary UDN pods. Weigh
+that against the alternative: leaving the leaf cgroup configured means
+probes stop working once kubelet's cgroup is recreated, until ovnkube-node
+is restarted.
+
+A rule that has gone stale can be recognised from the ruleset, because nft
+prints the cgroup ID it can no longer resolve instead of the path:
+
+```text
+socket cgroupv2 level 2 669 ip daddr @udn-pod-default-ips-v4 accept
+```
+
+For helm on such a host, both settings are needed, and neither changes a
+deployment that does run systemd:
+
+```yaml
+global:
+  noSystemd: true
+  kubeletCgroupPath: podruntime
+```
+
+`noSystemd` removes the systemd socket mount from ovnkube-node, which
+cannot be satisfied where `/run/systemd` does not exist.
+
 ### Overlapping PodIPs
 
 Two networks can have the same subnet since they are completely
@@ -570,6 +768,15 @@ replicates those generated by the default controller and replaces the IP address
 For host-networked pods, the controller retains the same IP addresses as the
 default controller. Custom EndpointSlices not created by the default controller
 are not processed.
+
+The mirror controller makes one exception for KubeVirt live migration. During
+a non-failed migration, the source and target `virt-launcher` pods can both be
+reported as not ready even though the virtual machine remains available on its
+persistent IP address. The controller keeps these VM-owned endpoints ready and
+serving, and reports them as not terminating, so the service load balancer does
+not remove the VM backend during the handoff. This override does not apply after
+a failed migration or to pods that are not owned by a virtual machine; those
+endpoints retain the conditions reported by the default EndpointSlice.
 
 The default EndpointSlices controller creates objects that contain the following labels:
 

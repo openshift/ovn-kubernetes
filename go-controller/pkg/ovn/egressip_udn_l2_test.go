@@ -109,7 +109,7 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 		app.Name = "test"
 		app.Flags = config.Flags
 
-		fakeOvn = NewFakeOVN(false)
+		fakeOvn = NewFakeOVN(false, node1Name)
 	})
 
 	ginkgo.AfterEach(func() {
@@ -164,7 +164,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
-					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
@@ -180,7 +179,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node2Subnet, networkName1, v4Node2Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node2Tsp),
-					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
@@ -307,10 +305,9 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				iUDN, nUDN, _ := net.ParseCIDR(v4Pod1IPNode1Net1 + "/23")
 				nUDN.IP = iUDN
 				fakeOvn.controller.logicalPortCache.add(&egressPodUDNLocal, "", util.GetNADName(nad.Namespace, nad.Name), "", nil, []*net.IPNet{nUDN})
-				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
-				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
-				fakeOvn.controller.eIPC.zone = node1.Name
-				fakeOvn.controller.zone = node1.Name
+				fakeOvn.controller.eIPC.nodeName = node1.Name
+				fakeOvn.controller.nodeName = node1.Name
+				gomega.Expect(fakeOvn.eIPController.SyncNodeCache()).To(gomega.Succeed())
 				err = fakeOvn.eIPController.ensureRouterPoliciesForNetwork(netInfo, &node1)
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.eIPController.ensureSwitchPoliciesForNode(netInfo, node1Name)
@@ -551,7 +548,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
-					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
@@ -567,7 +563,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node2Subnet, networkName1, v4Node2Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node2Tsp),
-					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
@@ -683,13 +678,12 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				// Add pod IPs to CDN cache
 				iCDN, nCDN, _ := net.ParseCIDR(podV4IP + "/23")
 				nCDN.IP = iCDN
-				fakeOvn.controller.zone = node1.Name
-				fakeOvn.eIPController.zone = node1.Name
+				fakeOvn.controller.nodeName = node1.Name
+				fakeOvn.eIPController.nodeName = node1.Name
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDNLocal, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
 				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
-				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
-				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
+				gomega.Expect(fakeOvn.eIPController.SyncNodeCache()).To(gomega.Succeed())
 				err = fakeOvn.networkManager.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				defer fakeOvn.networkManager.Stop()
@@ -1081,7 +1075,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
-					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
@@ -1097,7 +1090,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node2Subnet, networkName1, v4Node2Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node2Tsp),
-					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
@@ -1214,9 +1206,9 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				iCDN, nCDN, _ := net.ParseCIDR(podV4IP + "/23")
 				nCDN.IP = iCDN
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDNLocal, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
-				fakeOvn.controller.zone = node1.Name
-				fakeOvn.eIPController.zone = node1.Name
-				err = fakeOvn.eIPController.SyncLocalNodeZonesCache()
+				fakeOvn.controller.nodeName = node1.Name
+				fakeOvn.eIPController.nodeName = node1.Name
+				err = fakeOvn.eIPController.SyncNodeCache()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.networkManager.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1585,7 +1577,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
-					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
@@ -1601,7 +1592,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node2Subnet, networkName1, v4Node2Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node2Tsp),
-					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
@@ -1721,11 +1711,9 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				iCDN, nCDN, _ := net.ParseCIDR(podV4IP + "/23")
 				nCDN.IP = iCDN
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDN, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
-				fakeOvn.controller.zone = node1Name
-				fakeOvn.controller.eIPC.zone = node1Name
-				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
-				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
-				err = fakeOvn.eIPController.SyncLocalNodeZonesCache()
+				fakeOvn.controller.nodeName = node1Name
+				fakeOvn.controller.eIPC.nodeName = node1Name
+				err = fakeOvn.eIPController.SyncNodeCache()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.networkManager.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1963,7 +1951,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
-					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
@@ -1979,7 +1966,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node2Subnet, networkName1, v4Node2Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node2Tsp),
-					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
@@ -2099,10 +2085,9 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				iCDN, nCDN, _ := net.ParseCIDR(podV4IP + "/23")
 				nCDN.IP = iCDN
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDN, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
-				fakeOvn.controller.zone = node1Name
-				fakeOvn.eIPController.zone = node1Name
-				fakeOvn.controller.eIPC.nodeZoneState.Store(node1Name, true)
-				fakeOvn.controller.eIPC.nodeZoneState.Store(node2Name, false)
+				fakeOvn.controller.nodeName = node1Name
+				fakeOvn.eIPController.nodeName = node1Name
+				gomega.Expect(fakeOvn.eIPController.SyncNodeCache()).To(gomega.Succeed())
 				// Add pod IPs to UDN cache
 				iUDN, nUDN, _ := net.ParseCIDR(v4Pod1IPNode1Net1 + "/23")
 				nUDN.IP = iUDN
@@ -2330,7 +2315,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
-					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
@@ -2346,7 +2330,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node2Subnet, networkName1, v4Node2Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node2Tsp),
-					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
@@ -2466,9 +2449,9 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				iCDN, nCDN, _ := net.ParseCIDR(podV4IP + "/23")
 				nCDN.IP = iCDN
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDNLocal, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
-				fakeOvn.controller.zone = node1Name
-				fakeOvn.eIPController.zone = node1Name
-				err = fakeOvn.eIPController.SyncLocalNodeZonesCache()
+				fakeOvn.controller.nodeName = node1Name
+				fakeOvn.eIPController.nodeName = node1Name
+				err = fakeOvn.eIPController.SyncNodeCache()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.networkManager.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -2714,7 +2697,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node1Subnet, networkName1, v4Node1Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node1Tsp),
-					"k8s.ovn.org/zone-name":                       node1Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "1",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node1IPv4CIDR),
@@ -2730,7 +2712,6 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 					"k8s.ovn.org/node-primary-ifaddr":             fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4CIDR, ""),
 					"k8s.ovn.org/node-subnets":                    fmt.Sprintf("{\"default\":\"%s\",\"%s\":\"%s\"}", v4Node2Subnet, networkName1, v4Node2Net1),
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": fmt.Sprintf("{\"ipv4\":\"%s/16\"}", v4Node2Tsp),
-					"k8s.ovn.org/zone-name":                       node2Name,
 					"k8s.ovn.org/node-chassis-id":                 "473ca66d-d800-472f-b289-1ab81ae7f21c",
 					util.OvnNodeID:                                "2",
 					util.OVNNodeHostCIDRs:                         fmt.Sprintf("[\"%s\"]", node2IPv4CIDR),
@@ -2846,11 +2827,11 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 				iCDN, nCDN, _ := net.ParseCIDR(podV4IP + "/23")
 				nCDN.IP = iCDN
 				fakeOvn.controller.logicalPortCache.add(&egressPodCDNLocal, "", ovntypes.DefaultNetworkName, "", nil, []*net.IPNet{nCDN})
-				fakeOvn.controller.zone = node1Name
-				fakeOvn.eIPController.zone = node1Name
+				fakeOvn.controller.nodeName = node1Name
+				fakeOvn.eIPController.nodeName = node1Name
 				secConInfo, ok := fakeOvn.userDefinedNetworkControllers[networkName1]
 				gomega.Expect(ok).To(gomega.BeTrue())
-				err = fakeOvn.eIPController.SyncLocalNodeZonesCache()
+				err = fakeOvn.eIPController.SyncNodeCache()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 				err = fakeOvn.networkManager.Start()
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())

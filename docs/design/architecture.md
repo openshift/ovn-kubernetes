@@ -58,7 +58,7 @@ and more distributed.
         * runs only 1 replica, contains information local to this node
     * ovn-controller container:
         * Native OVN component
-        * Connects to SBDB running in control plane using TLS
+        * Connects to the local SBDB over a Unix socket
         * Converts SBDB logical flows into openflows
         * Write them to OVS
 * ovs-node pod
@@ -87,7 +87,7 @@ In order to effectively adapt the capabilities of the interconnect feature in th
 world, ovn-kubernetes components will replace `ovn-ic` daemon. Also note that the term `zone`
 which will be used heavily in these docs just refers to a single OVN deployment. Now that we
 know the pods and components running in the interconnect mode, let's tie up loose ends and
-show how these components run on a standard HA Kubernetes cluster. By default, each node in
+show how these components run on a standard HA Kubernetes cluster. Each node in
 the cluster is a `zone`, so each `zone` contains 1 node. There is no more RAFT since each
 node has its own database.
 

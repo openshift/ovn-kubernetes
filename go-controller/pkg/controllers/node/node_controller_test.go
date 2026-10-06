@@ -29,6 +29,7 @@ type fakeNodeHandler struct {
 	reconcileCalls int
 	deleteCalls    int
 	lastOldNode    *corev1.Node
+	gatewaySyncs   []string
 }
 
 func (f *fakeNodeHandler) GetNetworkName() string {
@@ -52,6 +53,10 @@ func (f *fakeNodeHandler) ReconcileNode(oldNode *corev1.Node, newNode *corev1.No
 func (f *fakeNodeHandler) SyncNodes(_ []*corev1.Node) error {
 	f.syncCalls++
 	return f.syncErr
+}
+
+func (f *fakeNodeHandler) MarkGatewaySyncNeeded(nodeName string) {
+	f.gatewaySyncs = append(f.gatewaySyncs, nodeName)
 }
 
 type fakeNodeActivityNetworkManager struct {
@@ -231,28 +236,56 @@ func TestReconcileUpdateScopedNetworkOnly(t *testing.T) {
 	}
 }
 
-func TestNodeControllerDoesNotFilterDefaultNetwork(t *testing.T) {
+func TestReconcileNetworkWithPreflightScopesHandler(t *testing.T) {
+	handlerA := &fakeNodeHandler{netName: "net-a"}
+	handlerB := &fakeNodeHandler{netName: "net-b"}
+	handlers := syncmap.NewSyncMap[NodeHandler]()
+	handlers.Store(handlerA.netName, handlerA)
+	handlers.Store(handlerB.netName, handlerB)
+
+	c := &NodeController{
+		nodeController: newNodeControllerForTest(1, nil),
+		handlers:       handlers,
+	}
+
+	c.ReconcileNetworkWithPreflight("node-a", "net-a", func(handler NodeHandler) {
+		handler.(*fakeNodeHandler).MarkGatewaySyncNeeded("node-a")
+	})
+
+	if len(handlerA.gatewaySyncs) != 1 || handlerA.gatewaySyncs[0] != "node-a" {
+		t.Fatalf("expected net-a preflight for node-a, got %v", handlerA.gatewaySyncs)
+	}
+	if len(handlerB.gatewaySyncs) != 0 {
+		t.Fatalf("expected net-b preflight to not run, got %v", handlerB.gatewaySyncs)
+	}
+}
+
+func TestNodeControllerFiltersRemoteNetworkActivityByNodeName(t *testing.T) {
 	if err := config.PrepareTestConfig(); err != nil {
 		t.Fatalf("failed to prepare test config: %v", err)
 	}
 	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
-	config.Default.Zone = "local-zone"
-
-	controller := &NodeController{networkManager: networkmanager.Default().Interface()}
+	controller := &NodeController{networkManager: networkmanager.Default().Interface(), nodeName: "local-node"}
 	remoteNode := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "node-a",
+			Name: "remote-node",
 			Annotations: map[string]string{
-				util.OvnNodeZoneName: "remote-zone",
+				util.OvnNodeZoneName: "local-node",
 			},
 		},
 	}
+	localNode := remoteNode.DeepCopy()
+	localNode.Name = "local-node"
+	localNode.Annotations[util.OvnNodeZoneName] = "some-other-zone"
 
 	if controller.shouldFilterByRemoteNetworkActivity(remoteNode, "default") {
 		t.Fatal("expected default network to skip dynamic UDN remote activity filtering")
 	}
 	if !controller.shouldFilterByRemoteNetworkActivity(remoteNode, "net-a") {
 		t.Fatal("expected non-default network to apply dynamic UDN remote activity filtering")
+	}
+	if controller.shouldFilterByRemoteNetworkActivity(localNode, "net-a") {
+		t.Fatal("expected the controller node to skip remote activity filtering regardless of its zone annotation")
 	}
 }
 
@@ -331,13 +364,13 @@ func TestReconcileNodeRemoteNodeBecomesActiveTreatsAsAdd(t *testing.T) {
 	}
 	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
-
 	handler := &fakeNodeHandler{netName: "net-a"}
 	handlers := syncmap.NewSyncMap[NodeHandler]()
 	handlers.Store(handler.netName, handler)
 
 	fakeNM := &fakeNodeActivityNetworkManager{active: true}
 	c := &NodeController{
+		nodeName:           "local-node",
 		networkManager:     fakeNM,
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{},
@@ -348,9 +381,6 @@ func TestReconcileNodeRemoteNodeBecomesActiveTreatsAsAdd(t *testing.T) {
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node-a",
-			Annotations: map[string]string{
-				util.OvnNodeZoneName: "remote-zone",
-			},
 		},
 	}
 	c.nodeLister = newNodeLister(t, node)
@@ -378,7 +408,6 @@ func TestReconcileNodeRemoteNodeBecomesInactiveDeletes(t *testing.T) {
 	}
 	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
 	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
-
 	handler := &fakeNodeHandler{netName: "net-a"}
 	handlers := syncmap.NewSyncMap[NodeHandler]()
 	handlers.Store(handler.netName, handler)
@@ -386,13 +415,11 @@ func TestReconcileNodeRemoteNodeBecomesInactiveDeletes(t *testing.T) {
 	oldNode := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node-a",
-			Annotations: map[string]string{
-				util.OvnNodeZoneName: "remote-zone",
-			},
 		},
 	}
 
 	c := &NodeController{
+		nodeName:           "local-node",
 		networkManager:     &fakeNodeActivityNetworkManager{active: false},
 		handlers:           handlers,
 		nodeReconciliation: map[string]map[string]bool{},
@@ -407,9 +434,6 @@ func TestReconcileNodeRemoteNodeBecomesInactiveDeletes(t *testing.T) {
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node-a",
-			Annotations: map[string]string{
-				util.OvnNodeZoneName: "remote-zone",
-			},
 		},
 	}
 	c.nodeLister = newNodeLister(t, node)

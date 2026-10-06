@@ -10,7 +10,7 @@ if [[ "${OVNKUBE_SH_VERBOSE:-}" == "true" ]]; then
 fi
 
 # This script is the entrypoint to the image.
-# Supports version 1.3.0 daemonsets
+# Supports version 1.4.0 daemonsets
 #    Keep the daemonset versioning aligned with the ovnkube release versions
 # Commands ($1 values)
 #    ovs-server     Runs the ovs daemons - ovsdb-server and ovs-switchd (v3)
@@ -25,7 +25,7 @@ fi
 #    ovn_debug      Displays ovn/ovs configuration and flows
 
 # NOTE: The script/image must be compatible with the daemonset.
-# This script supports version 1.3.0 daemonsets
+# This script supports version 1.4.0 daemonsets
 #      When called, it starts all needed daemons.
 # Currently the version here is used to match with the image version
 # It must be updated during every release
@@ -38,7 +38,7 @@ fi
 # OVN_KUBERNETES_NAMESPACE - k8s namespace - v3
 # K8S_NODE - hostname of the node - v3
 #
-# OVN_DAEMONSET_VERSION - version match daemonset and image - v1.3.0
+# OVN_DAEMONSET_VERSION - version match daemonset and image - v1.4.0
 # K8S_TOKEN - the apiserver token. Automatically detected when running in a pod - v3
 # K8S_CACERT - the apiserver CA. Automatically detected when running in a pod - v3
 # K8S_TOKEN_FILE - the apiserver token file. Automatically detected when running in a pod - v3
@@ -117,11 +117,11 @@ ovnkube_logfile_maxage=${OVNKUBE_LOGFILE_MAXAGE:-"5"}
 ovnkube_libovsdb_client_logfile=${OVNKUBE_LIBOVSDB_CLIENT_LOGFILE:-}
 
 # ovnkube.sh version (Update during each release)
-ovnkube_version="1.3.0"
+ovnkube_version="1.4.0"
 
 # The daemonset version must be compatible with this script.
 # The default when OVN_DAEMONSET_VERSION is not set is version 3
-ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.3.0"}
+ovn_daemonset_version=${OVN_DAEMONSET_VERSION:-"1.4.0"}
 
 # hostname is the host's hostname when using host networking,
 # otherwise it is the container ID (useful for debugging).
@@ -238,6 +238,8 @@ ovn_multi_network_enable=${OVN_MULTI_NETWORK_ENABLE:-false}
 ovn_network_segmentation_enable=${OVN_NETWORK_SEGMENTATION_ENABLE:=false}
 #OVN_NETWORK_CONNECT_ENABLE - enable network connect for ovn-kubernetes
 ovn_network_connect_enable=${OVN_NETWORK_CONNECT_ENABLE:=false}
+#OVN_UPLINK_ENABLE - enable uplink for ovn-kubernetes
+ovn_uplink_enable=${OVN_UPLINK_ENABLE:=false}
 #OVN_PRE_CONF_UDN_ADDR_ENABLE - enable connecting workloads with custom network configuration to UDNs
 ovn_pre_conf_udn_addr_enable=${OVN_PRE_CONF_UDN_ADDR_ENABLE:=false}
 #OVN_ROUTE_ADVERTISEMENTS_ENABLE - enable route advertisements for ovn-kubernetes
@@ -265,6 +267,16 @@ ovn_enable_multi_external_gateway=${OVN_ENABLE_MULTI_EXTERNAL_GATEWAY:-false}
 ovn_enable_ovnkube_identity=${OVN_ENABLE_OVNKUBE_IDENTITY:-true}
 #OVN_ENABLE_PERSISTENT_IPS - enable IPAM for virtualization workloads (KubeVirt persistent IPs)
 ovn_enable_persistent_ips=${OVN_ENABLE_PERSISTENT_IPS:-false}
+# OVNKUBE_CLUSTER_DEFAULT_NAD - namespace/name of the default cluster wide net-attach-def.
+# When unset, ovnkube defaults to <ovn-config-namespace>/default.
+ovnkube_cluster_default_nad=${OVNKUBE_CLUSTER_DEFAULT_NAD:-}
+
+# only pass the flag when the env variable is set, otherwise let ovnkube
+# resolve the default
+ovnkube_cluster_default_nad_flag=
+if [[ -n "${ovnkube_cluster_default_nad}" ]]; then
+  ovnkube_cluster_default_nad_flag="--cluster-default-nad=${ovnkube_cluster_default_nad}"
+fi
 
 # OVNKUBE_NODE_MODE - is the mode which ovnkube node operates
 ovnkube_node_mode=${OVNKUBE_NODE_MODE:-"full"}
@@ -575,30 +587,59 @@ check_health() {
   return 1
 }
 
-get_dpu_gw_options() {
-  # If ovn_gateway_opts or ovn_gateway_router_subnet is not set as environment variable, gather them from ovs settings
-  if [[ ${ovn_gateway_opts} == "" ]]; then
-    # get the gateway interface
-    gw_iface=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
-    if [[ ${gw_iface} == "" ]]; then
-      echo "Couldn't get OVN Gateway Interface from ovs external_ids setting"
-    else
-      ovn_gateway_opts="--gateway-interface=${gw_iface} "
-    fi
+get_gw_options() {
+  # Build a map from the existing gateway options and overlay any ovn-gw-*
+  # values from OVS external_ids. This preserves global options while allowing
+  # node-local OVS settings to override/add gateway parameters.
+  local opt
+  local key
+  local value
+  declare -A gw_opts_map=()
 
-    # get the gateway nexthop
-    gw_nexthop=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
-    if [[ ${gw_nexthop} == "" ]]; then
-      echo "Couldn't get OVN Gateway NextHop from ovs external_ids setting"
+  for opt in ${ovn_gateway_opts}; do
+    if [[ ${opt} == --*=* ]]; then
+      gw_opts_map["${opt%%=*}"]="${opt#*=}"
+    elif [[ ${opt} == --* ]]; then
+      gw_opts_map["${opt}"]=""
+    fi
+  done
+
+  # get the gateway interface
+  value=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-interface | tr -d \")
+  if [[ -n ${value} ]]; then
+    gw_opts_map["--gateway-interface"]="${value}"
+  fi
+
+  # get the gateway nexthop
+  value=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-nexthop | tr -d \")
+  if [[ -n ${value} ]]; then
+    gw_opts_map["--gateway-nexthop"]="${value}"
+  fi
+
+  # get the gateway vlanid
+  value=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
+  if [[ -n ${value} ]]; then
+    gw_opts_map["--gateway-vlanid"]="${value}"
+  fi
+
+  ovn_gateway_opts=""
+  for key in "${!gw_opts_map[@]}"; do
+    value="${gw_opts_map["${key}"]}"
+    if [[ ${value} == "" ]]; then
+      ovn_gateway_opts+="${key} "
     else
-      ovn_gateway_opts+="--gateway-nexthop=${gw_nexthop} "
+      ovn_gateway_opts+="${key}=${value} "
+    fi
+  done
+
+  # Get gateway options for DPUs
+  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
+    # this is only required if the DPU and DPU Host are in different subnets
+    if [[ ${ovn_gateway_router_subnet} == "" ]]; then
+      ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
     fi
   fi
 
-  # this is only required if the DPU and DPU Host are in different subnets
-  if [[ ${ovn_gateway_router_subnet} == "" ]]; then
-    ovn_gateway_router_subnet=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-router-subnet | tr -d \")
-  fi
 }
 
 display_file() {
@@ -832,19 +873,11 @@ function memory_trim_on_compaction_supported {
   fi
 }
 
-function get_node_zone() {
-  # Single-node-zone is the only supported interconnect topology: each node is
-  # its own zone, named after the kube node. In DPU mode, K8S_NODE has already
-  # been overridden earlier in this script from the OVS external_id
-  # host-k8s-nodename, so it carries the DPU-host's node name.
-  echo "${K8S_NODE}"
-}
-
 # v1.0.0 - run nb_ovsdb in a separate container listening only on
 # unix sockets
 local-nb-ovsdb() {
   trap 'ovsdb_cleanup nb' TERM
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
   rm -f ${OVN_RUNDIR}/ovnnb_db.pid
 
   echo "=============== run nb-ovsdb (unix sockets only) =========="
@@ -883,7 +916,7 @@ local-nb-ovsdb() {
 # unix sockets
 local-sb-ovsdb() {
   trap 'ovsdb_cleanup sb' TERM
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
   rm -f ${OVN_RUNDIR}/ovnsb_db.pid
 
   echo "=============== run sb-ovsdb (unix sockets only) ========== "
@@ -901,10 +934,10 @@ local-sb-ovsdb() {
   echo "=============== run sb-ovsdb (unix sockets only) ========== terminated"
 }
 
-# v1.3.0 - Runs northd.
+# v1.4.0 - Runs northd.
 run-ovn-northd() {
   trap 'ovn-appctl -t ovn-northd exit >/dev/null 2>&1; exit 0' TERM
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
   rm -f ${OVN_RUNDIR}/ovn-northd.pid
   rm -f ${OVN_RUNDIR}/ovn-northd.*.ctl
 
@@ -933,10 +966,10 @@ run-ovn-northd() {
   exit 8
 }
 
-# v1.3.0 -  run ovnkube-identity
+# v1.4.0 -  run ovnkube-identity
 ovnkube-identity() {
     trap 'kill $(jobs -p); exit 0' TERM
-    check_ovn_daemonset_version "1.3.0"
+    check_ovn_daemonset_version "1.4.0"
     rm -f ${OVN_RUNDIR}/ovnkube-identity.pid
 
     ovnkube_enable_hybrid_overlay_flag=
@@ -955,10 +988,10 @@ ovnkube-identity() {
     exit 9
 }
 
-# v1.3.0 - run ovnkube --ovnkube-controller
+# v1.4.0 - run ovnkube --ovnkube-controller
 ovnkube-controller() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller.pid
 
   echo "=============== ovnkube-controller (wait for local NB/SB) =========="
@@ -1093,6 +1126,12 @@ ovnkube-controller() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -1155,9 +1194,6 @@ ovnkube-controller() {
     ovnkube_config_duration_enable_flag="--metrics-enable-config-duration"
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
-
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-controller's configured zone is ${ovn_zone}"
 
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
@@ -1239,6 +1275,7 @@ ovnkube-controller() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -1261,6 +1298,7 @@ ovnkube-controller() {
     ${ovn_enable_dnsnameresolver_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
     --gateway-mode=${ovn_gateway_mode} \
@@ -1273,8 +1311,7 @@ ovnkube-controller() {
     --metrics-bind-address ${ovnkube_controller_metrics_bind_address} \
     --metrics-enable-pprof \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid \
-    --zone ${ovn_zone} &
+    --pidfile ${OVN_RUNDIR}/ovnkube-controller.pid &
 
   echo "=============== ovnkube-controller ========== running"
   wait_for_event attempts=3 process_ready ovnkube-controller
@@ -1288,7 +1325,7 @@ ovnkube-controller-with-node() {
   # currently we the process to background, therefore wait until that process removes its pid file on exit.
   # if the pid file doesnt exist, we exit immediately.
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; wait_ovnkube_controller_with_node_done; exit 0' TERM
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
   rm -f ${OVN_RUNDIR}/ovnkube-controller-with-node.pid
 
   # wait for ovs-servers to start since ovnkube initialization sets some fields in OVS DB
@@ -1434,6 +1471,12 @@ ovnkube-controller-with-node() {
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
 
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
+
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
 	  pre_conf_udn_addr_enable_flag="--enable-preconfigured-udn-addresses"
@@ -1548,17 +1591,9 @@ ovnkube-controller-with-node() {
     fi
   fi
 
-  # Get gateway options for DPUs
-  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-      get_dpu_gw_options
-  fi
-
-  if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
-      # get the gateway vlanid
-      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
-      if [[ -n ${gw_vlanid} ]]; then
-        ovn_gateway_opts+="--gateway-vlanid=${gw_vlanid}"
-      fi
+  # Get gateway options from OVS for full and dpu modes.
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+      get_gw_options
   fi
 
   ovnkube_node_mgmt_port_netdev_flag=
@@ -1603,9 +1638,6 @@ ovnkube-controller-with-node() {
     ovnkube_config_duration_enable_flag="--metrics-enable-config-duration"
   fi
   echo "ovnkube_config_duration_enable_flag: ${ovnkube_config_duration_enable_flag}"
-
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-controller-with-node's configured zone is ${ovn_zone}"
 
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
@@ -1759,6 +1791,7 @@ ovnkube-controller-with-node() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -1790,6 +1823,7 @@ ovnkube-controller-with-node() {
     ${sflow_targets} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${network_qos_enabled_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_disable_requestedchassis_flag} \
@@ -1812,8 +1846,7 @@ ovnkube-controller-with-node() {
     --nodeport \
     --ovn-config-namespace ${ovn_kubernetes_namespace} \
     --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-    --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid \
-    --zone ${ovn_zone} &
+    --pidfile ${OVN_RUNDIR}/ovnkube-controller-with-node.pid &
 
   wait_for_event attempts=3 process_ready ovnkube-controller-with-node
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then
@@ -1829,7 +1862,7 @@ ovnkube-controller-with-node() {
 # run ovnkube --cluster-manager.
 ovn-cluster-manager() {
   trap 'kill $(jobs -p); exit 0' TERM
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
 
   ovn_encap_port_flag=
     if [[ -n "${ovn_encap_port}" ]]; then
@@ -1940,6 +1973,12 @@ ovn-cluster-manager() {
 	  network_connect_enabled_flag="--enable-network-connect"
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
 
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
@@ -2065,6 +2104,7 @@ ovn-cluster-manager() {
     ${multi_network_enabled_flag} \
     ${network_segmentation_enabled_flag} \
     ${network_connect_enabled_flag} \
+    ${uplink_enabled_flag} \
     ${pre_conf_udn_addr_enable_flag} \
     ${route_advertisements_enabled_flag} \
     ${evpn_enabled_flag} \
@@ -2084,6 +2124,7 @@ ovn-cluster-manager() {
     ${network_qos_enabled_flag} \
     ${dynamic_udn_allocation_flag} \
     ${dynamic_udn_grace_period} \
+    ${ovnkube_cluster_default_nad_flag} \
     ${ovn_enable_dnsnameresolver_flag} \
     ${ovn_allow_icmp_netpol_flag} \
     ${ovnkube_metrics_scale_enable_flag} \
@@ -2109,7 +2150,7 @@ ovn-cluster-manager() {
 
 # ovn-controller - all nodes
 ovn-controller() {
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
   rm -f ${OVN_RUNDIR}/ovn-controller.pid
 
   echo "=============== ovn-controller - (wait for ovs)"
@@ -2140,7 +2181,7 @@ ovn-controller() {
 # ovn-node - all nodes
 ovn-node() {
   trap 'kill $(jobs -p) ; rm -f /etc/cni/net.d/10-ovn-kubernetes.conf ; exit 0' TERM
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
   rm -f ${OVN_RUNDIR}/ovnkube.pid
 
   # local_dbs_ready checks for the local NB/SB OVSDB readiness state.
@@ -2231,6 +2272,12 @@ ovn-node() {
 	  network_connect_enabled_flag="--enable-network-connect"
   fi
   echo "network_connect_enabled_flag=${network_connect_enabled_flag}"
+
+  uplink_enabled_flag=
+  if [[ ${ovn_uplink_enable} == "true" ]]; then
+	  uplink_enabled_flag="--enable-uplink"
+  fi
+  echo "uplink_enabled_flag=${uplink_enabled_flag}"
 
   pre_conf_udn_addr_enable_flag=
   if [[ ${ovn_pre_conf_udn_addr_enable} == "true" ]]; then
@@ -2354,17 +2401,9 @@ ovn-node() {
     ovn_dpu_host_gateway_representor_interface_flag="--dpu-host-gateway-representor-interface=${ovn_dpu_host_gateway_representor_interface}"
   fi
 
-  # Get gateway options for DPUs
-  if [[ ${ovnkube_node_mode} == "dpu" ]]; then
-      get_dpu_gw_options
-  fi
-
-  if [[ ${ovnkube_node_mode} != "dpu-host" && ! ${ovn_gateway_opts} =~ "gateway-vlanid" ]]; then
-      # get the gateway vlanid
-      gw_vlanid=$(ovs-vsctl --if-exists get Open_vSwitch . external_ids:ovn-gw-vlanid | tr -d \")
-      if [[ -n ${gw_vlanid} ]]; then
-        ovn_gateway_opts+="--gateway-vlanid=${gw_vlanid}"
-      fi
+  # Get gateway options from OVS for full and dpu modes.
+  if [[ ${ovnkube_node_mode} != "dpu-host" ]]; then
+      get_gw_options
   fi
 
   ovn_unprivileged_flag="--unprivileged-mode"
@@ -2382,9 +2421,6 @@ ovn-node() {
         --node-server-cert ${OVNKUBE_METRICS_CERT}
       "
   fi
-
-  ovn_zone=$(get_node_zone)
-  echo "ovnkube-node's configured zone is ${ovn_zone}"
 
   ovnkube_enable_multi_external_gateway_flag=
   if [[ ${ovn_enable_multi_external_gateway} == "true" ]]; then
@@ -2471,6 +2507,7 @@ ovn-node() {
         ${multi_network_enabled_flag} \
         ${network_segmentation_enabled_flag} \
         ${network_connect_enabled_flag} \
+        ${uplink_enabled_flag} \
         ${pre_conf_udn_addr_enable_flag} \
         ${route_advertisements_enabled_flag} \
         ${evpn_enabled_flag} \
@@ -2496,6 +2533,7 @@ ovn-node() {
         ${sflow_targets} \
         ${dynamic_udn_allocation_flag} \
         ${dynamic_udn_grace_period} \
+        ${ovnkube_cluster_default_nad_flag} \
         ${network_qos_enabled_flag} \
         --cluster-subnets ${net_cidr} --k8s-service-cidr=${svc_cidr} \
         --export-ovs-metrics \
@@ -2514,8 +2552,7 @@ ovn-node() {
         --nodeport \
         --ovn-config-namespace ${ovn_kubernetes_namespace} \
         --ovn-metrics-bind-address ${ovn_metrics_bind_address} \
-        --pidfile ${OVN_RUNDIR}/ovnkube.pid \
-        --zone ${ovn_zone} &
+        --pidfile ${OVN_RUNDIR}/ovnkube.pid &
 
   wait_for_event attempts=3 process_ready ovnkube
   if [[ ${ovnkube_node_mode} != "dpu" ]]; then
@@ -2529,7 +2566,7 @@ ovn-node() {
 
 # cleanup-ovn-node - all nodes
 cleanup-ovn-node() {
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
 
   rm -f /etc/cni/net.d/10-ovn-kubernetes.conf
 
@@ -2554,9 +2591,9 @@ cleanup-ovn-node() {
 
 }
 
-# v1.3.0 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
+# v1.4.0 - Runs ovn-kube-util in daemon mode to export prometheus metrics related to OVS.
 ovs-metrics() {
-  check_ovn_daemonset_version "1.3.0"
+  check_ovn_daemonset_version "1.4.0"
 
   echo "=============== ovs-metrics - (wait for ovs_ready)"
   wait_for_event ovs_ready

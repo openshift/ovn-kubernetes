@@ -17,6 +17,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	ovsops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
@@ -164,7 +165,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 				if dpuCD != nil {
 					err := bnnc.addDPUPodForNAD(pod, dpuCD, netName, nadKey, clientSet)
 					if err != nil {
-						klog.Errorf("Error adding pod %s/%s for for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
+						klog.Errorf("Error adding pod %s/%s for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 					} else {
 						nadToDPUCDMap[nadKey] = dpuCD
 					}
@@ -196,7 +197,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 						oldDPUCD, newDPUCD)
 					err := bnnc.delDPUPodForNAD(oldPod, oldDPUCD, nadKey, false)
 					if err != nil {
-						klog.Errorf("Error deleting pod %s/%s for for network %s: %v", oldPod.Namespace, oldPod.Name, bnnc.GetNetworkName(), err)
+						klog.Errorf("Error deleting pod %s/%s for network %s: %v", oldPod.Namespace, oldPod.Name, bnnc.GetNetworkName(), err)
 					}
 					nadToDPUCDMap[nadKey] = nil
 				}
@@ -206,7 +207,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 						"New connection details (%v)", oldDPUCD, newDPUCD)
 					err := bnnc.addDPUPodForNAD(newPod, newDPUCD, netName, nadKey, clientSet)
 					if err != nil {
-						klog.Errorf("Error adding pod %s/%s for for network %s: %v", newPod.Namespace, newPod.Name, bnnc.GetNetworkName(), err)
+						klog.Errorf("Error adding pod %s/%s for network %s: %v", newPod.Namespace, newPod.Name, bnnc.GetNetworkName(), err)
 					} else {
 						nadToDPUCDMap[nadKey] = newDPUCD
 					}
@@ -229,7 +230,7 @@ func (bnnc *BaseNodeNetworkController) watchPodsDPU() (*factory.Handler, error) 
 				if dpuCD != nil {
 					err := bnnc.delDPUPodForNAD(pod, dpuCD, nadKey, true)
 					if err != nil {
-						klog.Errorf("Error deleting pod %s/%s for for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
+						klog.Errorf("Error deleting pod %s/%s for network %s: %v", pod.Namespace, pod.Name, bnnc.GetNetworkName(), err)
 					}
 				}
 			}
@@ -277,8 +278,7 @@ func (bnnc *BaseNodeNetworkController) addRepPort(pod *corev1.Pod, dpuCD *util.D
 	}
 
 	klog.Infof("Adding VF representor %s for %s", vfRepName, podDesc)
-	err = cni.ConfigureOVS(context.TODO(), pod.Namespace, pod.Name, "", vfRepName, ifInfo, dpuCD.SandboxId,
-		deviceID, false, getter)
+	err = cni.ConfigureOVS(context.TODO(), bnnc.ovsClient, pod.Namespace, pod.Name, "", vfRepName, ifInfo, dpuCD.SandboxId, deviceID, false, getter)
 	if err != nil {
 		// Note(adrianc): we are lenient with cleanup in this method as pod is going to be retried anyway.
 		_ = bnnc.delRepPort(pod, dpuCD, vfRepName, nadKey)
@@ -328,8 +328,7 @@ func (bnnc *BaseNodeNetworkController) delRepPort(pod *corev1.Pod, dpuCD *util.D
 
 	// remove from br-int
 	return wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 60*time.Second, true, func(_ context.Context) (bool, error) {
-		_, _, err := util.RunOVSVsctl("--if-exists", "del-port", "br-int", vfRepName)
-		if err != nil {
+		if err := ovsops.DeletePortWithInterfaces(bnnc.ovsClient, "br-int", vfRepName); err != nil {
 			return false, nil
 		}
 		klog.Infof("Port %s deleted from bridge br-int", vfRepName)

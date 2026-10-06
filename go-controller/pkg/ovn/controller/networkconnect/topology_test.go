@@ -569,7 +569,6 @@ func TestEnsureConnectPortsOps(t *testing.T) {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-id": "1",
 							util.OvnNodeChassisID: chassisIDForNode("node1"),
-							util.OvnNodeZoneName:  "node1", // local zone
 						},
 					},
 				},
@@ -602,7 +601,6 @@ func TestEnsureConnectPortsOps(t *testing.T) {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-id": "2",
 							util.OvnNodeChassisID: chassisIDForNode("node2"),
-							util.OvnNodeZoneName:  "node2", // different zone
 						},
 					},
 				},
@@ -635,7 +633,6 @@ func TestEnsureConnectPortsOps(t *testing.T) {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-id": "1",
 							util.OvnNodeChassisID: chassisIDForNode("node1"),
-							util.OvnNodeZoneName:  "node1", // local zone
 						},
 					},
 				},
@@ -645,7 +642,6 @@ func TestEnsureConnectPortsOps(t *testing.T) {
 						Annotations: map[string]string{
 							"k8s.ovn.org/node-id": "2",
 							util.OvnNodeChassisID: chassisIDForNode("node2"),
-							util.OvnNodeZoneName:  "node2", // different zone
 						},
 					},
 				},
@@ -838,7 +834,6 @@ func TestEnsureConnectPortsOpsDeletesInactiveLayer3RemoteNodePorts(t *testing.T)
 				Annotations: map[string]string{
 					"k8s.ovn.org/node-id": "2",
 					util.OvnNodeChassisID: chassisIDForNode("node2"),
-					util.OvnNodeZoneName:  "node2",
 				},
 			},
 		},
@@ -1024,7 +1019,6 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node1",
 			Annotations: map[string]string{
-				util.OvnNodeZoneName:       "zone1",
 				util.OvnNodeID:             "1",
 				util.OvnNodeChassisID:      chassisIDForNode("node1"),
 				"k8s.ovn.org/node-subnets": string(node1SubnetsBytes),
@@ -1035,7 +1029,6 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node2",
 			Annotations: map[string]string{
-				util.OvnNodeZoneName:       "zone2",
 				util.OvnNodeID:             "2",
 				util.OvnNodeChassisID:      chassisIDForNode("node2"),
 				"k8s.ovn.org/node-subnets": string(node2SubnetsBytes),
@@ -1048,7 +1041,7 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	// Start node informer so getNodeSubnet can resolve node annotations.
-	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset)
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset, "test-node")
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 	err = wf.Start()
 	g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -1115,7 +1108,7 @@ func TestSyncNetworkConnectionsInactiveNetwork(t *testing.T) {
 	// Controller with connect router and both network routers.
 	c := &Controller{
 		nbClient:       nbClient,
-		zone:           "zone1",
+		zone:           "node1",
 		nodeLister:     wf.NodeCoreInformer().Lister(),
 		networkManager: nm,
 		localZoneNode:  node1,
@@ -1704,7 +1697,7 @@ func TestEnsureRoutingPoliciesOps(t *testing.T) {
 			}()
 
 			// Create watch factory
-			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset)
+			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset, "test-node")
 			require.NoError(t, err)
 			err = wf.Start()
 			require.NoError(t, err)
@@ -2232,7 +2225,7 @@ func TestEnsureStaticRoutesOps(t *testing.T) {
 			}()
 
 			// Create watch factory
-			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset)
+			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset, "test-node")
 			require.NoError(t, err)
 			err = wf.Start()
 			require.NoError(t, err)
@@ -2916,7 +2909,7 @@ func TestEnsureLoadBalancerGroupOps(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset)
+			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset, "test-node")
 			require.NoError(t, err)
 			err = wf.Start()
 			require.NoError(t, err)
@@ -3986,7 +3979,7 @@ func TestEnsureStaticRoutesOpsDeletesInactiveLayer3RemoteNodeRoutes(t *testing.T
 	_, err := fakeClientset.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
 	require.NoError(t, err)
 
-	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset)
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClientset, "test-node")
 	require.NoError(t, err)
 	err = wf.Start()
 	require.NoError(t, err)

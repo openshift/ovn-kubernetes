@@ -26,9 +26,7 @@ import (
 )
 
 func TestSetAdvertisements(t *testing.T) {
-	testZoneName := "testZone"
 	testNodeName := "testNode"
-	testNodeOnZoneName := "testNodeOnZone"
 	testNADName := "test/NAD"
 	testRAName := "testRA"
 	testVRFName := "testVRF"
@@ -99,14 +97,6 @@ func TestSetAdvertisements(t *testing.T) {
 			Name: testNodeName,
 		},
 	}
-	testNodeOnZone := corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: testNodeOnZoneName,
-			Annotations: map[string]string{
-				util.OvnNodeZoneName: testZoneName,
-			},
-		},
-	}
 	otherNode := corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "otherNode",
@@ -114,12 +104,16 @@ func TestSetAdvertisements(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		network         *ovncnitypes.NetConf
-		ra              *ratypes.RouteAdvertisements
-		node            corev1.Node
-		expectNoNetwork bool
-		expected        map[string][]string
+		name                      string
+		network                   *ovncnitypes.NetConf
+		ra                        *ratypes.RouteAdvertisements
+		node                      corev1.Node
+		missingRA                 bool
+		expectNoNetwork           bool
+		existingPodAdvertisements map[string][]string
+		existingEIPAdvertisements map[string][]string
+		expected                  map[string][]string
+		expectedEIP               map[string][]string
 	}{
 		{
 			name:    "reconciles VRF advertisements for selected node of default node network controller",
@@ -131,12 +125,12 @@ func TestSetAdvertisements(t *testing.T) {
 			},
 		},
 		{
-			name:    "reconciles VRF advertisements for selected node in same zone as default OVN network controller",
+			name:    "reconciles VRF advertisements for selected node of primary network controller",
 			network: primaryNetwork,
 			ra:      &podNetworkRA,
-			node:    testNodeOnZone,
+			node:    testNode,
 			expected: map[string][]string{
-				testNodeOnZoneName: {testVRFName},
+				testNodeName: {testVRFName},
 			},
 		},
 		{
@@ -152,24 +146,59 @@ func TestSetAdvertisements(t *testing.T) {
 			node:    otherNode,
 		},
 		{
-			name:    "ignores advertisements that are not accepted",
+			name:    "ignores advertisements with no Accepted condition",
 			network: defaultNetwork,
 			ra:      &podNetworkRANotAccepted,
 			node:    testNode,
 		},
 		{
-			name:            "fails for advertisements that are rejected",
-			network:         primaryNetwork,
-			ra:              &podNetworkRARejected,
-			node:            testNode,
-			expectNoNetwork: true,
+			name:    "starts new network without advertisements when advertisements are rejected",
+			network: primaryNetwork,
+			ra:      &podNetworkRARejected,
+			node:    testNode,
 		},
 		{
-			name:            "fails for advertisements that are old",
-			network:         primaryNetwork,
-			ra:              &podNetworkRAOutdated,
-			node:            testNode,
-			expectNoNetwork: true,
+			name:    "starts new network without advertisements when advertisements are old",
+			network: primaryNetwork,
+			ra:      &podNetworkRAOutdated,
+			node:    testNode,
+		},
+		{
+			name:    "preserves existing advertisements when advertisements are rejected",
+			network: primaryNetwork,
+			ra:      &podNetworkRARejected,
+			node:    testNode,
+			existingPodAdvertisements: map[string][]string{
+				testNodeName: {"previous-pod-vrf"},
+			},
+			existingEIPAdvertisements: map[string][]string{
+				testNodeName: {"previous-eip-vrf"},
+			},
+			expected: map[string][]string{
+				testNodeName: {"previous-pod-vrf"},
+			},
+			expectedEIP: map[string][]string{
+				testNodeName: {"previous-eip-vrf"},
+			},
+		},
+		{
+			name:      "preserves existing advertisements when route advertisement is missing",
+			network:   primaryNetwork,
+			ra:        &podNetworkRA,
+			node:      testNode,
+			missingRA: true,
+			existingPodAdvertisements: map[string][]string{
+				testNodeName: {"previous-pod-vrf"},
+			},
+			existingEIPAdvertisements: map[string][]string{
+				testNodeName: {"previous-eip-vrf"},
+			},
+			expected: map[string][]string{
+				testNodeName: {"previous-pod-vrf"},
+			},
+			expectedEIP: map[string][]string{
+				testNodeName: {"previous-eip-vrf"},
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -179,7 +208,7 @@ func TestSetAdvertisements(t *testing.T) {
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			config.OVNKubernetesFeature.EnableRouteAdvertisements = true
 			fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+			wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			tcm := &testControllerManager{
@@ -188,7 +217,7 @@ func TestSetAdvertisements(t *testing.T) {
 					ReconcilableNetInfo: &util.DefaultNetInfo{},
 				},
 			}
-			nm := newNetworkController("", testZoneName, testNodeName, tcm, wf)
+			nm := newNetworkController("", testNodeName, tcm, wf)
 
 			namespace, name, err := cache.SplitMetaNamespaceKey(testNADName)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -200,21 +229,34 @@ func TestSetAdvertisements(t *testing.T) {
 
 			_, err = fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), &tt.node, metav1.CreateOptions{})
 			g.Expect(err).ToNot(gomega.HaveOccurred())
-			_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), tt.ra, metav1.CreateOptions{})
-			g.Expect(err).ToNot(gomega.HaveOccurred())
+			if !tt.missingRA {
+				_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(context.Background(), tt.ra, metav1.CreateOptions{})
+				g.Expect(err).ToNot(gomega.HaveOccurred())
+			}
 			_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), nad, metav1.CreateOptions{})
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 
 			err = wf.Start()
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			defer wf.Shutdown()
-			g.Expect(nm.Start()).To(gomega.Succeed())
-			defer nm.Stop()
 
 			netInfo, err := util.NewNetInfo(tt.network)
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			mutableNetInfo := util.NewMutableNetInfo(netInfo)
 			mutableNetInfo.AddNADs(testNADName)
+
+			if tt.existingPodAdvertisements != nil || tt.existingEIPAdvertisements != nil {
+				existingNetInfo := util.NewMutableNetInfo(netInfo)
+				existingNetInfo.AddNADs(testNADName)
+				existingNetInfo.SetPodNetworkAdvertisedVRFs(tt.existingPodAdvertisements)
+				existingNetInfo.SetEgressIPAdvertisedVRFs(tt.existingEIPAdvertisements)
+				existingController := &testNetworkController{
+					ReconcilableNetInfo: util.NewReconcilableNetInfo(existingNetInfo),
+					tcm:                 tcm,
+				}
+				tcm.controllers[testNetworkKey(netInfo)] = existingController
+				nm.setNetworkState(existingNetInfo.GetNetworkName(), &networkControllerState{controller: existingController})
+			}
 
 			nm.getNADKeysForNetwork = func(networkName string) []string {
 				if networkName == mutableNetInfo.GetNetworkName() {
@@ -224,6 +266,8 @@ func TestSetAdvertisements(t *testing.T) {
 			}
 
 			nm.EnsureNetwork(mutableNetInfo)
+			g.Expect(nm.Start()).To(gomega.Succeed())
+			defer nm.Stop()
 
 			meetsExpectations := func(g gomega.Gomega) {
 				tcm.Lock()
@@ -246,10 +290,51 @@ func TestSetAdvertisements(t *testing.T) {
 					tt.expected = map[string][]string{}
 				}
 				g.Expect(reconcilable.GetPodNetworkAdvertisedVRFs()).To(gomega.Equal(tt.expected))
+				if tt.expectedEIP == nil {
+					tt.expectedEIP = map[string][]string{}
+				}
+				g.Expect(reconcilable.GetEgressIPAdvertisedVRFs()).To(gomega.Equal(tt.expectedEIP))
 			}
 
 			g.Eventually(meetsExpectations).Should(gomega.Succeed())
 			g.Consistently(meetsExpectations).Should(gomega.Succeed())
+		})
+	}
+}
+
+func TestNetworkControllerIsNodeManaged(t *testing.T) {
+	const localNode = "local-node"
+
+	tests := []struct {
+		name       string
+		controller *networkController
+		node       *corev1.Node
+		want       bool
+	}{
+		{
+			name:       "cluster manager manages unannotated node",
+			controller: &networkController{},
+			node:       &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			want:       true,
+		},
+		{
+			name:       "node manager manages its own unannotated node",
+			controller: &networkController{node: localNode},
+			node:       &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: localNode}},
+			want:       true,
+		},
+		{
+			name:       "node manager ignores foreign unannotated node",
+			controller: &networkController{node: localNode},
+			node:       &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "other-node"}},
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(tt.controller.isNodeManaged(tt.node)).To(gomega.Equal(tt.want))
 		})
 	}
 }
@@ -299,7 +384,7 @@ func TestNetworkControllerReconcilePendingNetworkRefChange(t *testing.T) {
 					ReconcilableNetInfo: &util.DefaultNetInfo{},
 				},
 			}
-			nm := newNetworkController("", "", "", tcm, nil)
+			nm := newNetworkController("", "", tcm, nil)
 			nm.nodeHasNetwork = func(_, _ string) bool { return tt.nodeHasNetwork }
 
 			networkName := netInfo.GetNetworkName()
@@ -367,7 +452,7 @@ func TestNetworkControllerClearsPendingNetworkRefOnDelete(t *testing.T) {
 			ReconcilableNetInfo: &util.DefaultNetInfo{},
 		},
 	}
-	nm := newNetworkController("", "", "", tcm, nil)
+	nm := newNetworkController("", "", tcm, nil)
 	nm.nodeHasNetwork = func(_, _ string) bool { return true }
 
 	networkName := netInfo.GetNetworkName()
@@ -409,7 +494,7 @@ func TestNetworkControllerClearsPendingNetworkRefOnDelete(t *testing.T) {
 	g.Expect(followupCalls).To(gomega.Equal(0))
 }
 
-func TestNetworkControllerStopsNetworkOnStartFailure(t *testing.T) {
+func TestNetworkControllerCleansStoppedNetworkAfterStartFailureAndDeletion(t *testing.T) {
 	g := gomega.NewWithT(t)
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 	t.Cleanup(func() {
@@ -438,7 +523,7 @@ func TestNetworkControllerStopsNetworkOnStartFailure(t *testing.T) {
 		},
 		raiseErrorWhenStartingController: fmt.Errorf("start failed"),
 	}
-	nm := newNetworkController("", "", "", tcm, nil)
+	nm := newNetworkController("", "", tcm, nil)
 
 	mutableNetInfo := util.NewMutableNetInfo(netInfo)
 	mutableNetInfo.SetNADs(netConf.NADName)
@@ -448,12 +533,198 @@ func TestNetworkControllerStopsNetworkOnStartFailure(t *testing.T) {
 	err = nm.syncNetwork(networkName)
 	g.Expect(err).To(gomega.HaveOccurred())
 	g.Expect(err.Error()).To(gomega.ContainSubstring("failed to start network"))
+	failedState := nm.getNetworkState(networkName)
+	g.Expect(failedState.controller).ToNot(gomega.BeNil())
+	g.Expect(failedState.startFailed).To(gomega.BeTrue())
+
+	nm.setNetwork(networkName, nil)
+	g.Expect(nm.syncNetwork(networkName)).To(gomega.Succeed())
+	g.Expect(nm.getNetworkState(networkName).controller).To(gomega.BeNil())
 
 	tcm.Lock()
 	defer tcm.Unlock()
 	expectedNetworkKey := testNetworkKey(netInfo)
 	g.Expect(tcm.started).To(gomega.Equal([]string{expectedNetworkKey}))
 	g.Expect(tcm.stopped).To(gomega.Equal([]string{expectedNetworkKey}))
+	g.Expect(tcm.cleaned).To(gomega.Equal([]string{expectedNetworkKey}))
+}
+
+func TestNetworkControllerCleansFailedStartBeforeRetry(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableRouteAdvertisements = false
+
+	netConf := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "udn-net",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: types.Layer3Topology,
+		Role:     types.NetworkRolePrimary,
+		NADName:  "ns1/primary",
+		Subnets:  "10.128.0.0/14",
+	}
+	netInfo, err := util.NewNetInfo(netConf)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	startErr := fmt.Errorf("start failed")
+	tcm := &testControllerManager{
+		controllers: map[string]NetworkController{},
+		defaultNetwork: &testNetworkController{
+			ReconcilableNetInfo: &util.DefaultNetInfo{},
+		},
+		raiseErrorWhenStartingController: startErr,
+	}
+	nm := newNetworkController("", "", tcm, nil)
+
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.SetNADs(netConf.NADName)
+	networkName := mutableNetInfo.GetNetworkName()
+	nm.setNetwork(networkName, mutableNetInfo)
+
+	g.Expect(nm.syncNetwork(networkName)).To(gomega.MatchError(gomega.ContainSubstring("failed to start network")))
+
+	tcm.Lock()
+	tcm.raiseErrorWhenStartingController = nil
+	tcm.Unlock()
+	g.Expect(nm.syncNetwork(networkName)).To(gomega.Succeed())
+
+	state := nm.getNetworkState(networkName)
+	g.Expect(state.controller).ToNot(gomega.BeNil())
+	g.Expect(state.startFailed).To(gomega.BeFalse())
+	tcm.Lock()
+	defer tcm.Unlock()
+	expectedNetworkKey := testNetworkKey(netInfo)
+	g.Expect(tcm.started).To(gomega.Equal([]string{expectedNetworkKey, expectedNetworkKey}))
+	g.Expect(tcm.stopped).To(gomega.Equal([]string{expectedNetworkKey}))
+	g.Expect(tcm.cleaned).To(gomega.Equal([]string{expectedNetworkKey}))
+}
+
+func TestNetworkControllerCleansFailedStartBeforeIncompatibleReplacement(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.OVNKubernetesFeature.EnableRouteAdvertisements = false
+	config.OVNKubernetesFeature.EnableUplink = true
+
+	netConf := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "udn-net",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: types.Layer3Topology,
+		Role:     types.NetworkRolePrimary,
+		NADName:  "ns1/primary",
+		Subnets:  "10.128.0.0/14",
+		Uplink:   "uplink-a",
+	}
+	netInfo, err := util.NewNetInfo(netConf)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	startErr := fmt.Errorf("start failed")
+	tcm := &testControllerManager{
+		controllers: map[string]NetworkController{},
+		defaultNetwork: &testNetworkController{
+			ReconcilableNetInfo: &util.DefaultNetInfo{},
+		},
+		raiseErrorWhenStartingController: startErr,
+	}
+	nm := newNetworkController("", "", tcm, nil)
+
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.SetNADs(netConf.NADName)
+	networkName := mutableNetInfo.GetNetworkName()
+	nm.setNetwork(networkName, mutableNetInfo)
+	g.Expect(nm.syncNetwork(networkName)).To(gomega.MatchError(gomega.ContainSubstring("failed to start network")))
+
+	replacementConf := *netConf
+	replacementConf.Uplink = "uplink-b"
+	replacementInfo, err := util.NewNetInfo(&replacementConf)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Expect(util.AreNetworksCompatible(netInfo, replacementInfo)).To(gomega.BeFalse())
+	replacement := util.NewMutableNetInfo(replacementInfo)
+	replacement.SetNADs(replacementConf.NADName)
+	nm.setNetwork(networkName, replacement)
+
+	tcm.Lock()
+	tcm.raiseErrorWhenStartingController = nil
+	tcm.Unlock()
+	g.Expect(nm.syncNetwork(networkName)).To(gomega.Succeed())
+
+	tcm.Lock()
+	defer tcm.Unlock()
+	g.Expect(tcm.started).To(gomega.HaveLen(2))
+	g.Expect(tcm.stopped).To(gomega.HaveLen(1))
+	g.Expect(tcm.cleaned).To(gomega.HaveLen(1))
+}
+
+func TestNetworkControllerFinishesTerminalCleanupBeforeFailedStartRecreation(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableRouteAdvertisements = false
+
+	netConf := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "udn-net",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: types.Layer3Topology,
+		Role:     types.NetworkRolePrimary,
+		NADName:  "ns1/primary",
+		Subnets:  "10.128.0.0/14",
+	}
+	netInfo, err := util.NewNetInfo(netConf)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.SetNADs(netConf.NADName)
+
+	startErr := fmt.Errorf("start failed")
+	cleanupErr := fmt.Errorf("cleanup failed")
+	tcm := &testControllerManager{
+		controllers: map[string]NetworkController{},
+		defaultNetwork: &testNetworkController{
+			ReconcilableNetInfo: &util.DefaultNetInfo{},
+		},
+		raiseErrorWhenStartingController: startErr,
+	}
+	nm := newNetworkController("", "", tcm, nil)
+	networkName := mutableNetInfo.GetNetworkName()
+	nm.setNetwork(networkName, mutableNetInfo)
+	g.Expect(nm.syncNetwork(networkName)).To(gomega.MatchError(gomega.ContainSubstring("failed to start network")))
+
+	nm.setNetwork(networkName, nil)
+	tcm.Lock()
+	tcm.raiseErrorWhenCleaningController = cleanupErr
+	tcm.Unlock()
+	g.Expect(nm.syncNetwork(networkName)).To(gomega.MatchError(gomega.ContainSubstring("cleanup failed")))
+
+	nm.setNetwork(networkName, mutableNetInfo)
+	tcm.Lock()
+	tcm.raiseErrorWhenStartingController = nil
+	tcm.raiseErrorWhenCleaningController = nil
+	tcm.Unlock()
+	g.Expect(nm.syncNetwork(networkName)).To(gomega.Succeed())
+
+	state := nm.getNetworkState(networkName)
+	g.Expect(state.controller).ToNot(gomega.BeNil())
+	g.Expect(state.startFailed).To(gomega.BeFalse())
+	tcm.Lock()
+	defer tcm.Unlock()
+	g.Expect(tcm.started).To(gomega.HaveLen(2))
+	g.Expect(tcm.stopped).To(gomega.HaveLen(1))
+	g.Expect(tcm.cleaned).To(gomega.HaveLen(2))
 }
 
 // TestNetworkController_ConcurrentReconciliation validates that the networkReconciler
@@ -464,7 +735,7 @@ func TestNetworkController_ConcurrentReconciliation(t *testing.T) {
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 	config.OVNKubernetesFeature.EnableMultiNetwork = true
 	fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	tcm := &testControllerManager{
@@ -473,7 +744,7 @@ func TestNetworkController_ConcurrentReconciliation(t *testing.T) {
 			ReconcilableNetInfo: &util.DefaultNetInfo{},
 		},
 	}
-	nm := newNetworkController("test", "", "", tcm, wf)
+	nm := newNetworkController("test", "", tcm, wf)
 
 	err = wf.Start()
 	g.Expect(err).ToNot(gomega.HaveOccurred())
@@ -549,7 +820,7 @@ func TestNetworkController_ConcurrentReconciliationMixed(t *testing.T) {
 	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
 	config.OVNKubernetesFeature.EnableMultiNetwork = true
 	fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
-	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient)
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, "test-node")
 	g.Expect(err).ToNot(gomega.HaveOccurred())
 
 	tcm := &testControllerManager{
@@ -558,7 +829,7 @@ func TestNetworkController_ConcurrentReconciliationMixed(t *testing.T) {
 			ReconcilableNetInfo: &util.DefaultNetInfo{},
 		},
 	}
-	nm := newNetworkController("test", "", "", tcm, wf)
+	nm := newNetworkController("test", "", tcm, wf)
 
 	err = wf.Start()
 	g.Expect(err).ToNot(gomega.HaveOccurred())

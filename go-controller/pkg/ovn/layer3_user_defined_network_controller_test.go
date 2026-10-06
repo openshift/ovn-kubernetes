@@ -9,7 +9,6 @@ import (
 	"net"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	cnitypes "github.com/containernetworking/cni/pkg/types"
@@ -88,7 +87,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 		app.Flags = config.Flags
 
 		useFakeAddressSets := false
-		fakeOvn = NewFakeOVN(useFakeAddressSets)
+		fakeOvn = NewFakeOVN(useFakeAddressSets, nodeName)
 		initialDB = libovsdbtest.TestSetup{
 			NBData: []libovsdbtest.TestData{
 				&nbdb.LogicalSwitch{
@@ -116,7 +115,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 				}
 			}
 			config.Gateway.Mode = gwMode
-			config.Default.Zone = nodeName
 			if knet.IsIPv6CIDRString(netInfo.clustersubnets) {
 				config.IPv6Mode = true
 				// tests dont support dualstack yet
@@ -147,7 +145,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 					By("adding a remote node")
 					testNode2, err := newNodeWithUserDefinedNetworks("test-node2", "192.168.127.202/24", netInfo)
 					Expect(err).NotTo(HaveOccurred())
-					testNode2.Annotations["k8s.ovn.org/zone-name"] = "blah"
 					nodes = append(nodes, *testNode2)
 				}
 
@@ -342,7 +339,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 					config.Gateway.DisableSNATMultipleGWs = testConfig.gatewayConfig.DisableSNATMultipleGWs
 				}
 			}
-			config.Default.Zone = nodeName
 			app.Action = func(_ *cli.Context) error {
 				netConf := netInfo.netconf()
 				networkConfig, err := util.NewNetInfo(netConf)
@@ -506,15 +502,11 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR, netInfo)
 			Expect(err).NotTo(HaveOccurred())
 
-			// NB_Global with default zone so GetNBZone returns it; node without zone annotation is treated as local.
-			nbZone := &nbdb.NBGlobal{Name: types.OvnDefaultZone, UUID: types.OvnDefaultZone}
-			// Post-cleanup DB: default net node switch + NB_Global + global entities (Copp, meters) as in Layer2 test.
-			defaultNetExpectations := generateUDNPostInitDB(append(emptyDefaultClusterNetworkNodeSwitch(nodeName), nbZone))
+			// Post-cleanup DB: default net node switch + global entities (Copp, meters) as in Layer2 test.
+			defaultNetExpectations := generateUDNPostInitDB(emptyDefaultClusterNetworkNodeSwitch(nodeName))
 
 			// Minimal initialDB: default net node switch, no UDN entities. The UDN controller's Start()
 			// runs init() which creates cluster router and join switch; then node sync creates per-node entities.
-			initialDB.NBData = append(initialDB.NBData, nbZone)
-
 			fakeOvn.startWithDBSetup(
 				initialDB,
 				&corev1.NamespaceList{Items: []corev1.Namespace{*newUDNNamespace(ns)}},
@@ -602,7 +594,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-			config.Default.Zone = nodeName
 			config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
 
 			// Basic UDN setup
@@ -619,7 +610,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 
 			remoteNode, err := newNodeWithUserDefinedNetworks("remoteNode", "192.168.127.202/24", netInfo)
 			Expect(err).NotTo(HaveOccurred())
-			remoteNode.Annotations["k8s.ovn.org/zone-name"] = "other-zone" // force remote
 			remoteNode.Annotations[util.OvnTransitSwitchPortAddr] = `{"ipv4":"100.88.0.4/16"}`
 
 			remotePod := corev1.Pod{
@@ -792,7 +782,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 			config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
 			config.OVNKubernetesFeature.EnableMultiNetwork = true
 			config.OVNKubernetesFeature.EnableNetworkSegmentation = true
-			config.Default.Zone = nodeName
 			config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
 
 			const (
@@ -837,7 +826,6 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 3 network", func() {
 
 			remoteNode, err := newNodeWithUserDefinedNetworks(remoteName, "192.168.127.202/24", netInfoB)
 			Expect(err).NotTo(HaveOccurred())
-			remoteNode.Annotations["k8s.ovn.org/zone-name"] = "other-zone"
 			remoteNode.Annotations[util.OvnTransitSwitchPortAddr] = `{"ipv4":"100.88.0.4/16"}`
 
 			localPod := corev1.Pod{
@@ -918,8 +906,6 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 		node2Name  = "node2"
 		udnName    = "test-udn"
 		udnNadName = "default/test-nad"
-		zone1      = "global"
-		zone2      = "remote"
 	)
 
 	var (
@@ -956,13 +942,12 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 		}
 	}
 
-	createTestNode := func(nodeName, zone string, nodeID string) *corev1.Node {
+	createTestNode := func(nodeName, nodeID string) *corev1.Node {
 		return &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: nodeName,
 				Annotations: map[string]string{
 					"k8s.ovn.org/node-subnets":                    `{"default":"10.128.1.0/24","` + udnName + `":"192.168.1.0/24"}`,
-					"k8s.ovn.org/zone-name":                       zone,
 					"k8s.ovn.org/node-id":                         nodeID,
 					"k8s.ovn.org/node-chassis-id":                 "test-chassis-" + nodeName,
 					"k8s.ovn.org/node-transit-switch-port-ifaddr": `{"ipv4":"100.88.0.1/16"}`,
@@ -979,7 +964,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netInfo.Transport()).To(Equal(types.NetworkTransportNoOverlay))
 
-				node1 := createTestNode(node1Name, zone1, "1")
+				node1 := createTestNode(node1Name, "1")
 				clusterRouterName := netInfo.GetNetworkScopedClusterRouterName()
 				transitSwitchName := netInfo.GetNetworkScopedName(types.TransitSwitch)
 
@@ -1024,7 +1009,6 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 							CommonNetworkControllerInfo: *cnci,
 							ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 							zoneICHandler:               zoneICHandler,
-							localZoneNodes:              &sync.Map{},
 						},
 					},
 				}
@@ -1071,7 +1055,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netInfo.Transport()).To(Equal(types.NetworkTransportNoOverlay))
 
-				node2 := createTestNode(node2Name, zone2, "2")
+				node2 := createTestNode(node2Name, "2")
 				clusterRouterName := netInfo.GetNetworkScopedClusterRouterName()
 				transitSwitchName := netInfo.GetNetworkScopedName(types.TransitSwitch)
 
@@ -1107,7 +1091,6 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 							CommonNetworkControllerInfo: *cnci,
 							ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 							zoneICHandler:               zoneICHandler,
-							localZoneNodes:              &sync.Map{},
 						},
 					},
 				}
@@ -1146,7 +1129,7 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(netInfo.Transport()).NotTo(Equal(types.NetworkTransportNoOverlay))
 
-				node1 := createTestNode(node1Name, zone1, "1")
+				node1 := createTestNode(node1Name, "1")
 				clusterRouterName := netInfo.GetNetworkScopedClusterRouterName()
 				transitSwitchName := netInfo.GetNetworkScopedName(types.TransitSwitch)
 
@@ -1199,7 +1182,6 @@ var _ = Describe("Layer3 UDN Transport Mode - Interconnect", func() {
 							CommonNetworkControllerInfo: *cnci,
 							ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
 							zoneICHandler:               zoneICHandler,
-							localZoneNodes:              &sync.Map{},
 						},
 					},
 				}
@@ -1246,7 +1228,7 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 
 	BeforeEach(func() {
 		Expect(config.PrepareTestConfig()).To(Succeed())
-		fakeOvn = NewFakeOVN(false)
+		fakeOvn = NewFakeOVN(false, nodeName)
 	})
 
 	AfterEach(func() {
@@ -1322,6 +1304,8 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 
 			userDefinedNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
 			podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
+
+			Expect(ConfigureAdvertisedNetworkIsolation(fakeOvn.nbClient)).To(Succeed())
 
 			// Step 4: Start watching nodes to trigger addUpdateLocalNodeEvent()
 			By("Starting node watch on L3 UDN controller")
@@ -1412,6 +1396,92 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 		Expect(app.Run([]string{app.Name})).To(Succeed())
 	})
 
+	// The exemption address set must be synced before any SNAT that references
+	// it is created; if the sync fails, no SNAT may be created at all.
+	It("does not create SNAT rules when the exemption address set cannot be synced", func() {
+		By("Setting up LOCAL gateway mode configuration")
+		config.Gateway.Mode = config.GatewayModeLocal
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.Gateway.V4MasqueradeSubnet = "169.254.0.0/16"
+
+		app := cli.NewApp()
+		app.Name = "test"
+		app.Flags = config.Flags
+
+		cudnNetInfo := userDefinedNetInfo{
+			netName:        userDefinedNetworkName,
+			nadName:        namespacedName(ns, nadName),
+			topology:       types.Layer3Topology,
+			clustersubnets: "10.100.0.0/16",
+			hostsubnets:    "10.100.1.0/24",
+			isPrimary:      true,
+			transport:      types.NetworkTransportNoOverlay,
+			outboundSNAT:   string(types.NoOverlaySNATEnabled),
+		}
+
+		app.Action = func(*cli.Context) error {
+			netConf := cudnNetInfo.netconf()
+			nad, err := newNetworkAttachmentDefinition(ns, nadName, *netConf)
+			Expect(err).NotTo(HaveOccurred())
+
+			n := newUDNNamespace(ns)
+			const nodeIPv4CIDR = "192.168.126.202/24"
+			testNode, err := newNodeWithUserDefinedNetworks(nodeName, nodeIPv4CIDR, cudnNetInfo)
+			Expect(err).NotTo(HaveOccurred())
+			By("Corrupting the host-cidrs annotation so that the exemption address set sync fails")
+			testNode.Annotations[util.OVNNodeHostCIDRs] = "not-a-json-list"
+
+			fakeOvn.startWithDBSetup(
+				libovsdbtest.TestSetup{
+					NBData: []libovsdbtest.TestData{
+						&nbdb.LogicalSwitch{Name: nodeName},
+					},
+				},
+				&corev1.NamespaceList{Items: []corev1.Namespace{*n}},
+				&corev1.NodeList{Items: []corev1.Node{}},
+				&nadapi.NetworkAttachmentDefinitionList{Items: []nadapi.NetworkAttachmentDefinition{*nad}},
+			)
+
+			By("Initializing CUDN controller")
+			fexec := util.GetExec().(*testing.FakeExec)
+			fexec.AddFakeCmdsNoOutputNoError([]string{
+				"ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group",
+			})
+			fullL3UDNController := fakeOvn.fullL3UDNControllers[userDefinedNetworkName]
+			Expect(fullL3UDNController).ToNot(BeNil())
+			Expect(fullL3UDNController.init()).To(Succeed())
+
+			By("Starting node watch on L3 UDN controller")
+			Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
+
+			By("Adding the node to trigger addUpdateLocalNodeEvent()")
+			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), testNode, metav1.CreateOptions{})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Expecting the node sync to fail and be deferred for retry")
+			Eventually(func() bool {
+				_, failed := fullL3UDNController.gatewaysFailed.Load(nodeName)
+				return failed
+			}).WithTimeout(5 * time.Second).WithPolling(200 * time.Millisecond).Should(BeTrue())
+			Eventually(func() bool {
+				_, failed := fullL3UDNController.addNodeFailed.Load(nodeName)
+				return failed
+			}).WithTimeout(5 * time.Second).WithPolling(200 * time.Millisecond).Should(BeTrue())
+
+			By("Expecting no SNAT to have been created")
+			Consistently(func() []*nbdb.NAT {
+				nats, err := libovsdbops.FindNATsWithPredicate(fakeOvn.nbClient, func(*nbdb.NAT) bool { return true })
+				Expect(err).NotTo(HaveOccurred())
+				return nats
+			}).WithTimeout(2 * time.Second).WithPolling(200 * time.Millisecond).Should(BeEmpty())
+
+			return nil
+		}
+
+		Expect(app.Run([]string{app.Name})).To(Succeed())
+	})
+
 	// Test 2: Verify SNAT with exempted_ext_ips is created on GR_<node> in SHARED gateway mode
 	It("creates SNAT with exempted address set in shared gateway mode on gateway router", func() {
 		// Step 1: Set config.Gateway.Mode = config.GatewayModeShared
@@ -1478,15 +1548,21 @@ var _ = Describe("Layer3 CUDN OutboundSNAT for no-overlay mode", func() {
 			userDefinedNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()
 			podInfo.populateUserDefinedNetworkLogicalSwitchCache(userDefinedNetController)
 
+			Expect(ConfigureAdvertisedNetworkIsolation(fakeOvn.nbClient)).To(Succeed())
+
 			// Step 4: Create and advertise a pod on the CUDN to trigger gateway SNAT creation
 			By("Starting node watch on L3 UDN controller for shared gateway mode")
 			Expect(fakeOvn.registerUDNNodeHandler(userDefinedNetworkName)).To(Succeed())
-			Expect(userDefinedNetController.bnc.WatchPods()).To(Succeed())
 
 			By("Adding node to trigger gateway creation with SNAT+exemption")
 			// Add the node AFTER starting the watch so the watch catches the ADD event
 			_, err = fakeOvn.fakeClient.KubeClient.CoreV1().Nodes().Create(context.Background(), testNode, metav1.CreateOptions{})
 			Expect(err).NotTo(HaveOccurred())
+			Eventually(func() error {
+				_, err := userDefinedNetController.bnc.GetLocalNode()
+				return err
+			}).WithTimeout(5 * time.Second).Should(Succeed())
+			Expect(userDefinedNetController.bnc.WatchPods()).To(Succeed())
 			By("Node created, gateway should be initialized")
 
 			// Wait for pod and gateway processing to complete
@@ -1773,8 +1849,6 @@ func newNodeWithUserDefinedNetworks(nodeName string, nodeIPv4CIDR string, netInf
 	nextHopIP := util.GetNodeGatewayIfAddr(nodeCIDR).IP
 	nodeCIDR.IP = nodeIP
 
-	zone := config.Default.Zone
-
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeName,
@@ -1783,7 +1857,6 @@ func newNodeWithUserDefinedNetworks(nodeName string, nodeIPv4CIDR string, netInf
 				"k8s.ovn.org/node-primary-ifaddr":                           fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", nodeIPv4CIDR, ""),
 				"k8s.ovn.org/node-subnets":                                  parsedNodeSubnets,
 				util.OVNNodeHostCIDRs:                                       fmt.Sprintf("[\"%s\"]", nodeIPv4CIDR),
-				"k8s.ovn.org/zone-name":                                     zone,
 				"k8s.ovn.org/l3-gateway-config":                             fmt.Sprintf("{\"default\":{\"mode\":\"shared\",\"bridge-id\":\"breth0\",\"interface-id\":\"breth0_ovn-worker\",\"mac-address\":%q,\"ip-addresses\":[%[2]q],\"ip-address\":%[2]q,\"next-hops\":[%[3]q],\"next-hop\":%[3]q,\"node-port-enable\":\"true\",\"vlan-id\":\"0\"}}", util.IPAddrToHWAddr(nodeIP), nodeCIDR, nextHopIP),
 				util.OvnNodeChassisID:                                       chassisIDForNode(nodeName),
 				"k8s.ovn.org/network-ids":                                   fmt.Sprintf("{\"default\":\"0\",\"isolatednet\":\"%s\"}", userDefinedNetworkID),
@@ -2061,14 +2134,14 @@ func expectedLogicalRouterPolicy(routerPolicyUUID1 string, netInfo util.NetInfo,
 		priority      = 1004
 		rerouteAction = "reroute"
 	)
+	inport := netInfo.GetNetworkScopedRouterToSwitchPortName(nodeName)
 	networkScopedSwitchName := netInfo.GetNetworkScopedSwitchName(nodeName)
-	lrpName := fmt.Sprintf("%s%s", types.RouterToSwitchPrefix, networkScopedSwitchName)
 
 	return &nbdb.LogicalRouterPolicy{
 		UUID:        routerPolicyUUID1,
 		Action:      rerouteAction,
 		ExternalIDs: standardNonDefaultNetworkExtIDs(netInfo),
-		Match:       fmt.Sprintf("inport == %q && ip4.dst == %s /* %s */", lrpName, destIP, networkScopedSwitchName),
+		Match:       fmt.Sprintf("inport == %q && ip4.dst == %s /* %s */", inport, destIP, networkScopedSwitchName),
 		Nexthops:    []string{nextHop},
 		Priority:    priority,
 	}
@@ -2118,7 +2191,7 @@ func nodePhysicalIPAddress() *net.IPNet {
 func udnGWSNATAddress() *net.IPNet {
 	return &net.IPNet{
 		IP:   net.ParseIP("169.254.169.13"),
-		Mask: net.CIDRMask(24, 32),
+		Mask: net.CIDRMask(32, 32),
 	}
 }
 
@@ -2168,9 +2241,7 @@ func expectedExternalSwitchAndLSPs(netInfo util.NetInfo, gwConfig util.L3Gateway
 
 func externalSwitchRouterPortOptions(gatewayRouterName string) map[string]string {
 	return map[string]string{
-		"nat-addresses":             "router",
-		"exclude-lb-vips-from-garp": "true",
-		libovsdbops.RouterPort:      types.GWRouterToExtSwitchPrefix + gatewayRouterName,
+		libovsdbops.RouterPort: types.GWRouterToExtSwitchPrefix + gatewayRouterName,
 	}
 }
 
@@ -2232,6 +2303,7 @@ func gwRouterOptions(gwConfig util.L3GatewayConfig) map[string]string {
 		"chassis":                       gwConfig.ChassisID,
 		"always_learn_from_arp_request": "false",
 		"dynamic_neigh_routers":         dynamicNeighRouters,
+		"disable_garp_rarp":             "true",
 	}
 }
 

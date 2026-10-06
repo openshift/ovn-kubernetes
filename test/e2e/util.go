@@ -29,14 +29,17 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -51,8 +54,6 @@ import (
 
 const (
 	ovnNodeSubnets = "k8s.ovn.org/node-subnets"
-	// ovnNodeZoneNameAnnotation is the node annotation name to store the node zone name.
-	ovnNodeZoneNameAnnotation = "k8s.ovn.org/zone-name"
 	// ovnGatewayMTUSupport annotation determines if options:gateway_mtu shall be set for a node's gateway router
 	ovnGatewayMTUSupport = "k8s.ovn.org/gateway-mtu-support"
 )
@@ -353,27 +354,36 @@ func pokeEndpointViaPod(f *framework.Framework, namespace, podName, targetHost s
 	return stdOut
 }
 
-// pokeEndpointViaNode leverages a k8 node running the netexec command to send a "request" to a target running
-// netexec on the given target host / protocol / port.
-// Returns the response based on the provided "request".
-func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targetPort uint16, request string) string {
+func tryPokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targetPort uint16, request string) (string, error) {
 	ipPort := net.JoinHostPort("localhost", fmt.Sprintf("%d", localPort))
 	// we leverage the dial command from netexec, that is already supporting multiple protocols
-	curlCommand := []string{"curl", "-g", "-q", "-s", fmt.Sprintf("http://%s/dial?request=%s&protocol=%s&host=%s&port=%d&tries=1",
-		ipPort,
-		request,
-		protocol,
-		targetHost,
-		targetPort)}
+	// bound the connect and total time so a stalled probe (e.g. NodePort not yet
+	// programmed) can't block callers past their own poll deadline
+	curlCommand := []string{"curl", "-g", "-q", "-s", "--connect-timeout", "5", "--max-time", "10",
+		fmt.Sprintf("http://%s/dial?request=%s&protocol=%s&host=%s&port=%d&tries=1",
+			ipPort,
+			request,
+			protocol,
+			targetHost,
+			targetPort)}
 	res, err := infraprovider.Get().ExecK8NodeCommand(nodeName, curlCommand)
-	framework.ExpectNoError(err, "failed to run command within pod")
+	if err != nil {
+		return "", err
+	}
 	response, err := parseNetexecResponse(res)
 	if err != nil {
 		framework.Logf("FAILED Command was %s", curlCommand)
 		framework.Logf("FAILED Response was %v", res)
-		return ""
 	}
-	framework.ExpectNoError(err)
+	return response, err
+}
+
+// pokeEndpointViaNode leverages a k8 node running the netexec command to send a "request" to a target running
+// netexec on the given target host / protocol / port.
+// Returns the response based on the provided "request".
+func pokeEndpointViaNode(nodeName, protocol, targetHost string, localPort, targetPort uint16, request string) string {
+	response, err := tryPokeEndpointViaNode(nodeName, protocol, targetHost, localPort, targetPort, request)
+	framework.ExpectNoError(err, "failed to run command on node %q", nodeName)
 	return response
 }
 
@@ -871,27 +881,39 @@ func getExternalContainerInterfaceIPsOnNetwork(containerName, networkName string
 // getExternalContainerInterfaceIPs returns IPv4 and IPv6 addresses configured
 // on the given interface inside the given external container. This is useful
 // for manually-configured interfaces like VLAN interfaces.
+// ipAddrInfo and ipAddrJSON replicate the relevant fields of the JSON output
+// of "ip -j addr show": one ipAddrJSON per link, one ipAddrInfo per address.
+type ipAddrInfo struct {
+	Family    string `json:"family"`
+	Local     string `json:"local"`
+	PrefixLen int    `json:"prefixlen"`
+	Scope     string `json:"scope"`
+}
+
+type ipAddrJSON struct {
+	AddrInfo []ipAddrInfo `json:"addr_info"`
+}
+
+// parseIPAddrJSON decodes the output of "ip -j addr show".
+func parseIPAddrJSON(out string) ([]ipAddrJSON, error) {
+	var parsed []ipAddrJSON
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		return nil, fmt.Errorf("failed to parse ip -j addr output: %w", err)
+	}
+	return parsed, nil
+}
+
 func getExternalContainerInterfaceIPs(containerName, ifaceName string) ([]string, []string, error) {
 	container := infraapi.ExternalContainer{Name: containerName}
-
-	// Replicates the relevant fields from the json output by "ip -j addr show"
-	type addrInfo struct {
-		Family string `json:"family"`
-		Local  string `json:"local"`
-		Scope  string `json:"scope"`
-	}
-	type ipAddrJSON struct {
-		AddrInfo []addrInfo `json:"addr_info"`
-	}
 
 	out, err := infraprovider.Get().ExecExternalContainerCommand(
 		container, []string{"ip", "-j", "addr", "show", "dev", ifaceName})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to exec on container %q: %w", containerName, err)
 	}
-	var parsed []ipAddrJSON
-	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse ip -j output: %w", err)
+	parsed, err := parseIPAddrJSON(out)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var v4, v6 []string
@@ -963,185 +985,6 @@ func patchService(c kubernetes.Interface, serviceName, serviceNamespace, jsonPat
 	return nil
 }
 
-func getNodeIPTRules(nodeName string) string {
-	ipt4Rules, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"iptables-save", "-c"})
-	framework.ExpectNoError(err, "failed to get iptables rules from node %s", nodeName)
-	ipt6Rules, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"ip6tables-save", "-c"})
-	framework.ExpectNoError(err, "failed to get ip6tables rules from node %s", nodeName)
-	iptRules := ipt4Rules + ipt6Rules
-	framework.Logf("DEBUG: Dumping IPTRules %v", iptRules)
-	return iptRules
-}
-
-// pokeNodeIPTableRules returns the number of iptables (both ipv6 and ipv4) rules that match the provided pattern
-func pokeNodeIPTableRules(nodeName, pattern string) int {
-	iptRules := getNodeIPTRules(nodeName)
-	numOfMatchRules := 0
-	for _, iptRule := range strings.Split(iptRules, "\n") {
-		match := strings.Contains(iptRule, pattern)
-		if match {
-			framework.Logf("DEBUG: Matched rule %s for pattern %s", iptRule, pattern)
-			numOfMatchRules++
-		}
-	}
-	return numOfMatchRules
-}
-
-func countIPTablesRulesMatches(nodeName string, patterns []string) int {
-	numMatches := 0
-	iptRules := getNodeIPTRules(nodeName)
-	for _, pattern := range patterns {
-		for _, iptRule := range strings.Split(iptRules, "\n") {
-			matched, err := regexp.MatchString(pattern, iptRule)
-			if err == nil && matched {
-				numMatches++
-			}
-		}
-	}
-	return numMatches
-}
-
-type Elem []string
-
-func (e *Elem) UnmarshalJSON(data []byte) error {
-	var str string
-	var i int
-	var concatenation map[string][]json.RawMessage
-	if err := json.Unmarshal(data, &str); err == nil {
-		*e = []string{str}
-		return nil
-	}
-	if err := json.Unmarshal(data, &i); err == nil {
-		*e = []string{fmt.Sprintf("%d", i)}
-		return nil
-	}
-	if err := json.Unmarshal(data, &concatenation); err == nil {
-		concat := concatenation["concat"]
-		for _, rawMsg := range concat {
-			var str string
-			var i int
-			if err := json.Unmarshal(rawMsg, &str); err == nil {
-				*e = append(*e, str)
-			}
-			if err := json.Unmarshal(rawMsg, &i); err == nil {
-				*e = append(*e, fmt.Sprintf("%d", i))
-			}
-		}
-		return nil
-	}
-	return fmt.Errorf("could not unmarshal %s", string(data))
-}
-
-func getNFTablesElements(nodeName, name string) ([]Elem, error) {
-	array := []Elem{}
-
-	nftCmd := []string{"nft", "-j", "list", "set", "inet", "ovn-kubernetes", name}
-	nftElements, err := infraprovider.Get().ExecK8NodeCommand(nodeName, nftCmd)
-	if err != nil {
-		return array, err
-	}
-	framework.Logf("DEBUG: Dumping NFTElements %v", nftElements)
-	// The output will look like
-	//
-	// {
-	//   "nftables": [
-	//     {
-	//       "metainfo": {
-	//         ...
-	//       }
-	//     },
-	//     {
-	//       "set": {
-	//         ...
-	//         "elem": [
-	//           ...
-	//         ]
-	//       }
-	//     }
-	//   ]
-	// }
-	//
-	// (Where the "elem" element will be omitted if the set is empty.)
-
-	jsonResult := map[string][]map[string]map[string]json.RawMessage{}
-	if err := json.Unmarshal([]byte(nftElements), &jsonResult); err != nil {
-		return array, err
-	}
-	elem := jsonResult["nftables"][1]["set"]["elem"]
-	if elem == nil {
-		return array, err
-	}
-	err = json.Unmarshal(elem, &array)
-	return array, err
-}
-
-// countNFTablesElements returns the number of nftables elements in the indicated set
-// of the "ovn-kubernetes" table.
-func countNFTablesElements(nodeName, name string) int {
-	defer ginkgo.GinkgoRecover()
-	array, err := getNFTablesElements(nodeName, name)
-	framework.ExpectNoError(err, "failed to get nftables elements from node %s", nodeName)
-	return len(array)
-}
-
-func countNFTablesRulesMatches(nodeName, name string, sets [][]string) int {
-	numMatches := 0
-	array, err := getNFTablesElements(nodeName, name)
-	framework.ExpectNoError(err, "failed to get nftables elements from node %s", nodeName)
-	for _, set := range sets {
-		for _, elem := range array {
-			if slices.Equal(set, elem) {
-				numMatches++
-			}
-		}
-	}
-	return numMatches
-}
-
-func checkNumberOfETPRules(backendNodeName string, value int, pattern string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numberOfETPRules := pokeNodeIPTableRules(backendNodeName, pattern)
-		isExpected := numberOfETPRules == value
-		if !isExpected {
-			framework.Logf("numberOfETPRules got: %d, expected: %d", numberOfETPRules, value)
-		}
-		return isExpected, nil
-	}
-}
-func checkNumberOfNFTElements(backendNodeName string, value int, name string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numberOfNFTElements := countNFTablesElements(backendNodeName, name)
-		isExpected := numberOfNFTElements == value
-		if !isExpected {
-			framework.Logf("numberOfNFTElements got: %d, expected: %d", numberOfNFTElements, value)
-		}
-		return isExpected, nil
-	}
-}
-
-func checkIPTablesRulesPresent(backendNodeName string, patterns []string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numMatches := countIPTablesRulesMatches(backendNodeName, patterns)
-		isExpected := numMatches == len(patterns)
-		if !isExpected {
-			framework.Logf("checkIPTablesRulesPresent got: numMatches: %d, expected: %d",
-				numMatches, len(patterns))
-		}
-		return isExpected, nil
-	}
-}
-func checkNFTElementsPresent(backendNodeName, name string, sets [][]string) wait.ConditionFunc {
-	return func() (bool, error) {
-		numMatches := countNFTablesRulesMatches(backendNodeName, name, sets)
-		isExpected := numMatches == len(sets)
-		if !isExpected {
-			framework.Logf("checkNFTElementsPresent got: numMatches: %d, expected: %d",
-				numMatches, len(sets))
-		}
-		return isExpected, nil
-	}
-}
-
 // isDualStackCluster returns 'true' if at least one of the nodes has more than one node subnet.
 func isDualStackCluster(nodes *v1.NodeList) bool {
 	for _, node := range nodes.Items {
@@ -1161,6 +1004,40 @@ func isDualStackCluster(nodes *v1.NodeList) bool {
 }
 
 // used to inject OVN specific test actions
+// networkStatusVRFName returns the VRF device name published in the given
+// network's (UDN or CUDN) status.vrfName field, empty when unset.
+func networkStatusVRFName(network *unstructured.Unstructured) (string, error) {
+	vrfName, _, err := unstructured.NestedString(network.Object, "status", "vrfName")
+	return vrfName, err
+}
+
+// waitForNetworkVRFName waits until the network CR reachable through the
+// given client publishes a non-empty status.vrfName and returns it.
+func waitForNetworkVRFName(client dynamic.ResourceInterface, networkName string, timeout, poll time.Duration) string {
+	ginkgo.GinkgoHelper()
+
+	var vrfName string
+	gomega.Eventually(func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		network, err := client.Get(ctx, networkName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+		name, err := networkStatusVRFName(network)
+		if err != nil {
+			return err
+		}
+		if name == "" {
+			return fmt.Errorf("network %s has no VRF name in status", networkName)
+		}
+		vrfName = name
+		return nil
+	}).WithTimeout(timeout).WithPolling(poll).Should(gomega.Succeed(),
+		"expected network %s to publish its VRF name in status", networkName)
+	return vrfName
+}
+
 func wrappedTestFramework(basename string) *framework.Framework {
 	f := newPrivelegedTestFramework(basename)
 	ginkgo.JustAfterEach(func() {
@@ -1459,16 +1336,6 @@ func getNodeContainerName() string {
 	return "ovnkube-controller"
 }
 
-// getNodeZone returns the node's zone
-func getNodeZone(node *v1.Node) (string, error) {
-	nodeZone, ok := node.Annotations[ovnNodeZoneNameAnnotation]
-	if !ok {
-		return "", fmt.Errorf("zone for the node %s not set in the annotation %s", node.Name, ovnNodeZoneNameAnnotation)
-	}
-
-	return nodeZone, nil
-}
-
 // adds route to a docker node with a full mask
 func addRouteToNode(nodeName string, ips []string, mtu int) error {
 	return routeToNode(nodeName, ips, mtu, true)
@@ -1761,7 +1628,7 @@ func getAgnHostHTTPPortBindFullCMD(port uint16) []string {
 
 // getAgnHostHTTPPortBindCMDArgs returns the aruments for /agnhost binary
 func getAgnHostHTTPPortBindCMDArgs(port uint16) []string {
-	return []string{"netexec", fmt.Sprintf("--http-port=%d", port)}
+	return []string{"netexec", fmt.Sprintf("--http-port=%d", port), "--udp-port=-1"}
 }
 
 // executeFileTemplate executes `name` template from the provided `templates`
@@ -2037,4 +1904,49 @@ func firstSubnetOf(subnet string, subnetSize int) string {
 		panic(fmt.Sprintf("firstSubnetOf: requested size /%d is not between min /%d and max /%d for %s", subnetSize, ones, bits, subnet))
 	}
 	return fmt.Sprintf("%s/%d", ipNet.IP, subnetSize)
+}
+
+// startTcpdumpMonitorPodOnNode creates a privileged host-network pod on the given node that
+// runs tcpdump on the specified interface with the provided filter, and waits up to
+// startupTimeout for the pod to be Running. Returning means the capture is active, so callers
+// can start generating traffic. It fails the spec if the pod cannot be created or does not
+// become Running within startupTimeout.
+func startTcpdumpMonitorPodOnNode(f *framework.Framework, startupTimeout time.Duration,
+	name, nodeName, nodeIface, options, filter string) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: f.Namespace.Name,
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
+			HostNetwork: true,
+			Containers: []corev1.Container{
+				{
+					Name:  "traffic-monitor",
+					Image: images.Netshoot(),
+					Command: []string{
+						"/bin/bash",
+						"-c",
+						fmt.Sprintf("exec tcpdump -i %s %s %s", nodeIface, options, filter),
+					},
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: func(b bool) *bool { return &b }(true),
+					},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}
+
+	// Bound pod creation and the readiness wait by a single startupTimeout budget.
+	startupCtx, cancel := context.WithTimeout(context.Background(), startupTimeout)
+	defer cancel()
+
+	_, err := f.ClientSet.CoreV1().Pods(f.Namespace.Name).Create(startupCtx, pod, metav1.CreateOptions{})
+	framework.ExpectNoError(err, "Failed to create traffic monitor pod")
+	err = e2epod.WaitTimeoutForPodRunningInNamespace(startupCtx, f.ClientSet, name, f.Namespace.Name, startupTimeout)
+	framework.ExpectNoError(err, fmt.Sprintf("traffic monitor pod %s did not become Running within %v", name, startupTimeout))
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
@@ -142,33 +143,22 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 
 		ginkgo.By("creating a host-network backend pod")
 
+		httpPort := infraprovider.Get().GetK8HostPort()
 		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: (int32(targetPort))}, {ContainerPort: (int32(targetPort)), Protocol: "UDP"}},
-			"netexec", fmt.Sprintf("--udp-port=%d", targetPort))
+			"netexec", fmt.Sprintf("--http-port=%d", httpPort), fmt.Sprintf("--udp-port=%d", targetPort))
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.HostNetwork = true
 
 		serverPod = e2epod.NewPodClient(f).CreateSync(context.TODO(), serverPod)
 		nodeName := serverPod.Spec.NodeName
 
-		ginkgo.By("Connecting to the service from another host-network pod on node " + nodeName)
-		// find the ovn-kube node pod on this node
-		pods, err := cs.CoreV1().Pods(deploymentconfig.Get().OVNKubernetesNamespace()).List(context.TODO(), metav1.ListOptions{
-			LabelSelector: "app=ovnkube-node",
-			FieldSelector: "spec.nodeName=" + nodeName,
-		})
-		framework.ExpectNoError(err)
-		gomega.Expect(pods.Items).To(gomega.HaveLen(1))
-		clientPod := pods.Items[0]
-
-		cmd := fmt.Sprintf(`/bin/sh -c 'echo hostname | /usr/bin/socat -t 5 - "udp:%s"'`,
-			net.JoinHostPort(service.Spec.ClusterIP, "80"))
-
+		ginkgo.By("Connecting to the service from node " + nodeName)
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
-			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			response, err := tryPokeEndpointViaNode(nodeName, "udp", service.Spec.ClusterIP, uint16(httpPort), 80, "hostname")
 			if err != nil {
-				return false, err
+				return false, nil
 			}
-			return stdout == nodeName, nil
+			return hostnameMatchesNode(response, nodeName), nil
 		})
 		framework.ExpectNoError(err)
 	})
@@ -274,7 +264,9 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 						ginkgo.By("Selecting 3 schedulable nodes")
 						nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 3)
 						gomega.Expect(err).NotTo(gomega.HaveOccurred())
-						gomega.Expect(len(nodes.Items)).To(gomega.BeNumerically(">", 2))
+						if len(nodes.Items) < 3 {
+							e2eskipper.Skipf("Test requires >= 3 Ready nodes, but there are only %v nodes", len(nodes.Items))
+						}
 
 						ginkgo.By("Selecting node for pods")
 						serverPodNodeName = nodes.Items[0].Name
@@ -402,6 +394,10 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 							}
 							return err
 						}, 60*time.Second, 1*time.Second).Should(gomega.Succeed())
+
+						ginkgo.By("Waiting for endpoint to be created")
+						err = e2eendpointslice.WaitForEndpointPods(context.TODO(), f.ClientSet, f.Namespace.Name, echoServiceName, serverPod.Name)
+						framework.ExpectNoError(err, "failed to wait for endpoint pod %s", serverPod.Name)
 					})
 
 					// Run queries against the service both with a small (10 bytes + overhead for echo service) and
@@ -415,7 +411,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 							if isLocalGWModeEnabled() && hostNetwork {
 								// if local gateway mode the intermediary node will attempt to fragment the packet, if the DF
 								// bit is not set. However, the decision on setting DF bit is left up to the kernel, and
-								// is unpredictable. If the DF bit is set, the iptables rule that DNATs nodeport -> cluster IP
+								// is unpredictable. If the DF bit is set, the nftables rule that DNATs nodeport -> cluster IP
 								// will then attempt to route the packet, and hit our 1400 byte MTU route. This will cause:
 								// 172.18.0.2:37755->10.96.141.254:9881(udp) sk_skb_reason_drop(SKB_DROP_REASON_PKT_TOO_BIG)
 								packetSizes = []string{"small"}
@@ -700,8 +696,9 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		ginkgo.By("Starting a UDP server listening on the additional IP")
 		// now that 2.2.2.2 exists on the node's lo interface, let's start a server listening on it
 		// we use UDP here since agnhost lets us pick the listen address only for UDP
+		httpPort := infraprovider.Get().GetK8HostPort()
 		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: int32(udpHostNsPort)}, {ContainerPort: int32(udpHostNsPort), Protocol: "UDP"}},
-			"netexec", "--udp-port="+fmt.Sprintf("%d", udpHostNsPort), "--udp-listen-addresses="+extraIP)
+			"netexec", fmt.Sprintf("--http-port=%d", httpPort), "--udp-port="+fmt.Sprintf("%d", udpHostNsPort), "--udp-listen-addresses="+extraIP)
 		serverPod.Labels = jig.Labels
 		serverPod.Spec.NodeName = nodeName
 		serverPod.Spec.HostNetwork = true
@@ -712,13 +709,11 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		// Connect from host -> additional IP. This shouldn't touch OVN at all, just acting as a basic
 		// sanity check that we're actually listening on this IP
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
-			cmd = fmt.Sprintf(`echo hostname | /usr/bin/socat -t 5 - "udp:%s"`,
-				net.JoinHostPort(extraIP, fmt.Sprintf("%d", udpHostNsPort)))
-			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			response, err := tryPokeEndpointViaNode(nodeName, "udp", extraIP, uint16(httpPort), uint16(udpHostNsPort), "hostname")
 			if err != nil {
-				return false, err
+				return false, nil
 			}
-			return (stdout == nodeName), nil
+			return hostnameMatchesNode(response, nodeName), nil
 		})
 		framework.ExpectNoError(err)
 
@@ -749,13 +744,11 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 
 		ginkgo.By("Confirming that the service is accesible via the service IP from a host-network pod")
 		err = wait.PollImmediate(framework.Poll, 30*time.Second, func() (bool, error) {
-			cmd = fmt.Sprintf(`/bin/sh -c 'echo hostname | /usr/bin/socat -t 5 - "udp:%s"'`,
-				net.JoinHostPort(service.Spec.ClusterIP, "80"))
-			stdout, err := e2epodoutput.RunHostCmdWithRetries(clientPod.Namespace, clientPod.Name, cmd, framework.Poll, 30*time.Second)
+			response, err := tryPokeEndpointViaNode(nodeName, "udp", service.Spec.ClusterIP, uint16(httpPort), 80, "hostname")
 			if err != nil {
-				return false, err
+				return false, nil
 			}
-			return stdout == nodeName, nil
+			return hostnameMatchesNode(response, nodeName), nil
 		})
 		framework.ExpectNoError(err)
 
@@ -780,7 +773,8 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			if err != nil {
 				return false, err
 			}
-			return stdout == fmt.Sprintf(`{"responses":["%s"]}`, nodeName), nil
+			return stdout == fmt.Sprintf(`{"responses":["%s"]}`, nodeName) ||
+				stdout == fmt.Sprintf(`{"responses":["%s"]}`, strings.Split(nodeName, ".")[0]), nil
 		})
 		framework.ExpectNoError(err)
 	})
@@ -985,7 +979,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			framework.ExpectNoError(err)
 
 			if len(nodes.Items) < 3 {
-				framework.Failf(
+				e2eskipper.Skipf(
 					"Test requires >= 3 Ready nodes, but there are only %v nodes",
 					len(nodes.Items))
 			}
@@ -1169,7 +1163,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			framework.ExpectNoError(err)
 
 			if len(nodes.Items) < 3 {
-				framework.Failf(
+				e2eskipper.Skipf(
 					"Test requires >= 3 Ready nodes, but there are only %v nodes",
 					len(nodes.Items))
 			}
@@ -1210,7 +1204,9 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			framework.ExpectNoError(err, "must list all Nodes")
 			for _, node := range nodes.Items {
 				_, err = providerCtx.AttachNetwork(secondaryProviderNetwork, node.Name)
-				framework.ExpectNoError(err, "network %s must attach to node %s", secondaryProviderNetwork.Name, node.Name)
+				if err != nil {
+					e2eskipper.Skipf("Test requires nodes that support attaching provider networks; network %s could not attach to node %s: %v", secondaryProviderNetwork.Name(), node.Name, err)
+				}
 			}
 			serverExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
 			serverExternalContainerSpec := infraapi.ExternalContainer{
@@ -1438,10 +1434,10 @@ spec:
 					// send ingress traffic from external container to egressNode where the pod lives
 					// On secondary bridges CI lane we will also created eth1 interface on each node
 					// in the cluster. In that case:
-					// (1) SGW: npclient's eth1 -> node's eth1-> node's breth1 -> iptables -> DNAT to CIP ->
+					// (1) SGW: npclient's eth1 -> node's eth1-> node's breth1 -> nftables -> DNAT to CIP ->
 					//          route to breth0 -> send to OVN -> hit GR; ETP=local will not be respected
 					//          in this case and its broken at the moment. (FIXME)
-					// (2) LGW: npclient's eth1 -> node's eth1-> node's breth1 -> iptables -> DNAT to .3 masquerade ->
+					// (2) LGW: npclient's eth1 -> node's eth1-> node's breth1 -> nftables -> DNAT to .3 masquerade ->
 					//          route to mp0 -> send to OVN -> hit switch; ETP=local will be respected
 					//          in this case and its delivered to the pod. (test works for this case)
 					if !isLocalGWModeEnabled() || serviceSpec.Name != etpLocalServiceName {
@@ -2290,8 +2286,9 @@ spec:
 		ginkgo.By("Selecting 2 schedulable nodes")
 		nodeList, err := e2enode.GetBoundedReadySchedulableNodes(ctx, cs, 2)
 		framework.ExpectNoError(err)
-		gomega.Expect(len(nodeList.Items)).To(gomega.BeNumerically(">", 1),
-			"need at least 2 nodes so the client sends traffic via the physical network")
+		if len(nodeList.Items) < 2 {
+			e2eskipper.Skipf("Test requires >= 2 Ready nodes so the client sends traffic via the physical network, but there are only %v nodes", len(nodeList.Items))
+		}
 		serverNodeName := nodeList.Items[0].Name
 		clientNodeName := nodeList.Items[1].Name
 
@@ -2545,12 +2542,13 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 2)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 2 {
-			framework.Failf("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
+			e2eskipper.Skipf("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
-		ips := e2enode.CollectAddresses(nodes, v1.NodeInternalIP)
+		nodeIPs := e2enode.GetAddresses(&nodes.Items[1], v1.NodeInternalIP)
+		gomega.Expect(nodeIPs).NotTo(gomega.BeEmpty(), "second Ready node must have an InternalIP")
 		namespaceName = f.Namespace.Name
 		backendNodeName = nodes.Items[0].Name
-		nodeIP = ips[1]
+		nodeIP = nodeIPs[0]
 	})
 
 	ginkgo.It("Should ensure service hairpin traffic is SNATed to hairpin masquerade IP; Switch LB", func() {
@@ -2564,7 +2562,11 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 		svcIP, err = createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, endpointHTTPPort, "ClusterIP", hairpinPodSel)
 		framework.ExpectNoError(err, fmt.Sprintf("unable to create service: service-for-pods, err: %v", err))
 
-		err = e2eendpointslice.WaitForEndpointCount(context.TODO(), f.ClientSet, namespaceName, "service-for-pods", 1)
+		svc, err := f.ClientSet.CoreV1().Services(namespaceName).Get(context.TODO(), "service-for-pods", metav1.GetOptions{})
+		framework.ExpectNoError(err, "failed to fetch service: service-for-pods")
+		// one backend pod -> one endpoint address per service IP family
+		numBackendPods := 1
+		err = e2eendpointslice.WaitForEndpointCount(context.TODO(), f.ClientSet, namespaceName, "service-for-pods", numBackendPods*len(svc.Spec.IPFamilies))
 		framework.ExpectNoError(err, fmt.Sprintf("service: service-for-pods never had an endpoint, err: %v", err))
 
 		ginkgo.By("by sending a TCP packet to service service-for-pods with type=ClusterIP in namespace " + namespaceName + " from backend pod " + backendName)
@@ -2601,15 +2603,27 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 		svcIP, err = createServiceForPodsWithLabel(f, namespaceName, serviceHTTPPort, hostNetPort, "NodePort", hairpinPodSel)
 		framework.ExpectNoError(err, fmt.Sprintf("unable to create service: service-for-pods, err: %v", err))
 
-		err = e2eendpointslice.WaitForEndpointCount(context.TODO(), f.ClientSet, namespaceName, "service-for-pods", 1)
-		framework.ExpectNoError(err, fmt.Sprintf("service: service-for-pods never had an endpoint, err: %v", err))
-
 		svc, err := f.ClientSet.CoreV1().Services(namespaceName).Get(context.TODO(), "service-for-pods", metav1.GetOptions{})
 		framework.ExpectNoError(err, "failed to fetch service: service-for-pods")
 
+		// one backend pod -> one endpoint address per service IP family
+		numBackendPods := 1
+		err = e2eendpointslice.WaitForEndpointCount(context.TODO(), f.ClientSet, namespaceName, "service-for-pods", numBackendPods*len(svc.Spec.IPFamilies))
+		framework.ExpectNoError(err, fmt.Sprintf("service: service-for-pods never had an endpoint, err: %v", err))
+
 		ginkgo.By("by sending a TCP packet to service service-for-pods with type=NodePort(" + nodeIP + ":" + fmt.Sprint(svc.Spec.Ports[0].NodePort) + ") in namespace " + namespaceName + " from node " + backendNodeName)
 
-		clientIP := pokeEndpointViaNode(backendNodeName, "http", nodeIP, hostNetPort, uint16(svc.Spec.Ports[0].NodePort), "clientip")
+		var clientIP string
+		err = wait.PollImmediate(2*time.Second, 30*time.Second, func() (bool, error) {
+			var pokeErr error
+			clientIP, pokeErr = tryPokeEndpointViaNode(backendNodeName, "http", nodeIP, hostNetPort, uint16(svc.Spec.Ports[0].NodePort), "clientip")
+			if pokeErr != nil || clientIP == "" {
+				return false, nil
+			}
+			return true, nil
+		})
+		framework.ExpectNoError(err, "timed out waiting for successful NodePort response")
+
 		clientIP, _, err = net.SplitHostPort(clientIP)
 		framework.ExpectNoError(err, "failed to parse client ip:port")
 
@@ -2630,6 +2644,7 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", feature.Serv
 		svcName                     = "lbservice-test"
 		backendName                 = "lb-backend-pod"
 		endpointHTTPPort            = 80
+		endpointAgnhostPort         = 10000
 		endpointUDPPort             = 10001
 		loadBalancerYaml            = "loadbalancer.yaml"
 		bgpAddYaml                  = "bgpAdd.yaml"
@@ -2648,7 +2663,7 @@ var _ = ginkgo.Describe("Load Balancer Service Tests with MetalLB", feature.Serv
 		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 2)
 		framework.ExpectNoError(err)
 		if len(nodes.Items) < 2 {
-			framework.Failf("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
+			e2eskipper.Skipf("Test requires >= 2 Ready nodes, but there are only %v nodes", len(nodes.Items))
 		}
 		backendNodeName = nodes.Items[0].Name
 		nonBackendNodeName = nodes.Items[1].Name
@@ -2701,6 +2716,12 @@ spec:
         ports:
         - name: http
           containerPort: 80
+      - name: agnhost
+        image: ` + images.AgnHost() + `
+        command: ["/agnhost", "netexec", "--http-port=10000"]
+        ports:
+        - name: agnhost
+          containerPort: 10000
       - name: udp-server
         image: ` + images.UDPServerSrcIPPrinter() + `
         imagePullPolicy: Always
@@ -2722,6 +2743,10 @@ spec:
     port: 80
     protocol: TCP
     targetPort: 80
+  - name: agnhost
+    port: 10000
+    protocol: TCP
+    targetPort: 10000
   - name: udp
     port: 10001
     protocol: UDP
@@ -2779,18 +2804,6 @@ metadata:
 		e2ekubectl.RunKubectlOrDie("default", "delete", "eip", "egressip", "--ignore-not-found=true")
 		e2ekubectl.RunKubectlOrDie("default", "label", "node", nonBackendNodeName, "k8s.ovn.org/egress-assignable-")
 	})
-
-	tryWgetLoadBalancer := func(externalContainer infraapi.ExternalContainer, svcLoadBalancerIP string) {
-		err := wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
-			_, err := wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
-			if err != nil {
-				framework.Logf("retrying wget to %s: %v", svcLoadBalancerIP, err)
-				return false, nil
-			}
-			return true, nil
-		})
-		framework.ExpectNoError(err, "failed to curl load balancer service")
-	}
 
 	ginkgo.It("Should ensure connectivity works on an external service when mtu changes in intermediate node", func() {
 		err := WaitForServingAndReadyServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*180)
@@ -2880,9 +2893,6 @@ metadata:
 
 		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s, err: %v", svcName, err))
-
-		numberOfETPRules := pokeNodeIPTableRules(backendNodeName, "OVN-KUBE-EXTERNALIP")
-		gomega.Expect(numberOfETPRules).To(gomega.Equal(5))
 
 		primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "must fetch primary provider network")
@@ -3012,7 +3022,29 @@ spec:
 		}
 	})
 
-	ginkgo.It("Should ensure load balancer service works with 0 node ports when ETP=local", func() {
+	testLBEndpoints := func(externalContainer infraapi.ExternalContainer, svcLoadBalancerIP string, wantEndpoints int) {
+		target := fmt.Sprintf("http://%s/hostname", util.JoinHostPortInt32(svcLoadBalancerIP, endpointAgnhostPort))
+		gotEndpoints := make(map[string]int)
+		// Give the test extra time, to ensure we eventually hit all endpoints
+		totalTimeout := retryTimeout * time.Duration(wantEndpoints)
+		_ = wait.PollImmediate(retryInterval, totalTimeout, func() (bool, error) {
+			endpoint, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{"curl", "-s", "-g", target})
+			if err != nil {
+				framework.Logf("retrying curl to %s: %v", svcLoadBalancerIP, err)
+				return false, nil
+			}
+			gotEndpoints[endpoint]++
+			if gotEndpoints[endpoint] == 1 {
+				framework.Logf("reached endpoint %s", endpoint)
+			}
+			done := len(gotEndpoints) == wantEndpoints
+			return done, nil
+		})
+		gomega.Expect(len(gotEndpoints)).NotTo(gomega.BeZero(), "failed to reach any endpoint of service %s", svcLoadBalancerIP)
+		gomega.Expect(len(gotEndpoints)).To(gomega.Equal(wantEndpoints), "failed to reach the expected number of load balancer endpoints")
+	}
+
+	ginkgo.It("Should ensure load balancer service works without node ports when ETP=local", func() {
 
 		err := WaitForServingAndReadyServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*180)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an enpoint, err: %v", svcName, err))
@@ -3022,29 +3054,15 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		noSNATServicesSet := "mgmtport-no-snat-services-v4"
-		if utilnet.IsIPv6String(svcLoadBalancerIP) {
-			noSNATServicesSet = "mgmtport-no-snat-services-v6"
-		}
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 2, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 5, "OVN-KUBE-EXTERNALIP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-
 		primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "must get primary provider network")
 
 		ginkgo.By("waiting for BGP route to be installed on the FRR router")
 		waitForFRRBGPRoute(svcLoadBalancerIP, externalRouterContainerName, primaryProviderNetwork)
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
 		externalContainer := infraapi.ExternalContainer{Name: externalClientContainerName}
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
 		ginkgo.By("patching service " + svcName + " to allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
 
@@ -3062,56 +3080,20 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 10, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 8, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
-		framework.ExpectNoError(err, "failed to curl load balancer service")
-
-		pktSize := 60
-		if utilnet.IsIPv6String(svcLoadBalancerIP) {
-			pktSize = 80
-		}
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		// FIXME: This used to check that the no-snat rule had been hit, but nftables
-		// doesn't attach counters to rules unless you explicitly request them, which
-		// we don't... Is this check really needed?
-
-		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
+		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure rules are also getting recreated correctly")
 		e2ekubectl.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
 		err = e2eendpointslice.WaitForEndpointCount(context.TODO(), f.ClientSet, namespaceName, svcName, 3)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		// number of rules/elements should have decreased by 2 (one for the TCP port,
-		// one for UDP)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 8, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 6, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
-		framework.ExpectNoError(err, "failed to curl load balancer service")
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		// FIXME: This used to check that the no-snat rule had been hit, but nftables
-		// doesn't attach counters to rules unless you explicitly request them, which
-		// we don't... Is this check really needed?
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 3)
 	})
 
-	ginkgo.It("Should ensure load balancer service works with 0 node ports when named targetPorts are used and ETP=local", func() {
+	ginkgo.It("Should ensure load balancer service works without node ports when named targetPorts are used and ETP=local", func() {
 		err := WaitForServingAndReadyServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 4, time.Second, time.Second*180)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 
@@ -3120,98 +3102,24 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		checkExactETPRules := func(noSNATServicesSet string) {
-			svc, err := f.ClientSet.CoreV1().Services(namespaceName).Get(context.TODO(), svcName, metav1.GetOptions{})
-			framework.ExpectNoError(err)
-
-			// Retrieve the loadbalancer's IP
-			var lbIP string
-			if len(svc.Status.LoadBalancer.Ingress) > 0 {
-				lbIP = svc.Status.LoadBalancer.Ingress[0].IP
-			}
-
-			discoveryClient := f.ClientSet.DiscoveryV1()
-			endpointSlices, err := discoveryClient.EndpointSlices(namespaceName).List(context.TODO(), metav1.ListOptions{
-				LabelSelector: fmt.Sprintf("kubernetes.io/service-name=%s", svcName),
-			})
-			framework.ExpectNoError(err)
-
-			// Retrieve unique addresses from all endpointslices
-			uniqueAddresses := sets.New[string]()
-			for _, es := range endpointSlices.Items {
-				uniqueAddresses = uniqueAddresses.Union(getServingAndReadyEndpointSliceAddresses(es))
-			}
-
-			mask := 32
-			if utilnet.IsIPv6String(lbIP) {
-				mask = 128
-			}
-
-			// Build regex patterns for iptables rules using lbIP and uniqueAddresses
-			var patterns []string
-			var sets [][]string
-			for address := range uniqueAddresses {
-				tcpPattern := fmt.Sprintf(".*-A OVN-KUBE-ETP -d %s/%d -p tcp -m tcp --dport 80 -m statistic "+
-					"--mode random --probability .* -j DNAT --to-destination %s$",
-					regexp.QuoteMeta(lbIP), mask, regexp.QuoteMeta(net.JoinHostPort(address, "80")))
-				patterns = append(patterns, tcpPattern)
-				udpPattern := fmt.Sprintf(".*-A OVN-KUBE-ETP -d %s/%d -p udp -m udp --dport 10001 -m statistic "+
-					"--mode random --probability .* -j DNAT --to-destination %s$",
-					regexp.QuoteMeta(lbIP), mask, regexp.QuoteMeta(net.JoinHostPort(address, "10001")))
-				patterns = append(patterns, udpPattern)
-
-				sets = append(sets, []string{address, "tcp", "80"})
-				sets = append(sets, []string{address, "udp", "10001"})
-			}
-			err = wait.PollImmediate(retryInterval, retryTimeout, checkIPTablesRulesPresent(backendNodeName, patterns))
-			framework.ExpectNoError(err, "Couldn't fetch the correct iptables rules, expected to find: %v, err: %v", patterns, err)
-			err = wait.PollImmediate(retryInterval, retryTimeout, checkNFTElementsPresent(backendNodeName, noSNATServicesSet, sets))
-			framework.ExpectNoError(err, "Couldn't fetch the correct nft elements, expected to find: %v, err: %v", sets, err)
-		}
-
-		noSNATServicesSet := "mgmtport-no-snat-services-v4"
-		if utilnet.IsIPv6String(svcLoadBalancerIP) {
-			noSNATServicesSet = "mgmtport-no-snat-services-v6"
-		}
-
-		// Initial sanity check.
-		ginkgo.By("checking number of firewall rules for baseline")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 2, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 5, "OVN-KUBE-EXTERNALIP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
 		externalContainer := infraapi.ExternalContainer{Name: externalClientContainerName}
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
 		// Patch the service to use named ports.
 		ginkgo.By("patching service " + svcName + " to named ports")
 		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/ports/0/targetPort", "http")
 		framework.ExpectNoError(err)
-		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/ports/1/targetPort", "udp")
+		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/ports/1/targetPort", "agnhost")
 		framework.ExpectNoError(err)
-		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.ports[0].targetPort}'")
-		gomega.Expect(output).To(gomega.Equal("'http'"))
-		output = e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.ports[1].targetPort}'")
-		gomega.Expect(output).To(gomega.Equal("'udp'"))
+		err = patchServiceStringValue(f.ClientSet, svcName, "default", "/spec/ports/2/targetPort", "udp")
+		framework.ExpectNoError(err)
+		output := e2ekubectl.RunKubectlOrDie("default", "get", "svc", svcName, "-o=jsonpath='{.spec.ports[1].targetPort}'")
+		gomega.Expect(output).To(gomega.Equal("'agnhost'"))
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
-		ginkgo.By("checking number of firewall rules for named ports")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 2, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 5, "OVN-KUBE-EXTERNALIP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-		externalContainer = infraapi.ExternalContainer{Name: externalClientContainerName}
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
+
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
 		// Patch the service to use allocateLoadBalancerNodeProts=false and externalTrafficPolicy=local.
 		ginkgo.By("patching service " + svcName + " to allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
@@ -3230,71 +3138,17 @@ spec:
 
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		ginkgo.By("checking number of firewall rules for allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 10, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 8, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 4)
 
-		ginkgo.By("checking exact ETP firewall rules for allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local")
-		checkExactETPRules(noSNATServicesSet)
-
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
-
-		pktSize := 60
-		if utilnet.IsIPv6String(svcLoadBalancerIP) {
-			pktSize = 80
-		}
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		// FIXME: This used to check that the no-snat rule had been hit, but nftables
-		// doesn't attach counters to rules unless you explicitly request them, which
-		// we don't... Is this check really needed?
-
-		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure iptable rules are also getting recreated correctly")
+		ginkgo.By("Scale down endpoints of service: " + svcName + " to ensure rules are also getting recreated correctly")
 		e2ekubectl.RunKubectlOrDie("default", "scale", "deployment", backendName, "--replicas=3")
 		err = WaitForServingAndReadyServiceEndpointsNum(context.TODO(), f.ClientSet, namespaceName, svcName, 3, time.Second, time.Second*180)
 		framework.ExpectNoError(err, fmt.Sprintf("service: %s never had an endpoint, err: %v", svcName, err))
 		time.Sleep(time.Second * 5) // buffer to ensure all rules are created correctly
 
-		// number of rules/elements should have decreased by 2 (one for the TCP port,
-		// one for UDP)
-		ginkgo.By("checking number of firewall rules after scale down")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 8, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 6, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		ginkgo.By("checking exact ETP firewall rules for allocateLoadBalancerNodePorts=false and externalTrafficPolicy=local after scale down")
-		checkExactETPRules(noSNATServicesSet)
-
-		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
-
-		tryWgetLoadBalancer(externalContainer, svcLoadBalancerIP)
-
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		// FIXME: This used to check that the no-snat rule had been hit, but nftables
-		// doesn't attach counters to rules unless you explicitly request them, which
-		// we don't... Is this check really needed?
-
-		// Also test proper deletion logic.
-		ginkgo.By("deleting the service")
-		e2ekubectl.RunKubectlOrDie("default", "delete", "service", svcName)
-		ginkgo.By("checking number of firewall rules after service delete")
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 2, "OVN-KUBE-ETP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 3, "OVN-KUBE-EXTERNALIP"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of iptable rules, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, noSNATServicesSet))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
-		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfNFTElements(backendNodeName, 0, "mgmtport-no-snat-nodeports"))
-		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
+		ginkgo.By("by sending TCP packets to service " + svcName + " with type=LoadBalancer and ensuring all endpoints are reached")
+		testLBEndpoints(externalContainer, svcLoadBalancerIP, 3)
 	})
 
 	ginkgo.It("Should ensure load balancer service works when ETP=local and session affinity is set", func() {
@@ -3867,4 +3721,10 @@ func getServingAndReadyEndpointSliceAddresses(epSlice discoveryv1.EndpointSlice)
 		addresses.Insert(ep.Addresses[0])
 	}
 	return addresses
+}
+
+// hostnameMatchesNode matches an agnhost hostname against a node name,
+// accepting either the full node name or its short hostname.
+func hostnameMatchesNode(hostname, nodeName string) bool {
+	return hostname == nodeName || hostname == strings.Split(nodeName, ".")[0]
 }

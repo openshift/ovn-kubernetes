@@ -11,7 +11,10 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 
+	"github.com/ovn-kubernetes/libovsdb/client"
+
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	uplinkinformers "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/informers/externalversions/uplink/v1alpha1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
@@ -43,7 +46,13 @@ func NewUserDefinedNodeNetworkController(
 	ruleManager *iprulemanager.Controller,
 	mpdm *managementport.MgmtPortDeviceManager,
 	defaultNetworkGateway Gateway,
+	ovsClient client.Client,
+	uplinkStateGatewayStatusController *UplinkStateGatewayStatusController,
 ) (*UserDefinedNodeNetworkController, error) {
+	if netInfo.Uplink() != "" && config.Gateway.Mode != config.GatewayModeShared {
+		return nil, fmt.Errorf("uplink %q for network %s is supported only in shared gateway mode",
+			netInfo.Uplink(), netInfo.GetNetworkName())
+	}
 
 	snnc := &UserDefinedNodeNetworkController{
 		BaseNodeNetworkController: BaseNodeNetworkController{
@@ -52,6 +61,7 @@ func NewUserDefinedNodeNetworkController(
 			stopChan:                        make(chan struct{}),
 			wg:                              &sync.WaitGroup{},
 			networkManager:                  networkManager,
+			ovsClient:                       ovsClient,
 		},
 		mpdm: mpdm,
 	}
@@ -62,8 +72,13 @@ func NewUserDefinedNodeNetworkController(
 				snnc.name, netInfo.GetNetworkName(), err)
 		}
 
+		var uplinkStateInformer uplinkinformers.UplinkStateInformer
+		if util.IsUplinkEnabled() {
+			uplinkStateInformer = snnc.watchFactory.UplinkStateInformer()
+		}
 		snnc.gateway, err = NewUserDefinedNetworkGateway(snnc.GetNetInfo(), node,
-			snnc.watchFactory.NodeCoreInformer().Lister(), snnc.Kube, vrfManager, ruleManager, defaultNetworkGateway)
+			snnc.watchFactory.NodeCoreInformer(), snnc.Kube, vrfManager, ruleManager, defaultNetworkGateway,
+			ovsClient, uplinkStateInformer, uplinkStateGatewayStatusController)
 		if err != nil {
 			return nil, fmt.Errorf("error creating UDN gateway for network %s: %v", netInfo.GetNetworkName(), err)
 		}
@@ -84,8 +99,8 @@ func (nc *UserDefinedNodeNetworkController) Start(_ context.Context) error {
 		nc.podHandler = handler
 	}
 	if util.IsNetworkSegmentationSupportEnabled() && nc.IsPrimaryNetwork() {
-		if err := nc.gateway.AddNetwork(); err != nil {
-			return fmt.Errorf("failed to add network to node gateway for network %s at node %s: %w",
+		if err := nc.gateway.Start(); err != nil {
+			return fmt.Errorf("failed to start node gateway for network %s at node %s: %w",
 				nc.GetNetworkName(), nc.name, err)
 		}
 	}
@@ -101,6 +116,9 @@ func (nc *UserDefinedNodeNetworkController) Stop() {
 	klog.Infof("Stopping UDN node network controller for network %s", nc.GetNetworkName())
 	close(nc.stopChan)
 	nc.stopChan = nil
+	if nc.gateway != nil {
+		nc.gateway.Stop()
+	}
 	nc.wg.Wait()
 
 	if nc.podHandler != nil {
@@ -114,7 +132,7 @@ func (nc *UserDefinedNodeNetworkController) Cleanup() error {
 	var err error
 
 	if nc.gateway != nil {
-		if err = nc.gateway.DelNetwork(); err != nil {
+		if err = nc.gateway.Cleanup(); err != nil {
 			errors = append(errors, fmt.Errorf("deleting network gateway for network %s failed: %v", nc.GetNetworkName(), err))
 		}
 	}
@@ -149,7 +167,6 @@ func (nc *UserDefinedNodeNetworkController) shouldReconcileNetworkChange(old, ne
 // 2. OpenFlows on br-ex bridge to forward traffic to correct ofports
 func (nc *UserDefinedNodeNetworkController) Reconcile(netInfo util.NetInfo) error {
 	reconcilePodNetwork := nc.shouldReconcileNetworkChange(nc.ReconcilableNetInfo, netInfo)
-
 	err := util.ReconcileNetInfo(nc.ReconcilableNetInfo, netInfo)
 	if err != nil {
 		klog.Errorf("Failed to reconcile network information for network %s: %v", nc.GetNetworkName(), err)

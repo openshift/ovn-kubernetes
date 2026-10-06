@@ -6,8 +6,11 @@
 package v1
 
 import (
+	egressfirewallv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	internal "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/internal"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
+	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
 )
 
@@ -37,6 +40,47 @@ func EgressFirewall(name, namespace string) *EgressFirewallApplyConfiguration {
 	b.WithKind("EgressFirewall")
 	b.WithAPIVersion("k8s.ovn.org/v1")
 	return b
+}
+
+// ExtractEgressFirewallFrom extracts the applied configuration owned by fieldManager from
+// egressFirewall for the specified subresource. Pass an empty string for subresource to extract
+// the main resource. Common subresources include "status", "scale", etc.
+// egressFirewall must be a unmodified EgressFirewall API object that was retrieved from the Kubernetes API.
+// ExtractEgressFirewallFrom provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEgressFirewallFrom(egressFirewall *egressfirewallv1.EgressFirewall, fieldManager string, subresource string) (*EgressFirewallApplyConfiguration, error) {
+	b := &EgressFirewallApplyConfiguration{}
+	err := managedfields.ExtractInto(egressFirewall, internal.Parser().Type("com.github.ovn-kubernetes.ovn-kubernetes.go-controller.pkg.crd.egressfirewall.v1.EgressFirewall"), fieldManager, b, subresource)
+	if err != nil {
+		return nil, err
+	}
+	b.WithName(egressFirewall.Name)
+	b.WithNamespace(egressFirewall.Namespace)
+
+	b.WithKind("EgressFirewall")
+	b.WithAPIVersion("k8s.ovn.org/v1")
+	return b, nil
+}
+
+// ExtractEgressFirewall extracts the applied configuration owned by fieldManager from
+// egressFirewall. If no managedFields are found in egressFirewall for fieldManager, a
+// EgressFirewallApplyConfiguration is returned with only the Name, Namespace (if applicable),
+// APIVersion and Kind populated. It is possible that no managed fields were found for because other
+// field managers have taken ownership of all the fields previously owned by fieldManager, or because
+// the fieldManager never owned fields any fields.
+// egressFirewall must be a unmodified EgressFirewall API object that was retrieved from the Kubernetes API.
+// ExtractEgressFirewall provides a way to perform a extract/modify-in-place/apply workflow.
+// Note that an extracted apply configuration will contain fewer fields than what the fieldManager previously
+// applied if another fieldManager has updated or force applied any of the previously applied fields.
+func ExtractEgressFirewall(egressFirewall *egressfirewallv1.EgressFirewall, fieldManager string) (*EgressFirewallApplyConfiguration, error) {
+	return ExtractEgressFirewallFrom(egressFirewall, fieldManager, "")
+}
+
+// ExtractEgressFirewallStatus extracts the applied configuration owned by fieldManager from
+// egressFirewall for the status subresource.
+func ExtractEgressFirewallStatus(egressFirewall *egressfirewallv1.EgressFirewall, fieldManager string) (*EgressFirewallApplyConfiguration, error) {
+	return ExtractEgressFirewallFrom(egressFirewall, fieldManager, "status")
 }
 
 func (b EgressFirewallApplyConfiguration) IsApplyConfiguration() {}

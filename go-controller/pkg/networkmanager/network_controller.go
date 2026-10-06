@@ -15,6 +15,7 @@ import (
 	nadlisters "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/listers/k8s.cni.cncf.io/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -38,11 +39,10 @@ const (
 	defaultNetworkReconcilerThreadiness = 5
 )
 
-func newNetworkController(name, zone, node string, cm ControllerManager, wf watchFactory) *networkController {
+func newNetworkController(name, node string, cm ControllerManager, wf watchFactory) *networkController {
 	nc := &networkController{
 		name:                   fmt.Sprintf("[%s network controller]", name),
 		node:                   node,
-		zone:                   zone,
 		cm:                     cm,
 		networks:               map[string]util.MutableNetInfo{},
 		networksByID:           map[int]string{},
@@ -105,13 +105,16 @@ func newNetworkController(name, zone, node string, cm ControllerManager, wf watc
 type networkControllerState struct {
 	controller         NetworkController
 	stoppedAndDeleting bool
+	// startFailed retains a stopped controller whose Cleanup method still owns
+	// any resources left by Start. Cleanup must succeed before deletion or a
+	// replacement Start so two controllers never own the same network state.
+	startFailed bool
 }
 
 type networkController struct {
 	sync.RWMutex
 
 	name string
-	zone string
 	node string
 
 	nadLister  nadlisters.NetworkAttachmentDefinitionLister
@@ -172,6 +175,9 @@ func (c *networkController) Stop() {
 		if networkControllerState.controller.GetNetworkName() == types.DefaultNetworkName {
 			// we don't own the lifecycle of the default network, so don't stop
 			// it
+			continue
+		}
+		if networkControllerState.stoppedAndDeleting || networkControllerState.startFailed {
 			continue
 		}
 		networkControllerState.controller.Stop()
@@ -251,24 +257,24 @@ func (c *networkController) getNetworkState(network string) *networkControllerSt
 	return state
 }
 
-func (c *networkController) getReconcilableNetworkState(network string) (ReconcilableNetworkController, bool) {
+func (c *networkController) getReconcilableNetworkState(network string) (ReconcilableNetworkController, bool, bool) {
 	if network == types.DefaultNetworkName {
-		return c.cm.GetDefaultNetworkController(), false
+		return c.cm.GetDefaultNetworkController(), false, false
 	}
 	c.RLock()
 	defer c.RUnlock()
 	state := c.networkControllers[network]
 	if state == nil {
-		return nil, false
+		return nil, false, false
 	}
-	return state.controller, state.stoppedAndDeleting
+	return state.controller, state.stoppedAndDeleting, state.startFailed
 }
 
 func (c *networkController) getControllerForNotify(networkName string) (NetworkController, bool) {
 	c.RLock()
 	defer c.RUnlock()
 	state := c.networkControllers[networkName]
-	if state == nil || state.controller == nil || state.stoppedAndDeleting {
+	if state == nil || state.controller == nil || state.stoppedAndDeleting || state.startFailed {
 		return nil, false
 	}
 	return state.controller, true
@@ -409,14 +415,15 @@ func (c *networkController) syncNetwork(network string) error {
 		klog.V(4).Infof("%s: finished syncing network %s, took %v", c.name, network, time.Since(startTime))
 	}()
 
-	have, stoppedAndDeleting := c.getReconcilableNetworkState(network)
+	have, stoppedAndDeleting, startFailed := c.getReconcilableNetworkState(network)
 	want := c.getNetwork(network)
-
 	compatible := util.AreNetworksCompatible(have, want)
 
 	// we will dispose of the old network if deletion is in progress or if
-	// non-reconcilable configuration changed
-	dispose := stoppedAndDeleting || !compatible
+	// non-reconcilable configuration changed. A stopped controller whose Start
+	// failed remains the cleanup owner and must release that state before a new
+	// controller may attempt to program the same network.
+	dispose := startFailed || stoppedAndDeleting || !compatible
 	if dispose {
 		err := c.deleteNetwork(network)
 		if err != nil {
@@ -426,7 +433,7 @@ func (c *networkController) syncNetwork(network string) error {
 	}
 
 	// fetch other relevant network information
-	err := c.gatherNetwork(want)
+	err := c.gatherNetwork(want, have)
 	if err != nil {
 		return fmt.Errorf("failed to fetch other network information for network %s: %w", network, err)
 	}
@@ -458,10 +465,10 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	}
 
 	networkName := network.GetNetworkName()
-	reconcilable, _ := c.getReconcilableNetworkState(networkName)
+	reconcilable, _, startFailed := c.getReconcilableNetworkState(networkName)
 
 	// this might just be an update of reconcilable network configuration
-	if reconcilable != nil {
+	if reconcilable != nil && !startFailed {
 		err := reconcilable.Reconcile(network)
 		if err != nil {
 			return fmt.Errorf("failed to reconcile controller for network %s: %w", networkName, err)
@@ -479,10 +486,13 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 		}
 		return fmt.Errorf("failed to create network %s: %w", networkName, err)
 	}
-
 	err = nc.Start(context.Background())
 	if err != nil {
 		nc.Stop()
+		c.setNetworkState(networkName, &networkControllerState{
+			controller:  nc,
+			startFailed: true,
+		})
 		return fmt.Errorf("failed to start network %s: %w", networkName, err)
 	}
 	c.setNetworkState(network.GetNetworkName(), &networkControllerState{controller: nc})
@@ -501,10 +511,11 @@ func (c *networkController) deleteNetwork(network string) error {
 	}
 	ctrl := have.controller
 	alreadyStopping := have.stoppedAndDeleting
+	startFailed := have.startFailed
 	have.stoppedAndDeleting = true
 	c.Unlock()
 
-	if !alreadyStopping {
+	if !alreadyStopping && !startFailed {
 		ctrl.Stop()
 	}
 
@@ -519,14 +530,14 @@ func (c *networkController) deleteNetwork(network string) error {
 	return nil
 }
 
-func (c *networkController) gatherNetwork(network util.MutableNetInfo) error {
+func (c *networkController) gatherNetwork(network util.MutableNetInfo, current util.NetInfo) error {
 	if network == nil {
 		return nil
 	}
-	return c.setAdvertisements(network)
+	return c.setAdvertisements(network, current)
 }
 
-func (c *networkController) setAdvertisements(network util.MutableNetInfo) error {
+func (c *networkController) setAdvertisements(network util.MutableNetInfo, current util.NetInfo) error {
 	if !network.IsDefault() && !network.IsPrimaryNetwork() {
 		return nil
 	}
@@ -564,6 +575,13 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo) error
 	eipAdvertisements := map[string][]string{}
 	for raName := range raNames {
 		ra, err := c.raLister.Get(raName)
+		if apierrors.IsNotFound(err) {
+			// A stale NAD annotation should not prevent a network controller
+			// from starting. Preserve the current advertised state until the
+			// RouteAdvertisements controller removes the stale annotation.
+			preserveAdvertisements(network, current)
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -579,9 +597,15 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo) error
 			continue
 		}
 		if accepted.Status != metav1.ConditionTrue || accepted.ObservedGeneration != ra.Generation {
-			// if the RA is not accepted, we commit to no change, best to
-			// preserve the old config while we can't validate new config
-			return fmt.Errorf("failed to reconcile network %q: RouteAdvertisements %q not in accepted status", network.GetNetworkName(), ra.Name)
+			// The RA is not accepted yet (e.g. a brand-new network whose
+			// subnets haven't been allocated). Don't abort here: starting the
+			// controller is what lets the node allocator assign subnets, which
+			// is in turn what lets the RA become accepted - aborting would
+			// deadlock the two. Keep the previously-advertised VRFs (empty for
+			// a new network) for now; the RA's later transition to Accepted
+			// re-triggers this sync and fills in the real VRFs.
+			preserveAdvertisements(network, current)
+			return nil
 		}
 
 		nodeSelector, err := metav1.LabelSelectorAsSelector(&ra.Spec.NodeSelector)
@@ -616,23 +640,30 @@ func (c *networkController) setAdvertisements(network util.MutableNetInfo) error
 	return nil
 }
 
+// preserveAdvertisements carries the currently-advertised VRFs over to the
+// network being synced, so a missing or not-yet-accepted RouteAdvertisements
+// neither blocks the controller from starting nor clears existing advertisement
+// state. For a brand-new network, current is nil and the advertised VRFs are
+// left empty.
+func preserveAdvertisements(network util.MutableNetInfo, current util.NetInfo) {
+	if current == nil {
+		return
+	}
+	network.SetPodNetworkAdvertisedVRFs(current.GetPodNetworkAdvertisedVRFs())
+	network.SetEgressIPAdvertisedVRFs(current.GetEgressIPAdvertisedVRFs())
+}
+
 func (c *networkController) hasRouteAdvertisements() bool {
 	return util.IsRouteAdvertisementsEnabled()
 }
 
 func (c *networkController) isNodeManaged(node *corev1.Node) bool {
-	switch {
-	case c.node == "" && c.zone == "":
+	if c.node == "" {
 		// cluster manager manages all nodes
 		return true
-	case util.GetNodeZone(node) == c.zone:
-		// ovnkube-controller manages nodes of its zone
-		return true
-	case node.Name == c.node:
-		// ovnkube-node only manages a specific node
-		return true
 	}
-	return false
+	// ovnkube-node only manages its own node.
+	return node.Name == c.node
 }
 
 func raNeedsUpdate(oldRA, newRA *ratypes.RouteAdvertisements) bool {
@@ -679,7 +710,7 @@ func nodeNeedsUpdate(oldNode, newNode *corev1.Node) bool {
 		return false
 	}
 
-	return !reflect.DeepEqual(oldNode.Labels, newNode.Labels) || oldNode.Annotations[util.OvnNodeZoneName] != newNode.Annotations[util.OvnNodeZoneName]
+	return !reflect.DeepEqual(oldNode.Labels, newNode.Labels)
 }
 
 func (c *networkController) getRunningNetwork(id int) string {
