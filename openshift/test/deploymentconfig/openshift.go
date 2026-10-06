@@ -1,12 +1,17 @@
 package deploymentconfig
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	imageutils "k8s.io/kubernetes/test/utils/image"
@@ -54,11 +59,15 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 }
 
 type openshift struct {
-	requiredImages map[api.ImageID]struct{}
+	kubeConfig      *rest.Config
+	requiredImages  map[api.ImageID]struct{}
+	nodeSubnetsOnce sync.Once
+	nodeSubnets     map[string][]string
+	nodeSubnetsErr  error
 }
 
-func New() api.DeploymentConfig {
-	return deploymentConfig
+func New(config *rest.Config) api.DeploymentConfig {
+	return &openshift{kubeConfig: config}
 }
 
 func (m *openshift) OVNKubernetesNamespace() string {
@@ -110,4 +119,50 @@ func (m *openshift) GetRequiredImages() []api.ImageConfig {
 		})
 	}
 	return imageConfigs
+}
+
+func (m *openshift) GetProviderNodeSubnets() (map[string][]string, error) {
+	m.nodeSubnetsOnce.Do(func() {
+		if m.kubeConfig == nil {
+			m.nodeSubnets = make(map[string][]string)
+			return
+		}
+		kubeClient, err := kubernetes.NewForConfig(m.kubeConfig)
+		if err != nil {
+			m.nodeSubnetsErr = fmt.Errorf("failed to create kubernetes client: %w", err)
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		nodes, err := kubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			m.nodeSubnetsErr = fmt.Errorf("failed to list nodes: %w", err)
+			return
+		}
+		result := make(map[string][]string, len(nodes.Items))
+		for i := range nodes.Items {
+			node := &nodes.Items[i]
+			// On cloud platforms, CNCC sets the cloud egress IP annotation
+			// with the actual routable subnet. Use it when present, fall
+			// back to node-primary-ifaddr for baremetal.
+			parsed, err := util.ParseCloudEgressIPConfig(node)
+			if err != nil {
+				parsed, err = util.ParseNodePrimaryIfAddr(node)
+			}
+			if err != nil {
+				m.nodeSubnetsErr = fmt.Errorf("failed to parse node %s provider subnet: %w", node.Name, err)
+				return
+			}
+			var subnets []string
+			if parsed.V4.Net != nil {
+				subnets = append(subnets, parsed.V4.Net.String())
+			}
+			if parsed.V6.Net != nil {
+				subnets = append(subnets, parsed.V6.Net.String())
+			}
+			result[node.Name] = subnets
+		}
+		m.nodeSubnets = result
+	})
+	return m.nodeSubnets, m.nodeSubnetsErr
 }
