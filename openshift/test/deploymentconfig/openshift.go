@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -72,4 +74,35 @@ func (m openshift) IsConfigurationEnabled(config api.Config) bool {
 
 func (m openshift) NBDBContainerName() string {
 	return "nbdb"
+}
+
+// ProviderSubnetCIDR returns the effective routable subnet CIDR for a node.
+// On cloud platforms (AWS, Azure, GCP), the Cloud Network Config Controller
+// (CNCC) sets the cloud egress IP annotation with the actual routable subnet,
+// which may differ from node-primary-ifaddr (e.g., GCP uses /32 for the
+// primary interface). On baremetal, node-primary-ifaddr is used directly.
+func (m openshift) ProviderSubnetCIDR(node *corev1.Node, isIPv6 bool) (string, error) {
+	if node == nil {
+		return "", fmt.Errorf("node must not be nil")
+	}
+	// On cloud platforms, CNCC sets the cloud egress IP annotation with the
+	// actual routable subnet. Use it when present, fall back to
+	// node-primary-ifaddr for baremetal.
+	parsed, err := util.ParseCloudEgressIPConfig(node)
+	if err != nil {
+		parsed, err = util.ParseNodePrimaryIfAddr(node)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to get provider subnet CIDR for node %s: %v", node.Name, err)
+	}
+	if isIPv6 {
+		if parsed.V6.Net == nil {
+			return "", fmt.Errorf("node %s has no IPv6 primary interface address", node.Name)
+		}
+		return parsed.V6.Net.String(), nil
+	}
+	if parsed.V4.Net == nil {
+		return "", fmt.Errorf("node %s has no IPv4 primary interface address", node.Name)
+	}
+	return parsed.V4.Net.String(), nil
 }
