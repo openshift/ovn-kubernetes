@@ -33,6 +33,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -839,9 +840,15 @@ func ExecCommandInContainerWithFullOutput(f *framework.Framework, namespace, pod
 	return e2epod.ExecWithOptions(f, options)
 }
 
+const (
+	ovnControllerACLAuditLogPathOVN = "/var/log/ovn/acl-audit-log.log"
+	ovnControllerLogPathOVN         = "/var/log/ovn/ovn-controller.log"
+	ovnControllerContainerName      = "ovn-controller"
+)
+
 func assertACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerdict string, expectedACLSeverity string) (bool, error) {
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
-	targetNodeLog, err := infraprovider.Get().ExecK8NodeCommand(targetNodeName, []string{"grep", "acl_log", ovnControllerLogPath})
+	targetNodeLog, err := ovnControllerACLLogLines(targetNodeName)
 	if err != nil {
 		return false, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}
@@ -1137,7 +1144,7 @@ func countACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerd
 	count := 0
 
 	framework.Logf("collecting the ovn-controller logs for node: %s", targetNodeName)
-	targetNodeLog, err := infraprovider.Get().ExecK8NodeCommand(targetNodeName, []string{"cat", ovnControllerLogPath})
+	targetNodeLog, err := ovnControllerACLLogLines(targetNodeName)
 	if err != nil {
 		return 0, fmt.Errorf("error accessing logs in node %s: %v", targetNodeName, err)
 	}
@@ -1160,6 +1167,67 @@ func countACLLogs(targetNodeName string, policyNameRegex string, expectedACLVerd
 
 	framework.Logf("The audit log contains %d occurrences of: '%s'", count, stringToMatch)
 	return count, nil
+}
+
+// ovnControllerACLLogLines returns ovn-controller log lines that contain acl_log for the given node.
+func ovnControllerACLLogLines(targetNodeName string) (string, error) {
+	if infraprovider.Get().Name() == "openshift" {
+		return ovnControllerACLLogLinesFromOVNKubeNode(targetNodeName)
+	}
+	// grep exits 1 when there are no matches; treat that as an empty result, not an error.
+	script := fmt.Sprintf("test -r %s || exit 2; grep acl_log %s || test $? -eq 1",
+		ovnControllerLogPath, ovnControllerLogPath)
+	return infraprovider.Get().ExecK8NodeCommand(targetNodeName, []string{"sh", "-c", script})
+}
+
+func ovnControllerACLLogLinesFromOVNKubeNode(nodeName string) (string, error) {
+	cfg, err := framework.LoadConfig()
+	if err != nil {
+		return "", fmt.Errorf("failed to load cluster config: %w", err)
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+	ns := deploymentconfig.Get().OVNKubernetesNamespace()
+	pods, err := cs.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{
+		LabelSelector: "app=ovnkube-node",
+		FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName).String(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to list ovnkube-node pods on node %s: %w", nodeName, err)
+	}
+	if len(pods.Items) == 0 {
+		return "", fmt.Errorf("no ovnkube-node pod found on node %s", nodeName)
+	}
+	// ACL audit lines live in acl-audit-log.log on OpenShift; upstream Kind clusters use ovn-controller.log paths.
+	script := fmt.Sprintf(`for f in %s %s %s; do if [ -f "$f" ]; then grep acl_log "$f" || true; fi; done`,
+		ovnControllerACLAuditLogPathOVN, ovnControllerLogPathOVN, ovnControllerLogPath)
+	var lastExecErr error
+	for _, pod := range pods.Items {
+		if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		controllerRunning := false
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.Name == ovnControllerContainerName && status.State.Running != nil {
+				controllerRunning = true
+				break
+			}
+		}
+		if !controllerRunning {
+			continue
+		}
+		output, err := e2ekubectl.RunKubectl(ns, "exec", pod.Name, "--container", ovnControllerContainerName, "--", "sh", "-c", script)
+		if err == nil {
+			return output, nil
+		}
+		lastExecErr = err
+	}
+	if lastExecErr != nil {
+		return "", fmt.Errorf("failed to exec in ovnkube-node pods on node %s: %w", nodeName, lastExecErr)
+	}
+	return "", fmt.Errorf("no ovnkube-node pod with a running ovn-controller container found on node %s", nodeName)
 }
 
 // getTemplateContainerEnv gets the value of an environment variable in a container template
