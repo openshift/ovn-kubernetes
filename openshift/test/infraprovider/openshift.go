@@ -14,6 +14,7 @@ import (
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
@@ -100,6 +101,13 @@ func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 	}
 }
 
+// HasClusterInfra returns true when the provider was fully initialized with
+// cluster access. Returns false for the zero-value provider used during test
+// listing without a kubeconfig.
+func (o *OpenshiftInfraProvider) HasClusterInfra() bool {
+	return o.clusterInfra != nil
+}
+
 // CheckForEVPN checks all EVPN prerequisites
 func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
 	if o.operNetwork == nil {
@@ -155,6 +163,12 @@ func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container 
 		panic("not implemented")
 	}
 	return o.clusterInfra.GetExternalContainerNetworkInterface(container, network)
+}
+
+func (o *OpenshiftInfraProvider) InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string]) {
+	// The hypervisor is on the same machine network as the cluster nodes,
+	// so no additional exclusion is needed.
+	return nil, nil
 }
 
 func (o *OpenshiftInfraProvider) ShutdownNode(nodeName string) error {
