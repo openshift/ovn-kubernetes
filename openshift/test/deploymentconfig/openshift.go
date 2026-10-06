@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,27 +17,11 @@ import (
 )
 
 var (
-	deploymentConfig api.DeploymentConfig
-	imageIDMapping   map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
+	imageIDMapping map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
 		api.Agnhost: imageutils.Agnhost,
 	}
 	imageConfigMap map[api.ImageID]api.ImageConfig
 )
-
-func init() {
-	deploymentConfig = &openshift{
-		requiredImages: make(map[api.ImageID]struct{}),
-	}
-	deploymentconfig.Set(deploymentConfig)
-
-	// Add images that are needed by the test suite.
-	imageConfigMap = map[api.ImageID]api.ImageConfig{
-		api.Agnhost: {
-			ImageID:  api.Agnhost,
-			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
-		},
-	}
-}
 
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -67,7 +50,16 @@ type openshift struct {
 }
 
 func New(config *rest.Config) api.DeploymentConfig {
-	return &openshift{kubeConfig: config}
+	// Add images that are needed by the test suite.
+	imageConfigMap = map[api.ImageID]api.ImageConfig{
+		api.Agnhost: {
+			ImageID:  api.Agnhost,
+			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
+		},
+	}
+	return &openshift{kubeConfig: config,
+		requiredImages: make(map[api.ImageID]struct{}),
+	}
 }
 
 func (m *openshift) OVNKubernetesNamespace() string {
