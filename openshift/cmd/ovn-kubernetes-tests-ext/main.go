@@ -55,7 +55,7 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	}
 
 	// Without cluster access, include all eligible tests
-	if ocpInfra == nil {
+	if ocpInfra == nil || !ocpInfra.HasClusterInfra() {
 		return true
 	}
 
@@ -97,13 +97,11 @@ func main() {
 		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
 	})
 
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
-	if err != nil {
-		panic(err)
-	}
-
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
+	// Must happen before BuildExtensionTestSpecsFromOpenShiftGinkgoSuite because Ginkgo
+	// Entry() arguments are evaluated during tree construction, triggering UDN subnet
+	// allocation which queries the infra provider for network exclusions.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
@@ -117,8 +115,19 @@ func main() {
 			infraErr = err
 		} else {
 			ocpInfra = infra
-			infraprovider.Set(ocpInfra)
 		}
+	}
+	// Always set the infra provider so that tree-construction-time calls
+	// (e.g. UDN subnet allocation) do not panic. When no cluster is
+	// available, the provider returns safe zero-value defaults.
+	if ocpInfra == nil {
+		ocpInfra = &ocpinfraprovider.OpenshiftInfraProvider{}
+	}
+	infraprovider.Set(ocpInfra)
+
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
+	if err != nil {
+		panic(err)
 	}
 
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
