@@ -530,20 +530,27 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 		logicalSwitch.LoadBalancerGroup = []string{clusterLoadBalancerGroupUUID, switchLoadBalancerGroupUUID}
 	}
 
-	// If supported, enable IGMP/MLD snooping and querier on the node.
+	// If supported, enable IGMP/MLD snooping on the node. The querier is only
+	// enabled while at least one namespace has multicast enabled; otherwise
+	// ovn-controller injects unused IGMP/MLD queries that flood every local
+	// port and can exceed the OVS 4096 resubmit limit.
 	if bnc.multicastSupport {
 		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
 
-		// Configure IGMP/MLD querier if the gateway IP address is known.
-		// Otherwise disable it.
+		// Configure IGMP/MLD querier source addresses if the gateway IP is known.
+		// Leave the querier disabled until a namespace actually uses multicast.
 		if v4Gateway != nil || v6Gateway != nil {
-			logicalSwitch.OtherConfig["mcast_querier"] = "true"
 			logicalSwitch.OtherConfig["mcast_eth_src"] = nodeLRPMAC.String()
 			if v4Gateway != nil {
 				logicalSwitch.OtherConfig["mcast_ip4_src"] = v4Gateway.String()
 			}
 			if v6Gateway != nil {
 				logicalSwitch.OtherConfig["mcast_ip6_src"] = util.HWAddrToIPv6LLA(nodeLRPMAC).String()
+			}
+			if bnc.hasMulticastEnabledNamespace() {
+				logicalSwitch.OtherConfig["mcast_querier"] = "true"
+			} else {
+				logicalSwitch.OtherConfig["mcast_querier"] = "false"
 			}
 		} else {
 			logicalSwitch.OtherConfig["mcast_querier"] = "false"

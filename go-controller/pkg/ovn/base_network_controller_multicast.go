@@ -1,10 +1,13 @@
 package ovn
 
 import (
+	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
+
+	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	libovsdbops "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
 	libovsdbutil "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/libovsdb/util"
@@ -269,6 +272,87 @@ func (bnc *BaseNetworkController) disableMulticast() error {
 	err = bnc.syncNsMulticast(map[string]bool{})
 	if err != nil {
 		return fmt.Errorf("unable to delete namespaced multicast objects: %v", err)
+	}
+	if err = bnc.syncNodeLogicalSwitchQueriers(false); err != nil {
+		return fmt.Errorf("unable to disable IGMP/MLD querier: %v", err)
+	}
+	return nil
+}
+
+// hasMulticastEnabledNamespace reports whether any namespace currently has
+// k8s.ovn.org/multicast-enabled=true. The cluster-wide multicast flag enables
+// snooping on every node switch; the querier should only run while a namespace
+// actually uses multicast.
+func (bnc *BaseNetworkController) hasMulticastEnabledNamespace() bool {
+	if bnc.watchFactory == nil {
+		return false
+	}
+	namespaces, err := bnc.watchFactory.GetNamespaces()
+	if err != nil {
+		klog.Warningf("Failed to list namespaces while checking multicast querier state: %v", err)
+		return false
+	}
+	for _, ns := range namespaces {
+		if isNamespaceMulticastEnabled(ns.Annotations) {
+			return true
+		}
+	}
+	return false
+}
+
+// syncNodeLogicalSwitchQueriers enables or disables the IGMP/MLD querier on
+// node logical switches that already have multicast snooping configured.
+// Switches without mcast_snoop are left unchanged (for example test fixtures
+// and switches that were never configured for multicast).
+func (bnc *BaseNetworkController) syncNodeLogicalSwitchQueriers(enableQuerier bool) error {
+	if bnc.watchFactory == nil {
+		return nil
+	}
+	want := "false"
+	if enableQuerier {
+		want = "true"
+	}
+
+	nodes, err := bnc.watchFactory.GetNodes()
+	if err != nil {
+		return fmt.Errorf("failed to list nodes while syncing IGMP/MLD querier: %w", err)
+	}
+
+	seen := sets.New[string]()
+	for _, node := range nodes {
+		switchName := bnc.GetNetworkScopedSwitchName(node.Name)
+		if seen.Has(switchName) {
+			continue
+		}
+		seen.Insert(switchName)
+
+		sw, err := libovsdbops.GetLogicalSwitch(bnc.nbClient, &nbdb.LogicalSwitch{Name: switchName})
+		if err != nil {
+			if errors.Is(err, libovsdbclient.ErrNotFound) {
+				continue
+			}
+			return fmt.Errorf("failed to get logical switch %s while syncing IGMP/MLD querier: %w", switchName, err)
+		}
+		if sw.OtherConfig["mcast_snoop"] != "true" {
+			continue
+		}
+		if sw.OtherConfig["mcast_querier"] == want {
+			continue
+		}
+		if enableQuerier && sw.OtherConfig["mcast_eth_src"] == "" {
+			klog.Warningf("Skipping IGMP/MLD querier enable on switch %s: querier source addresses are not configured", switchName)
+			continue
+		}
+		patch := &nbdb.LogicalSwitch{
+			Name: switchName,
+			OtherConfig: map[string]string{
+				"mcast_querier": want,
+			},
+		}
+		if err := libovsdbops.UpdateLogicalSwitchSetOtherConfig(bnc.nbClient, patch); err != nil {
+			return fmt.Errorf("failed to set mcast_querier=%s on switch %s: %w", want, switchName, err)
+		}
+		klog.Infof("Set mcast_querier=%s on logical switch %s", want, switchName)
 	}
 	return nil
 }

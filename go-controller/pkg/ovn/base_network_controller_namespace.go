@@ -202,6 +202,9 @@ func (bnc *BaseNetworkController) syncNamespaces(namespaces []interface{}) error
 		if err = bnc.syncNsMulticast(nsWithMulticast); err != nil {
 			return fmt.Errorf("error in syncing multicast for namespaces: %v", err)
 		}
+		if err = bnc.syncNodeLogicalSwitchQueriers(len(nsWithMulticast) > 0); err != nil {
+			return fmt.Errorf("error in syncing IGMP/MLD querier state: %v", err)
+		}
 	}
 	return nil
 }
@@ -230,7 +233,8 @@ func (bnc *BaseNetworkController) multicastUpdateNamespace(ns *corev1.Namespace,
 	if err != nil {
 		return err
 	}
-	return nil
+	// Enable the node IGMP/MLD querier only while multicast is in use.
+	return bnc.syncNodeLogicalSwitchQueriers(enabled || bnc.hasMulticastEnabledNamespace())
 }
 
 // Cleans up the multicast policy for this namespace if multicast was
@@ -241,6 +245,7 @@ func (bnc *BaseNetworkController) multicastDeleteNamespace(ns *corev1.Namespace,
 		if err := bnc.deleteMulticastAllowPolicy(ns.Name); err != nil {
 			return err
 		}
+		return bnc.syncNodeLogicalSwitchQueriers(bnc.hasMulticastEnabledNamespace())
 	}
 	return nil
 }

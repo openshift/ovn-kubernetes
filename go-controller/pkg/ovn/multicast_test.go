@@ -258,6 +258,32 @@ func getNodeData(netInfo util.NetInfo, nodeName string) []libovsdb.TestData {
 	}
 }
 
+func getNodeDataWithQuerier(netInfo util.NetInfo, nodeName, querier string) []libovsdb.TestData {
+	switchName := netInfo.GetNetworkScopedSwitchName(nodeName)
+	return []libovsdb.TestData{
+		&nbdb.LogicalSwitch{
+			UUID: switchName + "_UUID",
+			Name: switchName,
+			OtherConfig: map[string]string{
+				"mcast_snoop":   "true",
+				"mcast_querier": querier,
+				"mcast_eth_src": "0a:58:0a:80:00:01",
+				"mcast_ip4_src": "10.128.0.1",
+			},
+		},
+	}
+}
+
+func expectNodeSwitchQuerier(fakeOvn *FakeOVN, netInfo util.NetInfo, nodeName, want string) {
+	Eventually(func() string {
+		sw, err := libovsdbops.GetLogicalSwitch(fakeOvn.nbClient, &nbdb.LogicalSwitch{Name: netInfo.GetNetworkScopedSwitchName(nodeName)})
+		if err != nil {
+			return ""
+		}
+		return sw.OtherConfig["mcast_querier"]
+	}).Should(Equal(want))
+}
+
 func newNodeWithNad(nad *nadapi.NetworkAttachmentDefinition, networkName, networkID string) *corev1.Node {
 	n := newNode(nodeName, "192.168.126.202/24")
 	if nad != nil {
@@ -951,6 +977,98 @@ var _ = Describe("OVN Multicast with IP Address Family", func() {
 			Entry("IPv6", false, true, nil),
 			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
 			Entry("[Network Segmentation] IPv6", false, true, nadFromIPMode(namespaceName1, false, true)),
+		)
+	})
+
+	Context("IGMP querier", func() {
+		DescribeTable("disables the querier on existing node switches when no namespace uses multicast", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
+			app.Action = func(*cli.Context) error {
+				config.IPv4Mode = useIPv4
+				config.IPv6Mode = useIPv6
+
+				netInfo := getNetInfoFromNAD(nad)
+				node := newNodeWithNad(nad, networkName, networkID)
+				namespace1 := *newNamespace(namespaceName1)
+				if nad != nil {
+					namespace1 = *newUDNNamespace(namespaceName1)
+				}
+
+				objs := []runtime.Object{
+					&corev1.NamespaceList{Items: []corev1.Namespace{namespace1}},
+					&corev1.NodeList{Items: []corev1.Node{*node}},
+				}
+				if nad != nil {
+					objs = append(objs, &nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					})
+				}
+
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: getNodeDataWithQuerier(netInfo, nodeName, "true")}, objs...)
+				if nad != nil {
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
+				}
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
+				Expect(bnc.WatchNamespaces()).To(Succeed())
+				expectNodeSwitchQuerier(fakeOvn, netInfo, nodeName, "false")
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		},
+			Entry("IPv4", true, false, nil),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
+		)
+
+		DescribeTable("enables and disables the querier with the namespace annotation", func(useIPv4, useIPv6 bool, nad *nadapi.NetworkAttachmentDefinition) {
+			app.Action = func(*cli.Context) error {
+				config.IPv4Mode = useIPv4
+				config.IPv6Mode = useIPv6
+
+				netInfo := getNetInfoFromNAD(nad)
+				node := newNodeWithNad(nad, networkName, networkID)
+				namespace1 := *newNamespace(namespaceName1)
+				if nad != nil {
+					namespace1 = *newUDNNamespace(namespaceName1)
+				}
+
+				objs := []runtime.Object{
+					&corev1.NamespaceList{Items: []corev1.Namespace{namespace1}},
+					&corev1.NodeList{Items: []corev1.Node{*node}},
+				}
+				if nad != nil {
+					objs = append(objs, &nadapi.NetworkAttachmentDefinitionList{
+						Items: []nadapi.NetworkAttachmentDefinition{*nad},
+					})
+				}
+
+				fakeOvn.startWithDBSetup(libovsdb.TestSetup{NBData: getNodeDataWithQuerier(netInfo, nodeName, "false")}, objs...)
+				if nad != nil {
+					Expect(fakeOvn.networkManager.Start()).To(Succeed())
+					defer fakeOvn.networkManager.Stop()
+				}
+				bnc, _ := startBaseNetworkController(fakeOvn, nad)
+				Expect(bnc.WatchNamespaces()).To(Succeed())
+				expectNodeSwitchQuerier(fakeOvn, netInfo, nodeName, "false")
+
+				ns, err := fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespace1.Name, metav1.GetOptions{})
+				Expect(err).To(Succeed())
+				updateMulticast(fakeOvn, ns, true)
+				expectNodeSwitchQuerier(fakeOvn, netInfo, nodeName, "true")
+
+				ns, err = fakeOvn.fakeClient.KubeClient.CoreV1().Namespaces().Get(context.TODO(), namespace1.Name, metav1.GetOptions{})
+				Expect(err).To(Succeed())
+				updateMulticast(fakeOvn, ns, false)
+				expectNodeSwitchQuerier(fakeOvn, netInfo, nodeName, "false")
+				return nil
+			}
+
+			err := app.Run([]string{app.Name})
+			Expect(err).NotTo(HaveOccurred())
+		},
+			Entry("IPv4", true, false, nil),
+			Entry("[Network Segmentation] IPv4", true, false, nadFromIPMode(namespaceName1, true, false)),
 		)
 	})
 })
