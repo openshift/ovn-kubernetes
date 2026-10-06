@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
 package test
 
 // This list contains separate lists of informing and blocking tests. Tests not
