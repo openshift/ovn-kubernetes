@@ -13,7 +13,7 @@ import (
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	// import OTE migrated tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
