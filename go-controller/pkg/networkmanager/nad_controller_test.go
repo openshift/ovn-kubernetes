@@ -190,6 +190,9 @@ func (tr *testNetworkRefReconciler) Reconcile(node, networkName string) {
 }
 
 func (tnc *testNetworkController) Start(context.Context) error {
+	if tnc.tcm.startHook != nil {
+		tnc.tcm.startHook(tnc.GetNetworkName())
+	}
 	tnc.tcm.Lock()
 	defer tnc.tcm.Unlock()
 	fmt.Printf("starting network: %s\n", testNetworkKey(tnc))
@@ -367,6 +370,10 @@ type testControllerManager struct {
 
 	raiseErrorWhenCreatingController error
 	raiseErrorWhenStartingController error
+
+	// startHook, when set, runs at the start of every network
+	// controller's Start, before the manager lock is taken.
+	startHook func(networkName string)
 
 	valid []util.NetInfo
 }
