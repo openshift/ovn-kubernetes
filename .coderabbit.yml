@@ -43,11 +43,22 @@ reviews:
         - Dual-stack (IPv4+IPv6) must always be considered — flag
           changes that only handle single-stack.
         - Every feature or bug fix should include unit tests. Flag PRs
-          that modify behavior without corresponding test updates.
+          that modify product behavior without corresponding test updates,
+          subject to the website/documentation exception below.
         - E2E tests are required whenever feasible — be strict. Flag PRs
           that add or change user-facing behavior without E2E coverage.
           Do not accept "will add E2E later" — push back on the author
           to include them in the same PR.
+        - Website infrastructure and documentation changes are exempt
+          from unit, regression, and E2E test requirements. The website
+          has no unit test suite. This includes documentation content,
+          mkdocs.yml (including navigation), website assets/templates,
+          documentation dependencies, and website build/deployment
+          scripts or workflows. Do not request new tests or a test
+          framework for these changes, even when fixing website behavior.
+          Use the existing documentation build and manual preview/link
+          checks as appropriate. For PRs that also change product code,
+          apply test requirements to the product-code changes only.
         - Be strict: docs must be updated in the same PR when relevant.
           Features need user-facing docs, design decisions and non-obvious
           bug fixes need developer-guide updates, process changes need
