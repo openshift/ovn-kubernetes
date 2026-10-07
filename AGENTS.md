@@ -109,6 +109,17 @@ annotation on any node — the `mode` field will be `"local"` or `"shared"`.
 Shared gateway is the default.
 
 ## Docs
+
+### Website validation
+
+The website has no unit test suite. Do not request unit, regression, or E2E
+tests, or introduce a test framework, for documentation or website infrastructure
+changes. This includes documentation content, `mkdocs.yml` navigation/configuration,
+website assets/templates, documentation dependencies, and website build/deployment
+scripts or workflows, including fixes to website behavior. Validate with the existing
+documentation build and manual preview/link checks as appropriate. If a PR also
+changes product code, the usual test requirements still apply to those code changes.
+
 ### API Reference
 ```bash
 make -C docs/ generate-api-reference  # Generating API reference docs
