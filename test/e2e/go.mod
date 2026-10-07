@@ -93,7 +93,7 @@ require (
 	github.com/miekg/dns v1.1.43 // indirect
 	github.com/mistifyio/go-zfs v2.1.2-0.20190413222219-f784269be439+incompatible // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
-	github.com/moby/spdystream v0.5.0 // indirect
+	github.com/moby/spdystream v0.5.1 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
@@ -202,4 +202,5 @@ replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
 	github.com/ovn-org/ovn-kubernetes/go-controller => ../../go-controller
 	go.universe.tf/metallb => github.com/metallb/metallb v0.14.9
+	golang.org/x/net => github.com/openshift-sustaining/net v0.35.0-sec.4
 )
