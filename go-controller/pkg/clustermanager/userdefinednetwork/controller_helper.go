@@ -82,30 +82,11 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (_ *netv1.Ne
 	nadCopy := existingNAD.DeepCopy()
 
 	if nadCopy == nil {
-		// creating NAD in case no primary network exist should be atomic and synchronized with
-		// any other thread that create NADs.
-		c.createNetworkLock.Lock()
-		defer c.createNetworkLock.Unlock()
-
-		if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
-			actualNads, err := c.nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
-			if err != nil {
-				return nil, fmt.Errorf("failed to list  NetworkAttachmentDefinition: %w", err)
-			}
-			// This is best-effort check no primary NAD exist before creating one,
-			// noting prevent primary NAD from being created right after this check.
-			if err := PrimaryNetAttachDefNotExist(actualNads); err != nil {
-				return nil, err
-			}
-		}
-
-		newNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
+		nadCopy, err = c.createNAD(obj, namespace, desiredNAD)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
+			return nil, err
 		}
-		klog.Infof("Created NetworkAttachmentDefinition [%s/%s]", newNAD.Namespace, newNAD.Name)
-
-		nadCopy = newNAD
+		klog.Infof("Created NetworkAttachmentDefinition [%s/%s]", nadCopy.Namespace, nadCopy.Name)
 	}
 
 	if !metav1.IsControlledBy(nadCopy, obj) {
@@ -123,6 +104,30 @@ func (c *Controller) updateNAD(obj client.Object, namespace string) (_ *netv1.Ne
 	}
 
 	return c.applyNADAnnotations(nadCopy, desiredNAD.Annotations)
+}
+
+func (c *Controller) createNAD(obj client.Object, namespace string, desiredNAD *netv1.NetworkAttachmentDefinition) (*netv1.NetworkAttachmentDefinition, error) {
+	// Serialize the primary-network check and creation with other NAD creators.
+	c.createNetworkLock.Lock()
+	defer c.createNetworkLock.Unlock()
+
+	if utiludn.IsPrimaryNetwork(template.GetSpec(obj)) {
+		actualNads, err := c.nadLister.NetworkAttachmentDefinitions(namespace).List(labels.Everything())
+		if err != nil {
+			return nil, fmt.Errorf("failed to list NetworkAttachmentDefinition: %w", err)
+		}
+		// The informer cache makes this a best-effort check for an existing primary NAD.
+		if err := PrimaryNetAttachDefNotExist(actualNads); err != nil {
+			return nil, err
+		}
+	}
+
+	newNAD, err := c.nadClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(context.Background(), desiredNAD, metav1.CreateOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create NetworkAttachmentDefinition: %w", err)
+	}
+
+	return newNAD, nil
 }
 
 func (c *Controller) applyNADAnnotations(nad *netv1.NetworkAttachmentDefinition, annotations map[string]string) (*netv1.NetworkAttachmentDefinition, error) {
