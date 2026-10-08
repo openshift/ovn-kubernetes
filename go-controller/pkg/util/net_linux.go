@@ -33,6 +33,14 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 )
 
+func init() {
+	// Disable VF collection for package-level link operations; it is costly on PFs
+	// with many VFs and unnecessary.
+	if err := netlink.ConfigureHandle(netlink.HandleOptions{DisableVFInfoCollection: true}); err != nil {
+		panic(fmt.Sprintf("failed to configure netlink package handle: %v", err))
+	}
+}
+
 type NetLinkOps interface {
 	LinkList() ([]netlink.Link, error)
 	LinkByName(ifaceName string) (netlink.Link, error)
@@ -59,6 +67,7 @@ type NetLinkOps interface {
 	RouteAdd(route *netlink.Route) error
 	RouteReplace(route *netlink.Route) error
 	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
+	RouteListFilteredIter(family int, filter *netlink.Route, filterMask uint64, f func(netlink.Route) bool) error
 	RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error)
 	RuleAdd(rule *netlink.Rule) error
 	RuleDel(rule *netlink.Rule) error
@@ -256,6 +265,10 @@ func (defaultNetLinkOps) RouteReplace(route *netlink.Route) error {
 
 func (defaultNetLinkOps) RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error) {
 	return netlink.RouteListFiltered(family, filter, filterMask)
+}
+
+func (defaultNetLinkOps) RouteListFilteredIter(family int, filter *netlink.Route, filterMask uint64, f func(netlink.Route) bool) error {
+	return netlink.RouteListFilteredIter(family, filter, filterMask, f)
 }
 
 func (defaultNetLinkOps) RuleListFiltered(family int, filter *netlink.Rule, filterMask uint64) ([]netlink.Rule, error) {
