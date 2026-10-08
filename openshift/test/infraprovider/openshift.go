@@ -221,9 +221,11 @@ func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string
 	return stdout.String(), nil
 }
 
+const ErrExternalInfraNotAvailable = "external container infrastructure is not available"
+
 func (o *OpenshiftInfraProvider) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("%s", ErrExternalInfraNotAvailable)
 	}
 	return o.clusterInfra.ExecExternalContainerCommand(container, cmd)
 }
