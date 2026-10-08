@@ -229,4 +229,10 @@ var BlockingTests = []string{
 	"[Feature:EgressFirewall][ovn-kubernetes-ote][sig-network] ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is set to {} when the denied destination is poked there should be no trace in the ACL logs [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:EgressFirewall][ovn-kubernetes-ote][sig-network] e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:EgressFirewall][ovn-kubernetes-ote][sig-network] Status manager validation Should validate the egress firewall status when adding a new node zone [Serial][Suite:ovn-kubernetes/conformance/serial]",
+	// NetworkPolicy tests
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy the logs have the expected log level [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL allow and deny logging annotations are set to invalid values ACL logging is disabled [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is removed ACL logging is disabled [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network [Suite:ovn-kubernetes/conformance/parallel]",
 }
