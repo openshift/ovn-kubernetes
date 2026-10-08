@@ -169,8 +169,7 @@ func main() {
 	// skip tests that need external host if not available
 	specs.AddAfterEach(func(res *extensiontests.ExtensionTestResult) {
 		if res.Result == extensiontests.ResultFailed &&
-			(strings.Contains(res.Error, ocpinfraprovider.ErrExternalInfraNotAvailable) ||
-				strings.Contains(res.Output, ocpinfraprovider.ErrExternalInfraNotAvailable)) {
+			strings.Contains(res.Error, ocpinfraprovider.ErrExternalInfraNotAvailable) {
 			res.Result = extensiontests.ResultSkipped
 		}
 	})
