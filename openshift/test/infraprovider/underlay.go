@@ -3,67 +3,13 @@ package infraprovider
 import (
 	"context"
 	"fmt"
-	"strings"
-	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
-	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider/internal/nmstate"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 )
-
-const ovnKubeNodeLabel = "app=ovnkube-node"
-
-// bridgeMapping represents a single OVN bridge-mapping entry (physnet:ovsBridge).
-type bridgeMapping struct {
-	physnet   string
-	ovsBridge string
-}
-
-func (bm bridgeMapping) String() string {
-	return fmt.Sprintf("%s:%s", bm.physnet, bm.ovsBridge)
-}
-
-func bridgeMappingsString(mappings []bridgeMapping) string {
-	entries := make([]string, 0, len(mappings))
-	for _, m := range mappings {
-		entries = append(entries, m.String())
-	}
-	return strings.Join(entries, ",")
-}
-
-// defaultNetworkBridgeMapping is the mapping OVN-Kubernetes maintains for the
-// cluster default network's external bridge.
-func defaultNetworkBridgeMapping() bridgeMapping {
-	return bridgeMapping{physnet: "physnet", ovsBridge: deploymentconfig.Get().ExternalBridgeName()}
-}
-
-func configureBridgeMappings(podNamespace, podName string, mappings ...bridgeMapping) error {
-	mappingsArg := fmt.Sprintf("external_ids:ovn-bridge-mappings=%s", bridgeMappingsString(mappings))
-	cmd := strings.Join([]string{"ovs-vsctl", "set", "open", ".", mappingsArg}, " ")
-	if _, err := e2epodoutput.RunHostCmdWithRetries(podNamespace, podName, cmd, time.Second, 5*time.Second); err != nil {
-		return fmt.Errorf("failed to configure bridge mappings %q: %w", mappingsArg, err)
-	}
-	return nil
-}
-
-func findOVSPods(f *framework.Framework) ([]corev1.Pod, error) {
-	namespace := deploymentconfig.Get().OVNKubernetesNamespace()
-	ovsPodList, err := f.ClientSet.CoreV1().Pods(namespace).List(
-		context.Background(),
-		metav1.ListOptions{LabelSelector: ovnKubeNodeLabel},
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list OVS pods with label %q in namespace %q: %w", ovnKubeNodeLabel, namespace, err)
-	}
-	if len(ovsPodList.Items) == 0 {
-		return nil, fmt.Errorf("no pods with label %q in namespace %q", ovnKubeNodeLabel, namespace)
-	}
-	return ovsPodList.Items, nil
-}
 
 // SetupUnderlay wires a localnet logical network to an OVS bridge on every node
 // by configuring the OVN bridge-mappings. On OpenShift the localnet is mapped to
@@ -82,34 +28,48 @@ func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Un
 			deploymentconfig.Get().ExternalBridgeName(), underlay.BridgeName)
 	}
 
+	desiredState := nmstate.Configuration{
+		OVN: nmstate.OVN{
+			BridgeMapping: []nmstate.OVNBridgeMapping{{
+				Localnet: underlay.LogicalNetworkName,
+				Bridge:   underlay.BridgeName,
+				State:    nmstate.OVNBridgeMappingStatePresent,
+			}},
+		},
+	}
+
+	nncpName := f.UniqueName
+
+	cli, err := nmstate.Client(f.ClientConfig())
+	if err != nil {
+		return fmt.Errorf("failed to initialize nmstate client for openshift underlay setup: %w", err)
+	}
+
 	o.AddCleanUpFn(func() error {
-		ovsPods, err := findOVSPods(f)
-		if err != nil {
-			return fmt.Errorf("failed finding OVS pods during openshift underlay tear down: %w", err)
-		}
-		for _, ovsPod := range ovsPods {
-			if err := configureBridgeMappings(ovsPod.Namespace, ovsPod.Name, defaultNetworkBridgeMapping()); err != nil {
-				return fmt.Errorf("failed to restore default bridge mappings for pod %s/%s during cleanup: %w",
-					ovsPod.Namespace, ovsPod.Name, err)
-			}
+		framework.Logf("Deleting nncp %q", nncpName)
+		return nmstate.DeleteNNCP(context.Background(), cli, nncpName)
+	})
+
+	o.AddCleanUpFn(func() error {
+		desiredState.OVN.BridgeMapping[0].State = nmstate.OVNBridgeMappingStateAbsent
+		framework.Logf("Deleting ovn bridge mapping %q at ovs-bridge %q with nncp %q",
+			desiredState.OVN.BridgeMapping[0].Localnet,
+			desiredState.OVN.BridgeMapping[0].Bridge,
+			nncpName)
+		if err := nmstate.UpdateNNCP(context.Background(), cli, nncpName, desiredState); err != nil {
+			return fmt.Errorf("failed to remove bridge mapping for logical network %q to bridge %q during cleanup: %w",
+				underlay.LogicalNetworkName, underlay.BridgeName, err)
 		}
 		return nil
 	})
 
-	ovsPods, err := findOVSPods(f)
-	if err != nil {
-		return fmt.Errorf("failed finding OVS pods during openshift underlay setup: %w", err)
-	}
-	for _, ovsPod := range ovsPods {
-		if err := configureBridgeMappings(
-			ovsPod.Namespace,
-			ovsPod.Name,
-			defaultNetworkBridgeMapping(),
-			bridgeMapping{physnet: underlay.LogicalNetworkName, ovsBridge: underlay.BridgeName},
-		); err != nil {
-			return fmt.Errorf("failed to configure bridge mappings for pod %s/%s for logical network %s to bridge %s: %w",
-				ovsPod.Namespace, ovsPod.Name, underlay.LogicalNetworkName, underlay.BridgeName, err)
-		}
+	framework.Logf("Adding ovn bridge mapping %q at ovs-bridge %q with nncp %q",
+		desiredState.OVN.BridgeMapping[0].Localnet,
+		desiredState.OVN.BridgeMapping[0].Bridge,
+		nncpName)
+	if err := nmstate.UpdateNNCP(context.Background(), cli, nncpName, desiredState); err != nil {
+		return fmt.Errorf("failed to configure bridge mapping for logical network %q to bridge %q: %w",
+			underlay.LogicalNetworkName, underlay.BridgeName, err)
 	}
 	return nil
 }
