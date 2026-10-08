@@ -4,6 +4,7 @@
 package ovn
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -860,6 +862,67 @@ func (oc *DefaultNetworkController) newGatewayManager(nodeName string) *GatewayM
 		oc.gatewayOptions()...,
 	)
 	return gatewayManager
+}
+
+// PrecreateCDNGatewayExternal waits for the local node's l3-gateway-config
+// annotation, then creates the CDN gateway router and external switch so
+// ovn-controller can program the gateway patch port before NAD/UDN sync.
+func (oc *DefaultNetworkController) PrecreateCDNGatewayExternal(ctx context.Context) error {
+	if config.Gateway.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+
+	const (
+		pollInterval = time.Second
+		pollTimeout  = 5 * time.Minute
+	)
+
+	var l3Config *util.L3GatewayConfig
+	err := wait.PollUntilContextTimeout(ctx, pollInterval, pollTimeout, true, func(_ context.Context) (bool, error) {
+		node, err := oc.watchFactory.GetNode(oc.nodeName)
+		if err != nil {
+			klog.V(4).Infof("Waiting for node %s to precreate CDN gateway: %v", oc.nodeName, err)
+			return false, nil
+		}
+		cfg, err := util.ParseNodeL3GatewayAnnotation(node)
+		if err != nil {
+			if util.IsAnnotationNotSetError(err) {
+				klog.V(4).Infof("Waiting for %s on node %s to precreate CDN gateway",
+					util.OvnNodeL3GatewayConfig, oc.nodeName)
+				return false, nil
+			}
+			return false, err
+		}
+		if cfg.Mode == config.GatewayModeDisabled {
+			l3Config = cfg
+			return true, nil
+		}
+		if cfg.InterfaceID == "" || cfg.ChassisID == "" ||
+			len(cfg.IPAddresses) == 0 || len(cfg.MACAddress) == 0 {
+			klog.V(4).Infof("Waiting for complete %s on node %s to precreate CDN gateway",
+				util.OvnNodeL3GatewayConfig, oc.nodeName)
+			return false, nil
+		}
+		l3Config = cfg
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("timed out waiting for %s on node %s to precreate CDN gateway: %w",
+			util.OvnNodeL3GatewayConfig, oc.nodeName, err)
+	}
+	if l3Config.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+
+	if oc.defaultCOPPUUID == "" {
+		coppUUID, err := EnsureDefaultCOPP(oc.nbClient)
+		if err != nil {
+			return fmt.Errorf("unable to create router control plane protection for CDN gateway precreate: %w", err)
+		}
+		oc.defaultCOPPUUID = coppUUID
+	}
+
+	return oc.newGatewayManager(oc.nodeName).PrecreateCDNGatewayExternal(l3Config)
 }
 
 func (oc *DefaultNetworkController) gatewayOptions() []GatewayOption {

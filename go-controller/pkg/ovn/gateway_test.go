@@ -3132,3 +3132,175 @@ var _ = ginkgo.Describe("cleanupStalePodSNATs", func() {
 		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(expectedDB))
 	})
 })
+
+var _ = ginkgo.Describe("CDN gateway external precreate", func() {
+	var (
+		fakeOvn *FakeOVN
+	)
+
+	ginkgo.BeforeEach(func() {
+		gomega.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+		config.Gateway.Mode = config.GatewayModeShared
+		fakeOvn = NewFakeOVN(true, nodeName)
+	})
+
+	ginkgo.AfterEach(func() {
+		fakeOvn.shutdown()
+	})
+
+	ginkgo.It("creates the gateway router and external switch topology for the node", func() {
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{})
+
+		var err error
+		fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		l3GatewayConfig := &util.L3GatewayConfig{
+			Mode:        config.GatewayModeShared,
+			ChassisID:   "SYSTEM-ID",
+			BridgeID:    "BRIDGE-ID",
+			InterfaceID: "br-ex_" + nodeName,
+			MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+			IPAddresses: ovntest.MustParseIPNets("169.255.33.2/24"),
+		}
+
+		gw := NewGatewayManager(
+			nodeName,
+			fakeOvn.controller.defaultCOPPUUID,
+			fakeOvn.controller.kube,
+			fakeOvn.nbClient,
+			fakeOvn.controller.GetNetInfo(),
+			fakeOvn.watcher,
+			nodecontroller.NewNodeAnnotationCache(),
+			fakeOvn.addressSetManager,
+		)
+		err = gw.PrecreateCDNGatewayExternal(l3GatewayConfig)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		gwRouterName := types.GWRouterPrefix + nodeName
+		externalRouterPort := types.GWRouterToExtSwitchPrefix + gwRouterName
+		externalSwitchPortToRouter := types.EXTSwitchToGWRouterPrefix + gwRouterName
+		externalSwitch := util.GetExtSwitchFromNode(nodeName)
+		physicalIP := l3GatewayConfig.IPAddresses[0].IP.String()
+
+		testData := []libovsdbtest.TestData{
+			&nbdb.MeterBand{
+				UUID:   "25-pktps-rate-limiter-UUID",
+				Action: types.MeterAction,
+				Rate:   int(25),
+			},
+		}
+		meters := map[string]string{
+			OVNARPRateLimiter:              getMeterNameForProtocol(OVNARPRateLimiter),
+			OVNARPResolveRateLimiter:       getMeterNameForProtocol(OVNARPResolveRateLimiter),
+			OVNBFDRateLimiter:              getMeterNameForProtocol(OVNBFDRateLimiter),
+			OVNControllerEventsRateLimiter: getMeterNameForProtocol(OVNControllerEventsRateLimiter),
+			OVNICMPV4ErrorsRateLimiter:     getMeterNameForProtocol(OVNICMPV4ErrorsRateLimiter),
+			OVNICMPV6ErrorsRateLimiter:     getMeterNameForProtocol(OVNICMPV6ErrorsRateLimiter),
+			OVNRejectRateLimiter:           getMeterNameForProtocol(OVNRejectRateLimiter),
+			OVNTCPRSTRateLimiter:           getMeterNameForProtocol(OVNTCPRSTRateLimiter),
+			OVNServiceMonitorLimiter:       getMeterNameForProtocol(OVNServiceMonitorLimiter),
+		}
+		fairness := true
+		for _, v := range meters {
+			testData = append(testData, &nbdb.Meter{
+				UUID:  v + "-UUID",
+				Bands: []string{"25-pktps-rate-limiter-UUID"},
+				Name:  v,
+				Unit:  types.PacketsPerSecond,
+				Fair:  &fairness,
+			})
+		}
+		copp := &nbdb.Copp{
+			UUID:   "copp-UUID",
+			Name:   "ovnkube-default",
+			Meters: meters,
+		}
+		testData = append(testData, copp)
+
+		testData = append(testData,
+			&nbdb.LogicalRouter{
+				UUID: gwRouterName + "-UUID",
+				Name: gwRouterName,
+				Options: map[string]string{
+					"lb_force_snat_ip":              "router_ip",
+					"snat-ct-zone":                  "0",
+					"always_learn_from_arp_request": "false",
+					"dynamic_neigh_routers":         "false",
+					"chassis":                       l3GatewayConfig.ChassisID,
+					"mac_binding_age_threshold":     types.GRMACBindingAgeThreshold,
+				},
+				ExternalIDs: map[string]string{
+					"physical_ip":  physicalIP,
+					"physical_ips": physicalIP,
+				},
+				Ports: []string{externalRouterPort + "-UUID"},
+				Copp:  &copp.UUID,
+			},
+			&nbdb.LogicalRouterPort{
+				UUID: externalRouterPort + "-UUID",
+				Name: externalRouterPort,
+				MAC:  l3GatewayConfig.MACAddress.String(),
+				ExternalIDs: map[string]string{
+					"gateway-physical-ip": "yes",
+				},
+				Networks: []string{l3GatewayConfig.IPAddresses[0].String()},
+			},
+			&nbdb.LogicalSwitchPort{
+				UUID:      l3GatewayConfig.InterfaceID + "-UUID",
+				Name:      l3GatewayConfig.InterfaceID,
+				Addresses: []string{"unknown"},
+				Type:      "localnet",
+				Options: map[string]string{
+					"network_name": types.PhysicalNetworkName,
+				},
+			},
+			&nbdb.LogicalSwitchPort{
+				UUID: externalSwitchPortToRouter + "-UUID",
+				Name: externalSwitchPortToRouter,
+				Type: "router",
+				Options: map[string]string{
+					libovsdbops.RouterPort:      externalRouterPort,
+					"nat-addresses":             "router",
+					"exclude-lb-vips-from-garp": "true",
+				},
+				Addresses: []string{l3GatewayConfig.MACAddress.String()},
+			},
+			&nbdb.LogicalSwitch{
+				UUID:  externalSwitch + "-UUID",
+				Name:  externalSwitch,
+				Ports: []string{l3GatewayConfig.InterfaceID + "-UUID", externalSwitchPortToRouter + "-UUID"},
+			},
+		)
+		gomega.Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(testData))
+	})
+
+	ginkgo.It("is idempotent when called again", func() {
+		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{})
+
+		var err error
+		fakeOvn.controller.defaultCOPPUUID, err = EnsureDefaultCOPP(fakeOvn.nbClient)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		l3GatewayConfig := &util.L3GatewayConfig{
+			Mode:        config.GatewayModeShared,
+			ChassisID:   "SYSTEM-ID",
+			BridgeID:    "BRIDGE-ID",
+			InterfaceID: "br-ex_" + nodeName,
+			MACAddress:  ovntest.MustParseMAC("11:22:33:44:55:66"),
+			IPAddresses: ovntest.MustParseIPNets("169.255.33.2/24"),
+		}
+		gw := NewGatewayManager(
+			nodeName,
+			fakeOvn.controller.defaultCOPPUUID,
+			fakeOvn.controller.kube,
+			fakeOvn.nbClient,
+			fakeOvn.controller.GetNetInfo(),
+			fakeOvn.watcher,
+			nodecontroller.NewNodeAnnotationCache(),
+			fakeOvn.addressSetManager,
+		)
+		gomega.Expect(gw.PrecreateCDNGatewayExternal(l3GatewayConfig)).To(gomega.Succeed())
+		gomega.Expect(gw.PrecreateCDNGatewayExternal(l3GatewayConfig)).To(gomega.Succeed())
+	})
+})

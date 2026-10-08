@@ -441,6 +441,13 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}
 
+	// Precreate CDN gateway router + external switch before NAD/UDN sync so
+	// ovn-controller can create the gateway patch port and unblock
+	// ovnkube-node gateway readiness while UDN/MNP reconciliation runs.
+	if err = cm.precreateCDNGatewayExternal(ctx); err != nil {
+		return fmt.Errorf("failed to precreate CDN gateway external topology: %w", err)
+	}
+
 	if util.IsRouteAdvertisementsEnabled() {
 		if err := ovn.ConfigureAdvertisedNetworkIsolation(cm.nbClient); err != nil {
 			return fmt.Errorf("failed to initialize advertised network isolation: %w", err)
@@ -498,6 +505,16 @@ func (cm *ControllerManager) Stop() {
 	if cm.addressSetManager != nil {
 		cm.addressSetManager.Stop()
 	}
+}
+
+// precreateCDNGatewayExternal creates the CDN gateway router and external
+// switch early in controller startup, before NAD/UDN sync.
+func (cm *ControllerManager) precreateCDNGatewayExternal(ctx context.Context) error {
+	dnc, ok := cm.defaultNetworkController.(*ovn.DefaultNetworkController)
+	if !ok {
+		return fmt.Errorf("unexpected default network controller type %T", cm.defaultNetworkController)
+	}
+	return dnc.PrecreateCDNGatewayExternal(ctx)
 }
 
 func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
