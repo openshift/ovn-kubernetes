@@ -1437,6 +1437,41 @@ func (gw *GatewayManager) addExternalSwitch(prefix, interfaceID, gatewayRouter, 
 	return nil
 }
 
+// PrecreateCDNGatewayExternal creates the CDN gateway router and external
+// switch topology (createGWRouter + addExternalSwitch) early so ovn-controller
+// can create the gateway patch port before full gatewayInit. This unblocks
+// ovnkube-node readiness while NAD/UDN sync is still in progress.
+// CreateOrUpdate is idempotent with later gatewayInit.
+func (gw *GatewayManager) PrecreateCDNGatewayExternal(l3Config *util.L3GatewayConfig) error {
+	if l3Config == nil {
+		return fmt.Errorf("l3 gateway config is required to precreate CDN gateway for node %s", gw.nodeName)
+	}
+	if l3Config.Mode == config.GatewayModeDisabled {
+		return nil
+	}
+	if l3Config.InterfaceID == "" || l3Config.ChassisID == "" ||
+		len(l3Config.IPAddresses) == 0 || len(l3Config.MACAddress) == 0 {
+		return fmt.Errorf("incomplete l3 gateway config for node %s: interfaceID, chassisID, MACAddress and IPAddresses are required",
+			gw.nodeName)
+	}
+
+	gwConfig := &GatewayConfig{annoConfig: l3Config}
+	if _, err := gw.createGWRouter(gwConfig); err != nil {
+		return fmt.Errorf("failed to precreate CDN gateway router for node %s: %w", gw.nodeName, err)
+	}
+	if err := gw.addExternalSwitch("",
+		l3Config.InterfaceID,
+		gw.gwRouterName,
+		l3Config.MACAddress.String(),
+		physNetName(gw.netInfo),
+		l3Config.IPAddresses,
+		l3Config.VLANID); err != nil {
+		return fmt.Errorf("failed to precreate CDN external switch for node %s: %w", gw.nodeName, err)
+	}
+	klog.Infof("Precreated CDN gateway router %s and external switch for node %s", gw.gwRouterName, gw.nodeName)
+	return nil
+}
+
 // cleanupStaleMasqueradeData removes following from northbound database
 //   - LogicalRouterStaticRoute for rtoe-<GW_router> OutputPort anf IPPrefix is same as v4 or v6
 //     StaleMasqueradeSubnet
