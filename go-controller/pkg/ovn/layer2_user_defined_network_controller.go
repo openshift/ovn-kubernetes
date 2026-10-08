@@ -194,6 +194,10 @@ type Layer2UserDefinedNetworkController struct {
 	syncEIPNodeRerouteFailed    sync.Map
 	nodeClusterRouterPortFailed sync.Map
 
+	// gatewaySyncedAdvertised holds, per node, whether the network was
+	// advertised on it when its gateway was last synced.
+	gatewaySyncedAdvertised sync.Map
+
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
@@ -557,6 +561,7 @@ func (oc *Layer2UserDefinedNetworkController) localNodeSyncs(oldNode, newNode *c
 	shouldSyncMgmtPort := mgmtUpdateFailed || nodeSubnetChange
 	_, gwUpdateFailed := oc.gatewaysFailed.Load(newNode.Name)
 	shouldSyncGW := gwUpdateFailed ||
+		oc.gatewayAdvertisementChanged(newNode.Name) ||
 		gatewayChanged(oldNode, newNode, oldState, newState, oc.GetNetworkName()) ||
 		nodeChassisChanged(oldNode, newNode) ||
 		hostCIDRsChanged(oldNode, newNode) ||
@@ -570,6 +575,16 @@ func (oc *Layer2UserDefinedNetworkController) localNodeSyncs(oldNode, newNode *c
 		syncReroute:           shouldSyncReroute,
 		syncClusterRouterPort: clusterRouterPortFailed,
 	}
+}
+
+// gatewayAdvertisementChanged reports whether the network's advertisement
+// on the node differs from what its gateway was last synced with. The
+// gateway's SNAT depends on it, and a mark asking for a sync can be lost:
+// one set by reconcile while a gateway sync is running is cleared when that
+// sync, which read the old advertisement, finishes.
+func (oc *Layer2UserDefinedNetworkController) gatewayAdvertisementChanged(nodeName string) bool {
+	synced, ok := oc.gatewaySyncedAdvertised.Load(nodeName)
+	return !ok || synced.(bool) != util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
 }
 
 // ReconcileNode reconciles a node for a layer2 UDN controller.
@@ -686,6 +701,9 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 			oc.gatewayManagers.Store(node.Name, gwManager)
 
 			err := func() error {
+				// Read once, before the gateway is synced, and recorded
+				// below as what this sync used.
+				isUDNAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
 				gwConfig, err := oc.nodeGatewayConfig(node)
 				if err != nil {
 					return err
@@ -696,7 +714,6 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 				); err != nil {
 					return err
 				}
-				isUDNAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
 				err = oc.addOrUpdateUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, node.Name, isUDNAdvertised)
 				if err != nil {
 					return err
@@ -711,6 +728,7 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 						return err
 					}
 				}
+				oc.gatewaySyncedAdvertised.Store(node.Name, isUDNAdvertised)
 				oc.gatewaysFailed.Delete(node.Name)
 				return nil
 			}()
@@ -1040,6 +1058,7 @@ func (oc *Layer2UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node)
 				return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
 			}
 			oc.gatewayManagers.Delete(node.Name)
+			oc.gatewaySyncedAdvertised.Delete(node.Name)
 		}
 	} else if oc.hasInterconnectTransport() {
 		if err := oc.cleanupInterconnectSetupForRemoteNode(node); err != nil {
