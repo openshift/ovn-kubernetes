@@ -1211,11 +1211,15 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines ipv4 subnet exhaustion should fail when subnet is exhausted": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines with default pod network when live migration with post-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over localnet": "[Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
 
-	"Kubevirt Virtual Machines with default pod network when live migration with pre-copy fails, should keep connectivity": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over secondary layer2": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
 
-	"Kubevirt Virtual Machines with default pod network when live migration with pre-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines with default pod network when live migration with post-copy succeeds, should keep connectivity": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Kubevirt Virtual Machines with default pod network when live migration with pre-copy fails, should keep connectivity": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Kubevirt Virtual Machines with default pod network when live migration with pre-copy succeeds, should keep connectivity": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP": "[Disabled:Unimplemented]",
 
@@ -1655,11 +1659,11 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, evpn": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
+	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer2": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, localnet": "[Disabled:Unimplemented]",
+	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, localnet": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: API validations api-server should accept valid CRs ClusterUserDefinedNetwork, no-overlay, valid": "[Disabled:Unimplemented]",
 
@@ -1667,9 +1671,11 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, evpn": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
+	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer2": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
+
+	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid macSecurity": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid mtu": "[Disabled:Unimplemented]",
 
@@ -1687,6 +1693,12 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: API validations api-server should reject invalid CRs UserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
 
+	"Network Segmentation: API validations api-server should reject invalid updates ClusterUserDefinedNetwork, layer2, mac-security": "[Disabled:Unimplemented][Suite:ovn-kubernetes/conformance/serial/virtualization]",
+
+	"Network Segmentation: API validations api-server should reject invalid updates ClusterUserDefinedNetwork, localnet, mac-security": "[Disabled:Unimplemented][Suite:ovn-kubernetes/conformance/serial/virtualization]",
+
+	"Network Segmentation: API validations api-server should reject invalid updates UserDefinedNetwork, layer2, mac-security": "[Disabled:Unimplemented][Suite:ovn-kubernetes/conformance/serial/virtualization]",
+
 	"Network Segmentation: Default network multus annotation ValidatingAdmissionPolicy protection should prevent adding, modifying and removing the default-network annotation on existing pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: Default network multus annotation when added with static IP and MAC to a pod belonging to primary UDN should create the pod with the specified static IP and MAC address with persistent IPAM": "[Suite:ovn-kubernetes/conformance/parallel]",
@@ -1695,7 +1707,19 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: Localnet should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology": "[Disabled:Unimplemented]",
+	"Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology": "[Disabled:Unimplemented][Serial]",
+
+	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
+
+	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security enabled, should fail": "[Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
+
+	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
+
+	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security enabled, should fail": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
+
+	"Network Segmentation: MAC security using UserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
+
+	"Network Segmentation: MAC security using UserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security enabled, should fail": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
 
 	"Network Segmentation: Network Policies on a user defined primary network ICMP should bypass default deny policy for UDNs when enabled in L2 dualstack primary UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 

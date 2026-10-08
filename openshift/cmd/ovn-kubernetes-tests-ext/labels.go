@@ -9,8 +9,11 @@ import (
 // map contains prepend labels to be added on the spec for an existing spec label
 var labelToPrependLabelsMap = map[string][]string{
 	// Make EVPN tests to be added with gated label.
-	"Feature:EVPN": {
+	featureLabelEVPN: {
 		"FeatureGate:EVPN",
+	},
+	featureLabelMACSecurity: {
+		"FeatureGate:MACSecurity",
 	},
 }
 
