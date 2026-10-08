@@ -178,15 +178,18 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		isCloudEgressIPConfigAltered := util.CloudEgressIPConfigAnnotationChanged(oldNode, newNode)
 		h.eIPC.setNodeEgressReady(newNode.Name, isNewReady)
 		if !oldHadEgressLabel && newHasEgressLabel {
-			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
+			klog.Infof("[NODE-HANDLER] Node %s labeled with %s, isReady=%v, isReachable=%v",
+				newNode.Name, nodeEgressLabel, isNewReady, isNewReachable)
+
 			if isNewReady && isNewReachable {
 				h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
+				klog.Infof("[NODE-HANDLER] Calling addEgressNode for newly-labeled node %s", newNode.Name)
 				if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
 					return err
 				}
 			} else {
-				klog.Warningf("Node: %s has been labeled, but node is not ready"+
-					" and reachable, cannot use it for egress assignment", newNode.Name)
+				klog.Warningf("[NODE-HANDLER] Node %s labeled but NOT ready/reachable (ready=%v, reachable=%v), skipping addEgressNode",
+					newNode.Name, isNewReady, isNewReachable)
 			}
 			return nil
 		}
@@ -199,17 +202,17 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 				return err
 			}
 		} else if isNewReady && isNewReachable {
-			// Build a log message that captures all reasons we are re-evaluating,
-			// so operators can correlate annotation changes with re-assignments even
-			// when multiple conditions change simultaneously.
 			switch {
 			case isCloudEgressIPConfigAltered && isHostCIDRsAltered:
-				klog.Infof("Node: %s cloud egress IP config annotation and host CIDRs changed, re-evaluating egress IP assignments", newNode.Name)
+				klog.Infof("[NODE-HANDLER] Node %s: cloud config + host CIDRs changed, re-evaluating EgressIPs", newNode.Name)
 			case isCloudEgressIPConfigAltered:
-				klog.Infof("Node: %s cloud egress IP config annotation changed, re-evaluating egress IP assignments", newNode.Name)
+				klog.Infof("[NODE-HANDLER] Node %s: cloud config changed, re-evaluating EgressIPs", newNode.Name)
+			case !isOldReady:
+				klog.Infof("[NODE-HANDLER] Node %s: transitioned to ready (was not ready), calling addEgressNode", newNode.Name)
 			default:
-				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
+				klog.Infof("[NODE-HANDLER] Node %s: is ready and reachable, calling addEgressNode", newNode.Name)
 			}
+
 			h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
 				return err
