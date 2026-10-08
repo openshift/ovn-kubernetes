@@ -12,6 +12,11 @@ package test
 // InformingTests lists tests that generally pass but are not considered stable
 // and should not block CI jobs if they fail.
 var InformingTests = []string{
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy the logs have the expected log level [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL allow and deny logging annotations are set to invalid values ACL logging is disabled [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is removed ACL logging is disabled [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L2 primary UDN with custom network [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation a user defined primary network created using ClusterUserDefinedNetwork can perform east/west traffic between nodes two pods connected over a L3 primary UDN [Suite:ovn-kubernetes/conformance/parallel]",
