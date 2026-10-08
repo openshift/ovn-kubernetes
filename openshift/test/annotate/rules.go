@@ -11,7 +11,6 @@ var (
 	LabelToLabelMaps = map[string][]string{
 		"[Disabled:Unimplemented]": {
 			`[Feature:Service]`,
-			`[Feature:NetworkPolicy]`,
 			`[Feature:AdminNetworkPolicy]`,
 			`[Feature:BaselineNetworkPolicy]`,
 			`[Feature:EgressIP]`,
