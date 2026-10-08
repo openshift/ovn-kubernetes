@@ -1698,6 +1698,27 @@ func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name strin
 	svc, err = cs.CoreV1().Services(namespace).Create(context.TODO(), svc, metav1.CreateOptions{})
 	framework.ExpectNoError(err, "failed to create loadbalancer service")
 
+	// The OTE baremetal lane has no cloud provider or MetalLB to assign a
+	// LoadBalancer ingress IP, so fake one here: pick an unused IP in the
+	// nodes' primary subnet and patch it onto the Service's status. The
+	// egress service controller only cares that an ingress IP is present,
+	// not how it got there.
+	if infraprovider.Get().Name() == "openshift" {
+		nodes, err := cs.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+		framework.ExpectNoError(err, "failed to list nodes to allocate a fake loadbalancer ingress IP")
+		gomega.Expect(nodes.Items).NotTo(gomega.BeEmpty(), "expected at least one node to allocate a fake loadbalancer ingress IP")
+		var ingressIP net.IP
+		if protocol == v1.IPv6Protocol {
+			ingressIP, err = allocators.NewPrimaryIPv6(nodes.Items[0].Name)
+		} else {
+			ingressIP, err = allocators.NewPrimaryIPv4(nodes.Items[0].Name)
+		}
+		framework.ExpectNoError(err, "must allocate a fake loadbalancer ingress IP")
+		svc.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: ingressIP.String()}}
+		svc, err = cs.CoreV1().Services(namespace).UpdateStatus(context.TODO(), svc, metav1.UpdateOptions{})
+		framework.ExpectNoError(err, "failed to set fake loadbalancer ingress IP")
+	}
+
 	gomega.Eventually(func() error {
 		svc, err = cs.CoreV1().Services(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
