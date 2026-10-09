@@ -46,6 +46,12 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
+// startDefaultNodeNetworkController starts the default node network controller.
+// Unit tests override this to inject Start failures after Init succeeds.
+var startDefaultNodeNetworkController = func(ctx context.Context, nc *node.DefaultNodeNetworkController) error {
+	return nc.Start(ctx)
+}
+
 // NodeControllerManager structure is the object manages all controllers for all networks for ovnkube-node
 type NodeControllerManager struct {
 	name          string
@@ -426,6 +432,16 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 		return fmt.Errorf("failed to init default node network controller: %v", err)
 	}
 
+	// Start the default node network controller before NAD/UDN sync so CNI
+	// config is written as soon as the CDN gateway patch is ready. Init must
+	// remain first (UDN controllers need the OF manager/gateway from Init).
+	// networkManager.Start() serially starts every secondary network controller
+	// and would otherwise delay node readiness when many UDNs exist.
+	err = startDefaultNodeNetworkController(ctx, ncm.defaultNodeNetworkController)
+	if err != nil {
+		return fmt.Errorf("failed to start default node network controller: %v", err)
+	}
+
 	if ncm.networkManager != nil {
 		err = ncm.networkManager.Start()
 		if err != nil {
@@ -437,11 +453,6 @@ func (ncm *NodeControllerManager) Start(ctx context.Context, isOVNKubeController
 		if err := ncm.uplinkController.Start(); err != nil {
 			return fmt.Errorf("failed to start Uplink controller: %w", err)
 		}
-	}
-
-	err = ncm.defaultNodeNetworkController.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to start default node network controller: %v", err)
 	}
 
 	if ncm.vrfManager != nil {
