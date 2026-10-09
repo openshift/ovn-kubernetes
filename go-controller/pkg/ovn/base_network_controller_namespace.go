@@ -205,7 +205,8 @@ func (bnc *BaseNetworkController) multicastUpdateNamespace(ns *corev1.Namespace,
 	if err != nil {
 		return err
 	}
-	return nil
+	// Re-evaluate if the querier should be on/off on all nodes
+	return bnc.syncNodeLogicalSwitchQueriers()
 }
 
 // Cleans up the multicast policy for this namespace if multicast was
@@ -216,6 +217,8 @@ func (bnc *BaseNetworkController) multicastDeleteNamespace(ns *corev1.Namespace,
 		if err := bnc.deleteMulticastAllowPolicy(ns.Name, nsInfo); err != nil {
 			return err
 		}
+		// Check if we can now turn off the querier cluster-wide
+		return bnc.syncNodeLogicalSwitchQueriers()
 	}
 	return nil
 }

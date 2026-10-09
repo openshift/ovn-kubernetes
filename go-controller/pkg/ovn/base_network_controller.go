@@ -605,9 +605,9 @@ func (bnc *BaseNetworkController) createNodeLogicalSwitch(nodeName string, hostS
 	if bnc.multicastSupport {
 		logicalSwitch.OtherConfig["mcast_snoop"] = "true"
 
-		// Configure IGMP/MLD querier if the gateway IP address is known.
-		// Otherwise disable it.
-		if v4Gateway != nil || v6Gateway != nil {
+		// Configure IGMP/MLD querier if the gateway IP address is known AND
+		// at least one namespace has multicast enabled. Otherwise disable it.
+		if (v4Gateway != nil || v6Gateway != nil) && bnc.isAnyNamespaceMulticastEnabled() {
 			logicalSwitch.OtherConfig["mcast_querier"] = "true"
 			logicalSwitch.OtherConfig["mcast_eth_src"] = nodeLRPMAC.String()
 			if v4Gateway != nil {
@@ -1291,4 +1291,70 @@ func (bnc *BaseNetworkController) ensureDHCP(pod *corev1.Pod, podAnnotation *uti
 	opts = append(opts, kubevirt.WithIPv4DNSServer(ipv4DNSServer), kubevirt.WithIPv6DNSServer(ipv6DNSServer))
 
 	return kubevirt.EnsureDHCPOptionsForLSP(bnc.controllerName, bnc.nbClient, pod, podAnnotation.IPs, lsp, opts...)
+}
+
+// isAnyNamespaceMulticastEnabled returns true if at least one namespace in the cluster
+// has the multicast-enabled annotation.
+func (bnc *BaseNetworkController) isAnyNamespaceMulticastEnabled() bool {
+	namespaces, err := bnc.watchFactory.GetNamespaces()
+	if err != nil {
+		klog.Errorf("Failed to get namespaces for multicast querier check: %v", err)
+		return false
+	}
+	for _, ns := range namespaces {
+		if isNamespaceMulticastEnabled(ns.Annotations) {
+			return true
+		}
+	}
+	return false
+}
+
+// syncNodeLogicalSwitchQueriers updates mcast_querier on all node logical switches
+// based on whether any namespace currently has multicast enabled.
+func (bnc *BaseNetworkController) syncNodeLogicalSwitchQueriers() error {
+	if !bnc.multicastSupport {
+		return nil
+	}
+
+	enabled := bnc.isAnyNamespaceMulticastEnabled()
+	mcastQuerier := "false"
+	if enabled {
+		mcastQuerier = "true"
+	}
+
+	// Find all logical switches that have mcast_snoop=true
+	p := func(item *nbdb.LogicalSwitch) bool {
+		return item.OtherConfig["mcast_snoop"] == "true"
+	}
+	switches, err := libovsdbops.FindLogicalSwitchesWithPredicate(bnc.nbClient, p)
+	if err != nil {
+		return fmt.Errorf("failed to find logical switches for querier sync: %v", err)
+	}
+
+	for _, sw := range switches {
+		if sw.OtherConfig["mcast_querier"] == mcastQuerier {
+			continue
+		}
+
+		// Only enable if we have the necessary source addresses
+		if enabled && sw.OtherConfig["mcast_eth_src"] == "" {
+			klog.V(5).Infof("Skipping mcast_querier enable for switch %s: missing source config", sw.Name)
+			continue
+		}
+
+		newConfig := make(map[string]string)
+		for k, v := range sw.OtherConfig {
+			newConfig[k] = v
+		}
+		newConfig["mcast_querier"] = mcastQuerier
+
+		sw.OtherConfig = newConfig
+		err := libovsdbops.UpdateLogicalSwitchSetOtherConfig(bnc.nbClient, sw)
+		if err != nil {
+			klog.Errorf("Failed to update mcast_querier to %s for switch %s: %v", mcastQuerier, sw.Name, err)
+		} else {
+			klog.Infof("Updated mcast_querier to %s for switch %s", mcastQuerier, sw.Name)
+		}
+	}
+	return nil
 }
