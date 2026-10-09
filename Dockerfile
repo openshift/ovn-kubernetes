@@ -42,7 +42,7 @@ RUN INSTALL_PKGS=" \
 	libpcap iproute iproute-tc strace \
 	containernetworking-plugins \
 	tcpdump iputils \
-	libreswan-4.6-3.el9_0.3 \
+	libreswan-5.3.2-2.el9fdp \
 	ethtool conntrack-tools \
 	openshift-clients \
 	" && \
