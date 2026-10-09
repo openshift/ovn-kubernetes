@@ -4,8 +4,11 @@
 package controllermanager
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -19,14 +22,20 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	uplinkfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/clientset/versioned/fake"
 	uplinkinformerfactory "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/uplink/v1alpha1/apis/informers/externalversions"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	factoryMocks "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory/mocks"
 	libovsdbops "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/libovsdb/ops"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/networkmanager"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node"
+	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	ovntest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -508,5 +517,222 @@ var _ = Describe("Healthcheck tests", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 		})
+	})
+})
+
+var _ = Describe("NodeControllerManager Start order", func() {
+	const (
+		nodeName   = "worker1"
+		uplinkName = "enp3s0f0"
+		hostIP     = "192.168.1.10"
+		hostCIDR   = hostIP + "/24"
+		gwIP       = "192.168.1.1"
+		mgmtNetdev = "eth0-1"
+	)
+
+	var (
+		cniDir    string
+		wf        *factory.WatchFactory
+		wg        *sync.WaitGroup
+		ovnClient *util.OVNClientset
+	)
+
+	cleanupHostLinks := func() {
+		for _, name := range []string{types.K8sMgmtIntfName, mgmtNetdev, uplinkName} {
+			if link, err := netlink.LinkByName(name); err == nil {
+				_ = netlink.LinkDel(link)
+			}
+		}
+	}
+
+	setupHostLinks := func() error {
+		if err := netlink.LinkAdd(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: uplinkName}}); err != nil {
+			return err
+		}
+		l, err := netlink.LinkByName(uplinkName)
+		if err != nil {
+			return err
+		}
+		if err := netlink.LinkSetUp(l); err != nil {
+			return err
+		}
+		addr, err := netlink.ParseAddr(hostCIDR)
+		if err != nil {
+			return err
+		}
+		if err := netlink.AddrAdd(l, addr); err != nil {
+			return err
+		}
+		_ = netlink.RouteAdd(&netlink.Route{
+			LinkIndex: l.Attrs().Index,
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Dst:       ovntest.MustParseIPNet("0.0.0.0/0"),
+			Gw:        ovntest.MustParseIP(gwIP),
+		})
+		if err := netlink.LinkAdd(&netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: mgmtNetdev}}); err != nil {
+			return err
+		}
+		mgmt, err := netlink.LinkByName(mgmtNetdev)
+		if err != nil {
+			return err
+		}
+		return netlink.LinkSetUp(mgmt)
+	}
+
+	prepareConfig := func() {
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		config.IPv4Mode = true
+		config.IPv6Mode = false
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+		config.OVNKubernetesFeature.EnableEgressIP = false
+		config.OVNKubernetesFeature.EnableEgressService = false
+		config.OVNKubernetesFeature.EnableMultiExternalGateway = false
+		config.OVNKubernetesFeature.EnableRouteAdvertisements = false
+		// Install SimulatedDPUOps before SimulateDPU=true so the first
+		// initDPUOps (via Once) records Switchdev as the restore baseline.
+		DeferCleanup(util.SetDPUOpsForTesting(&util.SimulatedDPUOps{}))
+		config.OvnKubeNode.Mode = types.NodeModeDPUHost
+		config.OvnKubeNode.SimulateDPU = true
+		config.OvnKubeNode.MgmtPortNetdev = mgmtNetdev
+		config.OvnKubeNode.DPUNodeLeaseRenewInterval = 0
+		config.Gateway.NodeportEnable = false
+		config.Gateway.Interface = uplinkName
+		config.Gateway.NextHop = gwIP
+		config.Gateway.DisableForwarding = false
+		nodenft.SetFakeNFTablesHelper()
+	}
+
+	prepareClients := func(annotations map[string]string) {
+		var err error
+		cniDir, err = os.MkdirTemp("", "ovnk-cni-conf-")
+		Expect(err).NotTo(HaveOccurred())
+		config.CNI.ConfDir = cniDir
+
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        nodeName,
+				Annotations: annotations,
+			},
+			Status: corev1.NodeStatus{
+				Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: hostIP}},
+			},
+		}
+		ovnClient = util.GetOVNClientset(node)
+		wf, err = factory.NewNodeWatchFactory(ovnClient.GetNodeClientset(), nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		wg = &sync.WaitGroup{}
+	}
+
+	AfterEach(func() {
+		if wf != nil {
+			wf.Shutdown()
+			wf = nil
+		}
+		cleanupHostLinks()
+		if cniDir != "" {
+			_ = os.RemoveAll(cniDir)
+			cniDir = ""
+		}
+		cni.ResetRunner()
+		util.ResetRunner()
+	})
+
+	newNCM := func() *NodeControllerManager {
+		ncm, err := NewNodeControllerManager(ovnClient, wf, nodeName, wg, record.NewFakeRecorder(10), routemanager.NewController(), nil)
+		Expect(err).NotTo(HaveOccurred())
+		// Skip post-NM managers; this suite focuses on DNNC vs networkManager order.
+		ncm.vrfManager = nil
+		ncm.ruleManager = nil
+		ncm.uplinkController = nil
+		return ncm
+	}
+
+	cniConfPath := func() string {
+		return filepath.Join(config.CNI.ConfDir, config.CNIConfFileName)
+	}
+
+	ovntest.OnSupportedPlatformsIt("starts the default node network controller before network manager", func() {
+		prepareConfig()
+		cleanupHostLinks()
+		if err := setupHostLinks(); err != nil {
+			Skip(fmt.Sprintf("host netlink unavailable (need CAP_NET_ADMIN): %v", err))
+		}
+		prepareClients(map[string]string{
+			"k8s.ovn.org/node-subnets":             `{"default":["10.128.0.0/24"]}`,
+			util.OvnNodeManagementPortMacAddresses: `{"default":"0a:58:0a:80:00:02"}`,
+		})
+
+		ncm := newNCM()
+
+		releaseNM := make(chan struct{})
+		nmEntered := make(chan struct{})
+		var cniReadyAtNM bool
+		nm := &networkmanager.FakeNetworkManager{
+			StartFunc: func() error {
+				_, err := os.Stat(cniConfPath())
+				cniReadyAtNM = err == nil
+				close(nmEntered)
+				<-releaseNM
+				return nil
+			},
+		}
+		ncm.networkManager = nm
+
+		errCh := make(chan error, 1)
+		go func() {
+			defer GinkgoRecover()
+			errCh <- ncm.Start(context.Background(), nil)
+		}()
+
+		Eventually(nmEntered, 60*time.Second).Should(BeClosed())
+		Expect(cniReadyAtNM).To(BeTrue(), "CNI config must be written before network manager Start")
+		Expect(nm.Started()).To(BeFalse())
+		Consistently(errCh, 50*time.Millisecond).ShouldNot(Receive())
+
+		close(releaseNM)
+		Eventually(errCh, 30*time.Second).Should(Receive(BeNil()))
+		Expect(nm.Started()).To(BeTrue())
+
+		ncm.Stop(nil)
+	})
+
+	ovntest.OnSupportedPlatformsIt("does not start network manager when default node network controller start fails", func() {
+		prepareConfig()
+		cleanupHostLinks()
+		if err := setupHostLinks(); err != nil {
+			Skip(fmt.Sprintf("host netlink unavailable (need CAP_NET_ADMIN): %v", err))
+		}
+		prepareClients(map[string]string{
+			"k8s.ovn.org/node-subnets":             `{"default":["10.128.0.0/24"]}`,
+			util.OvnNodeManagementPortMacAddresses: `{"default":"0a:58:0a:80:00:02"}`,
+		})
+
+		// Fail after Init succeeds so this asserts the Start-before-NM order
+		// (an init-only failure would return earlier and still pass if
+		// networkManager.Start were moved before DNNC.Start).
+		origStart := startDefaultNodeNetworkController
+		DeferCleanup(func() { startDefaultNodeNetworkController = origStart })
+		startDefaultNodeNetworkController = func(context.Context, *node.DefaultNodeNetworkController) error {
+			return fmt.Errorf("injected start failure")
+		}
+
+		ncm := newNCM()
+		nmStarted := false
+		nm := &networkmanager.FakeNetworkManager{
+			StartFunc: func() error {
+				nmStarted = true
+				return nil
+			},
+		}
+		ncm.networkManager = nm
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err := ncm.Start(ctx, nil)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("failed to start default node network controller: injected start failure"))
+		Expect(nmStarted).To(BeFalse())
+		Expect(nm.Started()).To(BeFalse())
 	})
 })

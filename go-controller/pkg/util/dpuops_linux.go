@@ -118,6 +118,18 @@ func GetDPUOps() DPUOps {
 	return dpuOps
 }
 
+// SetDPUOpsForTesting replaces the process-wide DPUOps implementation.
+// Unit tests that need SimulatedDPUOps (or a mock) must call this because
+// GetDPUOps caches the first initialization via sync.Once. The returned
+// restore function puts the previous implementation back; call it from
+// AfterEach or DeferCleanup so later tests are not left on SimulatedDPUOps.
+func SetDPUOpsForTesting(ops DPUOps) (restore func()) {
+	dpuOpsOnce.Do(initDPUOps)
+	prev := dpuOps
+	dpuOps = ops
+	return func() { dpuOps = prev }
+}
+
 // IsSimulatedDPU returns true if we are in a Simulated DPU environment.
 func IsSimulatedDPU() bool {
 	if config.IsModeDPU() || config.IsModeDPUHost() {
