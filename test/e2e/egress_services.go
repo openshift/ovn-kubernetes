@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/kubernetes/test/e2e/framework"
@@ -37,12 +38,16 @@ import (
 )
 
 var _ = ginkgo.Describe("EgressService", feature.EgressService, func() {
+	// egressServiceYAML lives in TMPDIR, not the test binary's working
+	// directory: some OTE environments run the binary from a directory the
+	// test process can't write to, and os.CreateTemp also gives every spec
+	// its own unique path for free (no collisions between parallel workers).
+	egressServiceYAML := tempEgressServiceYAMLPath()
 	const (
-		egressServiceYAML     = "egress_service.yaml"
-		externalContainerName = "external-container-for-egress-service"
-		podHTTPPort           = "8080"
-		serviceName           = "test-egress-service"
-		blackholeRoutingTable = "100"
+		externalContainerBaseName = "external-container-for-egress-service"
+		podHTTPPort               = "8080"
+		serviceName               = "test-egress-service"
+		blackholeRoutingTable     = "100"
 	)
 
 	var (
@@ -86,6 +91,9 @@ var _ = ginkgo.Describe("EgressService", feature.EgressService, func() {
 		ginkgo.By("Creating the external component to send the traffic to/from")
 		primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "failed to get primary provider network")
+		// ponytail: unique name avoids collisions with other parallel Ginkgo workers reusing the same fixed
+		// container name on the shared external host; bump portalloc-style uniqueness if collisions recur.
+		externalContainerName := fmt.Sprintf("%s-%s", externalContainerBaseName, rand.String(5))
 		externalContainer = infraapi.ExternalContainer{Name: externalContainerName, Image: images.AgnHost(),
 			Network: primaryProviderNetwork, ExtPort: 8080,
 			CmdArgs: getAgnHostHTTPPortBindCMDArgs(8080)}
@@ -1011,6 +1019,7 @@ spec:
 
 	ginkgo.DescribeTable("[LGW] Should validate ingress reply traffic uses the Network",
 		func(protocol v1.IPFamily, isIPv6 bool) {
+			skipIfProtoNotAvailableFn(protocol, externalContainer)
 			ginkgo.By("Creating the backend pods")
 			podsCreateSync := errgroup.Group{}
 			createdPods := []*v1.Pod{}
@@ -1435,6 +1444,24 @@ func createLBServiceWithIngressIP(cs kubernetes.Interface, namespace, name strin
 	svc, err = cs.CoreV1().Services(namespace).Create(context.TODO(), svc, metav1.CreateOptions{})
 	framework.ExpectNoError(err, "failed to create loadbalancer service")
 
+	// The OTE baremetal lane has no cloud provider or MetalLB to assign a
+	// LoadBalancer ingress IP, so fake one here: pick an unused IP in the
+	// nodes' primary subnet and patch it onto the Service's status. The
+	// egress service controller only cares that an ingress IP is present,
+	// not how it got there.
+	if infraprovider.Get().Name() == "openshift" {
+		var ingressIP net.IP
+		if protocol == v1.IPv6Protocol {
+			ingressIP, err = ipalloc.NewPrimaryIPv6()
+		} else {
+			ingressIP, err = ipalloc.NewPrimaryIPv4()
+		}
+		framework.ExpectNoError(err, "must allocate a fake loadbalancer ingress IP")
+		svc.Status.LoadBalancer.Ingress = []v1.LoadBalancerIngress{{IP: ingressIP.String()}}
+		svc, err = cs.CoreV1().Services(namespace).UpdateStatus(context.TODO(), svc, metav1.UpdateOptions{})
+		framework.ExpectNoError(err, "failed to set fake loadbalancer ingress IP")
+	}
+
 	gomega.Eventually(func() error {
 		svc, err = cs.CoreV1().Services(namespace).Get(context.TODO(), name, metav1.GetOptions{})
 		if err != nil {
@@ -1671,6 +1698,16 @@ func setBlackholeRoutesOnRoutingTable(providerCtx infraapi.Context, nodeName, ip
 		return nil
 	})
 	framework.ExpectNoError(err, fmt.Sprintf("failed to set blackhole route to %s on node %s table %s, out: %s", ip, nodeName, table, out))
+}
+
+// tempEgressServiceYAMLPath returns a unique, guaranteed-writable path
+// (under TMPDIR) for an EgressService CRD manifest.
+func tempEgressServiceYAMLPath() string {
+	f, err := os.CreateTemp("", "egress_service-*.yaml")
+	framework.ExpectNoError(err, "failed to create temp file for egress service yaml")
+	path := f.Name()
+	f.Close()
+	return path
 }
 
 // Removes the blackhole route to the external container on the nodes.

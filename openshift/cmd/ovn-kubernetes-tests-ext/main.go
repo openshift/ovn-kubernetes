@@ -12,6 +12,7 @@ import (
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -20,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	kclientset "k8s.io/client-go/kubernetes"
 
 	// ensure providers are initialised for configuring infra
 	_ "k8s.io/kubernetes/test/e2e/framework/providers/aws"
@@ -126,6 +128,21 @@ func main() {
 		}
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
+		}
+		// test/e2e's own BeforeSuite (test/e2e/e2e_suite_test.go) only runs
+		// under `go test`, not in this extension binary, so the primary IP
+		// allocator tests rely on (ipalloc.NewPrimaryIPv4/v6, used by
+		// EgressIP/EgressService tests) is never initialized here unless we
+		// do it ourselves.
+		// Mirrors the DPU uplink skip in test/e2e/uplink.go's uplinkDPUGatewayNetworkEnv.
+		if os.Getenv("OVN_TEST_DPU_UPLINK_NETWORK") == "" {
+			client, err := kclientset.NewForConfig(cfg)
+			if err != nil {
+				panic(err)
+			}
+			if err := ipalloc.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+				panic(err)
+			}
 		}
 	})
 

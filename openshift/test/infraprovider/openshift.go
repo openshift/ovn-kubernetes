@@ -12,8 +12,11 @@ import (
 	operv1 "github.com/openshift/api/operator/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubernetes "k8s.io/client-go/kubernetes"
+	utilnet "k8s.io/utils/net"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -31,6 +34,7 @@ type OpenshiftInfraProvider struct {
 	hasFRRExternalContainer bool
 	hostPort                *portalloc.PortAllocator
 	clusterInfra            *baremetalInfra
+	kubeClient              kubernetes.Interface
 }
 
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
@@ -40,9 +44,14 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	if err != nil {
 		return nil, err
 	}
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
 	o := &OpenshiftInfraProvider{
 		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
+		kubeClient:   kubeClient,
 	}
 	if err = o.initClusterObjects(config); err != nil {
 		return nil, err
@@ -197,8 +206,36 @@ func (o *OpenshiftInfraProvider) GetK8HostPort() uint16 {
 	return o.hostPort.Allocate()
 }
 
+// GetK8NodeNetworkInterface only supports the primary (machine) network: baremetal
+// K8s nodes are real hosts/VMs, not podman containers the engine can attach to
+// arbitrary secondary test networks, so there is no interface info to report there.
 func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
-	panic("not implemented")
+	primary, err := o.PrimaryNetwork()
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get primary network: %w", err)
+	}
+	if !network.Equal(primary) {
+		return api.NetworkInterface{}, fmt.Errorf("GetK8NodeNetworkInterface only supports the primary network on the openshift provider, got %q", network.Name())
+	}
+	node, err := o.kubeClient.CoreV1().Nodes().Get(context.Background(), instance, metav1.GetOptions{})
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get node %s: %w", instance, err)
+	}
+	var v4, v6 string
+	for _, addr := range node.Status.Addresses {
+		if addr.Type != corev1.NodeInternalIP {
+			continue
+		}
+		if utilnet.IsIPv4String(addr.Address) {
+			v4 = addr.Address
+		} else if utilnet.IsIPv6String(addr.Address) {
+			v6 = addr.Address
+		}
+	}
+	if v4 == "" && v6 == "" {
+		return api.NetworkInterface{}, fmt.Errorf("node %s has no internal IP addresses", instance)
+	}
+	return api.NetworkInterface{IPv4: v4, IPv6: v6}, nil
 }
 
 func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string) (string, error) {
