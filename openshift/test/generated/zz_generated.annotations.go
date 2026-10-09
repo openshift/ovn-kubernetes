@@ -45,13 +45,13 @@ var AppendedAnnotations = map[string]string{
 
 	"ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is set to {} when the denied destination is poked there should be no trace in the ACL logs": "[Disabled:Unimplemented]",
 
-	"ACL Logging for NetworkPolicy the logs have the expected log level": "[Disabled:Unimplemented]",
+	"ACL Logging for NetworkPolicy the logs have the expected log level": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for NetworkPolicy when the namespace's ACL allow and deny logging annotations are set to invalid values ACL logging is disabled": "[Disabled:Unimplemented]",
+	"ACL Logging for NetworkPolicy when the namespace's ACL allow and deny logging annotations are set to invalid values ACL logging is disabled": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is removed ACL logging is disabled": "[Disabled:Unimplemented]",
+	"ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is removed ACL logging is disabled": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly": "[Disabled:Unimplemented]",
+	"ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: For BGP configured networks Validates BUM suppression is in effect for L2 EVPN networks MAC-VRF and IP-VRF": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1423,7 +1423,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Multicast when multicast enabled for namespace should be able to send multicast UDP traffic between nodes": "[Disabled:Unimplemented]",
 
-	"Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network": "[Disabled:Unimplemented]",
+	"Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller pod connected to ClusterUserDefinedNetwork CR & managed NADs cannot be deleted when being used": "[Suite:ovn-kubernetes/conformance/parallel]",
 

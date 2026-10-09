@@ -53,3 +53,7 @@ func (k kind) IsConfigurationEnabled(config api.Config) bool {
 func (k kind) NBDBContainerName() string {
 	return "nb-ovsdb"
 }
+
+func (k kind) OVNControllerLogPath() string {
+	return "/var/log/openvswitch/ovn-controller.log"
+}
