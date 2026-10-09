@@ -1018,6 +1018,10 @@ func (npw *nodePortWatcher) SyncServices(services []interface{}) error {
 			errors = append(errors, err)
 			continue
 		}
+		if netInfo == nil {
+			// network not active on our node
+			continue
+		}
 
 		epSlices, err := npw.watchFactory.GetServiceEndpointSlices(service.Namespace, service.Name, netInfo.GetNetworkName())
 		if err != nil {
@@ -1229,6 +1233,10 @@ func (npw *nodePortWatcher) DeleteEndpointSlice(epSlice *discovery.EndpointSlice
 				return utilerrors.Join(errors...)
 			}
 			errors = append(errors, fmt.Errorf("error getting active network for service %s/%s: %w", namespacedName.Namespace, namespacedName.Name, err))
+			return utilerrors.Join(errors...)
+		}
+		if netInfo == nil {
+			// network not active on our node
 			return utilerrors.Join(errors...)
 		}
 
