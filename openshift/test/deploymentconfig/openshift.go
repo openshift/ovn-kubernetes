@@ -73,3 +73,7 @@ func (m openshift) IsConfigurationEnabled(config api.Config) bool {
 func (m openshift) NBDBContainerName() string {
 	return "nbdb"
 }
+
+func (m openshift) OVNControllerLogPath() string {
+	return "/var/log/ovn/acl-audit-log.log"
+}
