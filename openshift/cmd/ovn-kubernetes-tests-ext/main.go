@@ -11,6 +11,7 @@ import (
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
 
 	// import ovn-kubernetes tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
