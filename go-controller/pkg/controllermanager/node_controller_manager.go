@@ -36,7 +36,6 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/iprulemanager"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/managementport"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/netlinkdevicemanager"
-	nodenft "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/nftables"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/routemanager"
 	nodeuplink "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/uplink"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/vrfmanager"
@@ -525,6 +524,9 @@ waitForControllerSyncLoop:
 	if err := node.CleanupEgressIPARPBlockNFT(ctx); err != nil {
 		return fmt.Errorf("failed to cleanup egress IP ARP/NDP block table: %v", err)
 	}
+	if err := node.CleanupEgressIPARPBlockNFTTable(ctx); err != nil {
+		return fmt.Errorf("failed to cleanup egress IP ARP/NDP block table: %v", err)
+	}
 
 	return nil
 }
@@ -666,11 +668,16 @@ func (ncm *NodeControllerManager) getAssignedEgressIPs() ([]string, error) {
 // addEgressIPARPBlockRules adds nftables rules to block ARP/NDP requests for egress IPs
 // during graceful shutdown. This prevents duplicate MAC responses during migration.
 func (ncm *NodeControllerManager) addEgressIPARPBlockRules(egressIPs []string) error {
+	if len(egressIPs) == 0 {
+		klog.V(5).Info("No egress IPs to add ARP block rules for")
+		return nil
+	}
+
 	klog.Infof("Adding nftables ARP/NDP block rules for %d egress IPs during shutdown", len(egressIPs))
 
 	uplinkName := ncm.defaultNodeNetworkController.Gateway.GetUplinkName()
-	if err := node.SetupEgressIPARPBlockNFT(egressIPs, uplinkName); err != nil {
-		return fmt.Errorf("failed to setup egress IP ARP block nftables %s: %w", nodenft.OVNKubernetesEgressIPNFTablesName, err)
+	if err := node.SetupEgressIPARPBlockNFTables(egressIPs, uplinkName); err != nil {
+		return fmt.Errorf("failed to setup egress IP ARP block nftables: %w", err)
 	}
 
 	klog.Infof("Successfully added nftables ARP/NDP block rules for %d egress IPs", len(egressIPs))
