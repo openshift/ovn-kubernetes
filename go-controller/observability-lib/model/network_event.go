@@ -51,6 +51,8 @@ func (e *ACLEvent) String() string {
 		action = "Allowed"
 	case aclActionDrop:
 		action = "Dropped"
+	case aclActionReject:
+		action = "Rejected"
 	case aclActionPass:
 		action = "Delegated to network policy"
 	default:
