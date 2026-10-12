@@ -1152,7 +1152,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 				if utilnet.IsIPv4(eIP) && eNode.egressIPConfig.Capacity.IPv4 != nil {
 					if *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity {
 						ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
-						if ipv4Allocated >= *eNode.egressIPConfig.Capacity.IPv4 {
+						if ipv4Allocated > *eNode.egressIPConfig.Capacity.IPv4 {
 							klog.Warningf("IPv4 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
 								item.Node, ipv4Allocated, *eNode.egressIPConfig.Capacity.IPv4, item.EgressIP)
 							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
@@ -1167,7 +1167,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 				if utilnet.IsIPv6(eIP) && eNode.egressIPConfig.Capacity.IPv6 != nil {
 					if *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity {
 						ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
-						if ipv6Allocated >= *eNode.egressIPConfig.Capacity.IPv6 {
+						if ipv6Allocated > *eNode.egressIPConfig.Capacity.IPv6 {
 							klog.Warningf("IPv6 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
 								item.Node, ipv6Allocated, *eNode.egressIPConfig.Capacity.IPv6, item.EgressIP)
 							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
