@@ -1,12 +1,14 @@
 reviewers:
   - jcaamano
   - kyrtapz
+  - pperiyasamy
   - tssurya
 approvers:
   - abhat
   - jcaamano
   - kyrtapz
   - knobunc
+  - pperiyasamy
   - tssurya
 
 # Bugzilla info
