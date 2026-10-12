@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package clustermanager
 
 import (
@@ -18,6 +21,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
@@ -25,17 +29,17 @@ import (
 	"k8s.io/klog/v2"
 	utilnet "k8s.io/utils/net"
 
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/allocator/id"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/config"
-	egressipv1 "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/factory"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/kube"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/metrics"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
-	objretry "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/retry"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/types"
-	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util"
-	utilerrors "github.com/ovn-org/ovn-kubernetes/go-controller/pkg/util/errors"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/allocator/id"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/metrics"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/ovn/healthcheck"
+	objretry "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/retry"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	utilerrors "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util/errors"
 )
 
 const (
@@ -129,6 +133,15 @@ func (eIPC *egressIPClusterController) getAllocationTotalCount() float64 {
 	return float64(count)
 }
 
+func (e *egressNode) hasAllocatedEgressIP(name string, eip string) bool {
+	for ip, egressIPName := range e.allocations {
+		if egressIPName == name && ip == eip {
+			return true
+		}
+	}
+	return false
+}
+
 // nodeAllocator contains all the information required to manage EgressIP assignment to egress node. This includes assignment
 // of EgressIP IPs to nodes and ensuring the egress nodes are reachable. For cloud nodes, it also tracks limits for
 // IP assignment to each node.
@@ -202,6 +215,31 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPNa
 				if cloudPrivateIPConfig.GetDeletionTimestamp() != nil && !cloudPrivateIPConfig.GetDeletionTimestamp().IsZero() {
 					return fmt.Errorf("cloud update request failed, CloudPrivateIPConfig: %s is being deleted", cloudPrivateIPConfigName)
 				}
+
+				// Handle a scenario in which the object exists in a failed state by removing it if the node it was assigned to no longer exists
+				assignedCondition := meta.FindStatusCondition(cloudPrivateIPConfig.Status.Conditions, string(ocpcloudnetworkapi.Assigned))
+				if cloudPrivateIPConfig.Status.Node != "" && assignedCondition != nil && assignedCondition.Status == metav1.ConditionFalse {
+					_, err := eIPC.watchFactory.GetNode(cloudPrivateIPConfig.Status.Node)
+					if err != nil && apierrors.IsNotFound(err) {
+						klog.Warningf("CloudPrivateIPConfig: %s is in Failed state (reason: %s) and node %s no longer exists, deleting to allow retry",
+							cloudPrivateIPConfigName, assignedCondition.Message, cloudPrivateIPConfig.Status.Node)
+						eIPRef := corev1.ObjectReference{
+							Kind: "EgressIP",
+							Name: egressIPName,
+						}
+						eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "CloudAssignmentRetry",
+							"egress IP: %s previously failed on deleted node %s (reason: %s), will retry assignment",
+							egressIP, cloudPrivateIPConfig.Status.Node, assignedCondition.Message)
+						if err := eIPC.kube.DeleteCloudPrivateIPConfig(cloudPrivateIPConfigName); err != nil {
+							return fmt.Errorf("failed to delete failed CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
+						}
+
+						return fmt.Errorf("deleted failed CloudPrivateIPConfig: %s, will retry creation in next reconciliation", cloudPrivateIPConfigName)
+					} else if err != nil {
+						klog.Errorf("Failed to check if node %s exists for CloudPrivateIPConfig %s: %v", cloudPrivateIPConfig.Status.Node, cloudPrivateIPConfigName, err)
+					}
+				}
+
 				if op.toAdd == cloudPrivateIPConfig.Spec.Node {
 					klog.Infof("CloudPrivateIPConfig: %s already assigned to node: %s", cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node)
 					continue
@@ -412,7 +450,7 @@ func (eIPC *egressIPClusterController) newRetryFramework(objectType reflect.Type
 		ObjType:                objectType,
 		EventHandler:           eventHandler,
 	}
-	return objretry.NewRetryFramework(eIPC.stopChan, eIPC.wg, eIPC.watchFactory, resourceHandler)
+	return objretry.NewRetryFramework("EgressIPClusterController", eIPC.stopChan, eIPC.wg, eIPC.watchFactory, resourceHandler)
 }
 
 func (eIPC *egressIPClusterController) Start() error {
@@ -878,12 +916,13 @@ func (eIPC *egressIPClusterController) deleteAllocatorEgressIPAssignmentIfExists
 }
 
 // addAllocatorEgressIPAssignments adds the allocation to the cache, so that
-// they are tracked during the life-cycle of ovnkube-master
+// they are tracked during the life-cycle of the cluster-manager controller.
 func (eIPC *egressIPClusterController) addAllocatorEgressIPAssignments(name string, statusAssignments []egressipv1.EgressIPStatusItem) {
 	eIPC.nodeAllocator.Lock()
 	defer eIPC.nodeAllocator.Unlock()
 	for _, status := range statusAssignments {
 		if eNode, exists := eIPC.nodeAllocator.cache[status.Node]; exists {
+			klog.V(5).Infof("Setting egress IP node allocation - node: %s, EIP name: %s, IP: %s", eNode.name, name, status.EgressIP)
 			eNode.allocations[status.EgressIP] = name
 		}
 	}
@@ -939,8 +978,8 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	}
 
 	// Validate the status, on restart it could be the case that what might have
-	// been assigned when ovnkube-master last ran is not a valid assignment
-	// anymore (specifically if ovnkube-master has been crashing for a while).
+	// been assigned when ovnkube-cluster-manager last ran is not a valid assignment
+	// anymore (specifically if ovnkube-cluster-manager has been crashing for a while).
 	// Any invalid status at this point in time needs to be removed and assigned
 	// to a valid node.
 	validStatus, invalidStatus := eIPC.validateEgressIPStatus(name, status)
@@ -973,11 +1012,6 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		statusToRemove = append(statusToRemove, status)
 		ipsToRemove.Insert(status.EgressIP)
 	}
-	// Adding the mark to annotations is bundled with status update in-order to minimise updates, cover the case where there is no update to status
-	// and mark annotation has been modified / removed. This should only occur for an update and the mark was previous set.
-	if ipsToAssign.Len() == 0 && ipsToRemove.Len() == 0 {
-		eIPC.ensureMark(old, new)
-	}
 
 	if ipsToRemove.Len() > 0 {
 		// The following is added as to ensure that we only add after having
@@ -987,7 +1021,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		// on a cloud: we patch all validStatsuses below, we wait for the status
 		// on the CloudPrivateIPConfig(s) we create to be set before executing
 		// anything in the OVN DB (Note that the status will be set by this
-		// controller in cluster-manager and asynchronously the ovnkube-master
+		// controller in cluster-manager and asynchronously the ovnkube-controller
 		// will read the CRD change and do the necessary plumbing (ADD/UPDATE/DELETE)
 		// in the OVN DB).
 		// So, we need to make sure that we delete and
@@ -1049,7 +1083,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 			// Before updating the cloud private IP object, we need to remove the OVN configuration
 			// for these invalid statuses so that traffic is not blackholed to non-existing setup in the
 			// cloud. Thus we patch the egressIP status with the valid set of statuses which will
-			// trigger an event for the ovnkube-master to take action upon.
+			// trigger an event for the ovnkube-controller to take action upon.
 			// Note that once we figure out the statusToAdd parts below we will trigger an
 			// update to cloudPrivateIP object which will trigger another patch for the eIP object.
 			//
@@ -1094,8 +1128,70 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 		// Execute CloudPrivateIPConfig changes for assignments which need to be
 		// added/removed, assignments which don't change do not require any
 		// further setup.
-		if err := eIPC.executeCloudPrivateIPConfigChange(name, statusToAdd, statusToRemove); err != nil {
-			return err
+		// Validate CloudPrivateIPConfig creation for both IPv4 and IPv6
+		if len(statusToAdd) > 0 {
+			eIPC.nodeAllocator.Lock()
+			validStatusToAdd := []egressipv1.EgressIPStatusItem{}
+
+			for _, item := range statusToAdd {
+				eNode, exists := eIPC.nodeAllocator.cache[item.Node]
+				if !exists {
+					klog.Warningf("Node %s not in allocator cache for EgressIP %s, skipping CloudPrivateIPConfig for %s",
+						item.Node, name, item.EgressIP)
+					continue
+				}
+
+				if _, alreadyAllocated := eNode.allocations[item.EgressIP]; !alreadyAllocated {
+					klog.Warningf("IP %s for EgressIP %s NOT in allocations for Node %s, skipping CloudPrivateIPConfig",
+						item.EgressIP, name, item.Node)
+					continue
+				}
+
+				// Validate capacity for IPv4
+				eIP := net.ParseIP(item.EgressIP)
+				if utilnet.IsIPv4(eIP) && eNode.egressIPConfig.Capacity.IPv4 != nil {
+					if *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity {
+						ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
+						if ipv4Allocated > *eNode.egressIPConfig.Capacity.IPv4 {
+							klog.Warningf("IPv4 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
+								item.Node, ipv4Allocated, *eNode.egressIPConfig.Capacity.IPv4, item.EgressIP)
+							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
+							delete(eNode.allocations, item.EgressIP)
+							eIPC.nodeAllocator.Unlock()
+							return fmt.Errorf("IPv4 capacity exceeded on node %s, deleting allocation %s", eNode.name, item.EgressIP)
+						}
+					}
+				}
+
+				// Validate capacity for IPv6
+				if utilnet.IsIPv6(eIP) && eNode.egressIPConfig.Capacity.IPv6 != nil {
+					if *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity {
+						ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
+						if ipv6Allocated > *eNode.egressIPConfig.Capacity.IPv6 {
+							klog.Warningf("IPv6 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
+								item.Node, ipv6Allocated, *eNode.egressIPConfig.Capacity.IPv6, item.EgressIP)
+							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
+							delete(eNode.allocations, item.EgressIP)
+							eIPC.nodeAllocator.Unlock()
+							return fmt.Errorf("IPv6 capacity exceeded on node %s, deleting allocation %s", eNode.name, item.EgressIP)
+						}
+					}
+				}
+
+				validStatusToAdd = append(validStatusToAdd, item)
+			}
+			eIPC.nodeAllocator.Unlock()
+
+			if len(validStatusToAdd) == 0 {
+				klog.Warningf("No valid IPs for CloudPrivateIPConfig creation for EgressIP %s", name)
+			}
+			if err := eIPC.executeCloudPrivateIPConfigChange(name, validStatusToAdd, statusToRemove); err != nil {
+				return err
+			}
+		} else {
+			if err := eIPC.executeCloudPrivateIPConfigChange(name, statusToAdd, statusToRemove); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1104,12 +1200,12 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	return nil
 }
 
-// syncCloudPrivateIPConfigs This method takes care syncing stale data in the
-// egress ip status with cloud private ip config upon master reboot cases.
-// cloud private ip config entry would have been deleted when master was down
-// whereas egress ip status was not updated for the deleted entry in an error
-// scenario. Hence this method ensures egress ip status is upto date with
-// available cloud private ip config entry.
+// syncCloudPrivateIPConfigs reconciles stale data in the EgressIP status
+// against the CloudPrivateIPConfig objects upon cluster-manager restart (or
+// leadership change). The CloudPrivateIPConfig entry may have been deleted
+// while the cluster manager was down, without the EgressIP status being
+// updated accordingly. This sync ensures the EgressIP status is consistent
+// with the CloudPrivateIPConfig objects currently present.
 func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interface{}) error {
 	if !util.PlatformTypeIsEgressIPCloudProvider() {
 		return nil
@@ -1128,12 +1224,32 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interfac
 		for _, status := range egressIP.Status.Items {
 			cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(status.EgressIP)
 			if _, exists := cloudPrivateIPConfigMap[cloudPrivateIPConfigName]; exists {
+				// CPIC exists - check if it has failed status by fetching the actual object
+				cpic, err := eIPC.watchFactory.GetCloudPrivateIPConfig(cloudPrivateIPConfigName)
+				if err == nil && cpic != nil && len(cpic.Status.Conditions) > 0 {
+					lastCondition := cpic.Status.Conditions[0]
+					if lastCondition.Status == "False" && lastCondition.Type == "Assigned" {
+						// This CPIC failed - don't include in updated status
+						klog.Warningf("Removing failed CloudPrivateIPConfig %s from EgressIP %s status. Reason: %s",
+							cloudPrivateIPConfigName, egressIP.Name, lastCondition.Message)
+						cloudPrivateIPNotFound = true
+						continue
+					}
+				}
+				// CPIC exists and either succeeded or we can't check its status - keep the status item
 				updatedStatus = append(updatedStatus, status)
 			} else {
 				// Set cloudPrivateIPNotFoundOrInvalid flag to true because egress ip entry not found in
 				// cloud private ip config object. Note that the egress ip status might still reflect an
 				// old node assignment if the informer cache has old data, so do not invalidate if it is
 				// not the same node as the cloud private ip config assignment.
+				// CPIC doesn't exist
+				eIP := net.ParseIP(status.EgressIP)
+				if utilnet.IsIPv4(eIP) {
+					klog.Infof("IPv4 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
+				} else if utilnet.IsIPv6(eIP) {
+					klog.Infof("IPv6 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
+				}
 				cloudPrivateIPNotFound = true
 			}
 		}
@@ -1184,6 +1300,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 	defer eIPC.nodeAllocator.Unlock()
 	assignments := []egressipv1.EgressIPStatusItem{}
 	assignableNodes, existingAllocations := eIPC.getSortedEgressData()
+
 	if len(assignableNodes) == 0 {
 		eIPRef := corev1.ObjectReference{
 			Kind: "EgressIP",
@@ -1193,6 +1310,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 		klog.Errorf("No assignable nodes found for EgressIP: %s and requested IPs: %v", name, egressIPs)
 		return assignments
 	}
+
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
 	for _, egressIP := range egressIPs {
 		klog.V(5).Infof("Will attempt assignment for egress IP: %s", egressIP)
@@ -1211,7 +1329,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "EgressIPConflict", "Egress IP %s with IP "+
 				"%v is conflicting with a host (%s) IP address and will not be assigned", name, eIP, conflictedHost)
 			klog.Errorf("Egress IP: %v address is already assigned on an interface on node %s", eIP, conflictedHost)
-			return assignments
+			continue
 		}
 		if status, exists := existingAllocations[eIP.String()]; exists {
 			// On public clouds we will re-process assignments for the same IP
@@ -1263,7 +1381,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 					"IP: %q for EgressIP: %s is already allocated for EgressIP: %s on %s", egressIP, name, status.Name, status.Node,
 				)
 				klog.Errorf("IP: %q for EgressIP: %s is already allocated for EgressIP: %s on %s", egressIP, name, status.Name, status.Node)
-				return assignments
+				continue
 			}
 		}
 		// Egress IP for secondary host networks is only available on baremetal environments
@@ -1322,21 +1440,37 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			if egressIPNetwork == "" {
 				continue
 			}
-			if eNode.egressIPConfig.Capacity.IP < util.UnlimitedNodeCapacity {
-				if eNode.egressIPConfig.Capacity.IP-len(eNode.allocations) <= 0 {
+			if eNode.egressIPConfig.Capacity.IP != nil && *eNode.egressIPConfig.Capacity.IP < util.UnlimitedNodeCapacity {
+				if *eNode.egressIPConfig.Capacity.IP-len(eNode.allocations) <= 0 {
 					klog.V(5).Infof("Additional allocation on Node: %s exhausts it's IP capacity, trying another node", eNode.name)
 					continue
 				}
 			}
-			if eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity && utilnet.IsIPv4(eIP) {
-				if eNode.egressIPConfig.Capacity.IPv4-getIPFamilyAllocationCount(eNode.allocations, false) <= 0 {
-					klog.V(5).Infof("Additional allocation on Node: %s exhausts it's IPv4 capacity, trying another node", eNode.name)
+			if eNode.egressIPConfig.Capacity.IPv4 != nil && *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity && utilnet.IsIPv4(eIP) {
+				ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
+				ipv4Capacity := *eNode.egressIPConfig.Capacity.IPv4 - 1
+				ipv4Remaining := ipv4Capacity - ipv4Allocated
+
+				klog.V(5).Infof("IPv4 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
+					name, eIP.String(), eNode.name, ipv4Capacity, ipv4Allocated, ipv4Remaining)
+
+				if ipv4Remaining <= 0 {
+					klog.Warningf("Node %s cannot host EgressIP %s IP %s: IPv4 capacity full (capacity=%d, allocated=%d)",
+						eNode.name, name, eIP.String(), ipv4Capacity, ipv4Allocated)
 					continue
 				}
 			}
-			if eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity && utilnet.IsIPv6(eIP) {
-				if eNode.egressIPConfig.Capacity.IPv6-getIPFamilyAllocationCount(eNode.allocations, true) <= 0 {
-					klog.V(5).Infof("Additional allocation on Node: %s exhausts it's IPv6 capacity, trying another node", eNode.name)
+			if eNode.egressIPConfig.Capacity.IPv6 != nil && *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity && utilnet.IsIPv6(eIP) {
+				ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
+				ipv6Capacity := *eNode.egressIPConfig.Capacity.IPv6 - 1
+				ipv6Remaining := ipv6Capacity - ipv6Allocated
+
+				klog.V(5).Infof("IPv6 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
+					name, eIP.String(), eNode.name, ipv6Capacity, ipv6Allocated, ipv6Remaining)
+
+				if ipv6Remaining <= 0 {
+					klog.Warningf("Node %s cannot host EgressIP %s IP %s: IPv6 capacity full (capacity=%d, allocated=%d)",
+						eNode.name, name, eIP.String(), ipv6Capacity, ipv6Allocated)
 					continue
 				}
 			}
@@ -1414,7 +1548,14 @@ func (eIPC *egressIPClusterController) isEgressIPAddrConflict(egressIP net.IP) (
 		}
 		nodeHostAddrsSet, err := util.ParseNodeHostCIDRsDropNetMask(node)
 		if err != nil {
-			return false, "", fmt.Errorf("failed to parse node host cidrs for node %s: %v", node.Name, err)
+			// The annotation is the only source of this node's host addresses.
+			// If it is missing or unparseable there is nothing to compare the
+			// egress IP against, so skip the node rather than failing the check
+			// for every node. Such a node is also excluded from assignment, see
+			// the egress node event handler.
+			klog.Warningf("Skipping node %s for EgressIP conflict check, its host addresses are unknown: %v",
+				node.Name, err)
+			continue
 		}
 		if nodeHostAddrsSet.Has(egressIP.String()) {
 			return true, node.Name, nil
@@ -1440,6 +1581,10 @@ func (eIPC *egressIPClusterController) validateEgressIPStatus(name string, items
 		} else {
 			if eNode.getAllocationCountForEgressIP(name) > 1 {
 				klog.Errorf("Allocator error: EgressIP: %s claims multiple egress IPs on same node: %s, will attempt rebalancing", name, eIPStatus.Node)
+				validAssignment = false
+			}
+			if !eNode.hasAllocatedEgressIP(name, eIPStatus.EgressIP) {
+				klog.Errorf("Allocator error: EgressIP: %s has mistmach with status vs cache for node: %s with IP: %s", name, eIPStatus.Node, eIPStatus.EgressIP)
 				validAssignment = false
 			}
 			if !eNode.isEgressAssignable {
@@ -1676,21 +1821,21 @@ func cloudPrivateIPConfigNameToIPString(name string) string {
 // removePendingOps removes the existing pending CloudPrivateIPConfig operations
 // from the cache and returns the EgressIP object which can be re-synced given
 // the new assignment possibilities.
-func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPName, egressIP string) ([]*egressipv1.EgressIP, error) {
+func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPName, egressIPAddr string) ([]*egressipv1.EgressIP, error) {
 	eIPC.pendingCloudPrivateIPConfigsMutex.Lock()
 	defer eIPC.pendingCloudPrivateIPConfigsMutex.Unlock()
 	ops, pending := eIPC.pendingCloudPrivateIPConfigsOps[egressIPName]
 	if !pending {
 		return nil, fmt.Errorf("no pending operation found for EgressIP: %s", egressIPName)
 	}
-	op, exists := ops[egressIP]
+	op, exists := ops[egressIPAddr]
 	if !exists {
-		return nil, fmt.Errorf("pending operations found for EgressIP: %s, but not for the finalized IP: %s", egressIPName, egressIP)
+		return nil, fmt.Errorf("pending operations found for EgressIP: %s, but not for the finalized IP: %s", egressIPName, egressIPAddr)
 	}
 	// Make sure we are dealing with a delete operation, since for update
 	// operations will still need to process the add afterwards.
 	if op.toAdd == "" && op.toDelete != "" {
-		delete(ops, egressIP)
+		delete(ops, egressIPAddr)
 	}
 	if len(ops) == 0 {
 		delete(eIPC.pendingCloudPrivateIPConfigsOps, egressIPName)
@@ -1708,10 +1853,16 @@ func (eIPC *egressIPClusterController) removePendingOpsAndGetResyncs(egressIPNam
 	resyncs := make([]*egressipv1.EgressIP, 0, len(egressIPs))
 	for _, egressIP := range egressIPs {
 		egressIP := *egressIP
-		// Do not process the egress IP object which owns the
-		// CloudPrivateIPConfig for which we are currently processing the
-		// deletion for.
 		if egressIP.Name == egressIPName {
+			for _, specIP := range egressIP.Spec.EgressIPs {
+				// Do not process the egress IP object which owns the
+				// CloudPrivateIPConfig for which we are currently processing the
+				// deletion for unless it still has the IP in it's spec
+				if specIP == egressIPAddr {
+					resyncs = append(resyncs, &egressIP)
+					break
+				}
+			}
 			continue
 		}
 		unassigned := len(egressIP.Spec.EgressIPs) - len(egressIP.Status.Items)
@@ -1862,22 +2013,6 @@ var (
 
 func getEgressIPMarkAllocator() id.Allocator {
 	return id.NewIDAllocator("eip_mark", eipMarkMax-eipMarkMin)
-}
-
-// ensureMark ensures that if a mark was remove or changed value, then restore the mark.
-func (eIPC *egressIPClusterController) ensureMark(old, new *egressipv1.EgressIP) {
-	// Adding the mark to annotations is bundled with status update in-order to minimise updates, cover the case where there is no update to status
-	// and mark annotation has been modified / removed. This should only occur for an update and the mark was previous set.
-	if old != nil && new != nil {
-		if util.IsEgressIPMarkSet(old.Annotations) && util.EgressIPMarkAnnotationChanged(old.Annotations, new.Annotations) {
-			mark, _, err := eIPC.getOrAllocMark(new.Name)
-			if err != nil {
-				klog.Errorf("Failed to restore EgressIP %s mark because unable to retrieve mark: %v", new.Name, err)
-			} else if err = eIPC.patchEgressIP(new.Name, generateMarkPatchOp(mark)); err != nil {
-				klog.Errorf("Failed to restore EgressIP %s mark because patching failed: %v", new.Name, err)
-			}
-		}
-	}
 }
 
 // getOrAllocMark allocates a new mark integer for name using round-robin strategy if none was already allocated for name otherwise
