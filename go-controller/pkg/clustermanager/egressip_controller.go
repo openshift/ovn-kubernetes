@@ -1182,12 +1182,11 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 			}
 			eIPC.nodeAllocator.Unlock()
 
-			if len(validStatusToAdd) > 0 {
-				if err := eIPC.executeCloudPrivateIPConfigChange(name, validStatusToAdd, statusToRemove); err != nil {
-					return err
-				}
-			} else {
+			if len(validStatusToAdd) == 0 {
 				klog.Warningf("No valid IPs for CloudPrivateIPConfig creation for EgressIP %s", name)
+			}
+			if err := eIPC.executeCloudPrivateIPConfigChange(name, validStatusToAdd, statusToRemove); err != nil {
+				return err
 			}
 		} else {
 			if err := eIPC.executeCloudPrivateIPConfigChange(name, statusToAdd, statusToRemove); err != nil {
