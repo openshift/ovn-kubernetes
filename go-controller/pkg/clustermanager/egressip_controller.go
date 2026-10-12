@@ -668,17 +668,16 @@ func checkEgressNodesReachabilityIterate(eIPC *egressIPClusterController) {
 				klog.Errorf("Node: %s is detected as unreachable, but could not re-assign egress IPs, err: %v", nodeName, err)
 			}
 		} else {
-			klog.Infof("[REACHABILITY-CHECK] Node: %s transitioned from unreachable to reachable, will trigger EgressIP reconciliation", nodeName)
+			klog.Infof("Node: %s is detected as reachable and ready again, adding it to egress assignment", nodeName)
 			nodeToAdd, err := eIPC.watchFactory.GetNode(nodeName)
 			if err != nil {
-				klog.Errorf("[REACHABILITY-CHECK] Node: %s is reachable but failed to get node object, err: %v", nodeName, err)
+				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 				continue
 			}
 			if err := eIPC.retryEgressNodes.AddRetryObjWithAddNoBackoff(nodeToAdd); err != nil {
-				klog.Errorf("[REACHABILITY-CHECK] Node: %s failed to add to retry queue, err: %v", nodeName, err)
+				klog.Errorf("Node: %s is detected as reachable and ready again, but could not re-assign egress IPs, err: %v", nodeName, err)
 				continue
 			}
-			klog.Infof("[REACHABILITY-CHECK] Node: %s added to retry queue, requesting retry processing", nodeName)
 			eIPC.retryEgressNodes.RequestRetryObjs()
 		}
 	}
@@ -784,41 +783,30 @@ func (eIPC *egressIPClusterController) reconcileSecondaryHostNetworkEIPs(node *c
 
 func (eIPC *egressIPClusterController) addEgressNode(nodeName string) error {
 	var errors []error
-	klog.Infof("[ADD-EGRESS-NODE] Node %s about to be added for egress assignment", nodeName)
+	klog.V(5).Infof("Egress node: %s about to be initialized", nodeName)
 
+	// If a node has been labelled for egress IP we need to check if there are any
+	// egress IPs which are missing an assignment. If there are, we need to send a
+	// synthetic update since reconcileEgressIP will then try to assign those IPs to
+	// this node (if possible)
 	egressIPs, err := eIPC.kube.GetEgressIPs()
 	if err != nil {
 		return fmt.Errorf("unable to list EgressIPs, err: %v", err)
 	}
-
-	klog.Infof("[ADD-EGRESS-NODE] Found %d total EgressIPs to check for node %s", len(egressIPs), nodeName)
-
-	reconciledCount := 0
-	skippedCount := 0
-
 	for _, egressIP := range egressIPs {
 		egressIP := *egressIP
-		specCount := len(egressIP.Spec.EgressIPs)
-		statusCount := len(egressIP.Status.Items)
-
-		if specCount != statusCount {
-			klog.Infof("[ADD-EGRESS-NODE] EgressIP %s has unassigned IPs (spec=%d, status=%d), triggering reconciliation for node %s",
-				egressIP.Name, specCount, statusCount, nodeName)
-
+		if len(egressIP.Spec.EgressIPs) != len(egressIP.Status.Items) {
+			// Send a "synthetic update" on all egress IPs which are not fully
+			// assigned, the reconciliation loop for WatchEgressIP will try to
+			// assign stuff to this new node. The workqueue's delta FIFO
+			// implementation will not trigger a watch event for updates on
+			// objects which have no semantic difference, hence: call the
+			// reconciliation function directly.
 			if err := eIPC.reconcileEgressIP(nil, &egressIP); err != nil {
-				klog.Errorf("[ADD-EGRESS-NODE] Failed to reconcile EgressIP %s for node %s: %v", egressIP.Name, nodeName, err)
 				errors = append(errors, fmt.Errorf("synthetic update for EgressIP: %s failed, err: %v", egressIP.Name, err))
-			} else {
-				klog.Infof("[ADD-EGRESS-NODE] Successfully triggered reconciliation for EgressIP %s", egressIP.Name)
-				reconciledCount++
 			}
-		} else {
-			skippedCount++
 		}
 	}
-
-	klog.Infof("[ADD-EGRESS-NODE] Node %s: reconciled %d EgressIPs, skipped %d fully-assigned EgressIPs",
-		nodeName, reconciledCount, skippedCount)
 
 	if len(errors) > 0 {
 		return utilerrors.Join(errors...)
@@ -949,17 +937,6 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 
 	name := ""
 
-	// Get name for logging
-	if old != nil {
-		name = old.Name
-	}
-	if new != nil {
-		name = new.Name
-	}
-
-	klog.Infof("[RECONCILE-EIP] Starting reconciliation for EgressIP %s (old=%v, new=%v)",
-		name, old != nil, new != nil)
-
 	// Initialize a status which will be used to compare against
 	// new.spec.egressIPs and decide on what from the status should get deleted
 	// or kept.
@@ -973,11 +950,13 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 	// but are allocated and they are meant to be removed.
 	staleEgressIPs := sets.NewString()
 	if old != nil {
+		name = old.Name
 		status = old.Status.Items
 		staleEgressIPs.Insert(old.Spec.EgressIPs...)
 	}
 	if new != nil {
 		newEIP = new
+		name = newEIP.Name
 		status = newEIP.Status.Items
 		if staleEgressIPs.Len() > 0 {
 			for _, egressIP := range newEIP.Spec.EgressIPs {
@@ -1157,13 +1136,13 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 			for _, item := range statusToAdd {
 				eNode, exists := eIPC.nodeAllocator.cache[item.Node]
 				if !exists {
-					klog.Warningf("[CPIC-VALIDATION] Node %s not in allocator cache for EgressIP %s, skipping CPIC for %s",
+					klog.Warningf("Node %s not in allocator cache for EgressIP %s, skipping CloudPrivateIPConfig for %s",
 						item.Node, name, item.EgressIP)
 					continue
 				}
 
 				if _, alreadyAllocated := eNode.allocations[item.EgressIP]; !alreadyAllocated {
-					klog.Warningf("[CPIC-VALIDATION] IP %s for EgressIP %s NOT in allocations for Node %s, skipping CPIC",
+					klog.Warningf("IP %s for EgressIP %s NOT in allocations for Node %s, skipping CloudPrivateIPConfig",
 						item.EgressIP, name, item.Node)
 					continue
 				}
@@ -1174,7 +1153,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 					if *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity {
 						ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
 						if ipv4Allocated >= *eNode.egressIPConfig.Capacity.IPv4 {
-							klog.Warningf("[CPIC-VALIDATION] IPv4 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
+							klog.Warningf("IPv4 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
 								item.Node, ipv4Allocated, *eNode.egressIPConfig.Capacity.IPv4, item.EgressIP)
 							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
 							delete(eNode.allocations, item.EgressIP)
@@ -1189,7 +1168,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 					if *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity {
 						ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
 						if ipv6Allocated >= *eNode.egressIPConfig.Capacity.IPv6 {
-							klog.Warningf("[CPIC-VALIDATION] IPv6 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
+							klog.Warningf("IPv6 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
 								item.Node, ipv6Allocated, *eNode.egressIPConfig.Capacity.IPv6, item.EgressIP)
 							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
 							delete(eNode.allocations, item.EgressIP)
@@ -1200,7 +1179,6 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 				}
 
 				validStatusToAdd = append(validStatusToAdd, item)
-				klog.Infof("[CPIC-VALIDATION] IP %s validated for Node %s, OK to create CPIC", item.EgressIP, item.Node)
 			}
 			eIPC.nodeAllocator.Unlock()
 
@@ -1209,7 +1187,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 					return err
 				}
 			} else {
-				klog.Warningf("[CPIC-VALIDATION] No valid IPs for CloudPrivateIPConfig creation for EgressIP %s", name)
+				klog.Warningf("No valid IPs for CloudPrivateIPConfig creation for EgressIP %s", name)
 			}
 		} else {
 			if err := eIPC.executeCloudPrivateIPConfigChange(name, statusToAdd, statusToRemove); err != nil {
@@ -1253,7 +1231,7 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interfac
 					lastCondition := cpic.Status.Conditions[0]
 					if lastCondition.Status == "False" && lastCondition.Type == "Assigned" {
 						// This CPIC failed - don't include in updated status
-						klog.Warningf("[CPIC-CLEANUP] Removing failed CPIC %s from EgressIP %s status. Reason: %s",
+						klog.Warningf("Removing failed CloudPrivateIPConfig %s from EgressIP %s status. Reason: %s",
 							cloudPrivateIPConfigName, egressIP.Name, lastCondition.Message)
 						cloudPrivateIPNotFound = true
 						continue
@@ -1269,9 +1247,9 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interfac
 				// CPIC doesn't exist
 				eIP := net.ParseIP(status.EgressIP)
 				if utilnet.IsIPv4(eIP) {
-					klog.Infof("[CPIC-CLEANUP] IPv4 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
+					klog.Infof("IPv4 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
 				} else if utilnet.IsIPv6(eIP) {
-					klog.Infof("[CPIC-CLEANUP] IPv6 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
+					klog.Infof("IPv6 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
 				}
 				cloudPrivateIPNotFound = true
 			}
@@ -1324,25 +1302,15 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 	assignments := []egressipv1.EgressIPStatusItem{}
 	assignableNodes, existingAllocations := eIPC.getSortedEgressData()
 
-	klog.Infof("[ASSIGN-EIP] EgressIP %s: attempting to assign %d IPs, found %d assignable nodes",
-		name, len(egressIPs), len(assignableNodes))
-
 	if len(assignableNodes) == 0 {
 		eIPRef := corev1.ObjectReference{
 			Kind: "EgressIP",
 			Name: name,
 		}
 		eIPC.recorder.Eventf(&eIPRef, corev1.EventTypeWarning, "NoMatchingNodeFound", "no assignable nodes for EgressIP: %s, please tag at least one node with label: %s", name, util.GetNodeEgressLabel())
-		klog.Errorf("[ASSIGN-EIP] No assignable nodes found for EgressIP %s and requested IPs: %v", name, egressIPs)
+		klog.Errorf("No assignable nodes found for EgressIP: %s and requested IPs: %v", name, egressIPs)
 		return assignments
 	}
-
-	// Log available nodes
-	nodeNames := make([]string, 0, len(assignableNodes))
-	for _, node := range assignableNodes {
-		nodeNames = append(nodeNames, node.name)
-	}
-	klog.Infof("[ASSIGN-EIP] EgressIP %s: assignable nodes are: %v", name, nodeNames)
 
 	klog.V(5).Infof("Current assignments are: %+v", existingAllocations)
 	for _, egressIP := range egressIPs {
