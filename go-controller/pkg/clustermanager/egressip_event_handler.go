@@ -178,16 +178,15 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		isCloudEgressIPConfigAltered := util.CloudEgressIPConfigAnnotationChanged(oldNode, newNode)
 		h.eIPC.setNodeEgressReady(newNode.Name, isNewReady)
 		if !oldHadEgressLabel && newHasEgressLabel {
-			klog.Infof("Node %s labeled for egress assignment", newNode.Name)
-
+			klog.Infof("Node: %s has been labeled, adding it for egress assignment", newNode.Name)
 			if isNewReady && isNewReachable {
 				h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
 				if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
 					return err
 				}
 			} else {
-				klog.Warningf("Node %s labeled but not ready (ready=%v, reachable=%v), cannot assign EgressIPs",
-					newNode.Name, isNewReady, isNewReachable)
+				klog.Warningf("Node: %s has been labeled, but node is not ready"+
+					" and reachable, cannot use it for egress assignment", newNode.Name)
 			}
 			return nil
 		}
@@ -200,17 +199,17 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 				return err
 			}
 		} else if isNewReady && isNewReachable {
+			// Build a log message that captures all reasons we are re-evaluating,
+			// so operators can correlate annotation changes with re-assignments even
+			// when multiple conditions change simultaneously.
 			switch {
 			case isCloudEgressIPConfigAltered && isHostCIDRsAltered:
 				klog.Infof("Node: %s cloud egress IP config annotation and host CIDRs changed, re-evaluating egress IP assignments", newNode.Name)
 			case isCloudEgressIPConfigAltered:
 				klog.Infof("Node: %s cloud egress IP config annotation changed, re-evaluating egress IP assignments", newNode.Name)
-			case !isOldReady:
-				klog.Infof("Node %s became ready, re-evaluating egress IP assignments", newNode.Name)
 			default:
 				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
 			}
-
 			h.eIPC.setNodeEgressReachable(newNode.Name, isNewReachable)
 			if err := h.eIPC.addEgressNode(newNode.Name); err != nil {
 				return err
