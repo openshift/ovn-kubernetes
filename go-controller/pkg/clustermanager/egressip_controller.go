@@ -1178,6 +1178,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 								item.Node, ipv4Allocated, *eNode.egressIPConfig.Capacity.IPv4, item.EgressIP)
 							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
 							delete(eNode.allocations, item.EgressIP)
+							eIPC.nodeAllocator.Unlock()
 							return fmt.Errorf("IPv4 capacity exceeded on node %s, deleting allocation %s", eNode.name, item.EgressIP)
 						}
 					}
@@ -1192,6 +1193,7 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(old, new *egressipv1.Eg
 								item.Node, ipv6Allocated, *eNode.egressIPConfig.Capacity.IPv6, item.EgressIP)
 							// ROLLBACK FIX: Remove rejected IP from allocation map to clear stale cache
 							delete(eNode.allocations, item.EgressIP)
+							eIPC.nodeAllocator.Unlock()
 							return fmt.Errorf("IPv6 capacity exceeded on node %s, deleting allocation %s", eNode.name, item.EgressIP)
 						}
 					}
