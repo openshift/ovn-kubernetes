@@ -229,6 +229,19 @@ func main() {
 
 	specs = specs.Select(shouldIncludeTest)
 
+	specs.AddAfterEach(func(res *extensiontests.ExtensionTestResult) {
+		if res.Result != extensiontests.ResultFailed ||
+			!strings.Contains(res.Error, ocpinfraprovider.ErrExternalInfraNotAvailable) {
+			return
+		}
+		res.Result = extensiontests.ResultSkipped
+		// Preserve the original failure as the skip reason. Consumers build the
+		// JUnit skip message from Details and Output, not from Error, so the
+		// reason would otherwise be lost.
+		res.AddDetails("skip-reason", res.Error)
+		res.Output = fmt.Sprintf("%s\nSKIPPED: %s", res.Output, res.Error)
+	})
+
 	ovnTestsExtension.AddSpecs(specs)
 	extensionRegistry.Register(ovnTestsExtension)
 	root := &cobra.Command{
