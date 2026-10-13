@@ -1,24 +1,21 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
 package infraprovider
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/sets"
+
 	configv1 "github.com/openshift/api/config/v1"
-	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container/network"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/runner"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
-	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 const (
@@ -27,19 +24,27 @@ const (
 	// use network name created for attaching frr container with
 	// cluster primary network as per changes in the link:
 	// https://github.com/openshift/release/blob/db6697de61f4ae7e05c5a2db782a87c459e849bf/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh#L123-L124
-	primaryNetworkName         = "ostestbm_net"
+	bmPrimaryNetworkName       = "ostestbm_net"
 	frrContainerPrimaryNetIPv4 = "192.168.111.3"
 	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
 	externalFRRContainerName   = "frr"
+
+	bmSecondaryNetworkName = "secondarynetwork"
+	// Secondary subnets must match the values in test/e2e/egressip.go
+	// (secondaryIPV4Subnet / secondaryIPV6Subnet) because EgressIP tests
+	// hardcode addresses from these ranges. The CI step that provisions
+	// the baremetal secondary network must use the same subnets.
+	bmSecondaryIPv4Subnet = "10.10.10.0/24"
+	bmSecondaryIPv6Subnet = "2001:db8:abcd:1234::/64"
 )
 
 type baremetalInfra struct {
-	engine               *container.Engine
-	machineNetwork       api.Network           // contains subnet details about cluster machine network
-	machineNetworkGwInfo *api.NetworkInterface // contains interface info about hypervisor node machine network interface
+	base                 *baseInfra
+	secondaryNetwork     api.Network
+	secondaryHostNetInfo *api.NetworkInterface
 }
 
-func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
+func initializeBaremetalInfra(infra *configv1.Infrastructure) (*baremetalInfra, error) {
 	// Initialize command runner for executing commands on hypervisor
 	// (optional, may not be available)
 	sshRunner, err := hypervisorSshCmdRunner()
@@ -49,155 +54,235 @@ func initializeClusterInfra(config *rest.Config) (*baremetalInfra, error) {
 	if sshRunner == nil {
 		return nil, nil
 	}
-	configClient, err := configclient.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve config client: %w", err)
-	}
-	infra, err := configClient.ConfigV1().Infrastructures().Get(context.Background(), "cluster", metav1.GetOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve cluster infrastructure object: %w", err)
-	}
-	// Skip populating cluster infra object if cluster is not a BM.
-	// This is sufficient for now to support EVPN E2Es.
-	if infra.Spec.PlatformSpec.Type != configv1.BareMetalPlatformType {
-		return nil, nil
-	}
-	ci := &baremetalInfra{}
+
 	// Verify SSH connectivity works
 	if _, err := sshRunner.Run("echo", "connection test"); err != nil {
 		return nil, fmt.Errorf("failed to check frr container status, connectivity check failed with hypervisor: %w", err)
 	}
-	// Initialize podman container engine
-	ci.engine = container.NewEngine("podman", sshRunner)
+
+	h := &baseInfra{
+		runner:             sshRunner,
+		externalContainers: make(map[string]api.ExternalContainer),
+		engine:             container.NewEngine("podman", sshRunner),
+		primaryNetworkName: bmPrimaryNetworkName,
+	}
+
+	if infra.Spec.PlatformSpec.BareMetal == nil {
+		return nil, fmt.Errorf("infrastructure platform type is BareMetal but BareMetal spec is nil")
+	}
+
 	// just mimic machine network with ContainerEngineNetwork to make it
 	// compatibile with api.Network API.
-	machineNetwork := &network.ContainerEngineNetwork{NetName: primaryNetworkName}
+	machineNetwork := &network.ContainerEngineNetwork{NetName: bmPrimaryNetworkName}
 	var cidrs []network.ContainerEngineNetworkConfig
 	for _, cidr := range infra.Spec.PlatformSpec.BareMetal.MachineNetworks {
 		cidrs = append(cidrs, network.ContainerEngineNetworkConfig{Subnet: string(cidr)})
 	}
 	machineNetwork.Configs = cidrs
-	ci.machineNetwork = machineNetwork
+	h.machineNetwork = machineNetwork
 
-	v4, v6, err := ci.machineNetwork.IPv4IPv6Subnets()
+	v4, v6, err := h.machineNetwork.IPv4IPv6Subnets()
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve primary network subnets: %w", err)
 	}
 	// Retrieve primary network interface from hypervisor instance
-	ci.machineNetworkGwInfo, err = findHypervisorNodeInterface(sshRunner, v4, v6)
+	h.hostNetworkInfo, err = findHypervisorNodeInterface(sshRunner, v4, v6)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve hypervisor node interface for machine network: %w", err)
 	}
-	return ci, nil
+	// Open the external container port range (12000-65535/tcp) in the
+	// hypervisor firewall once, instead of per-port during each test.
+	if h.hostNetworkInfo != nil {
+		if err := configureFirewallForExternalContainerPorts(sshRunner, h.hostNetworkInfo.InfName); err != nil {
+			return nil, fmt.Errorf("failed to configure firewall for external container ports: %w", err)
+		}
+	}
+
+	bm := &baremetalInfra{base: h}
+
+	// Discover secondary network interface on hypervisor (optional).
+	secondaryNetInfo, err := findHypervisorNodeInterface(sshRunner, bmSecondaryIPv4Subnet, bmSecondaryIPv6Subnet)
+	if err == nil && secondaryNetInfo != nil {
+		secondaryNet := &network.ContainerEngineNetwork{
+			NetName: bmSecondaryNetworkName,
+			Configs: []network.ContainerEngineNetworkConfig{
+				{Subnet: bmSecondaryIPv4Subnet},
+				{Subnet: bmSecondaryIPv6Subnet},
+			}}
+		bm.secondaryNetwork = secondaryNet
+		bm.secondaryHostNetInfo = secondaryNetInfo
+	}
+
+	return bm, nil
+}
+
+func (ci *baremetalInfra) InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string]) {
+	// The hypervisor is on the same machine network as the cluster nodes.
+	return nil, nil
+}
+
+// enableSecondaryForwarding enables IPv4/IPv6 forwarding on the secondary
+// network interface of each cluster node. On baremetal, these interfaces are
+// pre-configured but may have forwarding disabled by default. The interface
+// name is discovered per-node since it may differ across nodes.
+func (ci *baremetalInfra) enableSecondaryForwarding(nodeNames []string, execNodeCmd func(nodeName string, cmd []string) (string, error)) error {
+	if ci.secondaryNetwork == nil {
+		return nil
+	}
+	for _, nodeName := range nodeNames {
+		output, err := execNodeCmd(nodeName, []string{"ip", "-j", "addr"})
+		if err != nil {
+			return fmt.Errorf("failed to get addresses from node %s: %w", nodeName, err)
+		}
+		ifName, err := findInterfaceBySubnet(output, bmSecondaryIPv4Subnet, bmSecondaryIPv6Subnet)
+		if err != nil {
+			return fmt.Errorf("failed to parse addresses from node %s: %w", nodeName, err)
+		}
+		if ifName == "" {
+			return fmt.Errorf("no secondary network interface found on node %s for subnets %s, %s", nodeName, bmSecondaryIPv4Subnet, bmSecondaryIPv6Subnet)
+		}
+		// The sysctl changes are runtime-only (lost on reboot) and are not reverted
+		// at teardown, which is acceptable for CI nodes.
+		for _, sysctl := range []string{
+			fmt.Sprintf("net.ipv4.conf.%s.forwarding=1", ifName),
+			fmt.Sprintf("net.ipv6.conf.%s.forwarding=1", ifName),
+		} {
+			if _, err := execNodeCmd(nodeName, []string{"sysctl", "-w", sysctl}); err != nil {
+				return fmt.Errorf("failed to set %s on node %s: %w", sysctl, nodeName, err)
+			}
+		}
+	}
+	return nil
+}
+
+// findInterfaceBySubnet parses ip -j addr output and returns the interface
+// name that has an address within one of the given subnets.
+func findInterfaceBySubnet(ipAddrJSON, v4Subnet, v6Subnet string) (string, error) {
+	var links []linkInfo
+	if err := json.Unmarshal([]byte(ipAddrJSON), &links); err != nil {
+		return "", fmt.Errorf("failed to parse ip addr JSON: %w", err)
+	}
+	for _, link := range links {
+		for _, addr := range link.AddrInfo {
+			if v4Subnet != "" {
+				if ok, _ := ipInCIDR(addr.Local, v4Subnet); ok {
+					return link.IfName, nil
+				}
+			}
+			if v6Subnet != "" {
+				if ok, _ := ipInCIDR(addr.Local, v6Subnet); ok {
+					return link.IfName, nil
+				}
+			}
+		}
+	}
+	return "", nil
+}
+
+func (ci *baremetalInfra) PrimaryNetwork() (api.Network, error) {
+	return ci.base.PrimaryNetwork()
 }
 
 func (ci *baremetalInfra) GetNetwork(name string) (api.Network, error) {
-	// Override "kind" network queries with the actual primary network name
-	// FUP: remove the override once this is fixed appropriately in u/s E2Es.
-	if name == "kind" {
-		framework.Logf("overriding kind network with actual primary network name %s for the query", primaryNetworkName)
-		name = primaryNetworkName
+	if name == bmSecondaryNetworkName && ci.secondaryNetwork != nil {
+		return ci.secondaryNetwork, nil
 	}
-	return ci.getNetwork(name)
-}
-
-func (ci *baremetalInfra) getNetwork(name string) (api.Network, error) {
-	// check primary network first.
-	if name == primaryNetworkName {
-		return ci.machineNetwork, nil
-	}
-	// fall back into container networks.
-	return ci.engine.GetNetwork(name)
-}
-
-func (ci *baremetalInfra) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
-	return ci.engine.ExecExternalContainerCommand(container, cmd)
-}
-
-func (ci *baremetalInfra) ExternalContainerPrimaryInterfaceName() string {
-	return ci.engine.ExternalContainerPrimaryInterfaceName()
-}
-
-func (ci *baremetalInfra) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
-	return ci.engine.GetExternalContainerLogs(container)
-}
-
-func (ci *baremetalInfra) GetExternalContainerPort() uint16 {
-	return ci.engine.GetExternalContainerPort()
+	return ci.base.GetNetwork(name)
 }
 
 func (ci *baremetalInfra) ListNetworks() ([]string, error) {
-	return ci.engine.ListNetworks()
+	return ci.base.ListNetworks()
 }
 
-func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
-	if container.Name == externalFRRContainerName && network.Name() == primaryNetworkName {
+func (ci *baremetalInfra) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
+	return ci.base.ExecExternalContainerCommand(container, cmd)
+}
+
+func (ci *baremetalInfra) ExternalContainerPrimaryInterfaceName() string {
+	return ci.base.ExternalContainerPrimaryInterfaceName()
+}
+
+func (ci *baremetalInfra) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
+	return ci.base.GetExternalContainerLogs(container)
+}
+
+func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
+	baseProvider := &baseContextProvider{
+		parent: ci.base,
+		engine: ci.base.engine.WithTestContext(context),
+	}
+	if ci.secondaryNetwork == nil {
+		return baseProvider
+	}
+	return &baremetalContextProvider{base: baseProvider, bm: ci}
+}
+
+// GetExternalContainerPort delegates to base and also configures the
+// hypervisor firewall for the allocated port.
+func (ci *baremetalInfra) GetExternalContainerPort() uint16 {
+	return ci.base.GetExternalContainerPort()
+}
+
+// GetExternalContainerNetworkInterface handles the FRR container special case
+// on the primary network, then delegates to base for everything else.
+func (ci *baremetalInfra) GetExternalContainerNetworkInterface(ec api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
+	if ec.Name == externalFRRContainerName && network.Name() == bmPrimaryNetworkName {
 		// frr container uses static ip configuration for ostestbm_net,
 		// querying it with podman inspect returns empty values, so build
 		// it explicitly.
-		if ci.machineNetworkGwInfo == nil {
+		if ci.base.hostNetworkInfo == nil {
 			return api.NetworkInterface{}, fmt.Errorf("can not find primary network gateway node for frr container")
 		}
 		return api.NetworkInterface{
 				IPv4:        frrContainerPrimaryNetIPv4,
 				IPv6:        frrContainerPrimaryNetIPv6,
-				IPv4Gateway: ci.machineNetworkGwInfo.IPv4,
-				IPv6Gateway: ci.machineNetworkGwInfo.IPv6,
+				IPv4Gateway: ci.base.hostNetworkInfo.IPv4,
+				IPv6Gateway: ci.base.hostNetworkInfo.IPv6,
 				InfName:     "eth0",
-				IPv4Prefix:  ci.machineNetworkGwInfo.IPv4Prefix,
-				IPv6Prefix:  ci.machineNetworkGwInfo.IPv6Prefix},
+				IPv4Prefix:  ci.base.hostNetworkInfo.IPv4Prefix,
+				IPv6Prefix:  ci.base.hostNetworkInfo.IPv6Prefix},
 			nil
 	}
-	return ci.engine.GetNetworkInterface(container.Name, network.Name())
+	// Cached secondary network container: return IPs from cache with
+	// secondary network prefix info.
+	if network.Name() == bmSecondaryNetworkName && ci.secondaryHostNetInfo != nil {
+		ci.base.mu.Lock()
+		cached, isCached := ci.base.externalContainers[ec.Name]
+		ci.base.mu.Unlock()
+		if isCached {
+			return api.NetworkInterface{
+				IPv4:       cached.IPv4,
+				IPv6:       cached.IPv6,
+				IPv4Prefix: ci.secondaryHostNetInfo.IPv4Prefix,
+				IPv6Prefix: ci.secondaryHostNetInfo.IPv6Prefix,
+				InfName:    ci.secondaryHostNetInfo.InfName,
+			}, nil
+		}
+	}
+	return ci.base.GetExternalContainerNetworkInterface(ec, network)
 }
 
-func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
-	ciWithTestContext := &baremetalInfra{
-		engine: ci.engine.WithTestContext(context)}
-	return ciWithTestContext
-}
-
-func (ci *baremetalInfra) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
-	return ci.engine.CreateExternalContainer(container)
-}
-
-func (ci *baremetalInfra) DeleteExternalContainer(container api.ExternalContainer) error {
-	return ci.engine.DeleteExternalContainer(container)
-}
-
-func (ci *baremetalInfra) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	return ci.engine.CreateNetwork(name, subnets...)
-}
-
-func (ci *baremetalInfra) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
-	return ci.engine.AttachNetwork(network, container)
-}
-
-func (ci *baremetalInfra) DetachNetwork(network api.Network, container string) error {
-	return ci.engine.DetachNetwork(network, container)
-}
-
-func (ci *baremetalInfra) DeleteNetwork(network api.Network) error {
-	return ci.engine.DeleteNetwork(network)
-}
-
+// hypervisorSshCmdRunner creates an SSH runner for the baremetal hypervisor.
+// Returns (nil, nil) when hypervisor access is not configured, for example
+// when SHARED_DIR is unset or the required files are absent. This is
+// expected when ovn-kubernetes-tests-ext runs with the list option
+// outside a CI environment.
 func hypervisorSshCmdRunner() (api.Runner, error) {
-	// Read hypervisor IP from shared directory
-	ip, err := readHypervisorIP()
+	ip, err := readSharedDirFile("server-ip", "hypervisor ip")
 	if err != nil {
 		return nil, err
 	}
 	if ip == "" {
-		return nil, nil // Not configured
+		return nil, nil
 	}
 
 	// Find SSH key for hypervisor access
-	sshKeyPath, err := findSSHKeyPath()
+	sshKeyPath, err := findClusterProfileFile("equinix-ssh-key", "packet-ssh-key")
 	if err != nil {
 		return nil, err
 	}
 	if sshKeyPath == "" {
-		return nil, nil // Not configured
+		return nil, nil
 	}
 
 	sshRunner, err := runner.NewSSHRunner(ip, hypervisorNodeUser, hypervisorSshport, sshKeyPath)
@@ -206,92 +291,6 @@ func hypervisorSshCmdRunner() (api.Runner, error) {
 	}
 
 	return sshRunner, nil
-}
-
-// readHypervisorIP reads the hypervisor IP from the SHARED_DIR/server-ip file.
-// Returns empty string if not configured, error if misconfigured.
-func readHypervisorIP() (string, error) {
-	sharedDir := os.Getenv("SHARED_DIR")
-	if sharedDir == "" {
-		return "", nil
-	}
-
-	ipFile := filepath.Join(sharedDir, "server-ip")
-	exists, err := fileExists(ipFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to check hypervisor ip file: %w", err)
-	}
-	if !exists {
-		return "", nil
-	}
-
-	data, err := os.ReadFile(ipFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to read hypervisor ip file: %w", err)
-	}
-
-	ip := strings.TrimSpace(string(data))
-	if ip == "" {
-		return "", fmt.Errorf("hypervisor ip file is empty")
-	}
-
-	return ip, nil
-}
-
-// findSSHKeyPath locates the SSH private key file for hypervisor access.
-// Tries equinix-ssh-key first, falls back to packet-ssh-key.
-// Returns empty string if not configured, error if misconfigured.
-func findSSHKeyPath() (string, error) {
-	clusterProfileDir := os.Getenv("CLUSTER_PROFILE_DIR")
-	if clusterProfileDir == "" {
-		return "", nil
-	}
-
-	// Try equinix-ssh-key first
-	equinixKey := filepath.Join(clusterProfileDir, "equinix-ssh-key")
-	exists, err := fileExists(equinixKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to check equinix-ssh-key: %w", err)
-	}
-	if exists {
-		return equinixKey, nil
-	}
-
-	// Fall back to packet-ssh-key
-	packetKey := filepath.Join(clusterProfileDir, "packet-ssh-key")
-	exists, err = fileExists(packetKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to check packet-ssh-key: %w", err)
-	}
-	if exists {
-		return packetKey, nil
-	}
-
-	return "", nil
-}
-
-// fileExists checks if a file exists and is accessible.
-// Returns (false, nil) if file doesn't exist, (false, error) for access errors.
-func fileExists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-type linkInfo struct {
-	IfName   string          `json:"ifname"`
-	Mac      string          `json:"address"`
-	AddrInfo []ipAddressInfo `json:"addr_info"`
-}
-
-type ipAddressInfo struct {
-	Family string `json:"family"`
-	Local  string `json:"local"`
 }
 
 // findHypervisorNodeInterface retrieves attached interface for the matching subnets from the hypervisor node.
@@ -348,6 +347,73 @@ func tryMatchLink(link linkInfo, v4Subnet, v6Subnet string) *api.NetworkInterfac
 
 	// Not a complete match, return nil
 	return nil
+}
+
+// configureFirewallForExternalContainerPorts opens the external container port
+// range (12000-65535/tcp) in the hypervisor firewall. The range matches the
+// port allocator in the container engine. The rule is added as permanent and
+// reloaded so it survives firewall restarts during the test run.
+func configureFirewallForExternalContainerPorts(runner api.Runner, interfaceName string) error {
+	zone, err := runner.Run("firewall-cmd", "--get-zone-of-interface="+interfaceName)
+	if err != nil {
+		return fmt.Errorf("failed to get firewall zone for interface %s: %w", interfaceName, err)
+	}
+	zone = strings.TrimSpace(zone)
+	if _, err := runner.Run("firewall-cmd", "--zone="+zone, "--add-port=12000-65535/tcp", "--permanent"); err != nil {
+		return fmt.Errorf("failed to add firewall port range 12000-65535/tcp to zone %s: %w", zone, err)
+	}
+	if _, err := runner.Run("firewall-cmd", "--reload"); err != nil {
+		return fmt.Errorf("failed to reload firewall: %w", err)
+	}
+	return nil
+}
+
+// baremetalContextProvider wraps baseContextProvider with secondary network
+// awareness. On baremetal, the secondary network is pre-configured by CI and
+// containers use host networking, so network creation/deletion and network
+// attach/detach are no-ops.
+type baremetalContextProvider struct {
+	base *baseContextProvider
+	bm   *baremetalInfra
+}
+
+func (p *baremetalContextProvider) CreateNetwork(name string, subnets ...string) (api.Network, error) {
+	if name == bmSecondaryNetworkName {
+		return p.bm.secondaryNetwork, nil
+	}
+	return p.base.CreateNetwork(name, subnets...)
+}
+
+func (p *baremetalContextProvider) DeleteNetwork(network api.Network) error {
+	if network.Name() == bmSecondaryNetworkName {
+		return nil
+	}
+	return p.base.DeleteNetwork(network)
+}
+
+func (p *baremetalContextProvider) CreateExternalContainer(ec api.ExternalContainer) (api.ExternalContainer, error) {
+	if ec.Network != nil && ec.Network.Name() == bmSecondaryNetworkName {
+		return p.bm.base.getOrCreateHostNetworkedContainer(ec, p.bm.secondaryHostNetInfo)
+	}
+	return p.base.CreateExternalContainer(ec)
+}
+
+func (p *baremetalContextProvider) DeleteExternalContainer(ec api.ExternalContainer) error {
+	return p.base.DeleteExternalContainer(ec)
+}
+
+func (p *baremetalContextProvider) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
+	if network.Name() == bmSecondaryNetworkName {
+		return api.NetworkInterface{}, nil
+	}
+	return p.base.AttachNetwork(network, instance)
+}
+
+func (p *baremetalContextProvider) DetachNetwork(network api.Network, instance string) error {
+	if network.Name() == bmSecondaryNetworkName {
+		return nil
+	}
+	return p.base.DetachNetwork(network, instance)
 }
 
 func ipInCIDR(ipStr, cidrStr string) (bool, error) {
