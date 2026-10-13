@@ -66,6 +66,10 @@ func (m openshift) GetAgnHostContainerImage() string {
 	return "registry.k8s.io/e2e-test-images/agnhost:2.40"
 }
 
+func (m openshift) OVNControllerLogPath() string {
+	return "/var/log/ovn/acl-audit-log.log"
+}
+
 func (m openshift) IsConfigurationEnabled(config api.Config) bool {
 	return false
 }
