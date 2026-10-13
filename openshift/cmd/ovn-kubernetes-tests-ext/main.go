@@ -166,6 +166,14 @@ func main() {
 
 	specs = specs.Select(shouldIncludeTest)
 
+	// skip tests that need external host if not available
+	specs.AddAfterEach(func(res *extensiontests.ExtensionTestResult) {
+		if res.Result == extensiontests.ResultFailed &&
+			strings.Contains(res.Error, ocpinfraprovider.ErrExternalInfraNotAvailable) {
+			res.Result = extensiontests.ResultSkipped
+		}
+	})
+
 	ovnTestsExtension.AddSpecs(specs)
 	extensionRegistry.Register(ovnTestsExtension)
 	root := &cobra.Command{
