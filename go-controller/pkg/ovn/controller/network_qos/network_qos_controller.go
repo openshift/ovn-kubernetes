@@ -84,6 +84,9 @@ type Controller struct {
 	// nad lister, only valid for default network controller when multi-network is enabled
 	nadLister nadlisterv1.NetworkAttachmentDefinitionLister
 	nadSynced cache.InformerSynced
+
+	handlerRegistrations []handlerRegistration
+	shutdownOnce         sync.Once
 }
 
 type eventData[T metav1.Object] struct {
@@ -116,6 +119,37 @@ func (e *eventData[T]) namespace() string {
 	return ""
 }
 
+type handlerRegistration struct {
+	informer cache.SharedIndexInformer
+	handle   cache.ResourceEventHandlerRegistration
+}
+
+func (c *Controller) addEventHandler(informer cache.SharedIndexInformer, handler cache.ResourceEventHandler) error {
+	handle, err := informer.AddEventHandler(handler)
+	if err == nil {
+		c.handlerRegistrations = append(c.handlerRegistrations, handlerRegistration{informer, handle})
+	}
+	return err
+}
+
+// shutdown detaches only this controller's listeners from the shared informers.
+// In-flight callbacks may finish, but additions to shut-down queues are ignored.
+func (c *Controller) shutdown() {
+	c.shutdownOnce.Do(func() {
+		for _, queue := range []interface{ ShutDown() }{c.nqosQueue, c.nqosNamespaceQueue, c.nqosPodQueue} {
+			if queue != nil {
+				queue.ShutDown()
+			}
+		}
+		for _, registration := range c.handlerRegistrations {
+			if err := registration.informer.RemoveEventHandler(registration.handle); err != nil {
+				klog.Errorf("%s: failed to remove NetworkQoS event handler: %v", c.controllerName, err)
+			}
+		}
+		c.handlerRegistrations = nil
+	})
+}
+
 // NewController returns a new *Controller.
 func NewController(
 	controllerName string,
@@ -145,6 +179,12 @@ func NewController(
 		nodeName:          nodeName,
 		nqosCache:         syncmap.NewSyncMap[*networkQoSState](),
 	}
+	initialized := false
+	defer func() {
+		if !initialized {
+			c.shutdown()
+		}
+	}()
 
 	klog.V(5).Infof("Setting up event handlers for Network QoS controller %s", controllerName)
 	// setup nqos informers, listers, queue
@@ -154,7 +194,7 @@ func NewController(
 		controllerutil.DefaultRateLimiter[string](),
 		workqueue.TypedRateLimitingQueueConfig[string]{Name: "networkQoS"},
 	)
-	_, err := nqosInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	err := c.addEventHandler(nqosInformer.Informer(), factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNQOSAdd,
 		UpdateFunc: c.onNQOSUpdate,
 		DeleteFunc: c.onNQOSDelete,
@@ -170,7 +210,7 @@ func NewController(
 		controllerutil.DefaultRateLimiter[*eventData[*corev1.Namespace]](),
 		workqueue.TypedRateLimitingQueueConfig[*eventData[*corev1.Namespace]]{Name: "nqosNamespaces"},
 	)
-	_, err = namespaceInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	err = c.addEventHandler(namespaceInformer.Informer(), factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNQOSNamespaceAdd,
 		UpdateFunc: c.onNQOSNamespaceUpdate,
 		DeleteFunc: c.onNQOSNamespaceDelete,
@@ -186,7 +226,7 @@ func NewController(
 		controllerutil.DefaultRateLimiter[*eventData[*corev1.Pod]](),
 		workqueue.TypedRateLimitingQueueConfig[*eventData[*corev1.Pod]]{Name: "nqosPods"},
 	)
-	_, err = podInformer.Informer().AddEventHandler(factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
+	err = c.addEventHandler(podInformer.Informer(), factory.WithUpdateHandlingForObjReplace(cache.ResourceEventHandlerFuncs{
 		AddFunc:    c.onNQOSPodAdd,
 		UpdateFunc: c.onNQOSPodUpdate,
 		DeleteFunc: c.onNQOSPodDelete,
@@ -202,6 +242,7 @@ func NewController(
 	}
 
 	c.eventRecorder = recorder
+	initialized = true
 	return c, nil
 }
 
@@ -209,6 +250,12 @@ func NewController(
 // objects (pods, namespaces, nqoses) will be handled in parallel.
 func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
+	wg := &sync.WaitGroup{}
+	defer func() {
+		c.shutdown()
+		wg.Wait()
+		c.teardownMetricsCollector()
+	}()
 
 	klog.Infof("Starting controller %s", c.controllerName)
 
@@ -233,7 +280,6 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 		klog.Errorf("Failed to repair Network QoS: %v", err)
 	}
 
-	wg := &sync.WaitGroup{}
 	// Start the workers after the repair loop to avoid races
 	klog.V(5).Info("Starting Network QoS workers")
 	for i := 0; i < threadiness; i++ {
@@ -271,11 +317,6 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) {
 	<-stopCh
 
 	klog.Infof("Shutting down controller %s", c.controllerName)
-	c.nqosQueue.ShutDown()
-	c.nqosNamespaceQueue.ShutDown()
-	c.nqosPodQueue.ShutDown()
-	c.teardownMetricsCollector()
-	wg.Wait()
 }
 
 // worker runs a worker thread that just dequeues items, processes them, and
@@ -340,7 +381,7 @@ func (c *Controller) onNQOSUpdate(oldObj, newObj any) {
 
 // onNQOSDelete queues the NQOS for processing.
 func (c *Controller) onNQOSDelete(obj interface{}) {
-	key, err := cache.MetaNamespaceKeyFunc(obj)
+	key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("couldn't get key for object %+v: %v", obj, err))
 		return
@@ -350,6 +391,9 @@ func (c *Controller) onNQOSDelete(obj interface{}) {
 
 // onNQOSNamespaceAdd queues the namespace for processing.
 func (c *Controller) onNQOSNamespaceAdd(obj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	ns, ok := obj.(*corev1.Namespace)
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("expecting Namespace but received %T", obj))
@@ -364,6 +408,9 @@ func (c *Controller) onNQOSNamespaceAdd(obj interface{}) {
 
 // onNQOSNamespaceUpdate queues the namespace for processing.
 func (c *Controller) onNQOSNamespaceUpdate(oldObj, newObj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	oldNamespace, ok := oldObj.(*corev1.Namespace)
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("expecting Namespace but received %T", oldObj))
@@ -393,6 +440,9 @@ func (c *Controller) onNQOSNamespaceUpdate(oldObj, newObj interface{}) {
 
 // onNQOSNamespaceDelete queues the namespace for processing.
 func (c *Controller) onNQOSNamespaceDelete(obj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	ns, ok := obj.(*corev1.Namespace)
 	if !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
@@ -413,6 +463,9 @@ func (c *Controller) onNQOSNamespaceDelete(obj interface{}) {
 
 // onNQOSPodAdd queues the pod for processing.
 func (c *Controller) onNQOSPodAdd(obj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("expecting Pod but received %T", obj))
@@ -422,11 +475,18 @@ func (c *Controller) onNQOSPodAdd(obj interface{}) {
 		utilruntime.HandleError(fmt.Errorf("empty pod"))
 		return
 	}
+	// Policy reconciliation excludes host-network Pods from address sets.
+	if pod.Spec.HostNetwork {
+		return
+	}
 	c.nqosPodQueue.Add(newEventData(nil, pod))
 }
 
 // onNQOSPodUpdate queues the pod for processing.
 func (c *Controller) onNQOSPodUpdate(oldObj, newObj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	oldPod, ok := oldObj.(*corev1.Pod)
 	if !ok {
 		utilruntime.HandleError(fmt.Errorf("expecting Pod but received %T", oldObj))
@@ -439,6 +499,9 @@ func (c *Controller) onNQOSPodUpdate(oldObj, newObj interface{}) {
 	}
 	if oldPod == nil || newPod == nil {
 		utilruntime.HandleError(fmt.Errorf("empty pod"))
+		return
+	}
+	if oldPod.Spec.HostNetwork && newPod.Spec.HostNetwork {
 		return
 	}
 	// don't process resync or objects that are marked for deletion
@@ -477,6 +540,9 @@ func (c *Controller) podNetworkResolver() func(nadKey string) string {
 
 // onNQOSPodDelete queues the pod for processing.
 func (c *Controller) onNQOSPodDelete(obj interface{}) {
+	if !c.hasNetworkQoS() {
+		return
+	}
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
@@ -490,7 +556,7 @@ func (c *Controller) onNQOSPodDelete(obj interface{}) {
 			return
 		}
 	}
-	if pod != nil {
+	if pod != nil && !pod.Spec.HostNetwork {
 		c.nqosPodQueue.Add(newEventData(pod, nil))
 	}
 }

@@ -477,45 +477,6 @@ func CreateOrAddNextHopsToLogicalRouterPolicyWithPredicateOps(nbClient libovsdbc
 	return m.CreateOrUpdateOps(ops, opModels...)
 }
 
-// ReplaceNextHopForLogicalRouterPolicyWithPredicateOps replaces the Nexthop for logical router policies
-// matching the given predicate. It first deletes the old Nexthop and then adds the new Nexthop for each policy.
-// Returns the corresponding operations.
-func ReplaceNextHopForLogicalRouterPolicyWithPredicateOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, p logicalRouterPolicyPredicate,
-	oldNextHop, newNextHop string) ([]ovsdb.Operation, error) {
-	lrps, err := FindLogicalRouterPoliciesWithPredicate(nbClient, p)
-	if err != nil {
-		return nil, err
-	}
-	for _, lrp := range lrps {
-		lrp.Nexthops = []string{oldNextHop}
-		opModel := operationModel{
-			Model:            lrp,
-			OnModelMutations: []interface{}{&lrp.Nexthops},
-			ErrNotFound:      false,
-			BulkOp:           false,
-		}
-
-		m := newModelClient(nbClient)
-		var err error
-		ops, err = m.DeleteOps(ops, opModel)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get delete old nexthop %s ops: %w", oldNextHop, err)
-		}
-		lrp.Nexthops = []string{newNextHop}
-		opModel = operationModel{
-			Model:            lrp,
-			OnModelMutations: []interface{}{&lrp.Nexthops},
-			ErrNotFound:      false,
-			BulkOp:           false,
-		}
-		ops, err = m.CreateOrUpdateOps(ops, opModel)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get create or update old nexthop %s ops: %w", oldNextHop, err)
-		}
-	}
-	return ops, nil
-}
-
 // DeleteNextHopsFromLogicalRouterPolicyOps removes the Nexthops from the
 // provided logical router policies.
 func DeleteNextHopsFromLogicalRouterPolicyOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation, routerName string, lrps []*nbdb.LogicalRouterPolicy, nextHops ...string) ([]ovsdb.Operation, error) {
@@ -761,6 +722,34 @@ func CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(nbClient libovsdbcl
 		opModels[0].ModelPredicate = p
 	}
 
+	m := newModelClient(nbClient)
+	return m.CreateOrUpdateOps(ops, opModels...)
+}
+
+// CreateLogicalRouterStaticRoutesOps creates new static routes and attaches them
+// to the named router with one mutation. The caller is responsible for ensuring
+// the routes do not already exist on the router.
+func CreateLogicalRouterStaticRoutesOps(nbClient libovsdbclient.Client, ops []ovsdb.Operation,
+	routerName string, routes ...*nbdb.LogicalRouterStaticRoute) ([]ovsdb.Operation, error) {
+	if len(routes) == 0 {
+		return ops, nil
+	}
+	router := &nbdb.LogicalRouter{Name: routerName}
+	opModels := make([]operationModel, 0, len(routes)+1)
+	for _, route := range routes {
+		if route.UUID != "" {
+			return nil, fmt.Errorf("new static route must not have a UUID")
+		}
+		opModels = append(opModels, operationModel{
+			Model:   route,
+			DoAfter: func() { router.StaticRoutes = append(router.StaticRoutes, route.UUID) },
+		})
+	}
+	opModels = append(opModels, operationModel{
+		Model:            router,
+		OnModelMutations: []interface{}{&router.StaticRoutes},
+		ErrNotFound:      true,
+	})
 	m := newModelClient(nbClient)
 	return m.CreateOrUpdateOps(ops, opModels...)
 }

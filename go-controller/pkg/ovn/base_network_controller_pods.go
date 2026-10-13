@@ -19,6 +19,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
+	k8sretry "k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 
 	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
@@ -597,6 +598,12 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 		addresses[0] = addresses[0] + " " + podIfAddr.IP.String()
 	}
 
+	macSecurityDisabled := bnc.MACSecurityMode() == ovntypes.MACSecurityModeDisabled
+	if macSecurityDisabled {
+		// steer frames destined to unknown MAC addresses to this port (e.g. nested VMs behind this port).
+		addresses = append(addresses, "unknown")
+	}
+
 	// Skip address configuration if LSP is disabled since it will install
 	// l2 look up flows that harms some topologies
 	if lsp.Enabled == nil || *lsp.Enabled {
@@ -617,6 +624,10 @@ func (bnc *BaseNetworkController) addLogicalPortToNetwork(pod *corev1.Pod, nadKe
 
 	// CNI depends on the flows from port security, delay setting it until end
 	lsp.PortSecurity = addresses
+	if macSecurityDisabled {
+		// drop MAC/IP addresses restriction on this port.
+		lsp.PortSecurity = nil
+	}
 	customFields = append(customFields, libovsdbops.LogicalSwitchPortPortSecurity)
 
 	// On layer2 topology with interconnect, we need to add specific port config
@@ -726,22 +737,40 @@ func (bnc *BaseNetworkController) delLSPOps(logicalPort, switchName,
 	return ops, nil
 }
 
+func (bnc *BaseNetworkController) addPodToNamespacePortGroupOps(ops []ovsdb.Operation, ns, portUUID string) ([]ovsdb.Operation, error) {
+	if !bnc.needNamespacedPortGroup() || portUUID == "" {
+		return ops, nil
+	}
+
+	// Namespace handling owns group lifetime. A pod that outlives namespace
+	// teardown must not recreate the group; missing dependencies are retried.
+	pgName := bnc.getNamespacePortGroupName(ns)
+	// The namespace handler may be only milliseconds behind pod setup. Retry
+	// just this cache lookup briefly before falling back to a full pod retry.
+	var membershipOps []ovsdb.Operation
+	err := k8sretry.OnError(k8sretry.DefaultRetry, func(err error) bool {
+		return errors.Is(err, libovsdbclient.ErrNotFound)
+	}, func() error {
+		var err error
+		membershipOps, err = libovsdbops.AddPortsToPortGroupOps(bnc.nbClient, ops, pgName, portUUID)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to add pod port %s to namespace port group %s: %w", portUUID, pgName, err)
+	}
+	return membershipOps, nil
+}
+
 func (bnc *BaseNetworkController) deletePodFromNamespace(ns string, portUUID string) ([]ovsdb.Operation, error) {
-	// for UDN, namespace may be not managed
-	nsInfo, nsUnlock := bnc.getNamespaceLocked(ns, true)
-	if nsInfo == nil {
+	if !bnc.needNamespacedPortGroup() || portUUID == "" {
 		return nil, nil
 	}
-	defer nsUnlock()
-	var ops []ovsdb.Operation
-	var err error
 
-	if nsInfo.portGroupName != "" && len(portUUID) > 0 {
-		if ops, err = libovsdbops.DeletePortsFromPortGroupOps(bnc.nbClient, ops, nsInfo.portGroupName, portUUID); err != nil {
-			return nil, err
-		}
+	pgName := bnc.getNamespacePortGroupName(ns)
+	ops, err := libovsdbops.DeletePortsFromPortGroupOps(bnc.nbClient, nil, pgName, portUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete pod port %s from namespace port group %s: %w", portUUID, pgName, err)
 	}
-
 	return ops, nil
 }
 

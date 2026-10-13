@@ -190,6 +190,7 @@ nav:
     - OVS Dynamic CPU Affinity: features/ovs-dynamic-cpu-affinity.md
     - Hardware Acceleration:
       - features/hardware-offload/index.md
+      - DPU Support: features/hardware-offload/dpu-support.md
       - OVS Acceleration with kernel datapath: features/hardware-offload/ovs-kernel.md
       - OVS Acceleration with DOCA datapath: features/hardware-offload/ovs-doca.md
     - BGP Integration:
@@ -204,7 +205,12 @@ nav:
     - Logging: troubleshooting/logging.md
   - Observability:
     - observability/index.md
-    - Metrics: observability/metrics.md
+    - Metrics:
+      - Overview: observability/metrics.md
+      - OVN-Kubernetes control plane: observability/metrics/ovnkube-control-plane.md
+      - OVN-Kubernetes node: observability/metrics/ovnkube-node.md
+      - OVN: observability/metrics/ovn.md
+      - Open vSwitch: observability/metrics/ovs.md
     - SDN Dashboard: observability/sdn-dashboard.md
     - OVN observability: observability/ovn-observability.md
   - Enhancement Proposals:

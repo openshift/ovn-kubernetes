@@ -13,10 +13,12 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gaissmai/cidrtree"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,9 +56,10 @@ import (
 )
 
 const (
-	rulePriority       = 6000 // the priority of the ip routing rules created by the controller. Egress Service priority is 5000.
-	ruleFwMarkPriority = 5999 // the priority of the ip routing rules for LGW mode when we want to skip processing eip ip rules because dst is a node ip.
-	maxRetries         = 15
+	rulePriority         = 6000 // the priority of the ip routing rules created by the controller. Egress Service priority is 5000.
+	ruleFwMarkPriority   = 4999 // bypass EgressService (5000) and EgressIP (6000) rules for traffic to node IPs in LGW.
+	legacyFwMarkPriority = 5999 // former bypass priority, removed precisely on upgrade.
+	maxRetries           = 15
 )
 
 var (
@@ -256,6 +259,10 @@ func (c *Controller) Run(stopCh <-chan struct{}, wg *sync.WaitGroup, threads int
 	// Any rules created with this priority that we do not recognize will be removed.
 	if err := c.ruleManager.OwnPriority(rulePriority); err != nil {
 		return fmt.Errorf("failed to own priority %d for IP rules: %v", rulePriority, err)
+	}
+	// The bypass rule moved from priority 5999 to 4999; remove the old rule on upgrade.
+	if err := cleanupLegacyNodeIPFwMarkRules(c.v4, c.v6); err != nil {
+		klog.Warningf("Failed to clean up legacy node IP fwmark rules: %v", err)
 	}
 
 	// Initialize nftables chains, maps, and rules for EgressIP SNAT and secondary interface drop
@@ -1519,6 +1526,38 @@ func isValidIP(ipStr string) bool {
 		return false
 	}
 	return len(ip) > 0
+}
+
+func cleanupLegacyNodeIPFwMarkRules(v4, v6 bool) error {
+	// The new rule manager has no record of a rule left by an older process,
+	// so its Delete method cannot remove the legacy rule.
+	ops := util.GetNetLinkOps()
+	deleteRule := func(family int) error {
+		rule := netlink.NewRule()
+		rule.Priority = legacyFwMarkPriority
+		rule.Mark = types.EgressIPConnmarkMark
+		rule.Table = unix.RT_TABLE_MAIN
+		rule.Family = family
+		if err := ops.RuleDel(rule); err != nil && !errors.Is(err, syscall.ENOENT) {
+			return fmt.Errorf("failed to delete legacy node IP fwmark rule %s: %w", rule.String(), err)
+		}
+		return nil
+	}
+
+	var errs []error
+	if v4 {
+		err := deleteRule(netlink.FAMILY_V4)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if v6 {
+		err := deleteRule(netlink.FAMILY_V6)
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return utilerrors.Join(errs...)
 }
 
 func getNodeIPFwMarkIPRule(ipFamily int) iprulemanager.IPRule {
