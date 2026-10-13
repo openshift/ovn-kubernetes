@@ -151,7 +151,7 @@ func isLocalGatewayMode(network *operv1.Network) bool {
 
 func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return api.NetworkInterface{}, fmt.Errorf("cannot get network interface for external container %q: external container infrastructure is not available on this platform", container.Name)
 	}
 	return o.clusterInfra.GetExternalContainerNetworkInterface(container, network)
 }
@@ -223,7 +223,7 @@ func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string
 
 func (o *OpenshiftInfraProvider) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("cannot exec into external container %q: external container infrastructure is not available on this platform", container.Name)
 	}
 	return o.clusterInfra.ExecExternalContainerCommand(container, cmd)
 }
@@ -237,7 +237,7 @@ func (o *OpenshiftInfraProvider) ExternalContainerPrimaryInterfaceName() string 
 
 func (o *OpenshiftInfraProvider) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("cannot get logs for external container %q: external container infrastructure is not available on this platform", container.Name)
 	}
 	return o.clusterInfra.GetExternalContainerLogs(container)
 }
@@ -251,9 +251,17 @@ func (o *OpenshiftInfraProvider) GetExternalContainerPort() uint16 {
 
 func (o *OpenshiftInfraProvider) ListNetworks() ([]string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("cannot list external container networks: external container infrastructure is not available on this platform")
 	}
 	return o.clusterInfra.ListNetworks()
+}
+
+// IsExternalContainerAvailable reports whether external container infrastructure
+// (e.g. the FRR container used by BGP/EVPN scenarios) is available. It is only
+// populated on bare-metal clusters; cloud platforms (Azure, AWS, GCP) have none,
+// so tests must skip external container connectivity checks when this returns false.
+func (o *OpenshiftInfraProvider) IsExternalContainerAvailable() bool {
+	return o.clusterInfra != nil
 }
 
 func (o *OpenshiftInfraProvider) NewTestContext() api.Context {
