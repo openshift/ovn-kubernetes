@@ -10,7 +10,6 @@ var (
 	// E2E tests are written with the support of ginkgo. ginkgo tests may contain Labels.
 	LabelToLabelMaps = map[string][]string{
 		"[Disabled:Unimplemented]": {
-			`[Feature:Service]`,
 			`[Feature:NetworkPolicy]`,
 			`[Feature:AdminNetworkPolicy]`,
 			`[Feature:BaselineNetworkPolicy]`,
@@ -106,9 +105,17 @@ var (
 			// These tests need bgpServerNetwork "bgpnet" which is not configured
 			// for downstream tests, so disable it.
 			"It cannot reach an external server on a different network",
+			// These tests attach an external container to the primary network,
+			// which the downstream lanes do not provide.
+			"should handle IP fragments",
+			"should listen on each host addresses",
+			"should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP",
 		},
 		// tests that rely on special configuration that we do not yet support
-		"[Disabled:SpecialConfig]": {},
+		"[Disabled:SpecialConfig]": {
+			// MetalLB is not deployed on the downstream lanes.
+			"Load Balancer Service Tests with MetalLB",
+		},
 		// tests that are known broken and need to be fixed upstream or in openshift
 		// always add an issue here
 		"[Disabled:Broken]": {},
