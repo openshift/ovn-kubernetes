@@ -482,6 +482,17 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	err = nc.Start(context.Background())
 	if err != nil {
 		nc.Stop()
+		// Start may have partially programmed host or OVN state before it
+		// returned an error. Retain the controller as pending deletion and use
+		// the normal cleanup path so a failed cleanup is retried before another
+		// start attempt.
+		c.setNetworkState(networkName, &networkControllerState{
+			controller:         nc,
+			stoppedAndDeleting: true,
+		})
+		if cleanupErr := c.deleteNetwork(networkName); cleanupErr != nil {
+			return fmt.Errorf("failed to start network %s: %w", networkName, errors.Join(err, cleanupErr))
+		}
 		return fmt.Errorf("failed to start network %s: %w", networkName, err)
 	}
 	c.setNetworkState(network.GetNetworkName(), &networkControllerState{controller: nc})
