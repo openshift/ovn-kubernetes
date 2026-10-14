@@ -1425,7 +1425,7 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 			if eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity && utilnet.IsIPv6(eIP) {
 				ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
 				//ipv6Capacity := eNode.egressIPConfig.Capacity.IPv6 - 1
-				ipv6Capacity := eNode.egressIPConfig.Capacity.IPv6 - 1 // Fix for 4.18
+				ipv6Capacity := eNode.egressIPConfig.Capacity.IPv6 // Fix for 4.18
 				ipv6Remaining := ipv6Capacity - ipv6Allocated
 
 				klog.V(5).Infof("IPv6 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
