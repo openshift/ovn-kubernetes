@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 	configv1 "github.com/openshift/api/config/v1"
 	operv1 "github.com/openshift/api/operator/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
@@ -16,6 +17,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
@@ -26,6 +29,7 @@ import (
 )
 
 type OpenshiftInfraProvider struct {
+	ext                     *extension.Extension
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
@@ -33,7 +37,7 @@ type OpenshiftInfraProvider struct {
 	clusterInfra            *baremetalInfra
 }
 
-func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
+func New(config *rest.Config, ext *extension.Extension) (*OpenshiftInfraProvider, error) {
 	ovnkconfig.Kubernetes.DNSServiceNamespace = "openshift-dns"
 	ovnkconfig.Kubernetes.DNSServiceName = "dns-default"
 	clusterInfra, err := initializeClusterInfra(config)
@@ -43,6 +47,7 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	o := &OpenshiftInfraProvider{
 		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
+		ext:          ext,
 	}
 	if err = o.initClusterObjects(config); err != nil {
 		return nil, err
@@ -86,6 +91,8 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 
 // configureOVNGatewayMode detects and configures the OVN gateway mode for tests
 func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
+	// Add the agnhost image to the required images
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
 	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
 		return
 	}
@@ -170,8 +177,16 @@ func (o *OpenshiftInfraProvider) GetDefaultTimeoutContext() *framework.TimeoutCo
 	return timeouts
 }
 
-func (o OpenshiftInfraProvider) PreloadImages(images []string) {
-	// no-op: OpenShift clusters pull images at runtime
+func (o *OpenshiftInfraProvider) PreloadImages(images []deploymentconfigapi.ImageConfig) {
+	for _, ri := range images {
+		img, err := extensionImageFromPullSpec(ri.PullSpec)
+		if err != nil {
+			framework.Logf("failed to register test image %q: %v", ri.PullSpec, err)
+			continue
+		}
+		img.Index = int(ri.ImageID)
+		o.ext.RegisterImage(img)
+	}
 }
 
 func (o *OpenshiftInfraProvider) Name() string {
@@ -313,8 +328,4 @@ func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 		panic("not implemented")
 	}
 	return o.externalContainerContextProvider.DeleteNetwork(network)
-}
-
-func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
-	panic("not implemented")
 }

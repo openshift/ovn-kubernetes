@@ -1,12 +1,48 @@
-package main
+package infraprovider
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 )
+
+func TestFedoraImageUsesConfiguredRepository(t *testing.T) {
+	const tag = "e2e-quay-io-kubevirt-fedora-with-test-tooling-container-disk-v1-8-2-DmMayTpvDZVswLv0"
+
+	for _, repo := range []string{
+		"",
+		"quay.io/openshift/community-e2e-images",
+		"mirror.example.com:5000/e2e",
+	} {
+		t.Run(repo, func(t *testing.T) {
+			t.Setenv("KUBE_TEST_REPO", repo)
+
+			want := ocpdeploymentconfig.FedoraKubevirtContainerDiskImage
+			if repo != "" {
+				want = repo + ":" + tag
+			}
+
+			got := deploymentconfig.Get().
+				GetImage(api.FedoraKubevirtContainerDisk).PullSpec
+			if got != want {
+				t.Fatalf("repo %q: got %q, want %q", repo, got, want)
+			}
+			found := false
+			for _, image := range deploymentconfig.Get().GetRequiredImages() {
+				if image.PullSpec == ocpdeploymentconfig.FedoraKubevirtContainerDiskImage {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("discovery must advertise the original Fedora pullspec")
+			}
+		})
+	}
+}
 
 func TestSplitImagePullSpec(t *testing.T) {
 	t.Parallel()
@@ -151,44 +187,5 @@ func TestExtensionImageFromPullSpec(t *testing.T) {
 
 	if _, err := extensionImageFromPullSpec(""); err == nil {
 		t.Fatal("expected error for empty pullspec")
-	}
-}
-
-func TestRegisterTestImages(t *testing.T) {
-	if len(requiredImages) == 0 {
-		t.Fatal("requiredImages is empty")
-	}
-
-	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
-	err := registerTestImages(ext)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if got, want := len(ext.Images), len(requiredImages); got != want {
-		t.Fatalf("registered %d images, want %d from requiredImages", got, want)
-	}
-
-	type imageKey struct {
-		index    int
-		pullSpec string
-	}
-	want := make(map[imageKey]int)
-	for _, ri := range requiredImages {
-		want[imageKey{ri.index, ri.pullSpec}]++
-	}
-
-	got := make(map[imageKey]int, len(ext.Images))
-	for _, img := range ext.Images {
-		got[imageKey{img.Index, fmt.Sprintf("%s/%s:%s", img.Registry, img.Name, img.Version)}]++
-	}
-
-	if len(got) != len(want) {
-		t.Fatalf("registered %d unique images, want %d", len(got), len(want))
-	}
-	for key, count := range want {
-		if got[key] != count {
-			t.Errorf("image %+v: got count %d, want %d", key, got[key], count)
-		}
 	}
 }
