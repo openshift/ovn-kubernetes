@@ -16,7 +16,6 @@ type AddressSet struct {
 	Addresses   []string          `ovsdb:"addresses"`
 	ExternalIDs map[string]string `ovsdb:"external_ids"`
 	Name        string            `ovsdb:"name"`
-	Options     map[string]string `ovsdb:"options"`
 }
 
 func (a *AddressSet) GetUUID() string {
@@ -85,41 +84,10 @@ func (a *AddressSet) GetName() string {
 	return a.Name
 }
 
-func (a *AddressSet) GetOptions() map[string]string {
-	return a.Options
-}
-
-func copyAddressSetOptions(a map[string]string) map[string]string {
-	if a == nil {
-		return nil
-	}
-	b := make(map[string]string, len(a))
-	for k, v := range a {
-		b[k] = v
-	}
-	return b
-}
-
-func equalAddressSetOptions(a, b map[string]string) bool {
-	if (a == nil) != (b == nil) {
-		return false
-	}
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if w, ok := b[k]; !ok || v != w {
-			return false
-		}
-	}
-	return true
-}
-
 func (a *AddressSet) DeepCopyInto(b *AddressSet) {
 	*b = *a
 	b.Addresses = copyAddressSetAddresses(a.Addresses)
 	b.ExternalIDs = copyAddressSetExternalIDs(a.ExternalIDs)
-	b.Options = copyAddressSetOptions(a.Options)
 }
 
 func (a *AddressSet) DeepCopy() *AddressSet {
@@ -141,8 +109,7 @@ func (a *AddressSet) Equals(b *AddressSet) bool {
 	return a.UUID == b.UUID &&
 		equalAddressSetAddresses(a.Addresses, b.Addresses) &&
 		equalAddressSetExternalIDs(a.ExternalIDs, b.ExternalIDs) &&
-		a.Name == b.Name &&
-		equalAddressSetOptions(a.Options, b.Options)
+		a.Name == b.Name
 }
 
 func (a *AddressSet) EqualsModel(b model.Model) bool {

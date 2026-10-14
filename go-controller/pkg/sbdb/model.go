@@ -60,7 +60,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Southbound",
-  "version": "21.13.0",
+  "version": "21.8.0",
   "tables": {
     "ACL_ID": {
       "columns": {
@@ -89,18 +89,6 @@ var schema = `{
         },
         "name": {
           "type": "string"
-        },
-        "options": {
-          "type": {
-            "key": {
-              "type": "string"
-            },
-            "value": {
-              "type": "string"
-            },
-            "min": 0,
-            "max": "unlimited"
-          }
         }
       },
       "indexes": [
@@ -1398,7 +1386,7 @@ var schema = `{
             "key": {
               "type": "integer",
               "minInteger": 0,
-              "maxInteger": 34
+              "maxInteger": 33
             }
           }
         },
@@ -1959,9 +1947,6 @@ var schema = `{
           "type": "boolean"
         },
         "nb_cfg": {
-          "type": "integer"
-        },
-        "nb_cfg_timestamp": {
           "type": "integer"
         },
         "options": {
