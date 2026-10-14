@@ -1448,6 +1448,9 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				klog.V(5).Infof("IPv4 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
 					name, eIP.String(), eNode.name, ipv4Capacity, ipv4Allocated, ipv4Remaining)
 
+				klog.Warningf("ShreyasDebug: IPv4 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
+					name, eIP.String(), eNode.name, ipv4Capacity, ipv4Allocated, ipv4Remaining)
+
 				if ipv4Remaining <= 0 {
 					klog.Warningf("Node %s cannot host EgressIP %s IP %s: IPv4 capacity full (capacity=%d, allocated=%d)",
 						eNode.name, name, eIP.String(), ipv4Capacity, ipv4Allocated)
@@ -1460,6 +1463,9 @@ func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []
 				ipv6Remaining := ipv6Capacity - ipv6Allocated
 
 				klog.V(5).Infof("IPv6 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
+					name, eIP.String(), eNode.name, ipv6Capacity, ipv6Allocated, ipv6Remaining)
+
+				klog.Warningf("ShreyasDebug: IPv6 capacity check for EgressIP %s IP %s on node %s: capacity=%d, allocated=%d, remaining=%d",
 					name, eIP.String(), eNode.name, ipv6Capacity, ipv6Allocated, ipv6Remaining)
 
 				if ipv6Remaining <= 0 {
