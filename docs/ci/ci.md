@@ -8,6 +8,12 @@ are used to run a subset of the Kubernetes E2E tests on each pull request. The
 local workflow that controls the test run is located in
 [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml).
 
+For pull requests that only change documentation (`docs/**`, Markdown files,
+`mkdocs.yml`, or `.github/ISSUE_TEMPLATE/**`), a lightweight file check runs and
+skips the build, lint, and test jobs. This lets the required `Build-PR` check report
+as skipped instead of remaining pending because the entire workflow was skipped.
+Scheduled, manual, and merge-group runs still run the full suite.
+
 The following tasks are performed:
 
 - Build OVN-Kubernetes
@@ -99,8 +105,7 @@ Instead, they must explicitly be requested with `make -C test control-plane WHAT
 ### Github CI integration through Github Actions Matrix
 
 Each of these shards and control-plane tests can then be run in a [Github Actions matrix](https://docs.github.com/en/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix) of:
-* Local Gateway Mode and Shared Gateway Mode. See:
-[Enable Node-Local Services Access in Shared Gateway Mode](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/docs/design/shared_gw_dgp.md)
+* Local Gateway Mode and Shared Gateway Mode. See [Gateway Modes](../design/gateway-modes.md).
 * IPv4 Only, IPv6 Only and Dualstack
 * Disabled SNAT Multiple Gateways or Enabled SNAT Gateways
 * Single bridge or two bridges

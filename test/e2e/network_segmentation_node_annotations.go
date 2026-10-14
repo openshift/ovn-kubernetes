@@ -48,7 +48,7 @@ var _ = Describe("Network Segmentation: Node Annotations", feature.NetworkSegmen
 
 		// Serial() is required because this test modifies cluster-wide state (node annotations)
 		// that controls Layer2UsesTransitRouter and affects ovnkube-control-plane behavior.
-		It("should clean up tunnel ID annotations when UDN is deleted with transit router topology", Serial, func() {
+		It("should clean up tunnel ID annotations when UDN is deleted with transit router topology", Serial, func(ctx SpecContext) {
 			// This test verifies that tunnel ID annotations are cleaned up when a UDN is deleted
 			// in transit router topology. The test simulates a migration scenario by:
 			// 1. Creating an L2 primary network
@@ -88,7 +88,7 @@ var _ = Describe("Network Segmentation: Node Annotations", feature.NetworkSegmen
 			Expect(err).NotTo(HaveOccurred())
 
 			By("waiting for network to be ready")
-			Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, testUdnName), 30*time.Second, time.Second).Should(Succeed())
+			Eventually(ctx, userDefinedNetworkReadyFunc(ctx, f.DynamicClient, f.Namespace.Name, testUdnName), 30*time.Second, time.Second).Should(Succeed())
 
 			By("verifying no tunnel ID annotations are allocated in transit router topology")
 
@@ -216,7 +216,7 @@ var _ = Describe("Network Segmentation: Node Annotations", feature.NetworkSegmen
 			Expect(allNodesUseTransitRouter).To(BeTrue(), "all nodes should have TransitRouter enabled")
 		})
 
-		It("should NOT allocate tunnel ID annotations for L3 networks", func() {
+		It("should NOT allocate tunnel ID annotations for L3 networks", func(ctx SpecContext) {
 			testUdnName := "node-annotation-not-l3-tunnel-id"
 			By("creating an L3 network")
 			netConfig := &networkAttachmentConfigParams{
@@ -232,7 +232,7 @@ var _ = Describe("Network Segmentation: Node Annotations", feature.NetworkSegmen
 			Expect(err).NotTo(HaveOccurred())
 
 			By("waiting for network to be ready")
-			Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, testUdnName), 30*time.Second, time.Second).Should(Succeed())
+			Eventually(ctx, userDefinedNetworkReadyFunc(ctx, f.DynamicClient, f.Namespace.Name, testUdnName), 30*time.Second, time.Second).Should(Succeed())
 
 			By("verifying tunnel ID annotations are NOT allocated on nodes")
 			nodeList, err := e2enode.GetReadySchedulableNodes(context.TODO(), cs)
@@ -250,7 +250,7 @@ var _ = Describe("Network Segmentation: Node Annotations", feature.NetworkSegmen
 			}
 		})
 
-		It("should NOT allocate tunnel ID annotations for secondary L2 networks", func() {
+		It("should NOT allocate tunnel ID annotations for secondary L2 networks", func(ctx SpecContext) {
 			testUdnName := "node-annotation-not-l2-tunnel-id"
 			By("creating a secondary L2 network")
 			netConfig := &networkAttachmentConfigParams{
@@ -266,7 +266,7 @@ var _ = Describe("Network Segmentation: Node Annotations", feature.NetworkSegmen
 			Expect(err).NotTo(HaveOccurred())
 
 			By("waiting for network to be ready")
-			Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, f.Namespace.Name, testUdnName), 30*time.Second, time.Second).Should(Succeed())
+			Eventually(ctx, userDefinedNetworkReadyFunc(ctx, f.DynamicClient, f.Namespace.Name, testUdnName), 30*time.Second, time.Second).Should(Succeed())
 
 			By("verifying tunnel ID annotations are NOT allocated on nodes")
 			nodeList, err := e2enode.GetReadySchedulableNodes(context.TODO(), cs)
