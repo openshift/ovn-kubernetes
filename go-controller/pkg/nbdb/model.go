@@ -60,7 +60,7 @@ func FullDatabaseModel() (model.ClientDBModel, error) {
 
 var schema = `{
   "name": "OVN_Northbound",
-  "version": "7.19.0",
+  "version": "7.18.0",
   "tables": {
     "ACL": {
       "columns": {
@@ -252,18 +252,6 @@ var schema = `{
         },
         "name": {
           "type": "string"
-        },
-        "options": {
-          "type": {
-            "key": {
-              "type": "string"
-            },
-            "value": {
-              "type": "string"
-            },
-            "min": 0,
-            "max": "unlimited"
-          }
         }
       },
       "indexes": [
@@ -2198,7 +2186,7 @@ var schema = `{
               "refTable": "Logical_Switch_Port",
               "refType": "strong"
             },
-            "min": 0,
+            "min": 1,
             "max": 1
           }
         }
@@ -2256,13 +2244,7 @@ var schema = `{
           "type": {
             "key": {
               "type": "string",
-              "enum": [
-                "set",
-                [
-                  "inline",
-                  "vtap"
-                ]
-              ]
+              "enum": "inline"
             }
           }
         },

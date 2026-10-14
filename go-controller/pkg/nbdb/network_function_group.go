@@ -19,7 +19,6 @@ var (
 	NetworkFunctionGroupFallbackFailOpen  NetworkFunctionGroupFallback = "fail-open"
 	NetworkFunctionGroupFallbackFailClose NetworkFunctionGroupFallback = "fail-close"
 	NetworkFunctionGroupModeInline        NetworkFunctionGroupMode     = "inline"
-	NetworkFunctionGroupModeVtap          NetworkFunctionGroupMode     = "vtap"
 )
 
 // NetworkFunctionGroup defines an object in Network_Function_Group table
