@@ -50,8 +50,36 @@ const (
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 	featureLabelEgressIP            = "Feature:EgressIP"
 	// Test constants used for test categorization and filtering
-	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
+	EIPSecondaryNetworkTestPrefix   = "secondary-host-eip"
+	featureLabelNoOverlay           = "Feature:NoOverlay"
+	featureLabelRouteAdvertisements = "Feature:RouteAdvertisements"
+
+	// defaultNetworkNoOverlaySuite identifies the no-overlay specs that assert on
+	// the cluster default network rather than on a user defined network. They can
+	// only run on a cluster installed with transport=NoOverlay.
+	defaultNetworkNoOverlaySuite = "No-Overlay: Default network is enabled with no-overlay"
 )
+
+// Name fragments identifying specs that exercise no-overlay with managed
+// routing, where ovn-kubernetes owns the BGP configuration. They need the
+// cluster internal BGP fabric to be configured, see HasManagedBGP.
+//
+// The leading space matters: without it "unmanaged routing", used by the specs
+// that bring their own RouteAdvertisements, would match too.
+var managedRoutingNameFragments = []string{
+	" managed routing",
+	" managed mode routing",
+}
+
+// requiresManagedBGP reports whether the spec exercises managed routing.
+func requiresManagedBGP(name string) bool {
+	for _, fragment := range managedRoutingNameFragments {
+		if strings.Contains(name, fragment) {
+			return true
+		}
+	}
+	return false
+}
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
 // and test labels. When ocpInfra is nil (no cluster access), all tests are included.
@@ -71,8 +99,9 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	}
 
 	// EVPN tests: only include if EVPN is enabled in the cluster
+	isEVPN := spec.Labels.Has(featureLabelEVPN)
 	evpnEnabled := ocpInfra.CheckForEVPN()
-	if !evpnEnabled && spec.Labels.Has(featureLabelEVPN) {
+	if !evpnEnabled && isEVPN {
 		return false
 	}
 
@@ -100,6 +129,32 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		(spec.Labels.Has(featureLabelNetworkSegmentation) || strings.Contains(spec.Name, "Primary UDN") ||
 			strings.Contains(spec.Name, "disabling egress nodes with egress-assignable label")) {
 		return false
+	}
+
+	// BGP tests: only include if the cluster advertises routes through FRR and
+	// an external FRR router is reachable to inspect those routes with. EVPN
+	// specs are left to the stricter EVPN check above, so that this does not
+	// become a second way for the blocking EVPN suite to disappear.
+	if !isEVPN && spec.Labels.Has(featureLabelRouteAdvertisements) && !ocpInfra.CheckForRouteAdvertisements() {
+		return false
+	}
+
+	// No-overlay tests: only include if the cluster can run networks
+	// unencapsulated. Specs covering the cluster default network additionally
+	// require that network to have been installed with transport=NoOverlay.
+	if spec.Labels.Has(featureLabelNoOverlay) {
+		if !ocpInfra.CheckForNoOverlay() {
+			return false
+		}
+		if strings.Contains(spec.Name, defaultNetworkNoOverlaySuite) && !ocpInfra.IsDefaultNetworkNoOverlay() {
+			return false
+		}
+		// Managed routing has ovn-kubernetes create the RouteAdvertisements and
+		// the FRRConfiguration itself, which it only does once the cluster
+		// internal BGP fabric is configured.
+		if requiresManagedBGP(spec.Name) && !ocpInfra.HasManagedBGP() {
+			return false
+		}
 	}
 
 	// FUP: not having to detect the environment, and just be able to
