@@ -31,7 +31,44 @@ const (
 	frrContainerPrimaryNetIPv4 = "192.168.111.3"
 	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
 	externalFRRContainerName   = "frr"
+
+	// The external BGP server the upstream route advertisement E2Es expect is
+	// created by contrib/kind.sh as a container named "bgpserver" on a network
+	// named "bgpnet". Downstream the same role is filled by the agnhost container
+	// deployed on its own macvlan network by the baremetalds-e2e-ovn-bgp-pre CI
+	// step, so queries using the upstream names are redirected here.
+	// ref: https://github.com/openshift/release/blob/master/ci-operator/step-registry/baremetalds/e2e/ovn/bgp/pre/baremetalds-e2e-ovn-bgp-pre-commands.sh
+	upstreamBGPServerContainerName = "bgpserver"
+	upstreamBGPServerNetworkName   = "bgpnet"
+	bgpServerContainerName         = "agnhost"
+	bgpServerNetworkName           = "agnhost_net"
+	// agnhost_net is created with --ipam-driver=none and its addresses are
+	// assigned by hand afterwards, so podman inspect reports nothing for them.
+	// Spell them out explicitly, same as for the frr container.
+	bgpServerNetSubnetIPv4 = "172.20.0.0/16"
+	bgpServerNetSubnetIPv6 = "2001:db8:2::/64"
+	bgpServerIPv4          = "172.20.0.100"
+	bgpServerIPv6          = "2001:db8:2::100"
+	// the external frr container is the default gateway of the agnhost container
+	bgpServerNetFRRIPv4 = "172.20.0.2"
+	bgpServerNetFRRIPv6 = "2001:db8:2::2"
 )
+
+// bgpServerNetwork describes the macvlan network the external BGP server is
+// attached to on the hypervisor.
+var bgpServerNetwork = &network.ContainerEngineNetwork{
+	NetName: bgpServerNetworkName,
+	Configs: []network.ContainerEngineNetworkConfig{
+		{Subnet: bgpServerNetSubnetIPv4, Gateway: bgpServerNetFRRIPv4},
+		{Subnet: bgpServerNetSubnetIPv6, Gateway: bgpServerNetFRRIPv6},
+	},
+}
+
+// isBGPServerContainer reports whether name refers to the external BGP server,
+// under either the upstream or the downstream name.
+func isBGPServerContainer(name string) bool {
+	return name == upstreamBGPServerContainerName || name == bgpServerContainerName
+}
 
 type baremetalInfra struct {
 	engine               *container.Engine
@@ -106,6 +143,11 @@ func (ci *baremetalInfra) getNetwork(name string) (api.Network, error) {
 	if name == primaryNetworkName {
 		return ci.machineNetwork, nil
 	}
+	// the external BGP server network uses static addressing, so it cannot be
+	// resolved through the container engine; serve it from the static description.
+	if name == upstreamBGPServerNetworkName || name == bgpServerNetworkName {
+		return bgpServerNetwork, nil
+	}
 	// fall back into container networks.
 	return ci.engine.GetNetwork(name)
 }
@@ -146,6 +188,19 @@ func (ci *baremetalInfra) GetExternalContainerNetworkInterface(container api.Ext
 				InfName:     "eth0",
 				IPv4Prefix:  ci.machineNetworkGwInfo.IPv4Prefix,
 				IPv6Prefix:  ci.machineNetworkGwInfo.IPv6Prefix},
+			nil
+	}
+	if isBGPServerContainer(container.Name) && network.Name() == bgpServerNetworkName {
+		// the agnhost container is statically addressed on agnhost_net too, so
+		// podman inspect cannot report its addresses either.
+		return api.NetworkInterface{
+				IPv4:        bgpServerIPv4,
+				IPv6:        bgpServerIPv6,
+				IPv4Gateway: bgpServerNetFRRIPv4,
+				IPv6Gateway: bgpServerNetFRRIPv6,
+				InfName:     "eth0",
+				IPv4Prefix:  bgpServerNetSubnetIPv4,
+				IPv6Prefix:  bgpServerNetSubnetIPv6},
 			nil
 	}
 	return ci.engine.GetNetworkInterface(container.Name, network.Name())

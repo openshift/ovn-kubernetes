@@ -95,10 +95,14 @@ var (
 			// Fix it later.
 			"integration should recover ovnkube pods after restart with primary and secondary UDN resources",
 			// Disable BGP and VRF Lite tests.
+			// "BGP: isolation" is not listed here: the external BGP server it
+			// needs is provided downstream by the agnhost container that the
+			// baremetalds-e2e-ovn-bgp-pre CI step deploys, which
+			// openshift/test/infraprovider resolves for the upstream
+			// bgpserver/bgpnet names.
 			"VRF-Lite",
 			"BGP: When default podNetwork is advertised",
 			"BGP: Pod to external server when CUDN network is advertised",
-			"BGP: isolation between advertised networks",
 			// Disable EVPN isolation test with other CUDN advertised network because
 			// it doesn't have required FRR configuration yet.
 			"When there is other network Of type Layer 3 CUDN advertised",
