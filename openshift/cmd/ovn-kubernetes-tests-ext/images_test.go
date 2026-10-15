@@ -6,6 +6,9 @@ import (
 	"testing"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 )
 
 func TestSplitImagePullSpec(t *testing.T) {
@@ -155,9 +158,8 @@ func TestExtensionImageFromPullSpec(t *testing.T) {
 }
 
 func TestRegisterTestImages(t *testing.T) {
-	if len(requiredImages) == 0 {
-		t.Fatal("requiredImages is empty")
-	}
+	deploymentconfig.Set(ocpdeploymentconfig.New())
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
 
 	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
 	err := registerTestImages(ext)
@@ -165,7 +167,7 @@ func TestRegisterTestImages(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if got, want := len(ext.Images), len(requiredImages); got != want {
+	if got, want := len(ext.Images), len(deploymentconfig.Get().GetRequiredImages()); got != want {
 		t.Fatalf("registered %d images, want %d from requiredImages", got, want)
 	}
 
@@ -174,8 +176,8 @@ func TestRegisterTestImages(t *testing.T) {
 		pullSpec string
 	}
 	want := make(map[imageKey]int)
-	for _, ri := range requiredImages {
-		want[imageKey{ri.index, ri.pullSpec}]++
+	for _, ri := range deploymentconfig.Get().GetRequiredImages() {
+		want[imageKey{int(ri.ImageID), ri.PullSpec}]++
 	}
 
 	got := make(map[imageKey]int, len(ext.Images))

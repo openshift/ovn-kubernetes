@@ -44,7 +44,15 @@ reviews:
           changes that only handle single-stack.
         - Every feature or bug fix should include unit tests. Flag PRs
           that modify product behavior without corresponding test updates,
-          subject to the website/documentation exception below.
+          subject to the test/ and website/documentation exceptions below.
+        - Changes under test/ are exempt from requirements to add unit
+          tests. Do not request unit tests for code in this directory,
+          including test helpers, image configuration, deployment
+          configuration, and infrastructure providers. Validate with
+          existing builds and relevant test suites as appropriate, and
+          preserve coverage of existing scenarios. For PRs that also
+          change product code outside test/, apply the usual test
+          requirements to those product changes only.
         - E2E tests are required whenever feasible — be strict. Flag PRs
           that add or change user-facing behavior without E2E coverage.
           Do not accept "will add E2E later" — push back on the author

@@ -74,12 +74,6 @@ var (
 	bgpExternalNetworkName         = envOrDefault("OVN_TEST_BGP_SERVER_NETWORK", "bgpnet")
 )
 
-func init() {
-	if os.Getenv("ENABLE_ROUTE_ADVERTISEMENTS") == "true" {
-		images.Add(images.FRR())
-	}
-}
-
 var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.RouteAdvertisements, func() {
 	var serverContainerIPs []string
 	var frrContainerIPv4, frrContainerIPv6 string
@@ -822,7 +816,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 	})
 
 	ginkgo.DescribeTable("Route Advertisements",
-		func(cudnTemplate *udnv1.ClusterUserDefinedNetwork, ra *rav1.RouteAdvertisements) {
+		func(ctx ginkgo.SpecContext, cudnTemplate *udnv1.ClusterUserDefinedNetwork, ra *rav1.RouteAdvertisements) {
 			// set the exact selector
 			cudnTemplate.Spec.NamespaceSelector = metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{
 				Key:      "kubernetes.io/metadata.name",
@@ -845,7 +839,7 @@ var _ = ginkgo.Describe("BGP: Pod to external server when CUDN network is advert
 			ginkgo.DeferCleanup(func() {
 				udnClient.K8sV1().ClusterUserDefinedNetworks().Delete(context.TODO(), cUDN.Name, metav1.DeleteOptions{})
 			})
-			gomega.Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cUDN.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
+			gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cUDN.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
 
 			ginkgo.DeferCleanup(func() {
 				ginkgo.By(fmt.Sprintf("delete pods in %s namespace to unblock CUDN CR & associate NAD deletion", f.Namespace.Name))
@@ -1299,7 +1293,7 @@ var _ = ginkgo.Describe("BGP: When an advertised CUDN network is dynamically all
 		gomega.Expect(len(nodes.Items)).To(gomega.BeNumerically(">", 2))
 	})
 
-	ginkgo.It("is accepted when the network is allocated on a subset of the nodes only", func() {
+	ginkgo.It("is accepted when the network is allocated on a subset of the nodes only", func(ctx ginkgo.SpecContext) {
 		ginkgo.By("create ClusterUserDefinedNetwork")
 		cudnTemplate := &udnv1.ClusterUserDefinedNetwork{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1348,7 +1342,7 @@ var _ = ginkgo.Describe("BGP: When an advertised CUDN network is dynamically all
 		ginkgo.DeferCleanup(func() {
 			udnClient.K8sV1().ClusterUserDefinedNetworks().Delete(context.TODO(), cUDN.Name, metav1.DeleteOptions{})
 		})
-		gomega.Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cUDN.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
+		gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cUDN.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
 		netName := types.CUDNPrefix + cUDN.Name
 
 		ginkgo.DeferCleanup(func() {
@@ -1470,7 +1464,7 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 		var ra *rav1.RouteAdvertisements
 		var hostNetworkPort int
 		ginkgo.Context("", ginkgo.Ordered, ginkgo.ContinueOnFailure, func() {
-			ginkgo.BeforeAll(func() {
+			ginkgo.BeforeAll(func(ctx ginkgo.SpecContext) {
 				ginkgo.By("Configuring primary UDN namespaces")
 				var err error
 				// Create namespaces directly via the API instead of f.CreateNamespace()
@@ -1536,8 +1530,8 @@ var _ = ginkgo.Describe("BGP: isolation", feature.RouteAdvertisements, func() {
 				gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 				ginkgo.By("Waiting for networks to be ready")
-				gomega.Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudnA.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
-				gomega.Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudnB.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
+				gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudnA.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
+				gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudnB.Name), 5*time.Second, time.Second).Should(gomega.Succeed())
 
 				ginkgo.By("Selecting 3 schedulable nodes")
 				// bound the node list: network pods are only scheduled on the
@@ -4501,7 +4495,7 @@ func createUserDefinedNetwork(
 		30*time.Second,
 		true,
 		func(ctx context.Context) (bool, error) {
-			lastReadyErr = networkReadyFunc(client, name)()
+			lastReadyErr = networkReadyFunc(ctx, client, name)()
 			return lastReadyErr == nil, nil
 		},
 	); err != nil {

@@ -45,7 +45,7 @@ var _ = Describe("Network Segmentation: integration", feature.NetworkSegmentatio
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should recover ovnkube pods after restart with primary and secondary UDN resources", func() {
+	It("should recover ovnkube pods after restart with primary and secondary UDN resources", func(ctx SpecContext) {
 		const (
 			primaryUDNName     = "primary-udn"
 			secondaryUDNName   = "secondary-udn"
@@ -69,13 +69,13 @@ var _ = Describe("Network Segmentation: integration", feature.NetworkSegmentatio
 		cleanupPrimaryUDN, err := createManifest(primaryNamespace, newPrimaryUserDefinedNetworkManifest(cs, primaryUDNName))
 		Expect(err).NotTo(HaveOccurred())
 		defer cleanupPrimaryUDN()
-		Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, primaryNamespace, primaryUDNName), 30*time.Second, time.Second).Should(Succeed())
+		Eventually(ctx, userDefinedNetworkReadyFunc(ctx, f.DynamicClient, primaryNamespace, primaryUDNName), 30*time.Second, time.Second).Should(Succeed())
 
 		By("creating a secondary UDN and waiting until it is ready")
 		cleanupSecondaryUDN, err := createManifest(primaryNamespace, newL2SecondaryUDNManifest(secondaryUDNName))
 		Expect(err).NotTo(HaveOccurred())
 		defer cleanupSecondaryUDN()
-		Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, primaryNamespace, secondaryUDNName), 30*time.Second, time.Second).Should(Succeed())
+		Eventually(ctx, userDefinedNetworkReadyFunc(ctx, f.DynamicClient, primaryNamespace, secondaryUDNName), 30*time.Second, time.Second).Should(Succeed())
 
 		By("labeling the primary namespace so it matches the EgressIP namespace selector")
 		primaryNSObj, err := cs.CoreV1().Namespaces().Get(context.Background(), primaryNamespace, metav1.GetOptions{})

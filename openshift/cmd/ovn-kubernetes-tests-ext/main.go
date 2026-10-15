@@ -5,12 +5,14 @@ import (
 	"strings"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
-	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -37,8 +39,10 @@ var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 
 const (
 	// Feature labels used for test categorization and filtering
-	featureLabelEVPN                = "Feature:EVPN"
-	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
+	featureLabelEVPN                  = "Feature:EVPN"
+	featureLabelNetworkSegmentation   = "Feature:NetworkSegmentation"
+	featureLabelVirtualMachineSupport = "Feature:VirtualMachineSupport"
+	featureLabelMACSecurity           = "Feature:MACSecurity"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -74,25 +78,31 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 }
 
 func main() {
+	// Set OpenShift deployment config before any deploymentconfig.Get() callers
+	// (image registration and e2e tests).
+	deploymentconfig.Set(ocpdeploymentconfig.New())
+
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
 	ovnTestsExtension := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
-	// register OVN-Kubernetes e2e images to the openshift-tests extension
-	if err := registerTestImages(ovnTestsExtension); err != nil {
-		panic(err)
-	}
 	// add ovn-kubernetes test suites into openshift suites
 	// by default, we treat all tests as parallel and only expose tests as Serial if the appropriate label is added - "Serial"
 	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
 	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/serial",
-		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`name.contains("[Suite:ovn-kubernetes/conformance/serial]")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
+		Qualifiers: []string{`name.contains("[Suite:ovn-kubernetes/conformance/parallel]")`},
+	})
+
+	// The dedicated virtualization OTE lane selects this suite directly.
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name:       "ovn-kubernetes/conformance/serial/virtualization",
+		Qualifiers: []string{`name.contains("[Suite:ovn-kubernetes/conformance/serial/virtualization]")`},
 	})
 
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
@@ -116,6 +126,14 @@ func main() {
 		}
 	}
 
+	// Add the agnhost image to the required images
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+	// Register OVN-Kubernetes e2e images to the openshift-tests extension
+	err = registerTestImages(ovnTestsExtension)
+	if err != nil {
+		panic(err)
+	}
+
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
 	specs.AddBeforeAll(func() {
 		if cfgErr != nil {
@@ -137,9 +155,9 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
+		// Exclude Network Segmentation and Virtual Machine tests on SingleReplica topology (e.g., MicroShift, SNO)
 		// These tests require at least 2 nodes and will fail on single-node deployments
-		if spec.Labels.Has(featureLabelNetworkSegmentation) {
+		if spec.Labels.Has(featureLabelNetworkSegmentation) || spec.Labels.Has(featureLabelVirtualMachineSupport) {
 			spec.Exclude(extensiontests.TopologyEquals("SingleReplica"))
 		}
 
