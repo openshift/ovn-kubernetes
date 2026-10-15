@@ -72,8 +72,8 @@ func TestHasEVPNFeatureGate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasEVPNFeatureGate(tt.fg); got != tt.want {
-				t.Errorf("hasEVPNFeatureGate() = %v, want %v", got, tt.want)
+			if got := hasFeatureGate(tt.fg, evpnFeatureGateName); got != tt.want {
+				t.Errorf("hasFeatureGate(%s) = %v, want %v", evpnFeatureGateName, got, tt.want)
 			}
 		})
 	}
