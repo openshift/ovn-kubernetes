@@ -40,7 +40,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		providerCtx = infraprovider.Get().NewTestContext()
 	})
 
-	It("using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology", func() {
+	It("using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology", func(ctx SpecContext) {
 		const (
 			vlan              = 200
 			testPort          = 9000
@@ -97,7 +97,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 			_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", cudnName, "--wait", fmt.Sprintf("--timeout=%ds", 120))
 			Expect(err).NotTo(HaveOccurred())
 		})
-		Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudnName)).WithTimeout(5*time.Second).WithPolling(time.Second).
+		Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudnName)).WithTimeout(5*time.Second).WithPolling(time.Second).
 			Should(Succeed(), "CUDN CR is not ready")
 
 		By("create test pods")
@@ -147,7 +147,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 		}
 	})
 
-	It("should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart", func() {
+	It("should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart", func(ctx SpecContext) {
 		const (
 			vlan = 201
 		)
@@ -192,7 +192,7 @@ var _ = Describe("Network Segmentation: Localnet", feature.NetworkSegmentation, 
 			_, err := e2ekubectl.RunKubectl("", "delete", "clusteruserdefinednetwork", cudnName, "--wait", fmt.Sprintf("--timeout=%ds", 120))
 			Expect(err).NotTo(HaveOccurred())
 		})
-		Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudnName)).WithTimeout(5*time.Second).WithPolling(time.Second).
+		Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudnName)).WithTimeout(5*time.Second).WithPolling(time.Second).
 			Should(Succeed(), "CUDN CR is not ready")
 
 		By("create test pod with IPAM-less localnet network")

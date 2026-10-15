@@ -73,10 +73,11 @@ var _ = Describe("Network Segmentation: MAC security", feature.NetworkSegmentati
 		),
 	}
 
-	type provisionNetResourceFn func(f *framework.Framework, params networkAttachmentConfigParams)
+	type provisionNetResourceFn func(ctx context.Context, f *framework.Framework, params networkAttachmentConfigParams)
 
 	// test client-server TCP connectivity according to MAC security settings
 	testBody := func(
+		ctx context.Context,
 		netConf networkAttachmentConfigParams,
 		provisionNetworkResource provisionNetResourceFn,
 		assertConnectivity asserConnectivityFn,
@@ -101,7 +102,7 @@ var _ = Describe("Network Segmentation: MAC security", feature.NetworkSegmentati
 		netConf.namespace = f.Namespace.Name
 
 		By("creating network resource")
-		provisionNetworkResource(f, netConf)
+		provisionNetworkResource(ctx, f, netConf)
 
 		By("create test pods")
 		serverPodCfg := podConfiguration{
@@ -153,22 +154,22 @@ var _ = Describe("Network Segmentation: MAC security", feature.NetworkSegmentati
 	}
 
 	DescribeTable("using ClusterUserDefinedNetwork, connectivity between client and server pods",
-		func(netConf networkAttachmentConfigParams, assertConnectivityFn asserConnectivityFn) {
-			testBody(netConf, provisionCUDN, assertConnectivityFn)
+		func(ctx SpecContext, netConf networkAttachmentConfigParams, assertConnectivityFn asserConnectivityFn) {
+			testBody(ctx, netConf, provisionCUDN, assertConnectivityFn)
 		},
 		layer2Cases,
 		localnetCases,
 	)
 
 	DescribeTable("using UserDefinedNetwork, connectivity between client and server pods",
-		func(netConf networkAttachmentConfigParams, assertConnectivityFn asserConnectivityFn) {
-			testBody(netConf, provisionUDN, assertConnectivityFn)
+		func(ctx SpecContext, netConf networkAttachmentConfigParams, assertConnectivityFn asserConnectivityFn) {
+			testBody(ctx, netConf, provisionUDN, assertConnectivityFn)
 		},
 		layer2Cases,
 	)
 })
 
-func provisionCUDN(f *framework.Framework, netConf networkAttachmentConfigParams) {
+func provisionCUDN(ctx context.Context, f *framework.Framework, netConf networkAttachmentConfigParams) {
 	GinkgoHelper()
 	if netConf.topology == "localnet" {
 		netConf.physicalNetworkName = uniqueMetaName("mac-sec")
@@ -189,7 +190,7 @@ func provisionCUDN(f *framework.Framework, netConf networkAttachmentConfigParams
 		By("delete the CUDN CR")
 		Expect(f.DynamicClient.Resource(clusterUDNGVR).Delete(context.Background(), netConf.name, metav1.DeleteOptions{})).To(Succeed())
 	})
-	Eventually(clusterUserDefinedNetworkReadyFunc(f.DynamicClient, netConf.name)).
+	Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, netConf.name)).
 		WithTimeout(5*time.Second).WithPolling(1*time.Second).Should(Succeed(), "CUDN should become ready")
 }
 
@@ -245,13 +246,13 @@ func generateTestMACSecurityCUDNManifest(param networkAttachmentConfigParams) ud
 	}
 }
 
-func provisionUDN(f *framework.Framework, netConf networkAttachmentConfigParams) {
+func provisionUDN(ctx context.Context, f *framework.Framework, netConf networkAttachmentConfigParams) {
 	GinkgoHelper()
 	cr, err := json.Marshal(generateTestMACSecurityUDNManifest(netConf))
 	Expect(err).NotTo(HaveOccurred())
 	_, err = e2ekubectl.RunKubectlInput(netConf.namespace, string(cr), "apply", "-f", "-")
 	Expect(err).NotTo(HaveOccurred())
-	Eventually(userDefinedNetworkReadyFunc(f.DynamicClient, netConf.namespace, netConf.name), 5*time.Second, time.Second).Should(Succeed())
+	Eventually(ctx, userDefinedNetworkReadyFunc(ctx, f.DynamicClient, netConf.namespace, netConf.name), 5*time.Second, time.Second).Should(Succeed())
 }
 
 func generateTestMACSecurityUDNManifest(param networkAttachmentConfigParams) udnv1.UserDefinedNetwork {
