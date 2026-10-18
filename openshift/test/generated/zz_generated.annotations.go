@@ -1921,6 +1921,8 @@ var AppendedAnnotations = map[string]string{
 
 	"UplinkState API validation accepts up to 256 default gateways across both IP families": "[Suite:ovn-kubernetes/conformance/parallel]",
 
+	"[OTP] SDN adminnetworkpolicy metrics 73331-BANP and ANP metrics are available [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
+
 	"blocking ICMP needs frag when a client VM pod with 1500 MTU targets a host networked pod should be able to send large TCP packet and not get a route cache entry": "[Disabled:Unimplemented]",
 
 	"blocking ICMP needs frag when a client host networked pod with targets a proxy node nodeport service with ovnk networked backend should be able to send large UDP packet and not get a route cache entry": "[Disabled:Unimplemented]",
