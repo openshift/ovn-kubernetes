@@ -108,6 +108,8 @@ var (
 			// These tests need bgpServerNetwork "bgpnet" which is not configured
 			// for downstream tests, so disable it.
 			"It cannot reach an external server on a different network",
+			// network-segmentation mac-security tests over localnet topology
+			".*MAC security.*localnet.*",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
