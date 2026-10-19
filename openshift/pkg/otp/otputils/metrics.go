@@ -1,13 +1,13 @@
 package otputils
 
 import (
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
 
 	o "github.com/onsi/gomega"
-	"github.com/tidwall/gjson"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -59,7 +59,17 @@ func GetPolicyMetrics(metricName string, expectedValue string, labels ...string)
 			return false, nil
 		}
 
-		value := gjson.Get(string(output), "data.result.0.value.1").String()
+		var resp struct {
+			Data struct {
+				Result []struct {
+					Value []interface{} `json:"value"`
+				} `json:"result"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(output, &resp); err != nil || len(resp.Data.Result) == 0 || len(resp.Data.Result[0].Value) < 2 {
+			return false, nil
+		}
+		value, _ := resp.Data.Result[0].Value[1].(string)
 		if value == expectedValue {
 			return true, nil
 		}
