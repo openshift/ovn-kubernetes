@@ -38,7 +38,7 @@ func ApplyResourceFromTemplate(namespace string, templatePath string, parameters
 	processCmd.Stdout = &processed
 	processCmd.Stderr = &errOut
 	if err := processCmd.Run(); err != nil {
-		return fmt.Errorf("failed to process template %s: %v, stderr: %s", templatePath, err, errOut.String())
+		return fmt.Errorf("failed to process template %s: %w, stderr: %s", templatePath, err, errOut.String())
 	}
 
 	applyArgs := []string{"apply", "-f", "-"}
