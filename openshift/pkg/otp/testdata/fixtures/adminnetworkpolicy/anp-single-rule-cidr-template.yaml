@@ -1,0 +1,35 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: anp-single-rule-cidr-template
+parameters:
+- name: NAME
+  value: anp-allow
+- name: SUBJECTVAL
+  value: default
+- name: PRIORITY
+  value: "10"
+- name: RULENAME
+  value: allow-rule
+- name: RULEACTION
+  value: Allow
+- name: CIDR
+  value: "10.0.0.0/8"
+
+objects:
+- apiVersion: networking.k8s.io/v1alpha1
+  kind: AdminNetworkPolicy
+  metadata:
+    name: ${NAME}
+  spec:
+    priority: ${{PRIORITY}}
+    subject:
+      namespaces:
+        matchLabels:
+          kubernetes.io/metadata.name: ${SUBJECTVAL}
+    egress:
+    - name: ${RULENAME}
+      action: ${RULEACTION}
+      to:
+      - networks:
+        - cidr: ${CIDR}
