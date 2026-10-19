@@ -19,9 +19,8 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 	)
 
 	g.BeforeEach(func() {
-		// Ensure OVN-K is present
 		output, err := exec.Command("oc", "get", "network.config.openshift.io", "cluster", "-o", "jsonpath={.status.networkType}").Output()
-		o.Expect(err).NotTo(o.HaveOccurred())
+		o.Expect(err).NotTo(o.HaveOccurred(), "failed to check network type")
 		if !strings.Contains(strings.ToLower(string(output)), "ovn") {
 			g.Skip("AdminNetworkPolicy only supported on OVN clusters")
 		}
@@ -47,13 +46,12 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 			banpIngress      = make(map[string]string)
 		)
 
-		// Initialize variables
 		banpMetricsList := []string{"ovnkube_controller_baseline_admin_network_policies_rules"}
 		anpMetricsList := []string{"ovnkube_controller_admin_network_policies_rules"}
 		actionList := []string{"Allow", "Deny", "Pass"}
 
 		ipStackType := otputils.CheckIPStackType()
-		o.Expect(ipStackType).NotTo(o.BeEmpty())
+		o.Expect(ipStackType).NotTo(o.BeEmpty(), "failed to determine cluster IP stack type")
 
 		g.By("1. Create a BANP with two rules with Allow action for Ingress and Deny action for Egress")
 		banpCR := otputils.MultiPodMixedRuleBANPPolicyResource{
@@ -81,7 +79,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 			Template:      banpCRTemplate,
 		}
 		err := banpCR.Create()
-		o.Expect(err).NotTo(o.HaveOccurred())
+		o.Expect(err).NotTo(o.HaveOccurred(), "failed to create BANP policy")
 		defer otputils.RemoveResource("banp", banpCR.Name)
 
 		g.By("2. Validate BANP rule metrics with Ingress Allow action")
@@ -94,7 +92,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		g.By("4. Update BANP to add another ingress rule and validate metrics")
 		patchBANP := fmt.Sprintf("[{\"op\": \"add\", \"path\":\"/spec/ingress/1\", \"value\": {\"name\":\"deny ingress\", \"action\": \"Deny\", \"from\": [{\"pods\":  {\"namespaceSelector\": {\"matchLabels\": {%s: %s}}, \"podSelector\": {}}}]}}]", namespaceLabelKey, namespaceLabelVal)
 		err = exec.Command("oc", "patch", "baselineadminnetworkpolicy", banpCR.Name, "--type=json", "-p", patchBANP).Run()
-		o.Expect(err).NotTo(o.HaveOccurred())
+		o.Expect(err).NotTo(o.HaveOccurred(), "failed to patch BANP with additional ingress rule")
 		otputils.GetPolicyMetrics(banpMetricsList[0], banpIngress[actionList[1]], "Ingress", actionList[1])
 
 		g.By("5. Create a ANP with one ingress rule with deny action.")
@@ -114,7 +112,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 			Template:        anpCRTemplate,
 		}
 		err = anpCR.Create()
-		o.Expect(err).NotTo(o.HaveOccurred())
+		o.Expect(err).NotTo(o.HaveOccurred(), "failed to create ANP policy")
 		defer otputils.RemoveResource("anp", anpCR.Name)
 
 		g.By("6. Validate ANP rule metrics with Ingress Deny action")
@@ -138,7 +136,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 			Template:   anpNodeCRTemplate,
 		}
 		err = anpNodeCR.Create()
-		o.Expect(err).NotTo(o.HaveOccurred())
+		o.Expect(err).NotTo(o.HaveOccurred(), "failed to create second ANP policy")
 		defer otputils.RemoveResource("anp", anpNodeCR.Name)
 
 		g.By("8. Validate ANP rule metrics with Egress Allow action")
