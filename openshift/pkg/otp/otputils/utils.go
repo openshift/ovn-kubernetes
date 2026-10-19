@@ -20,11 +20,15 @@ import (
 // FixturePath returns the absolute path to a fixture file in the OTE extension
 func FixturePath(parts ...string) string {
 	cwd, _ := os.Getwd()
-	// If already in openshift dir, don't add it again
+	// Try relative paths first (development mode)
 	base := filepath.Join(cwd, "pkg", "otp", "testdata", "fixtures")
 	if _, err := os.Stat(base); os.IsNotExist(err) {
-		// Try with openshift prefix if not found
+		// Try with openshift prefix
 		base = filepath.Join(cwd, "openshift", "pkg", "otp", "testdata", "fixtures")
+		if _, err := os.Stat(base); os.IsNotExist(err) {
+			// Fall back to packaged location (in container image)
+			base = "/opt/ovn-kubernetes-tests-ext/fixtures"
+		}
 	}
 	return filepath.Join(append([]string{base}, parts...)...)
 }
