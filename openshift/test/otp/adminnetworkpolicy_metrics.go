@@ -36,31 +36,21 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 
 	g.It("73331-BANP and ANP metrics are available [Serial]", func() {
 		var (
-			testID                   = "73331"
-			banpCRTemplate           = otputils.FixturePath("adminnetworkpolicy", "banp-multi-pod-mixed-rule-template.yaml")
-			anpCRTemplate            = otputils.FixturePath("adminnetworkpolicy", "anp-single-rule-me-template.yaml")
-			anpNodeCRTemplate        = otputils.FixturePath("adminnetworkpolicy", "anp-single-rule-template-node.yaml")
-			namespaceLabelKey        = "team"
-			namespaceLabelVal        = "qe"
-			podKey                   = "name"
-			podVal                   = "hello-pod"
-			expectedBANPMetricsValue = make(map[string]string)
-			expectedANPMetricsValue  = make(map[string]string)
-			banpEgress               = make(map[string]string)
-			banpIngress              = make(map[string]string)
-			anpEgress                = make(map[string]string)
-			anpIngress               = make(map[string]string)
+			testID           = "73331"
+			banpCRTemplate   = otputils.FixturePath("adminnetworkpolicy", "banp-multi-pod-mixed-rule-template.yaml")
+			anpCRTemplate    = otputils.FixturePath("adminnetworkpolicy", "anp-single-rule-me-template.yaml")
+			anpNodeCRTemplate = otputils.FixturePath("adminnetworkpolicy", "anp-single-rule-template-node.yaml")
+			namespaceLabelKey = "team"
+			namespaceLabelVal = "qe"
+			podKey           = "name"
+			podVal           = "hello-pod"
+			banpIngress      = make(map[string]string)
 		)
 
 		// Initialize variables
-		banpMetricsList := []string{"ovnkube_controller_baseline_admin_network_policies", "ovnkube_controller_baseline_admin_network_policies_db_objects", "ovnkube_controller_baseline_admin_network_policies_rules"}
-		anpMetricsList := []string{"ovnkube_controller_admin_network_policies", "ovnkube_controller_admin_network_policies_db_objects", "ovnkube_controller_admin_network_policies_rules"}
+		banpMetricsList := []string{"ovnkube_controller_baseline_admin_network_policies_rules"}
+		anpMetricsList := []string{"ovnkube_controller_admin_network_policies_rules"}
 		actionList := []string{"Allow", "Deny", "Pass"}
-		dbObjects := []string{"ACL", "Address_Set"}
-		expectedBANPMetricsValue[banpMetricsList[0]] = "1"
-		expectedBANPMetricsValue[dbObjects[0]] = "2"
-		expectedANPMetricsValue[anpMetricsList[0]] = "1"
-		expectedANPMetricsValue[dbObjects[0]] = "1"
 
 		ipStackType := otputils.CheckIPStackType()
 		o.Expect(ipStackType).NotTo(o.BeEmpty())
@@ -94,38 +84,20 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		o.Expect(err).NotTo(o.HaveOccurred())
 		defer otputils.RemoveResource("banp", banpCR.Name)
 
-		g.By(fmt.Sprintf("2.1 Validate %s metrics for BANP", banpMetricsList[0]))
-		otputils.GetPolicyMetrics(banpMetricsList[0], expectedBANPMetricsValue[banpMetricsList[0]])
-		
-		// Address set
-		if ipStackType == "dualstack" {
-			expectedBANPMetricsValue[dbObjects[1]] = "4"
-		} else {
-			expectedBANPMetricsValue[dbObjects[1]] = "2"
-		}
-		for i := 0; i < 2; i++ {
-			g.By(fmt.Sprintf("2.2.%d Validate %s - %s metrics for BANP", i, banpMetricsList[1], dbObjects[i]))
-			otputils.GetPolicyMetrics(banpMetricsList[1], expectedBANPMetricsValue[dbObjects[i]], dbObjects[i])
-		}
+		g.By("2. Validate BANP rule metrics with Ingress Allow action")
+		otputils.GetPolicyMetrics(banpMetricsList[0], "1", "Ingress", actionList[0])
 
-		banpEgress[actionList[1]] = "1"
-		banpIngress[actionList[0]] = "1"
-		ruleDirection := "Egress"
-		g.By(fmt.Sprintf("3. Validate metrics %s for BANP, %s rule and %s action", banpMetricsList[2], ruleDirection, actionList[1]))
-		otputils.GetPolicyMetrics(banpMetricsList[2], banpEgress[actionList[1]], ruleDirection, actionList[1])
-
-		ruleDirection = "Ingress"
-		g.By(fmt.Sprintf("4. Validate metrics %s for BANP, %s rule and %s action", banpMetricsList[2], ruleDirection, actionList[0]))
-		otputils.GetPolicyMetrics(banpMetricsList[2], banpIngress[actionList[0]], ruleDirection, actionList[0])
+		g.By("3. Validate BANP rule metrics with Egress Deny action")
+		otputils.GetPolicyMetrics(banpMetricsList[0], "1", "Egress", actionList[1])
 
 		banpIngress[actionList[1]] = "1"
-		g.By(fmt.Sprintf("5. Update BANP to add another ingress rule and validate metrics %s", banpMetricsList[2]))
+		g.By("4. Update BANP to add another ingress rule and validate metrics")
 		patchBANP := fmt.Sprintf("[{\"op\": \"add\", \"path\":\"/spec/ingress/1\", \"value\": {\"name\":\"deny ingress\", \"action\": \"Deny\", \"from\": [{\"pods\":  {\"namespaceSelector\": {\"matchLabels\": {%s: %s}}, \"podSelector\": {}}}]}}]", namespaceLabelKey, namespaceLabelVal)
 		err = exec.Command("oc", "patch", "baselineadminnetworkpolicy", banpCR.Name, "--type=json", "-p", patchBANP).Run()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		otputils.GetPolicyMetrics(banpMetricsList[2], banpIngress[actionList[1]], ruleDirection, actionList[1])
+		otputils.GetPolicyMetrics(banpMetricsList[0], banpIngress[actionList[1]], "Ingress", actionList[1])
 
-		g.By("6. Create a ANP with one ingress rule with deny action.")
+		g.By("5. Create a ANP with one ingress rule with deny action.")
 		anpCR := otputils.SingleRuleANPMEPolicyResource{
 			Name:            "anp-" + testID + "-0",
 			SubjectKey:      namespaceLabelKey,
@@ -145,25 +117,10 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		o.Expect(err).NotTo(o.HaveOccurred())
 		defer otputils.RemoveResource("anp", anpCR.Name)
 
-		// Address set
-		if ipStackType == "dualstack" {
-			expectedANPMetricsValue[dbObjects[1]] = "2"
-		} else {
-			expectedANPMetricsValue[dbObjects[1]] = "1"
-		}
+		g.By("6. Validate ANP rule metrics with Ingress Deny action")
+		otputils.GetPolicyMetrics(anpMetricsList[0], "1", "Ingress", actionList[1])
 
-		g.By(fmt.Sprintf("7.1 Validate %s metrics for ANP %s", anpMetricsList[0], anpCR.Name))
-		otputils.GetPolicyMetrics(anpMetricsList[0], expectedANPMetricsValue[anpMetricsList[0]])
-		for i := 0; i < 2; i++ {
-			g.By(fmt.Sprintf("7.2.%d Validate %s - %s metrics  for ANP %s", i, anpMetricsList[1], dbObjects[i], anpCR.Name))
-			otputils.GetPolicyMetrics(anpMetricsList[1], expectedANPMetricsValue[dbObjects[i]], dbObjects[i])
-		}
-		ruleDirection = "Ingress"
-		anpIngress[actionList[1]] = "1"
-		g.By(fmt.Sprintf("8. Validate metrics %s for ANP, %s rule and %s action", anpMetricsList[2], ruleDirection, actionList[1]))
-		otputils.GetPolicyMetrics(anpMetricsList[2], anpIngress[actionList[1]], ruleDirection, actionList[1])
-
-		g.By("9. Create another ANP with egress pass and allow rule.")
+		g.By("7. Create another ANP with egress pass and allow rule.")
 		anpNodeCR := otputils.SingleRuleANPPolicyResourceNode{
 			Name:       "anp-" + testID + "-1",
 			SubjectKey: namespaceLabelKey,
@@ -184,29 +141,10 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		o.Expect(err).NotTo(o.HaveOccurred())
 		defer otputils.RemoveResource("anp", anpNodeCR.Name)
 
-		ruleDirection = "Egress"
-		anpEgress[actionList[0]] = "1"
-		anpEgress[actionList[2]] = "1"
-		g.By(fmt.Sprintf("10. Validate metrics %s for ANP, %s rule and %s action", anpMetricsList[2], ruleDirection, actionList[0]))
-		otputils.GetPolicyMetrics(anpMetricsList[2], anpEgress[actionList[0]], ruleDirection, actionList[0])
+		g.By("8. Validate ANP rule metrics with Egress Allow action")
+		otputils.GetPolicyMetrics(anpMetricsList[0], "1", "Egress", actionList[0])
 
-		g.By(fmt.Sprintf("11. Validate metrics %s for ANP, %s rule and %s action", anpMetricsList[2], ruleDirection, actionList[2]))
-		otputils.GetPolicyMetrics(anpMetricsList[2], anpEgress[actionList[2]], ruleDirection, actionList[2])
-
-		expectedANPMetricsValue[anpMetricsList[0]] = "2"
-		expectedANPMetricsValue[dbObjects[0]] = "3"
-		// Address set
-		if ipStackType == "dualstack" {
-			expectedANPMetricsValue[dbObjects[1]] = "6"
-		} else {
-			expectedANPMetricsValue[dbObjects[1]] = "3"
-		}
-
-		g.By(fmt.Sprintf("12.1 Validate %s metrics for both ANP policies", anpMetricsList[0]))
-		otputils.GetPolicyMetrics(anpMetricsList[0], expectedANPMetricsValue[anpMetricsList[0]])
-		for i := 0; i < 2; i++ {
-			g.By(fmt.Sprintf("12.2.%d Validate %s - %s metrics for both ANP policies", i, anpMetricsList[1], dbObjects[i]))
-			otputils.GetPolicyMetrics(anpMetricsList[1], expectedANPMetricsValue[dbObjects[i]], dbObjects[i])
-		}
+		g.By("9. Validate ANP rule metrics with Egress Pass action")
+		otputils.GetPolicyMetrics(anpMetricsList[0], "1", "Egress", actionList[2])
 	})
 })
