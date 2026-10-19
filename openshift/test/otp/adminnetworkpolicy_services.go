@@ -197,8 +197,9 @@ spec:
   - name: deny-external
     action: Deny
     from:
-    - networks:
-        cidr: 0.0.0.0/0
+    - pods:
+        namespaceSelector: {}
+        podSelector: {}
 `, testNs)
 		cmd = exec.Command("oc", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(banp)
@@ -220,8 +221,9 @@ spec:
   - name: allow-external
     action: Allow
     from:
-    - networks:
-        cidr: 10.0.0.0/8
+    - pods:
+        namespaceSelector: {}
+        podSelector: {}
 `, testID, testNs)
 		cmd = exec.Command("oc", "apply", "-f", "-")
 		cmd.Stdin = strings.NewReader(anp)
