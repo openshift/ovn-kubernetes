@@ -14,18 +14,15 @@ import (
 
 // GetSAToken returns the token for the prometheus-k8s service account
 func GetSAToken() (string, error) {
-	// Try to get token from service account directly
 	args := []string{"create", "token", "prometheus-k8s", "-n", "openshift-monitoring"}
 	token, err := exec.Command("oc", args...).Output()
 	if err == nil && len(token) > 0 {
 		return strings.TrimSpace(string(token)), nil
 	}
-	
-	// Fallback: get from secret
 	args = []string{"get", "secrets", "-n", "openshift-monitoring", "-o", "jsonpath={.items[?(@.type==\"kubernetes.io/service-account-token\")].name}"}
 	secretNames, err := exec.Command("oc", args...).Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get service account secrets: %w", err)
 	}
 	
 	secretList := strings.Fields(string(secretNames))
@@ -37,14 +34,14 @@ func GetSAToken() (string, error) {
 	args = []string{"get", "secret", secretName, "-n", "openshift-monitoring", "-o", "jsonpath={.data.token}"}
 	tokenBase64, err := exec.Command("oc", args...).Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get service account token secret: %w", err)
 	}
 	
 	tokenCmd := exec.Command("base64", "-d")
 	tokenCmd.Stdin = strings.NewReader(string(tokenBase64))
 	token, err = tokenCmd.Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to decode token from base64: %w", err)
 	}
 	return strings.TrimSpace(string(token)), nil
 }
