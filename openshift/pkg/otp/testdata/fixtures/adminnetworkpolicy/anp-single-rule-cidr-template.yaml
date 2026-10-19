@@ -15,6 +15,8 @@ parameters:
   value: Allow
 - name: CIDR
   value: "10.0.0.0/8"
+- name: CIDR6
+  value: "fd00::/8"
 
 objects:
 - apiVersion: policy.networking.k8s.io/v1alpha1
@@ -33,3 +35,4 @@ objects:
       to:
       - networks:
         - cidr: ${CIDR}
+        - cidr: ${CIDR6}

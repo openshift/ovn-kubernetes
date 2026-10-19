@@ -135,7 +135,8 @@ func getPodIPs(namespace, podName string) ([]string, error) {
 
 // CheckACLLogs monitors OVN-K node logs for specific ACL audit strings
 func CheckACLLogs(serverPodNs, serverPodName, clientPodNs, clientPodName, curlCmd, aclLogSearchString, ovnKNodePodName string, resultPass bool) {
-	tailACLLog := "tail -f /var/log/ovn/acl-audit-log.log"
+	// tail -n 0 starts at end of file, -F follows file renames (unlike -f)
+	tailACLLog := "tail -n 0 -F /var/log/ovn/acl-audit-log.log"
 	
 	cmd := exec.Command("oc", "exec", "-n", "openshift-ovn-kubernetes", ovnKNodePodName, "-c", "ovn-controller", "--", "/bin/bash", "-c", tailACLLog)
 	var logOutput bytes.Buffer
@@ -143,9 +144,9 @@ func CheckACLLogs(serverPodNs, serverPodName, clientPodNs, clientPodName, curlCm
 	if err := cmd.Start(); err != nil {
 		framework.Failf("Failed to start log tailing: %v", err)
 	}
-	defer cmd.Process.Kill()
 
-	time.Sleep(2 * time.Second)
+	// Allow time for tail to initialize and start following the file
+	time.Sleep(1 * time.Second)
 
 	if curlCmd == "pass" {
 		CurlPod2PodPass(serverPodNs, serverPodName, clientPodNs, clientPodName)
@@ -153,12 +154,17 @@ func CheckACLLogs(serverPodNs, serverPodName, clientPodNs, clientPodName, curlCm
 		CurlPod2PodFail(serverPodNs, serverPodName, clientPodNs, clientPodName)
 	}
 
-	time.Sleep(5 * time.Second)
+	// Allow time for log entry to be written
+	time.Sleep(2 * time.Second)
 	
-	found := strings.Contains(logOutput.String(), aclLogSearchString)
+	// Stop tail process before reading buffer to avoid data race with copy goroutine
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait() // waits for stdout copy goroutine to finish
+	logs := logOutput.String()
+	found := strings.Contains(logs, aclLogSearchString)
 	if resultPass {
-		o.Expect(found).To(o.BeTrue(), fmt.Sprintf("Expected log string not found: %s\nLogs:\n%s", aclLogSearchString, logOutput.String()))
+		o.Expect(found).To(o.BeTrue(), fmt.Sprintf("Expected log string not found: %s\nLogs:\n%s", aclLogSearchString, logs))
 	} else {
-		o.Expect(found).To(o.BeFalse(), fmt.Sprintf("Unexpected log string found: %s\nLogs:\n%s", aclLogSearchString, logOutput.String()))
+		o.Expect(found).To(o.BeFalse(), fmt.Sprintf("Unexpected log string found: %s\nLogs:\n%s", aclLogSearchString, logs))
 	}
 }
