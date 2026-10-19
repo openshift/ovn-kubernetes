@@ -1495,6 +1495,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation Uplink default-VRF egress does not restore gateway readiness on an UplinkState recreated after deselection": "[Suite:ovn-kubernetes/conformance/parallel]",
 
+	"Network Segmentation Uplink default-VRF egress keeps ovnkube-node running when the Uplink bridge is deleted under an active CUDN": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"Network Segmentation Uplink default-VRF egress maps multiple CUDNs to the same Uplink bridge": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation Uplink default-VRF egress publishes the heaviest next hops of the lowest-metric default routes": "[Suite:ovn-kubernetes/conformance/parallel]",
@@ -1674,6 +1676,10 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation should set NO_FLOOD on CUDN patch ports, direct node-IP ARP to default GR (p12 flow), and fan out external GARP to all GRs (p11 flow)": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation status.vrfName validation accepts a 15-character vrfName and rejects a 16-character one": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation when primary CUDN already exists, second primary CUDN targeting the same namespace should report not-ready": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation when primary UDN already exists, second primary UDN in the same namespace should report not-ready": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1918,6 +1924,8 @@ var AppendedAnnotations = map[string]string{
 	"Unidling With non annotated service Should not generate a NeedPods event when has backend": "[Disabled:Unimplemented]",
 
 	"Uplink route advertisements with Dynamic UDN allocation allows node-disjoint Dynamic CUDNs to share a targetVRF auto Uplink and rejects overlap": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Uplink route advertisements with Dynamic UDN allocation rebuilds the CUDN gateway with the reallocated node subnets after an inactive interval": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"UplinkState API validation accepts up to 256 default gateways across both IP families": "[Suite:ovn-kubernetes/conformance/parallel]",
 
