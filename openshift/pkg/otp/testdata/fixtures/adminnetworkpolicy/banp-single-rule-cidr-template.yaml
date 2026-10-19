@@ -15,7 +15,7 @@ parameters:
   value: "0.0.0.0/0"
 
 objects:
-- apiVersion: networking.k8s.io/v1alpha1
+- apiVersion: policy.networking.k8s.io/v1alpha1
   kind: BaselineAdminNetworkPolicy
   metadata:
     name: ${NAME}

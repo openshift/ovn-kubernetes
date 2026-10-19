@@ -63,6 +63,8 @@ var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
 	"[ovn-kubernetes-ote][sig-network] [OTP] SDN adminnetworkpolicy metrics 73331-BANP and ANP metrics are available [Serial] [Suite:ovn-kubernetes/conformance/serial]",
 	"[ovn-kubernetes-ote][sig-network] [OTP] SDN adminnetworkpolicy APBR interaction 73963-ANP overrides BANP with AdminPolicyBasedExternalRoutes [Serial] [Suite:ovn-kubernetes/conformance/serial]",
+	"[ovn-kubernetes-ote][sig-network] [OTP] SDN adminnetworkpolicy services 73440-ANP/BANP with ClusterIP and NodePort Services [Serial] [Suite:ovn-kubernetes/conformance/serial]",
+	"[ovn-kubernetes-ote][sig-network] [OTP] SDN adminnetworkpolicy services 82081-ANP/BANP with LoadBalancer Services [Serial] [Suite:ovn-kubernetes/conformance/serial]",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
