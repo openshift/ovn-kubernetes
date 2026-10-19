@@ -206,3 +206,8 @@ type AclSettings struct {
 func (s *AclSettings) GetJSONString() string {
 	return fmt.Sprintf("{\"k8s.ovn.org/acl-logging\": \"{\\\"deny\\\": \\\"%s\\\", \\\"allow\\\": \\\"%s\\\"}\"}", s.DenySetting, s.AllowSetting)
 }
+
+// GetAnnotationArg returns the acl-logging annotation as an `oc annotate` key=value argument.
+func (s *AclSettings) GetAnnotationArg() string {
+	return fmt.Sprintf(`k8s.ovn.org/acl-logging={"deny": "%s", "allow": "%s"}`, s.DenySetting, s.AllowSetting)
+}
