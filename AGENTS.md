@@ -66,6 +66,13 @@ Run with `make test-crd` from `test/`. See
 required, and `docs/developer-guide/local_testing_guide.md#crd-integration-tests` for how
 to run and add new tests.
 
+Changes under `test/` are exempt from requirements to add unit tests. Do not
+request or add unit tests for code in this directory, including test helpers,
+image configuration, deployment configuration, and infrastructure providers.
+Validate changes with the existing builds and relevant test suites as appropriate,
+and preserve coverage of existing scenarios. If a PR also changes product code
+outside `test/`, the usual test requirements still apply to those product changes.
+
 ## Key Conventions
 
 See `CONTRIBUTING.md` for full details:
