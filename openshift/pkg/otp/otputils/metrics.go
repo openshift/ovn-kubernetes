@@ -2,6 +2,7 @@ package otputils
 
 import (
 	"fmt"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -13,23 +14,39 @@ import (
 
 // GetSAToken returns the token for the prometheus-k8s service account
 func GetSAToken() (string, error) {
-	args := []string{"get", "secret", "-n", "openshift-monitoring", "-o", "jsonpath={.items[?(@.metadata.annotations.kubernetes\\.io/service-account\\.name==\"prometheus-k8s\")].name}"}
-	secretName, err := exec.Command("oc", args...).Output()
+	// Try to get token from service account directly
+	args := []string{"create", "token", "prometheus-k8s", "-n", "openshift-monitoring"}
+	token, err := exec.Command("oc", args...).Output()
+	if err == nil && len(token) > 0 {
+		return strings.TrimSpace(string(token)), nil
+	}
+	
+	// Fallback: get from secret
+	args = []string{"get", "secrets", "-n", "openshift-monitoring", "-o", "jsonpath={.items[?(@.type==\"kubernetes.io/service-account-token\")].name}"}
+	secretNames, err := exec.Command("oc", args...).Output()
 	if err != nil {
 		return "", err
 	}
-	args = []string{"get", "secret", strings.TrimSpace(string(secretName)), "-n", "openshift-monitoring", "-o", "jsonpath={.data.token}"}
+	
+	secretList := strings.Fields(string(secretNames))
+	if len(secretList) == 0 {
+		return "", fmt.Errorf("no service account token secret found")
+	}
+	
+	secretName := secretList[0]
+	args = []string{"get", "secret", secretName, "-n", "openshift-monitoring", "-o", "jsonpath={.data.token}"}
 	tokenBase64, err := exec.Command("oc", args...).Output()
 	if err != nil {
 		return "", err
 	}
+	
 	tokenCmd := exec.Command("base64", "-d")
 	tokenCmd.Stdin = strings.NewReader(string(tokenBase64))
-	token, err := tokenCmd.Output()
+	token, err = tokenCmd.Output()
 	if err != nil {
 		return "", err
 	}
-	return string(token), nil
+	return strings.TrimSpace(string(token)), nil
 }
 
 // GetPolicyMetrics queries Prometheus for OVN-K metrics
@@ -40,11 +57,8 @@ func GetPolicyMetrics(metricName string, expectedValue string, labels ...string)
 	query := metricName
 	if len(labels) > 0 {
 		var labelSelectors []string
-		if metricName == "ovnkube_controller_baseline_admin_network_policies_db_objects" || 
-		   metricName == "ovnkube_controller_admin_network_policies_db_objects" {
-			labelSelectors = append(labelSelectors, fmt.Sprintf("db_object=\"%s\"", labels[0]))
-		} else if metricName == "ovnkube_controller_baseline_admin_network_policies_rules" ||
-		          metricName == "ovnkube_controller_admin_network_policies_rules" {
+		if metricName == "ovnkube_controller_baseline_admin_network_policies_rules" ||
+		   metricName == "ovnkube_controller_admin_network_policies_rules" {
 			labelSelectors = append(labelSelectors, fmt.Sprintf("direction=\"%s\"", labels[0]))
 			labelSelectors = append(labelSelectors, fmt.Sprintf("action=\"%s\"", labels[1]))
 		}
@@ -52,9 +66,10 @@ func GetPolicyMetrics(metricName string, expectedValue string, labels ...string)
 	}
 
 	err = wait.PollImmediate(5*time.Second, 2*time.Minute, func() (bool, error) {
-		promURL := "https://prometheus-k8s.openshift-monitoring.svc:9091/api/v1/query?query=" + query
-		curlCmd := fmt.Sprintf("curl -k -s -H \"Authorization: Bearer %s\" \"%s\"", token, promURL)
-		output, err := exec.Command("oc", "exec", "-n", "openshift-monitoring", "prometheus-k8s-0", "-c", "prometheus", "--", "bash", "-c", curlCmd).Output()
+		encodedQuery := url.QueryEscape(query)
+		promURL := "https://prometheus-k8s.openshift-monitoring.svc:9091/api/v1/query?query=" + encodedQuery
+		curlCmd := fmt.Sprintf("TOKEN='%s'\ncurl -k -s -H \"Authorization: Bearer ${TOKEN}\" \"%s\"", token, promURL)
+		output, err := exec.Command("oc", "exec", "-n", "openshift-monitoring", "prometheus-k8s-0", "-c", "prometheus", "--", "bash", "-c", curlCmd).CombinedOutput()
 		if err != nil {
 			return false, nil
 		}
