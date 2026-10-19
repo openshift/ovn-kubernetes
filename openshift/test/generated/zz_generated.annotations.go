@@ -1950,6 +1950,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Uplink route advertisements with Dynamic UDN allocation rebuilds the CUDN gateway with the reallocated node subnets after an inactive interval": "[Suite:ovn-kubernetes/conformance/parallel]",
 
+	"[OTP] SDN adminnetworkpolicy APBR interaction 73963-ANP overrides BANP with AdminPolicyBasedExternalRoutes [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
+
 	"[OTP] SDN adminnetworkpolicy metrics 73331-BANP and ANP metrics are available [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"blocking ICMP needs frag when a client VM pod with 1500 MTU targets a host networked pod should be able to send large TCP packet and not get a route cache entry": "[Disabled:Unimplemented]",

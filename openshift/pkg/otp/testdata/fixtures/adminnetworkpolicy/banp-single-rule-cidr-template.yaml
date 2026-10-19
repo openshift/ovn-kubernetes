@@ -1,0 +1,32 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: banp-single-rule-cidr-template
+parameters:
+- name: NAME
+  value: default
+- name: SUBJECTVAL
+  value: default
+- name: RULENAME
+  value: deny-rule
+- name: RULEACTION
+  value: Deny
+- name: CIDR
+  value: "0.0.0.0/0"
+
+objects:
+- apiVersion: networking.k8s.io/v1alpha1
+  kind: BaselineAdminNetworkPolicy
+  metadata:
+    name: ${NAME}
+  spec:
+    subject:
+      namespaces:
+        matchLabels:
+          kubernetes.io/metadata.name: ${SUBJECTVAL}
+    egress:
+    - name: ${RULENAME}
+      action: ${RULEACTION}
+      to:
+      - networks:
+        - cidr: ${CIDR}

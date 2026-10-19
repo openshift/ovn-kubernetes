@@ -61,6 +61,7 @@ var InformingTests = []string{
 	"[Feature:EgressIP][Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:EgressIP][Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[ovn-kubernetes-ote][sig-network] [OTP] SDN adminnetworkpolicy metrics 73331-BANP and ANP metrics are available [Serial] [Suite:ovn-kubernetes/conformance/serial]",
+	"[ovn-kubernetes-ote][sig-network] [OTP] SDN adminnetworkpolicy APBR interaction 73963-ANP overrides BANP with AdminPolicyBasedExternalRoutes [Serial] [Suite:ovn-kubernetes/conformance/serial]",
 
 }
 
