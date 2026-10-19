@@ -20,7 +20,13 @@ import (
 // FixturePath returns the absolute path to a fixture file in the OTE extension
 func FixturePath(parts ...string) string {
 	cwd, _ := os.Getwd()
-	return filepath.Join(append([]string{cwd, "openshift", "pkg", "otp", "testdata", "fixtures"}, parts...)...)
+	// If already in openshift dir, don't add it again
+	base := filepath.Join(cwd, "pkg", "otp", "testdata", "fixtures")
+	if _, err := os.Stat(base); os.IsNotExist(err) {
+		// Try with openshift prefix if not found
+		base = filepath.Join(cwd, "openshift", "pkg", "otp", "testdata", "fixtures")
+	}
+	return filepath.Join(append([]string{base}, parts...)...)
 }
 
 // ApplyResourceFromTemplate processes an OpenShift template and applies it
