@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes"
@@ -73,9 +74,14 @@ func GetNthFirstUDNSubnets(n int) (ipv4, ipv6 []string) {
 }
 
 // getMachineNetworkSubnets retrieves the machine network subnets from node
-// annotations (k8s.ovn.org/node-primary-ifaddr). It returns the unique IPv4
-// and IPv6 CIDR networks found across all nodes. When KUBECONFIG is not set,
-// the call is a no-op and returns empty sets.
+// annotations. It first attempts to use the cloud egress IP config annotation
+// (cloud.network.openshift.io/egress-ipconfig) which provides the actual
+// network CIDR (e.g. 10.0.128.0/24). If that annotation is not present (e.g.
+// on non-cloud platforms), it falls back to the node primary interface address
+// annotation (k8s.ovn.org/node-primary-ifaddr) which may only provide a host
+// address (e.g. 10.0.128.4/32). It returns the unique IPv4 and IPv6 CIDR
+// networks found across all nodes. When KUBECONFIG is not set, the call is a
+// no-op and returns empty sets.
 func getMachineNetworkSubnets() (sets.Set[string], sets.Set[string], error) {
 	ipv4 := sets.New[string]()
 	ipv6 := sets.New[string]()
@@ -98,27 +104,60 @@ func getMachineNetworkSubnets() (sets.Set[string], sets.Set[string], error) {
 		return ipv4, ipv6, fmt.Errorf("failed to list nodes: %w", err)
 	}
 	for i := range nodes.Items {
-		ifAddr, err := util.GetNodeIfAddrAnnotation(&nodes.Items[i])
+		node := &nodes.Items[i]
+		v4CIDR, v6CIDR, err := machineNetworkCIDRsFromNode(node)
 		if err != nil {
-			return ipv4, ipv6, fmt.Errorf("failed to get interface address annotation for node %q: %w", nodes.Items[i].Name, err)
+			return ipv4, ipv6, err
 		}
-		for _, addr := range []string{ifAddr.IPv4, ifAddr.IPv6} {
-			if addr == "" {
-				continue
-			}
-			_, cidr, err := net.ParseCIDR(addr)
-			if err != nil {
-				return ipv4, ipv6, fmt.Errorf("failed to parse CIDR %q for node %q: %w", addr, nodes.Items[i].Name, err)
-			}
-			if cidr == nil {
-				return ipv4, ipv6, fmt.Errorf("parsed nil CIDR from %q for node %q", addr, nodes.Items[i].Name)
-			}
-			if cidr.IP.To4() != nil {
-				ipv4.Insert(cidr.String())
-			} else {
-				ipv6.Insert(cidr.String())
-			}
+		if v4CIDR != "" {
+			ipv4.Insert(v4CIDR)
+		}
+		if v6CIDR != "" {
+			ipv6.Insert(v6CIDR)
 		}
 	}
 	return ipv4, ipv6, nil
+}
+
+// machineNetworkCIDRsFromNode extracts machine network CIDRs from a node.
+// It prefers the cloud egress IP config annotation which has the real subnet
+// CIDR, falling back to the node primary interface address annotation.
+func machineNetworkCIDRsFromNode(node *corev1.Node) (v4, v6 string, err error) {
+	egressIPConfig, err := util.ParseCloudEgressIPConfig(node)
+	if err == nil {
+		if egressIPConfig.V4.Net != nil {
+			v4 = egressIPConfig.V4.Net.String()
+		}
+		if egressIPConfig.V6.Net != nil {
+			v6 = egressIPConfig.V6.Net.String()
+		}
+		return v4, v6, nil
+	}
+	if !util.IsAnnotationNotSetError(err) {
+		return "", "", fmt.Errorf("failed to parse cloud egress IP config for node %q: %w", node.Name, err)
+	}
+
+	// Fall back to node-primary-ifaddr annotation.
+	ifAddr, err := util.GetNodeIfAddrAnnotation(node)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get interface address annotation for node %q: %w", node.Name, err)
+	}
+	for _, addr := range []string{ifAddr.IPv4, ifAddr.IPv6} {
+		if addr == "" {
+			continue
+		}
+		_, cidr, err := net.ParseCIDR(addr)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to parse CIDR %q for node %q: %w", addr, node.Name, err)
+		}
+		if cidr == nil {
+			return "", "", fmt.Errorf("parsed nil CIDR from %q for node %q", addr, node.Name)
+		}
+		if cidr.IP.To4() != nil {
+			v4 = cidr.String()
+		} else {
+			v6 = cidr.String()
+		}
+	}
+	return v4, v6, nil
 }
