@@ -28,7 +28,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 
 	g.AfterEach(func() {
 		for _, ns := range nsList {
-			exec.Command("oc", "delete", "ns", ns, "--ignore-not-found=true").Run()
+			_ = exec.Command("oc", "delete", "ns", ns, "--ignore-not-found=true").Run()
 		}
 		nsList = nil
 	})
