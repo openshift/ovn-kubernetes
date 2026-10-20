@@ -90,7 +90,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 
 		banpIngress[actionList[1]] = "1"
 		g.By("4. Update BANP to add another ingress rule and validate metrics")
-		patchBANP := fmt.Sprintf("[{\"op\": \"add\", \"path\":\"/spec/ingress/1\", \"value\": {\"name\":\"deny ingress\", \"action\": \"Deny\", \"from\": [{\"pods\":  {\"namespaceSelector\": {\"matchLabels\": {%s: %s}}, \"podSelector\": {}}}]}}]", namespaceLabelKey, namespaceLabelVal)
+		patchBANP := fmt.Sprintf("[{\"op\": \"add\", \"path\":\"/spec/ingress/1\", \"value\": {\"name\":\"deny ingress\", \"action\": \"Deny\", \"from\": [{\"pods\":  {\"namespaceSelector\": {\"matchLabels\": {\"%s\": \"%s\"}}, \"podSelector\": {}}}]}}]", namespaceLabelKey, namespaceLabelVal)
 		err = exec.Command("oc", "patch", "baselineadminnetworkpolicy", banpCR.Name, "--type=json", "-p", patchBANP).Run()
 		o.Expect(err).NotTo(o.HaveOccurred(), "failed to patch BANP with additional ingress rule")
 		otputils.GetPolicyMetrics(banpMetricsList[0], banpIngress[actionList[1]], "Ingress", actionList[1])
