@@ -69,7 +69,7 @@ func RemoveResource(resourceType, name string, extraArgs ...string) error {
 
 // WaitForPodWithLabelReady waits for pods with the given label to be ready
 func WaitForPodWithLabelReady(namespace, label string) error {
-	return wait.PollImmediate(5*time.Second, 2*time.Minute, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 2*time.Minute, true, func(context.Context) (bool, error) {
 		args := []string{"get", "pods", "-n", namespace, "-l", label, "-o", "jsonpath={.items[*].status.conditions[?(@.type==\"Ready\")].status}"}
 		output, err := exec.Command("oc", args...).Output()
 		if err != nil {
@@ -147,7 +147,7 @@ func CheckACLLogs(serverPodNs, serverPodName, clientPodNs, clientPodName, curlCm
 	if err := cmd.Start(); err != nil {
 		framework.Failf("Failed to start log tailing: %v", err)
 	}
-	defer cmd.Process.Kill()
+	defer func() { _ = cmd.Process.Kill() }()
 
 	time.Sleep(2 * time.Second)
 

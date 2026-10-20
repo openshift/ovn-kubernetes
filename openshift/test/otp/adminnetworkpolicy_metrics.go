@@ -80,7 +80,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		}
 		err := banpCR.Create()
 		o.Expect(err).NotTo(o.HaveOccurred(), "failed to create BANP policy")
-		defer otputils.RemoveResource("banp", banpCR.Name)
+		defer func() { _ = otputils.RemoveResource("banp", banpCR.Name) }()
 
 		g.By("2. Validate BANP rule metrics with Ingress Allow action")
 		otputils.GetPolicyMetrics(banpMetricsList[0], "1", "Ingress", actionList[0])
@@ -113,7 +113,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		}
 		err = anpCR.Create()
 		o.Expect(err).NotTo(o.HaveOccurred(), "failed to create ANP policy")
-		defer otputils.RemoveResource("anp", anpCR.Name)
+		defer func() { _ = otputils.RemoveResource("anp", anpCR.Name) }()
 
 		g.By("6. Validate ANP rule metrics with Ingress Deny action")
 		otputils.GetPolicyMetrics(anpMetricsList[0], "1", "Ingress", actionList[1])
@@ -137,7 +137,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		}
 		err = anpNodeCR.Create()
 		o.Expect(err).NotTo(o.HaveOccurred(), "failed to create second ANP policy")
-		defer otputils.RemoveResource("anp", anpNodeCR.Name)
+		defer func() { _ = otputils.RemoveResource("anp", anpNodeCR.Name) }()
 
 		g.By("8. Validate ANP rule metrics with Egress Allow action")
 		otputils.GetPolicyMetrics(anpMetricsList[0], "1", "Egress", actionList[0])
