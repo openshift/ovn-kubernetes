@@ -65,7 +65,7 @@ func GetPolicyMetrics(metricName string, expectedValue string, labels ...string)
 	err = wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 2*time.Minute, true, func(context.Context) (bool, error) {
 		encodedQuery := url.QueryEscape(query)
 		promURL := "https://prometheus-k8s.openshift-monitoring.svc:9091/api/v1/query?query=" + encodedQuery
-		curlCmd := fmt.Sprintf("TOKEN='%s'\ncurl -k -s -H \"Authorization: Bearer ${TOKEN}\" \"%s\"", token, promURL)
+		curlCmd := fmt.Sprintf("TOKEN='%s'\ncurl -s --cacert /run/secrets/kubernetes.io/serviceaccount/ca.crt -H \"Authorization: Bearer ${TOKEN}\" \"%s\"", token, promURL)
 		output, err := exec.Command("oc", "exec", "-n", "openshift-monitoring", "prometheus-k8s-0", "-c", "prometheus", "--", "bash", "-c", curlCmd).CombinedOutput()
 		if err != nil {
 			return false, nil
