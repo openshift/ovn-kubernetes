@@ -86,7 +86,7 @@ func makeNodeSwitchTargetIPs(service *corev1.Service, node string, clusterEntry 
 	return
 }
 
-func makeNodeRouterTargetIPs(service *corev1.Service, node *nodeInfo, clusterEntry util.LBEndpointEntry, c *lbConfig, hostMasqueradeIPV4, hostMasqueradeIPV6 string) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool, zeroRouterLocalEndpointsV4, zeroRouterLocalEndpointsV6 bool) {
+func makeNodeRouterTargetIPs(service *corev1.Service, node *nodeInfo, clusterEntry util.LBEndpointEntry, c *lbConfig, hostMasqueradeIPV4, hostMasqueradeIPV6 string, preferLocal bool) (targetIPsV4, targetIPsV6 []string, v4Changed, v6Changed bool, zeroRouterLocalEndpointsV4, zeroRouterLocalEndpointsV6 bool) {
 	targetIPsV4 = clusterEntry.V4IPs
 	targetIPsV6 = clusterEntry.V6IPs
 
@@ -114,6 +114,29 @@ func makeNodeRouterTargetIPs(service *corev1.Service, node *nodeInfo, clusterEnt
 		}
 		if len(targetIPsV6) == 0 {
 			zeroRouterLocalEndpointsV6 = true
+			targetIPsV6 = clusterEntry.V6IPs
+		}
+	}
+	// OCP HACK END
+
+	// OCP HACK BEGIN
+	// Extend dns-default preferLocal to router targets so that UDN traffic arriving via
+	// management port → GWR (br-ex) path also prefers the local dns-default pod.
+	// Remove together with the switch-side hack above when ITP:preferLocal is implemented.
+	if preferLocal {
+		localV4 := util.FilterIPsSlice(targetIPsV4, node.podSubnets, true)
+		localV6 := util.FilterIPsSlice(targetIPsV6, node.podSubnets, true)
+		if len(localV4) > 0 {
+			targetIPsV4 = localV4
+		} else if len(targetIPsV4) == 0 && !c.externalTrafficLocal {
+			// No local endpoint and no prior ETP=Local filtering: restore from the full
+			// cluster entry so traffic is not dropped (tainted nodes, custom nodePlacement).
+			// When externalTrafficLocal is true the empty list is intentional — do not restore.
+			targetIPsV4 = clusterEntry.V4IPs
+		}
+		if len(localV6) > 0 {
+			targetIPsV6 = localV6
+		} else if len(targetIPsV6) == 0 && !c.externalTrafficLocal {
 			targetIPsV6 = clusterEntry.V6IPs
 		}
 	}
@@ -475,7 +498,8 @@ func buildTemplateLBs(service *corev1.Service, configs []lbConfig, nodes []nodeI
 						entry,
 						&cfg,
 						config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String(),
-						config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
+						config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String(),
+						false)
 
 					if v4Changed {
 						routerV4TargetNeedsTemplate = true
@@ -684,6 +708,7 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 				// OCP HACK begin
 				zeroRouterV4LocalEndpoints := true
 				zeroRouterV6LocalEndpoints := true
+				isDNSDefault := service.Namespace == "openshift-dns" && service.Name == "dns-default"
 				// OCP HACK end
 
 				for _, entry := range cfg.clusterEndpoints {
@@ -695,14 +720,15 @@ func buildPerNodeLBs(service *corev1.Service, configs []lbConfig, nodes []nodeIn
 						entry,
 						&cfg,
 						config.Gateway.MasqueradeIPs.V4HostMasqueradeIP.String(),
-						config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String())
+						config.Gateway.MasqueradeIPs.V6HostMasqueradeIP.String(),
+						isDNSDefault)
 
 					routerV4targets = append(routerV4targets, joinHostsPort(routerV4TargetIPs, entry.Port)...)
 					routerV6targets = append(routerV6targets, joinHostsPort(routerV6TargetIPs, entry.Port)...)
 
 					// OCP HACK begin
 					// TODO: Remove this hack once we add support for ITP:preferLocal and DNS operator starts using it.
-					if service.Namespace == "openshift-dns" && service.Name == "dns-default" {
+					if isDNSDefault {
 						// Select endpoints that are local to this node.
 						switchV4targetDNSips := util.FilterIPsSlice(entry.V4IPs, node.podSubnets, true)
 						switchV6targetDNSips := util.FilterIPsSlice(entry.V6IPs, node.podSubnets, true)
