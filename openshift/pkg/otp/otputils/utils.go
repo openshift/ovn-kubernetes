@@ -2,6 +2,7 @@ package otputils
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
