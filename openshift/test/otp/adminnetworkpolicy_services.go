@@ -31,22 +31,22 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy services", func() {
 
 	g.AfterEach(func() {
 		// Delete test-created ANPs and BANPs
-		exec.Command("oc", "delete", "anp", "--all", "--ignore-not-found=true").Run()
-		
+		_ = exec.Command("oc", "delete", "anp", "--all", "--ignore-not-found=true").Run()
+
 		// Restore or delete BANP named "default"
 		if len(originalBANPDefault) > 0 {
 			// Restore the original BANP
 			cmd := exec.Command("oc", "apply", "-f", "-")
 			cmd.Stdin = strings.NewReader(string(originalBANPDefault))
-			cmd.Run()
+			_ = cmd.Run()
 		} else {
 			// No original BANP existed, delete the test one
-			exec.Command("oc", "delete", "banp", "default", "--ignore-not-found=true").Run()
+			_ = exec.Command("oc", "delete", "banp", "default", "--ignore-not-found=true").Run()
 		}
-		
+
 		// Delete test namespaces
 		for _, ns := range nsList {
-			exec.Command("oc", "delete", "ns", ns, "--ignore-not-found=true").Run()
+			_ = exec.Command("oc", "delete", "ns", ns, "--ignore-not-found=true").Run()
 		}
 		nsList = nil
 		originalBANPDefault = nil

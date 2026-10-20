@@ -92,7 +92,9 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		}
 		err := banpCR.Create()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		defer otputils.RemoveResource("banp", banpCR.Name)
+		defer func() {
+			_ = otputils.RemoveResource("banp", banpCR.Name)
+		}()
 
 		g.By(fmt.Sprintf("2.1 Validate %s metrics for BANP", banpMetricsList[0]))
 		otputils.GetPolicyMetrics(banpMetricsList[0], expectedBANPMetricsValue[banpMetricsList[0]])
@@ -143,7 +145,9 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		}
 		err = anpCR.Create()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		defer otputils.RemoveResource("anp", anpCR.Name)
+		defer func() {
+			_ = otputils.RemoveResource("anp", anpCR.Name)
+		}()
 
 		// Address set
 		if ipStackType == "dualstack" {
@@ -182,7 +186,9 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {
 		}
 		err = anpNodeCR.Create()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		defer otputils.RemoveResource("anp", anpNodeCR.Name)
+		defer func() {
+			_ = otputils.RemoveResource("anp", anpNodeCR.Name)
+		}()
 
 		ruleDirection = "Egress"
 		anpEgress[actionList[0]] = "1"

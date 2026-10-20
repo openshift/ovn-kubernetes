@@ -1,6 +1,7 @@
 package otputils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -54,18 +55,17 @@ func GetPolicyMetrics(metricName string, expectedValue string, labels ...string)
 	query := metricName
 	if len(labels) > 0 {
 		var labelSelectors []string
-		if metricName == "ovnkube_controller_baseline_admin_network_policies_db_objects" || 
-		   metricName == "ovnkube_controller_admin_network_policies_db_objects" {
+		switch metricName {
+		case "ovnkube_controller_baseline_admin_network_policies_db_objects", "ovnkube_controller_admin_network_policies_db_objects":
 			labelSelectors = append(labelSelectors, fmt.Sprintf("db_object=\"%s\"", labels[0]))
-		} else if metricName == "ovnkube_controller_baseline_admin_network_policies_rules" ||
-		          metricName == "ovnkube_controller_admin_network_policies_rules" {
+		case "ovnkube_controller_baseline_admin_network_policies_rules", "ovnkube_controller_admin_network_policies_rules":
 			labelSelectors = append(labelSelectors, fmt.Sprintf("direction=\"%s\"", labels[0]))
 			labelSelectors = append(labelSelectors, fmt.Sprintf("action=\"%s\"", labels[1]))
 		}
 		query = fmt.Sprintf("%s{%s}", metricName, strings.Join(labelSelectors, ","))
 	}
 
-	err = wait.PollImmediate(5*time.Second, 2*time.Minute, func() (bool, error) {
+	err = wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 2*time.Minute, true, func(context.Context) (bool, error) {
 		encodedQuery := url.QueryEscape(query)
 		promURL := "https://prometheus-k8s.openshift-monitoring.svc:9091/api/v1/query?query=" + encodedQuery
 		curlCmd := fmt.Sprintf("TOKEN='%s'\ncurl -k -s -H \"Authorization: Bearer ${TOKEN}\" \"%s\"", token, promURL)
