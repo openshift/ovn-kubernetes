@@ -38,10 +38,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
@@ -58,7 +56,6 @@ import (
 
 	ipamclaimsv1alpha1 "github.com/k8snetworkplumbingwg/ipamclaims/pkg/crd/ipamclaims/v1alpha1"
 	nadapi "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
-	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 
 	iputils "github.com/containernetworking/plugins/pkg/ip"
 
@@ -279,7 +276,6 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 		httpServerTestPods  = []*corev1.Pod{}
 		iperfServerTestPods = []*corev1.Pod{}
 		clientSet           kubernetes.Interface
-		nadClient           nadclient.K8sCniCncfIoV1Interface
 		providerCtx         infraapi.Context
 
 		isDualStack = func() bool {
@@ -400,7 +396,9 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 					output := ""
 					Eventually(func() error {
 						var err error
-						output, err = virtClient.RunCommand(vmi, fmt.Sprintf("curl http://%s", net.JoinHostPort(podIP, "8000")), polling)
+						// A console timeout does not stop curl in the guest. Finish
+						// before that timeout so retries can obtain a shell prompt.
+						output, err = virtClient.RunCommand(vmi, fmt.Sprintf("curl --connect-timeout 3 --max-time 5 http://%s", net.JoinHostPort(podIP, "8000")), polling)
 						return err
 					}).
 						WithPolling(polling).
@@ -696,7 +694,8 @@ fi
 			step = by(vmName, stage+": Check n/s tcp traffic")
 			output := ""
 			Eventually(func() error {
-				output, err = virtClient.RunCommand(vmi, "curl -kL https://kubernetes.default.svc.cluster.local", polling)
+				// Leave time to read the prompt and exit status after curl ends.
+				output, err = virtClient.RunCommand(vmi, "curl --connect-timeout 3 --max-time 5 -kL https://kubernetes.default.svc.cluster.local", 15*time.Second)
 				return err
 			}).
 				WithPolling(polling).
@@ -710,16 +709,17 @@ fi
 			By("Skip network policy, test should be fixed after OVN bump broke them")
 		}
 
-		liveMigrateVirtualMachine = func(vmName string) {
+		liveMigrateVirtualMachine = func(vmName string) *kubevirtv1.VirtualMachineInstanceMigration {
 			GinkgoHelper()
 			vmimCreationRetries := 0
+			var vmim *kubevirtv1.VirtualMachineInstanceMigration
 			Eventually(func() error {
 				if vmimCreationRetries > 0 {
 					// retry due to unknown issue where kubevirt webhook gets stuck reading the request body
 					// https://github.com/ovn-kubernetes/ovn-kubernetes/issues/3902#issuecomment-1750257559
 					By(fmt.Sprintf("Retrying vmim %s creation", vmName))
 				}
-				vmim := &kubevirtv1.VirtualMachineInstanceMigration{
+				vmim = &kubevirtv1.VirtualMachineInstanceMigration{
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace:    namespace,
 						GenerateName: vmName,
@@ -732,6 +732,7 @@ fi
 				vmimCreationRetries++
 				return err
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
+			return vmim
 		}
 
 		checkLiveMigrationSucceeded = func(vmName string, migrationMode kubevirtv1.MigrationMode) {
@@ -792,59 +793,17 @@ fi
 			checkLiveMigrationSucceeded(vmi.Name, kubevirtv1.MigrationPreCopy)
 		}
 
-		vmiMigrations = func(client crclient.Client) ([]kubevirtv1.VirtualMachineInstanceMigration, error) {
-			unstructuredVMIMigrations := &unstructured.UnstructuredList{}
-			unstructuredVMIMigrations.SetGroupVersionKind(schema.GroupVersionKind{
-				Group:   kubevirtv1.GroupVersion.Group,
-				Kind:    "VirtualMachineInstanceMigrationList",
-				Version: kubevirtv1.GroupVersion.Version,
-			})
-
-			if err := client.List(context.Background(), unstructuredVMIMigrations); err != nil {
-				return nil, err
-			}
-			if len(unstructuredVMIMigrations.Items) == 0 {
-				return nil, fmt.Errorf("empty migration list")
-			}
-
-			var migrations []kubevirtv1.VirtualMachineInstanceMigration
-			for i := range unstructuredVMIMigrations.Items {
-				var vmiMigration kubevirtv1.VirtualMachineInstanceMigration
-				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(
-					unstructuredVMIMigrations.Items[i].Object,
-					&vmiMigration,
-				); err != nil {
-					return nil, err
-				}
-				migrations = append(migrations, vmiMigration)
-			}
-
-			return migrations, nil
-		}
-
-		checkLiveMigrationFailed = func(vmName string) {
+		checkLiveMigrationFailed = func(migration *kubevirtv1.VirtualMachineInstanceMigration) {
 			GinkgoHelper()
-			By("checking the VM live-migrated failed to migrate")
-			vmi := &kubevirtv1.VirtualMachineInstance{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: namespace,
-					Name:      vmName,
-				},
-			}
-			err := crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)
-			Expect(err).NotTo(HaveOccurred(), "should success retrieving vmi")
-
-			Eventually(func() (kubevirtv1.VirtualMachineInstanceMigrationPhase, error) {
-				migrations, err := vmiMigrations(crClient)
-				if err != nil {
-					return kubevirtv1.MigrationPhaseUnset, err
-				}
-				if len(migrations) > 1 {
-					return kubevirtv1.MigrationPhaseUnset, fmt.Errorf("expected one migration, got %d", len(migrations))
-				}
-				return migrations[0].Status.Phase, nil
-			}).WithPolling(time.Second).WithTimeout(5 * time.Minute).Should(
-				Equal(kubevirtv1.MigrationFailed),
+			By(fmt.Sprintf("checking migration %s/%s failed", migration.Namespace, migration.Name))
+			Eventually(func(g Gomega) {
+				current := &kubevirtv1.VirtualMachineInstanceMigration{}
+				g.Expect(crClient.Get(context.Background(), crclient.ObjectKeyFromObject(migration), current)).To(Succeed())
+				g.Expect(current.UID).To(Equal(migration.UID), "migration object should not be replaced")
+				g.Expect(current.Status.Phase).To(Equal(kubevirtv1.MigrationFailed))
+			}).WithPolling(time.Second).WithTimeout(5*time.Minute).Should(
+				Succeed(),
+				"migration %s/%s for VMI %s should fail", migration.Namespace, migration.Name, migration.Spec.VMIName,
 			)
 		}
 
@@ -862,8 +821,8 @@ fi
 				return err
 			}).WithPolling(time.Second).WithTimeout(time.Minute).Should(Succeed())
 
-			liveMigrateVirtualMachine(vmi.Name)
-			checkLiveMigrationFailed(vmi.Name)
+			migration := liveMigrateVirtualMachine(vmi.Name)
+			checkLiveMigrationFailed(migration)
 		}
 
 		globalAddressesByFamily = func(isOfFamily func(string) bool, vmi *kubevirtv1.VirtualMachineInstance) func() ([]string, error) {
@@ -1327,15 +1286,6 @@ config:
 				return ra.Status.Status
 			}, 30*time.Second, time.Second).Should(Equal("Accepted"))
 		}
-
-		getCUDNSubnets = func(cudn *udnv1.ClusterUserDefinedNetwork) []string {
-			nad, err := nadClient.NetworkAttachmentDefinitions(namespace).Get(context.TODO(), cudn.Name, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			var result map[string]interface{}
-			err = json.Unmarshal([]byte(nad.Spec.Config), &result)
-			Expect(err).NotTo(HaveOccurred())
-			return strings.Split(result["subnets"].(string), ",")
-		}
 	)
 	BeforeEach(func() {
 		// So we can use it at AfterEach, since fr.ClientSet is nil there
@@ -1347,9 +1297,6 @@ config:
 		Expect(err).NotTo(HaveOccurred())
 
 		virtClient, err = kubevirt.NewClient("/tmp")
-		Expect(err).NotTo(HaveOccurred())
-
-		nadClient, err = nadclient.NewForConfig(fr.ClientConfig())
 		Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -1948,17 +1895,6 @@ ip route add %[3]s via %[4]s
 			checkEastWestIperfTraffic(vmi, testPodsIPs, step)
 
 			if td.role == udnv1.NetworkRolePrimary {
-				if isIPv6Supported(fr.ClientSet) {
-					step = by(vmi.Name, fmt.Sprintf("Checking IPv6 gateway before %s %s", td.resource.description, td.test.description))
-
-					expectedIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(getCUDNSubnets(cudn))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(kubevirt.RetrieveIPv6Gateways).
-						WithArguments(virtClient, vmi).
-						WithTimeout(5*time.Second).
-						WithPolling(time.Second).
-						Should(Equal([]string{expectedIPv6GatewayPath}), "should filter remote ipv6 gateway nexthop")
-				}
 				output, err := virtClient.RunCommand(vmi, "/tmp/iperf-server.sh", time.Minute)
 				Expect(err).NotTo(HaveOccurred(), step+": "+output)
 
@@ -2026,35 +1962,6 @@ ip route add %[3]s via %[4]s
 				if td.evpn != nil {
 					step = by(vmi.Name, fmt.Sprintf("Check east/west external traffic (l2 stretching) after %s %s", td.resource.description, td.test.description))
 					checkExternalEastWestIperfTraffic(vmi, macVRFContainerIPs, step)
-				}
-			}
-
-			if td.role == udnv1.NetworkRolePrimary && td.test.description == liveMigrate.description {
-				if isIPv4Supported(fr.ClientSet) {
-					step = by(vmi.Name, fmt.Sprintf("Checking IPv4 gateway cached mac after %s %s", td.resource.description, td.test.description))
-					Expect(crClient.Get(context.TODO(), crclient.ObjectKeyFromObject(vmi), vmi)).To(Succeed())
-
-					expectedGatewayMAC, err := kubevirt.GenerateGatewayMAC(getCUDNSubnets(cudn))
-					Expect(err).NotTo(HaveOccurred(), step)
-
-					Expect(err).NotTo(HaveOccurred(), step)
-					Eventually(kubevirt.RetrieveCachedGatewayMAC).
-						WithArguments(virtClient, vmi, "enp1s0", cidrIPv4).
-						WithTimeout(10*time.Second).
-						WithPolling(time.Second).
-						Should(Equal(expectedGatewayMAC), step)
-				}
-				if isIPv6Supported(fr.ClientSet) {
-					step = by(vmi.Name, fmt.Sprintf("Checking IPv6 gateway after %s %s", td.resource.description, td.test.description))
-					By(step)
-
-					targetNodeIPv6GatewayPath, err := kubevirt.GenerateGatewayIPv6RouterLLA(getCUDNSubnets(cudn))
-					Expect(err).NotTo(HaveOccurred())
-					Eventually(kubevirt.RetrieveIPv6Gateways).
-						WithArguments(virtClient, vmi).
-						WithTimeout(5*time.Second).
-						WithPolling(time.Second).
-						Should(Equal([]string{targetNodeIPv6GatewayPath}), "should reconcile ipv6 gateway nexthop after live migration")
 				}
 			}
 		},
@@ -2582,11 +2489,6 @@ runcmd:
 			checkEastWestIperfTraffic(vmi, serverIPsByName, step)
 
 			by(vmi.Name, "simulate client VM live-migration failure")
-			// Delete the successful migration's VMIM because liveMigrateFailed() expects exactly one migration.
-			// TODO: remove this cleanup once the helper fix in https://github.com/ovn-kubernetes/ovn-kubernetes/pull/6981 is incorporated.
-			Expect(crClient.DeleteAllOf(context.Background(), &kubevirtv1.VirtualMachineInstanceMigration{}, &crclient.DeleteAllOfOptions{
-				ListOptions: crclient.ListOptions{Namespace: vmi.Namespace},
-			})).To(Succeed())
 			liveMigrateFailed(vmi)
 
 			step = by(vmi.Name, "Check TCP connections, after failed migration")

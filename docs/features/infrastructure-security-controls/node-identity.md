@@ -28,7 +28,7 @@ The `OVNKubeCSRController` performs several checks to validate the requested cer
 - Checking that the certificate expiration does not exceed the maximum allowed duration.
 
 Once the certificate is approved and signed, `ovnkube-node` uses it to communicate with the API server and request a new certificate upon expiration.
-The RBAC rules are consistent across all `ovnkube-node` pods, we use the `system:ovn-nodes` group as the subject for Role/ClusterRole bindings to avoid duplication:
+The RBAC rules are consistent across all `ovnkube-node` pods. We use the `system:ovn-nodes` group as the subject for Role/ClusterRole bindings to avoid duplication:
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -48,8 +48,11 @@ This is intentional as it helps ensure that the certificate rotation works seaml
 
 ## Validating Admission Webhook
 
-The feature introduces a validating webhook for updates to `pod/status` and `node/status`.\
-The `ovnkube-node` pod exclusively updates the status on both resources, so it is sufficient to verify only update requests.\
+The feature introduces a validating webhook for pod creation, updates to `pods` and
+`pods/status`, and updates to `nodes/status`.
+
+For cluster-wide pod annotation protection, see [Security](security.md#protected-pod-annotations).
+
 The webhooks include the following checks for each `ovnkube-node` pod:
 - Modifying annotations on pods hosted on its own node.
 - Modifying annotations on its own node.
@@ -68,10 +71,10 @@ must match the node's [k8s.ovn.org/node-subnets](https://github.com/ovn-kubernet
 
 ## DaemonSet
 
-In Kind,
+In KinD,
 the feature is enabled by default and can be disabled with `--disable-ovnkube-identity` when creating the cluster.\
 By default,
-the webhook listens on the nodes `localhost` address so there has to be an instance running on the control-plane node:
+the webhook listens on the node's `localhost` address, so there has to be an instance running on the control-plane node:
 ```
 kubectl get pod -lname=ovnkube-identity -n ovn-kubernetes  -o wide
 NAME                                READY   STATUS    RESTARTS   AGE   IP           NODE                NOMINATED NODE   READINESS GATES

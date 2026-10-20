@@ -75,16 +75,16 @@ configuration. Please use the `Feature Config` option
 `enable-route-advertisements` under `OVNKubernetesFeatureConfig` config to
 enable it.
 
-## Local kind demo
+## Local KinD demo
 
-A local kind cluster can enable route advertisements with
+A local KinD cluster can enable route advertisements with
 `contrib/kind.sh -mne -rae`.
 For FRR-k8s development, apply the patches in
 `contrib/frr-k8s/patches` to an FRR-k8s checkout and run the patched
 `hack/demo/demo.sh` script from that checkout.
 
 Without arguments, the demo configures the main BGP session only. It discovers
-the kind node `InternalIP` addresses and the external FRR peer address for each
+the KinD node `InternalIP` addresses and the external FRR peer address for each
 available IP family. In a dual-stack cluster, the rendered FRR and Kubernetes
 configuration includes both IPv4 and IPv6 peers.
 
@@ -848,6 +848,27 @@ default    Accepted
 extranet   Not Accepted: configuration pending: no networks selected
 ```
 
+The controller validates every value it interpolates into the generated raw
+FRR configuration before generating it. A `RouteAdvertisements` is reported as
+`Not Accepted` and no `FRRConfiguration` is generated for it when:
+
+- `spec.targetVRF` is set to something other than `auto` that is not a valid
+  Linux interface name (at most 15 bytes, no whitespace, `/` or `:`)
+- a selected network has an EVPN VNI outside 1-16777215, a route target that is
+  not of the form `ASN:NN`, `A.B.C.D:NN` or `*:NN`, or a VRF name that is not
+  a valid interface name
+- a neighbor of a selected `FRRConfiguration` has an address that is not an IP
+  address, or an interface that is not a valid interface name
+
+The condition message names the offending field, value and object.
+`FRRConfiguration` objects generated for that `RouteAdvertisements` before
+input validation existed are deleted, so a value rejected after an upgrade
+does not stay in the configuration the nodes run; once none remain, the
+`RouteAdvertisements` is removed from the annotations of the selected networks
+and they stop being advertised. These checks apply to hand-written
+`NetworkAttachmentDefinition` objects too, which are not covered by the
+`ClusterUserDefinedNetwork` CRD validation.
+
 Check that `FRRConfiguration` have been generated as expected:
 
 ```shell
@@ -1043,7 +1064,7 @@ connectivity checks, tcpdump, ovn-trace, ovs-trace, ...
 
 ## Best Practices
 
-TBD
+<!-- TBD -->
 
 ## Future Items
 

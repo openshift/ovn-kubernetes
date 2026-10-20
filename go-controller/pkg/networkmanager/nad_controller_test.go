@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -1447,6 +1448,24 @@ func TestSyncAll(t *testing.T) {
 			syncAllInjectedError: ErrNetworkControllerTopologyNotManaged,
 		},
 		{
+			name:              "nad with negative network ID gets a replacement",
+			testNADs:          []TestNAD{{name: "test/nad1", netconf: network_A, networkID: "-2"}},
+			mode:              modeClusterManager,
+			expectGeneratedID: true,
+		},
+		{
+			name:              "nad with upper boundary network ID gets a replacement",
+			testNADs:          []TestNAD{{name: "test/nad1", netconf: network_A, networkID: strconv.Itoa(MaxNetworks)}},
+			mode:              modeClusterManager,
+			expectGeneratedID: true,
+		},
+		{
+			name:              "nad with huge network ID gets a replacement",
+			testNADs:          []TestNAD{{name: "test/nad1", netconf: network_A, networkID: strconv.Itoa(math.MaxInt)}},
+			mode:              modeClusterManager,
+			expectGeneratedID: true,
+		},
+		{
 			name: "nad already annotated with network ID",
 			testNADs: []TestNAD{
 				{
@@ -1705,10 +1724,23 @@ func TestSyncAll(t *testing.T) {
 			g.Expect(err).ToNot(gomega.HaveOccurred())
 			defer wf.Shutdown()
 
-			err = controller.Start()
-			g.Expect(err).ToNot(gomega.HaveOccurred())
-			// sync has already happened, stop
-			controller.Stop()
+			// Exercise initial synchronization without starting workers: annotation
+			// updates can otherwise reconcile NADs while the network controller
+			// takes the cleanup snapshot asserted below.
+			nadController := controller.(*nadController)
+			defer controller.Stop()
+			g.Expect(nadController.syncAll()).To(gomega.Succeed())
+			g.Expect(nadController.networkController.syncAll()).To(gomega.Succeed())
+
+			if tt.expectGeneratedID {
+				for _, testNAD := range tt.testNADs {
+					namespace, name, _ := strings.Cut(testNAD.name, "/")
+					nad, err := fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().
+						NetworkAttachmentDefinitions(namespace).Get(context.Background(), name, metav1.GetOptions{})
+					g.Expect(err).ToNot(gomega.HaveOccurred())
+					g.Expect(nad.Annotations[types.OvnNetworkIDAnnotation]).To(gomega.Equal("1"))
+				}
+			}
 
 			actualNetworks := map[string]util.NetInfo{}
 			for _, network := range tcm.valid {
@@ -2443,6 +2475,110 @@ func TestSyncNADDoesNotRescheduleAlreadyDynamicallyRemovedNAD(t *testing.T) {
 	g.Expect(nc.syncNAD(key, nad)).To(gomega.Succeed())
 	g.Expect(nc.markedForRemoval).ToNot(gomega.HaveKey(key))
 	g.Expect(nc.dynamicallyRemovedNADs.Has(key)).To(gomega.BeTrue())
+}
+
+// newDynamicRemovalTestController returns a node NAD controller rendering
+// network net-a through two primary NADs in different namespaces, with nad-a
+// past its inactivity grace period.
+func newDynamicRemovalTestController(g *gomega.WithT) (*nadController, string, string, *nettypes.NetworkAttachmentDefinition) {
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	config.OVNKubernetesFeature.EnableDynamicUDNAllocation = true
+	config.OVNKubernetesFeature.EnableNetworkSegmentation = true
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.UDNDeletionGracePeriod = time.Hour
+
+	keyA := "ns1/nad-a"
+	keyB := "ns2/nad-a"
+	networkIDAllocator := id.NewIDAllocator("NetworkIDs", MaxNetworks)
+	g.Expect(networkIDAllocator.ReserveID(types.DefaultNetworkName, types.DefaultNetworkID)).To(gomega.Succeed())
+	g.Expect(networkIDAllocator.ReserveID("net-a", 1)).To(gomega.Succeed())
+
+	netConf := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "net-a",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: types.Layer3Topology,
+		Role:     types.NetworkRolePrimary,
+		NADName:  keyA,
+	}
+	nadA, err := buildNADWithAnnotations("nad-a", "ns1", netConf, map[string]string{
+		types.OvnNetworkIDAnnotation: "1",
+	})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	nadA.OwnerReferences = []metav1.OwnerReference{{
+		Kind:       "ClusterUserDefinedNetwork",
+		Name:       "cudn-a",
+		Controller: ptrTo(true),
+	}}
+	netInfo, err := util.NewNetInfo(netConf)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	networkController := newNetworkController("test-nad", "", nil, nil)
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.SetNADs(keyA, keyB)
+	networkController.setNetwork("net-a", mutableNetInfo)
+
+	nc := &nadController{
+		controller:             &controller.FakeController{},
+		networkController:      networkController,
+		nads:                   map[string]string{keyA: "net-a", keyB: "net-a"},
+		nadsByNetwork:          map[string]sets.Set[string]{"net-a": sets.New[string](keyA, keyB)},
+		dynamicFilterNADs:      map[string]bool{keyA: true, keyB: true},
+		primaryNADs:            map[string]string{"ns1": keyA, "ns2": keyB},
+		networkIDAllocator:     networkIDAllocator,
+		filterNADsOnNode:       "node1",
+		podTracker:             &PodTrackerController{nodeNADToPodCache: map[string]map[string]map[string]struct{}{}},
+		markedForRemoval:       map[string]time.Time{keyA: time.Now().Add(-time.Minute)},
+		dynamicallyRemovedNADs: sets.New[string](),
+		cncConnectedNetworks:   map[string]sets.Set[string]{},
+	}
+	return nc, keyA, keyB, nadA
+}
+
+func TestSyncNADDynamicRemovalDeletesNetworkWhenOtherNADsAlreadyRemoved(t *testing.T) {
+	g := gomega.NewWithT(t)
+	nc, keyA, keyB, nadA := newDynamicRemovalTestController(g)
+	nc.dynamicallyRemovedNADs.Insert(keyB)
+
+	g.Expect(nc.syncNAD(keyA, nadA)).To(gomega.Succeed())
+	g.Expect(nc.markedForRemoval).ToNot(gomega.HaveKey(keyA))
+	g.Expect(nc.dynamicallyRemovedNADs.Has(keyA)).To(gomega.BeTrue())
+	g.Expect(nc.dynamicallyRemovedNADs.Has(keyB)).To(gomega.BeTrue())
+	// Both NADs remain cached to mirror the informer.
+	g.Expect(nc.nads).To(gomega.HaveKey(keyA))
+	g.Expect(nc.nads).To(gomega.HaveKey(keyB))
+	g.Expect(nc.nadsByNetwork["net-a"].UnsortedList()).To(gomega.ConsistOf(keyA, keyB))
+	g.Expect(nc.networkController.getNetwork("net-a")).To(gomega.BeNil())
+}
+
+func TestSyncNADDynamicRemovalKeepsNetworkWhileOtherNADInGracePeriod(t *testing.T) {
+	g := gomega.NewWithT(t)
+	nc, keyA, keyB, nadA := newDynamicRemovalTestController(g)
+	nc.markedForRemoval[keyB] = time.Now().Add(time.Hour)
+
+	g.Expect(nc.syncNAD(keyA, nadA)).To(gomega.Succeed())
+	g.Expect(nc.markedForRemoval).ToNot(gomega.HaveKey(keyA))
+	g.Expect(nc.markedForRemoval).To(gomega.HaveKey(keyB))
+	g.Expect(nc.dynamicallyRemovedNADs.Has(keyA)).To(gomega.BeTrue())
+	network := nc.networkController.getNetwork("net-a")
+	g.Expect(network).ToNot(gomega.BeNil())
+	g.Expect(network.GetNADNamespaces()).To(gomega.ConsistOf("ns2"))
+}
+
+func TestSyncNADDeleteKeepsNetworkIDWhileOtherNADDynamicallyRemoved(t *testing.T) {
+	g := gomega.NewWithT(t)
+	nc, keyA, keyB, _ := newDynamicRemovalTestController(g)
+	delete(nc.markedForRemoval, keyA)
+	nc.dynamicallyRemovedNADs.Insert(keyB)
+
+	// nad-a is deleted from the API while nad-b, still in the informer, is
+	// only removed locally: the network goes away but keeps its ID for nad-b.
+	g.Expect(nc.syncNAD(keyA, nil)).To(gomega.Succeed())
+	g.Expect(nc.nads).NotTo(gomega.HaveKey(keyA))
+	g.Expect(nc.nadsByNetwork["net-a"].UnsortedList()).To(gomega.ConsistOf(keyB))
+	g.Expect(nc.networkController.getNetwork("net-a")).To(gomega.BeNil())
+	g.Expect(nc.networkIDAllocator.GetID("net-a")).To(gomega.Equal(1))
 }
 
 func TestOnNetworkRefChangeNotifiesNetworkRefReconcilers(t *testing.T) {
