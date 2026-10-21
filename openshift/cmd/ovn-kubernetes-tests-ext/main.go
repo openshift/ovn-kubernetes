@@ -8,11 +8,11 @@ import (
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
-	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -56,7 +56,7 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	}
 
 	// Without cluster access, include all eligible tests
-	if ocpInfra == nil {
+	if ocpInfra == nil || !ocpInfra.HasClusterInfra() {
 		return true
 	}
 
@@ -76,10 +76,6 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 }
 
 func main() {
-	// Set OpenShift deployment config before any deploymentconfig.Get() callers
-	// (image registration and e2e tests).
-	deploymentconfig.Set(ocpdeploymentconfig.New())
-
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
 	ovnTestsExtension := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
@@ -97,16 +93,17 @@ func main() {
 		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
 	})
 
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
-	if err != nil {
-		panic(err)
-	}
-
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
+	// Must happen before BuildExtensionTestSpecsFromOpenShiftGinkgoSuite because Ginkgo
+	// Entry() arguments are evaluated during tree construction, triggering UDN subnet
+	// allocation which queries the infra provider for network exclusions.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
+	// Set deployment config before infra provider initialization, because
+	// ocpinfraprovider.New → configureTestEnvs calls deploymentconfig.Get().
+	deploymentconfig.Set(ocpdeploymentconfig.New(cfg))
 	var infraErr error
 	if cfgErr == nil {
 		infra, err := ocpinfraprovider.New(cfg)
@@ -114,8 +111,19 @@ func main() {
 			infraErr = err
 		} else {
 			ocpInfra = infra
-			infraprovider.Set(ocpInfra)
 		}
+	}
+	// Always set the infra provider so that tree-construction-time calls
+	// (e.g. UDN subnet allocation) do not panic. When no cluster is
+	// available, the provider returns safe zero-value defaults.
+	if ocpInfra == nil {
+		ocpInfra = &ocpinfraprovider.OpenshiftInfraProvider{}
+	}
+	infraprovider.Set(ocpInfra)
+
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
+	if err != nil {
+		panic(err)
 	}
 
 	// Add the agnhost image to the required images
