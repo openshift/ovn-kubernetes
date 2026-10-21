@@ -39,6 +39,9 @@ Open vSwitch (OVS) at its core.
 go-controller/        # Main Go codebase — feature implementations, component code, ovnkube binaries, CRDs, libovsdb models, observability library, hybrid-overlay
 test/e2e/             # End-to-end Ginkgo tests covering all features (network policy, egress, UDN, KubeVirt, BGP, etc.)
 test/crd-integration/ # CRD integration tests (defaulting, validation, CEL) — run via envtest, no Kind cluster needed
+openshift/            # OpenShift-specific extensions and tests — OTP (OpenShift Test Platform) test utilities, fixtures, and test cases
+  pkg/otp/            # OTP test helpers for AdminNetworkPolicy, ACL logging, metrics validation, and pod connectivity
+  test/otp/           # OTP test suites for ANP/BANP features specific to OpenShift
 dist/                 # Container images (Dockerfiles) and deployment YAML manifests
 helm/                 # Helm charts for deploying ovn-kubernetes
 docs/                 # mkdocs source for ovn-kubernetes.io — OKEPs, feature docs, design docs, developer, installation guides
