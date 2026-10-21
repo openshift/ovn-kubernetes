@@ -173,11 +173,8 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 )
 
-replace (
-	// This adds support for iptables-replace to improve performance
-	// Required until https://github.com/coreos/go-iptables/pull/124 is merged
-	// and the dependency above bumped to a release containing that change,
-	// or support for iptables is dropped
-	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
-	github.com/gogo/protobuf => github.com/gogo/protobuf v1.3.2
-)
+// This adds support for iptables-replace to improve performance
+// Required until https://github.com/coreos/go-iptables/pull/124 is merged
+// and the dependency above bumped to a release containing that change,
+// or support for iptables is dropped
+replace github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
