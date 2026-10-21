@@ -78,6 +78,52 @@ A bastion host in the same VPC runs external test containers via podman with
 - **Shared IP**: All containers share the bastion's host IP, which limits tests
   that require distinct container IPs (e.g., Egress Firewall CIDR rules)
 
+### Localnet Underlay
+
+The localnet MAC-security tests use `SetupUnderlay` to map the test's logical
+network to the existing external OVS bridge, `br-ex`, on every node. No
+dedicated OVS bridge, physical NIC, or external container is created.
+
+The **kubernetes-nmstate operator and its CRDs must already be installed**,
+including `NMState`, `NodeNetworkConfigurationPolicy` (NNCP), and
+`NodeNetworkConfigurationEnactment` (NNCE). The test identity needs permission
+to create, read, and patch NMState and NNCP resources, delete NNCPs, read
+NNCEs, and list Nodes.
+
+The setup and cleanup lifecycle is:
+
+1. `nmstate.Deploy` creates or patches the `NMState` resource named `nmstate`
+   and waits for it to become Available. It does **not** install the operator
+   or its CRDs.
+2. `SetupUnderlay` creates or patches an NNCP named after the test framework's
+   unique name, adding the logical-network-to-`br-ex` bridge mapping.
+3. Setup waits for the NNCP to become Available and for every selected node's
+   NNCE to report Available for the written policy generation.
+4. When the test context is cleaned up, the mapping is first marked `absent`
+   in the NNCP and the helper waits for that update to be applied. Only after
+   removal succeeds does it delete the NNCP and wait for it to disappear.
+   Deleting an NNCP alone does not undo the applied network configuration.
+   The NMState resource and operator are left in place.
+
+If mapping removal fails, cleanup returns an error identifying the NNCP and
+does not delete it. Inspect the policy and its per-node NNCEs, resolve the
+node or NMState failure, and retry mapping removal before deleting the policy.
+If the update failed before being persisted, the policy might still request
+the mapping to be present; ensure it requests `absent` first. Retaining the
+policy preserves the desired state for recovery but does not guarantee
+automatic retries. Delete it only after every selected node's NNCE reports
+Available for the policy's removal generation.
+
+The helpers bound the complete operation, including API writes and polling:
+five minutes for NMState deployment and one minute for each NNCP update or
+deletion. Earlier caller deadlines are preserved, and each cleanup operation
+receives a fresh budget.
+
+Run these tests through `ovn-kubernetes/conformance/serial/virtualization`,
+whose `Parallelism: 1` setting prevents the fixed VLAN and IP configuration
+from overlapping between tests. A `[Serial]` label in a test name alone does
+not serialize execution by the extension runner.
+
 ### UDN Subnet Allocation
 
 The UDN subnet allocator (`test/e2e/allocators/udn.go`) allocates `/20` blocks
