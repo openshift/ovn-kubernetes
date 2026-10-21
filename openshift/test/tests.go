@@ -61,6 +61,7 @@ var InformingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation UserDefinedNetwork CRD Controller for primary UDN without required namespace label should not be able to update the namespace and remove the UDN label [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation should set NO_FLOOD on CUDN patch ports, direct node-IP ARP to default GR (p12 flow), and fan out external GARP to all GRs (p11 flow) [Suite:ovn-kubernetes/conformance/parallel]",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
