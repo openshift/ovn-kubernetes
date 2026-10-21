@@ -121,12 +121,19 @@ func main() {
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:        "ovn-kubernetes/conformance/serial",
 		Parallelism: 1,
-		Qualifiers:  []string{"name.contains('[Suite:ovn-kubernetes/conformance/serial')"},
+		Qualifiers:  []string{"name.contains('[Suite:ovn-kubernetes/conformance/serial') && !name.contains('[Suite:ovn-kubernetes/conformance/serial/virtualization')"},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/parallel')"},
+		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/parallel') && !name.contains('[Suite:ovn-kubernetes/conformance/parallel/virtualization')"},
+	})
+
+	// The dedicated virtualization OTE lane selects this suite directly.
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name:        "ovn-kubernetes/conformance/serial/virtualization",
+		Parallelism: 1,
+		Qualifiers:  []string{"name.contains('[Suite:ovn-kubernetes/conformance/serial/virtualization]')"},
 	})
 
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
