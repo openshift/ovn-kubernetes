@@ -22,6 +22,7 @@ openshift/
     annotate/                   # Annotation generator logic and label rules (rules.go)
     generated/                  # zz_generated.annotations.go (auto-generated, do not edit)
     infraprovider/              # OpenShift infra provider (baremetal, cloud, base)
+      internal/nmstate/         # Underlay client, configuration types, NNCP operations and availability checks
     deploymentconfig/           # OpenShift deployment config (images, node subnets, interface)
     namespace.go                # Namespace helpers
     e2e_test.go                 # go:generate directive for annotations
