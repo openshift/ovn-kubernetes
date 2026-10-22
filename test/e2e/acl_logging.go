@@ -959,8 +959,25 @@ func makeDenyAllPolicy(f *framework.Framework, ns string, policyName string) (*k
 	return f.ClientSet.NetworkingV1().NetworkPolicies(ns).Create(context.TODO(), policy, metav1.CreateOptions{})
 }
 
+func writeACLLoggingManifestToTempFile(pattern, content string) string {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		framework.Failf("Unable to create temp file for CRD config: %v", err)
+	}
+	name := f.Name()
+	if _, err := f.WriteString(content); err != nil {
+		_ = f.Close()
+		_ = os.Remove(name)
+		framework.Failf("Unable to write CRD config to disk: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(name)
+		framework.Failf("Unable to close temp file for CRD config: %v", err)
+	}
+	return name
+}
+
 func makeAdminNetworkPolicy(anpName, priority, anpSubjectNS, restrictedPeerNS, openPeerNS, unknownPeerNS string) error {
-	anpYaml := "anp.yaml"
 	var anpConfig = fmt.Sprintf(`apiVersion: policy.networking.k8s.io/v1alpha1
 kind: AdminNetworkPolicy
 metadata:
@@ -992,10 +1009,7 @@ spec:
           kubernetes.io/metadata.name: %s
 `, anpName, priority, anpSubjectNS, restrictedPeerNS, openPeerNS, unknownPeerNS)
 
-	if err := os.WriteFile(anpYaml, []byte(anpConfig), 0644); err != nil {
-		framework.Failf("Unable to write CRD config to disk: %v", err)
-	}
-
+	anpYaml := writeACLLoggingManifestToTempFile("anp-*.yaml", anpConfig)
 	defer func() {
 		if err := os.Remove(anpYaml); err != nil {
 			framework.Logf("Unable to remove the CRD config from disk: %v", err)
@@ -1007,7 +1021,6 @@ spec:
 }
 
 func makeBaselineAdminNetworkPolicy(banpSubjectNS, restrictedPeerNS, unknownPeerNS string) error {
-	banpYaml := "banp.yaml"
 	var banpConfig = fmt.Sprintf(`apiVersion: policy.networking.k8s.io/v1alpha1
 kind: BaselineAdminNetworkPolicy
 metadata:
@@ -1032,10 +1045,7 @@ spec:
           kubernetes.io/metadata.name: %s
 `, banpSubjectNS, restrictedPeerNS, unknownPeerNS)
 
-	if err := os.WriteFile(banpYaml, []byte(banpConfig), 0644); err != nil {
-		framework.Failf("Unable to write CRD config to disk: %v", err)
-	}
-
+	banpYaml := writeACLLoggingManifestToTempFile("banp-*.yaml", banpConfig)
 	defer func() {
 		if err := os.Remove(banpYaml); err != nil {
 			framework.Logf("Unable to remove the CRD config from disk: %v", err)
@@ -1047,7 +1057,6 @@ spec:
 }
 
 func makeEgressFirewall(ns, allowedDstIP, mask, denyCIDR string) error {
-	egressFirewallYaml := "egressfirewall.yaml"
 	var egressFirewallConfig = fmt.Sprintf(`apiVersion: k8s.ovn.org/v1
 kind: EgressFirewall
 metadata:
@@ -1063,10 +1072,7 @@ spec:
       cidrSelector: %s
 `, allowedDstIP, mask, denyCIDR)
 
-	if err := os.WriteFile(egressFirewallYaml, []byte(egressFirewallConfig), 0644); err != nil {
-		framework.Failf("Unable to write CRD config to disk: %v", err)
-	}
-
+	egressFirewallYaml := writeACLLoggingManifestToTempFile("egressfirewall-*.yaml", egressFirewallConfig)
 	defer func() {
 		if err := os.Remove(egressFirewallYaml); err != nil {
 			framework.Logf("Unable to remove the CRD config from disk: %v", err)
