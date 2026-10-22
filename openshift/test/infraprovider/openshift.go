@@ -14,6 +14,7 @@ import (
 	"time"
 
 	configv1 "github.com/openshift/api/config/v1"
+	apifeatures "github.com/openshift/api/features"
 	operv1 "github.com/openshift/api/operator/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
@@ -119,6 +120,9 @@ func (o *OpenshiftInfraProvider) configureTestEnvs() {
 		// E2Es check this env variable to decide whether to run UDN tests.
 		_ = os.Setenv("ENABLE_NETWORK_SEGMENTATION", "true")
 	}
+	if featureGateEnabled(o.clusterFeatureGate, apifeatures.FeatureGateDNSNameResolver) {
+		_ = os.Setenv("OVN_ENABLE_DNSNAMERESOLVER", "true")
+	}
 }
 
 // HasClusterInfra returns true when the provider was fully initialized with
@@ -182,20 +186,20 @@ func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
 	if o.operNetwork == nil {
 		return false
 	}
-	return hasEVPNFeatureGate(o.clusterFeatureGate) &&
+	return featureGateEnabled(o.clusterFeatureGate, apifeatures.FeatureGateEVPN) &&
 		hasFRRRouteProvider(o.operNetwork) &&
 		isLocalGatewayMode(o.operNetwork) &&
 		o.hasFRRExternalContainer
 }
 
-// hasEVPNFeatureGate checks if the EVPN feature gate is enabled in the cluster
-func hasEVPNFeatureGate(clusterFeatureGate *configv1.FeatureGate) bool {
+// featureGateEnabled checks if the feature gate is enabled in the cluster
+func featureGateEnabled(clusterFeatureGate *configv1.FeatureGate, featureGateName configv1.FeatureGateName) bool {
 	if clusterFeatureGate == nil {
 		return false
 	}
 	for _, featureGate := range clusterFeatureGate.Status.FeatureGates {
 		for _, feature := range featureGate.Enabled {
-			if feature.Name == "EVPN" {
+			if feature.Name == featureGateName {
 				return true
 			}
 		}
