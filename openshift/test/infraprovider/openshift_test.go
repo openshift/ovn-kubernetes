@@ -8,21 +8,24 @@ import (
 	"testing"
 
 	configv1 "github.com/openshift/api/config/v1"
+	apifeatures "github.com/openshift/api/features"
 	operv1 "github.com/openshift/api/operator/v1"
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 )
 
-func TestHasEVPNFeatureGate(t *testing.T) {
+func TestFeatureGateEnabled(t *testing.T) {
 	tests := []struct {
-		name string
-		fg   *configv1.FeatureGate
-		want bool
+		name            string
+		fg              *configv1.FeatureGate
+		featureGateName configv1.FeatureGateName
+		want            bool
 	}{
 		{
-			name: "nil FeatureGate",
-			fg:   nil,
-			want: false,
+			name:            "nil FeatureGate",
+			fg:              nil,
+			featureGateName: "SomeFeature",
+			want:            false,
 		},
 		{
 			name: "EVPN present",
@@ -33,13 +36,14 @@ func TestHasEVPNFeatureGate(t *testing.T) {
 							Version: "4.18.0",
 							Enabled: []configv1.FeatureGateAttributes{
 								{Name: "SomeFeature"},
-								{Name: "EVPN"},
+								{Name: apifeatures.FeatureGateEVPN},
 							},
 						},
 					},
 				},
 			},
-			want: true,
+			featureGateName: apifeatures.FeatureGateEVPN,
+			want:            true,
 		},
 		{
 			name: "EVPN absent",
@@ -55,7 +59,8 @@ func TestHasEVPNFeatureGate(t *testing.T) {
 					},
 				},
 			},
-			want: false,
+			featureGateName: apifeatures.FeatureGateEVPN,
+			want:            false,
 		},
 		{
 			name: "empty feature list",
@@ -66,14 +71,43 @@ func TestHasEVPNFeatureGate(t *testing.T) {
 					},
 				},
 			},
-			want: false,
+			featureGateName: apifeatures.FeatureGateEVPN,
+			want:            false,
+		},
+		{
+			name: "DNSNameResolver present",
+			fg: &configv1.FeatureGate{
+				Status: configv1.FeatureGateStatus{
+					FeatureGates: []configv1.FeatureGateDetails{
+						{Version: "4.18.0",
+							Enabled: []configv1.FeatureGateAttributes{
+								{Name: apifeatures.FeatureGateDNSNameResolver},
+							},
+						},
+					},
+				},
+			},
+			featureGateName: apifeatures.FeatureGateDNSNameResolver,
+			want:            true,
+		},
+		{
+			name: "DNSNameResolver absent",
+			fg: &configv1.FeatureGate{
+				Status: configv1.FeatureGateStatus{
+					FeatureGates: []configv1.FeatureGateDetails{
+						{Version: "4.18.0"},
+					},
+				},
+			},
+			featureGateName: apifeatures.FeatureGateDNSNameResolver,
+			want:            false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := hasEVPNFeatureGate(tt.fg); got != tt.want {
-				t.Errorf("hasEVPNFeatureGate() = %v, want %v", got, tt.want)
+			if got := featureGateEnabled(tt.fg, tt.featureGateName); got != tt.want {
+				t.Errorf("featureGateEnabled() = %v, want %v", got, tt.want)
 			}
 		})
 	}
