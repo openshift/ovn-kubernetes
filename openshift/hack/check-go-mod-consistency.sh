@@ -1,4 +1,7 @@
 #!/bin/bash
+# SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 set -e
 # because we must manage the openshift go mod and also the go-controller go mod, we must ensure they are
 # kept in sync to prevent version drift. Focus on the go version and k8 api only however all k8 deps must be kept in sync.

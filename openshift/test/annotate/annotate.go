@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package annotate
 
 import (
@@ -55,7 +58,9 @@ func Run(labelToTestName, labelToLabel map[string][]string, filter func(name str
 		pairs = append(pairs, fmt.Sprintf("%q:\n%q,", testName, labels))
 	}
 	sort.Strings(pairs)
-	contents := fmt.Sprintf(`
+	contents := fmt.Sprintf(`// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package generated
 
 import (

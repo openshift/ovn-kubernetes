@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package deploymentconfig
 
 import (
@@ -12,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
@@ -73,9 +77,25 @@ func (m *openshift) ExternalBridgeName() string {
 }
 
 func (m *openshift) PrimaryInterfaceName() string {
-	// support only for baremetald which expects the following interface name
-	// TODO; dynamically look up primary interface name instead of hardcoding it to baremetald env
-	return "enp0s3"
+	if m.kubeConfig == nil {
+		return ""
+	}
+	kubeClient, err := kubernetes.NewForConfig(m.kubeConfig)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create kubernetes client: %v", err))
+	}
+	nodes, err := kubeClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{Limit: 1})
+	if err != nil {
+		panic(fmt.Sprintf("failed to list nodes: %v", err))
+	}
+	if len(nodes.Items) == 0 {
+		panic("no nodes found in cluster")
+	}
+	iface, err := m.findPrimaryInterface(kubeClient, nodes.Items[0].Name)
+	if err != nil {
+		panic(fmt.Sprintf("failed to find primary interface: %v", err))
+	}
+	return iface
 }
 
 func (m *openshift) IsConfigurationEnabled(config api.Config) bool {
@@ -148,4 +168,49 @@ func (m *openshift) GetNodeMachineNetworks() (map[string][]string, error) {
 		result[node.Name] = subnets
 	}
 	return result, nil
+}
+
+// findPrimaryInterface queries ovs-vsctl on an ovnkube-node pod to find the
+// physical uplink port on br-ex. The physical NIC is the OVS port whose
+// interface type is "system".
+func (m *openshift) findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeName string) (string, error) {
+	ovnNamespace := m.OVNKubernetesNamespace()
+	ovnkubeNodePods, err := kubeClient.CoreV1().Pods(ovnNamespace).List(context.Background(), metav1.ListOptions{
+		LabelSelector: "app=ovnkube-node",
+		FieldSelector: "spec.nodeName=" + nodeName,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(ovnkubeNodePods.Items) != 1 {
+		return "", fmt.Errorf("failed to find ovnkube-node pod for node instance %s", nodeName)
+	}
+	ovnKubeNodePodName := ovnkubeNodePods.Items[0].Name
+	ports, err := e2epodoutput.RunHostCmd(ovnNamespace, ovnKubeNodePodName, "ovs-vsctl list-ports br-ex")
+	if err != nil {
+		return "", err
+	}
+	for _, port := range strings.Split(strings.TrimSpace(ports), "\n") {
+		port = strings.TrimSpace(port)
+		if port == "" {
+			continue
+		}
+		out, err := e2epodoutput.RunHostCmd(ovnNamespace, ovnKubeNodePodName, fmt.Sprintf("ovs-vsctl get Port %s Interfaces", port))
+		if err != nil {
+			return "", err
+		}
+		// remove brackets on list of interfaces
+		ifaces := strings.TrimPrefix(strings.TrimSuffix(strings.TrimSpace(out), "]"), "[")
+		for _, iface := range strings.Split(ifaces, ",") {
+			out, err := e2epodoutput.RunHostCmd(ovnNamespace, ovnKubeNodePodName, fmt.Sprintf("ovs-vsctl get Interface %s Type", strings.TrimSpace(iface)))
+			if err != nil {
+				return "", err
+			}
+			// If system Type we know this is the OVS port is the NIC
+			if strings.TrimSpace(out) == "system" {
+				return port, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("failed to find network interface from ovnkube-node pod %s", ovnKubeNodePodName)
 }
