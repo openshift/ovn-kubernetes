@@ -60,6 +60,7 @@ var InformingTests = []string{
 	"[Feature:EgressIP][Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:EgressIP][Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:EgressIP][Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave [Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"[Feature:AdminNetworkPolicy][Feature:BaselineNetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for AdminNetworkPolicy and BaselineAdminNetworkPolicy the ANP ACL logs have the expected log level [Suite:ovn-kubernetes/conformance/parallel]",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
