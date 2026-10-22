@@ -214,3 +214,7 @@ func (m *openshift) findPrimaryInterface(kubeClient *kubernetes.Clientset, nodeN
 	}
 	return "", fmt.Errorf("failed to find network interface from ovnkube-node pod %s", ovnKubeNodePodName)
 }
+
+func (m *openshift) OVNControllerLogPath() string {
+	return "/var/log/ovn/acl-audit-log.log"
+}
