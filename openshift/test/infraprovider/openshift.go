@@ -24,7 +24,6 @@ import (
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
@@ -42,11 +41,15 @@ type platformInfra interface {
 	InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string])
 }
 
+const (
+	errExternalInfraNotAvailable = "external container infrastructure not available - this test requires external container/network infrastructure provider to be initialized"
+)
+
 type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
-	hostPort                *portalloc.PortAllocator
+	hostPort                *randPortAllocator
 	clusterInfra            platformInfra
 	initialized             bool // true when New() was called with cluster access
 	platformType            configv1.PlatformType
@@ -60,7 +63,10 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
-		hostPort:     portalloc.New(30000, 32767),
+		// 9000-9999 is the only range besides NodePort (30000-32767) that the
+		// installer's AWS security groups and GCP firewall rules open for
+		// node-to-node traffic, and it cannot collide with NodePort allocations.
+		hostPort:     newRandPortAllocator(9000, 9999),
 		clusterInfra: clusterInfra,
 		initialized:  true,
 		platformType: platformType,
@@ -236,7 +242,7 @@ func (o *OpenshiftInfraProvider) InfrastructureNetworkExclusions() (ipv4, ipv6 s
 
 func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return api.NetworkInterface{}, fmt.Errorf("GetExternalContainerNetworkInterface: %s", errExternalInfraNotAvailable)
 	}
 	return o.clusterInfra.GetExternalContainerNetworkInterface(container, network)
 }
@@ -265,14 +271,14 @@ func (o *OpenshiftInfraProvider) Name() string {
 
 func (o *OpenshiftInfraProvider) PrimaryNetwork() (api.Network, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("PrimaryNetwork: %s", errExternalInfraNotAvailable)
 	}
 	return o.clusterInfra.PrimaryNetwork()
 }
 
 func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("GetNetwork: %s", errExternalInfraNotAvailable)
 	}
 	return o.clusterInfra.GetNetwork(name)
 
@@ -369,35 +375,37 @@ func (o *OpenshiftInfraProvider) ExecK8NodeCommand(nodeName string, cmd []string
 
 func (o *OpenshiftInfraProvider) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("ExecExternalContainerCommand: %s", errExternalInfraNotAvailable)
 	}
 	return o.clusterInfra.ExecExternalContainerCommand(container, cmd)
 }
 
 func (o *OpenshiftInfraProvider) ExternalContainerPrimaryInterfaceName() string {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		framework.Logf("WARNING: ExternalContainerPrimaryInterfaceName called but external infrastructure not initialized - returning empty string")
+		return ""
 	}
 	return o.clusterInfra.ExternalContainerPrimaryInterfaceName()
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerLogs(container api.ExternalContainer) (string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return "", fmt.Errorf("GetExternalContainerLogs: %s", errExternalInfraNotAvailable)
 	}
 	return o.clusterInfra.GetExternalContainerLogs(container)
 }
 
 func (o *OpenshiftInfraProvider) GetExternalContainerPort() uint16 {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		framework.Logf("WARNING: GetExternalContainerPort called but external infrastructure not initialized - returning 0")
+		return 0
 	}
 	return o.clusterInfra.GetExternalContainerPort()
 }
 
 func (o *OpenshiftInfraProvider) ListNetworks() ([]string, error) {
 	if o.clusterInfra == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("ListNetworks: %s", errExternalInfraNotAvailable)
 	}
 	return o.clusterInfra.ListNetworks()
 }
@@ -421,42 +429,42 @@ type contextOpenshift struct {
 
 func (o *contextOpenshift) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return api.ExternalContainer{}, fmt.Errorf("CreateExternalContainer: %s", errExternalInfraNotAvailable)
 	}
 	return o.externalContainerContextProvider.CreateExternalContainer(container)
 }
 
 func (o *contextOpenshift) DeleteExternalContainer(container api.ExternalContainer) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DeleteExternalContainer: %s", errExternalInfraNotAvailable)
 	}
 	return o.externalContainerContextProvider.DeleteExternalContainer(container)
 }
 
 func (o *contextOpenshift) CreateNetwork(name string, subnets ...string) (api.Network, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return nil, fmt.Errorf("CreateNetwork: %s", errExternalInfraNotAvailable)
 	}
 	return o.externalContainerContextProvider.CreateNetwork(name, subnets...)
 }
 
 func (o *contextOpenshift) AttachNetwork(network api.Network, container string) (api.NetworkInterface, error) {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return api.NetworkInterface{}, fmt.Errorf("AttachNetwork: %s", errExternalInfraNotAvailable)
 	}
 	return o.externalContainerContextProvider.AttachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DetachNetwork(network api.Network, container string) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DetachNetwork: %s", errExternalInfraNotAvailable)
 	}
 	return o.externalContainerContextProvider.DetachNetwork(network, container)
 }
 
 func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 	if o.externalContainerContextProvider == nil {
-		panic("not implemented")
+		return fmt.Errorf("DeleteNetwork: %s", errExternalInfraNotAvailable)
 	}
 	return o.externalContainerContextProvider.DeleteNetwork(network)
 }
