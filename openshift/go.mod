@@ -170,7 +170,7 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
-	go.universe.tf/metallb v0.0.0-00010101000000-000000000000 // indirect
+	go.universe.tf/metallb v0.14.9 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
@@ -230,7 +230,7 @@ require (
 
 replace (
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
-	github.com/docker/docker => github.com/docker/docker v26.1.5+incompatible
+	github.com/docker/docker => github.com/docker/docker v28.0.0+incompatible
 	github.com/onsi/ginkgo/v2 => github.com/openshift/onsi-ginkgo/v2 v2.6.1-0.20260424201627-4d4cc33d669d
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller => ../go-controller
 	github.com/ovn-kubernetes/ovn-kubernetes/test/e2e => ../test/e2e
