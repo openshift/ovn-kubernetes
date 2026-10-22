@@ -746,6 +746,8 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
+	"BGP: For BGP configured networks withdraws and restores VTEP advertisements after an invalid node annotation": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer2": "[Disabled:Unimplemented]",
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3 no-overlay SNAT disabled unmanaged routing": "[Disabled:Unimplemented]",
@@ -1094,6 +1096,10 @@ var AppendedAnnotations = map[string]string{
 
 	"EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv6 pods": "[Disabled:Unimplemented]",
 
+	"EgressService Should validate namespace ownership of manually managed EndpointSlices IPv4": "[Disabled:Unimplemented]",
+
+	"EgressService Should validate namespace ownership of manually managed EndpointSlices IPv6": "[Disabled:Unimplemented]",
+
 	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv4 pods": "[Disabled:Unimplemented]",
 
 	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv6 pods": "[Disabled:Unimplemented]",
@@ -1203,6 +1209,8 @@ var AppendedAnnotations = map[string]string{
 	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv4": "[Disabled:Unimplemented]",
 
 	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv6": "[Disabled:Unimplemented]",
+
+	"Hybrid-overlay subnet claims rejects a remote node claiming an arbitrary subnet": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv4": "[Disabled:Unimplemented]",
 
@@ -1833,6 +1841,8 @@ var AppendedAnnotations = map[string]string{
 	"Node IP and MAC address migration when when MAC address changes when a nodeport service is configured Ensures flows are updated when MAC address changes": "[Disabled:Unimplemented]",
 
 	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup": "[Disabled:Unimplemented]",
+
+	"Node subnet claims rejects a node claiming a sub-prefix of another node's subnet": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"OVS CPU affinity pinning can be enabled on specific nodes by creating enable_dynamic_cpu_affinity file": "[Disabled:Unimplemented]",
 
