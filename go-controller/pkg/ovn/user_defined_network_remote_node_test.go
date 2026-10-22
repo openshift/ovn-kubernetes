@@ -69,28 +69,57 @@ var _ = Describe("UDN remote node removal", func() {
 		fakeOvn := NewFakeOVN(true)
 		fakeOvn.startWithDBSetup(libovsdbtest.TestSetup{NBData: initialData})
 		defer fakeOvn.shutdown()
-		base := BaseUserDefinedNetworkController{BaseNetworkController: BaseNetworkController{
-			CommonNetworkControllerInfo: CommonNetworkControllerInfo{nbClient: fakeOvn.nbClient, sbClient: fakeOvn.sbClient},
-			ReconcilableNetInfo:         util.NewReconcilableNetInfo(netInfo),
-			localZoneNodes:              &sync.Map{},
-		}}
+		layer2Controller := &Layer2UserDefinedNetworkController{}
+		layer3Controller := &Layer3UserDefinedNetworkController{}
+		base := &layer3Controller.BaseUserDefinedNetworkController
+		if layer2 {
+			base = &layer2Controller.BaseUserDefinedNetworkController
+		}
+		base.nbClient = fakeOvn.nbClient
+		base.sbClient = fakeOvn.sbClient
+		base.ReconcilableNetInfo = util.NewReconcilableNetInfo(netInfo)
+		base.localZoneNodes = &sync.Map{}
+		base.lsManager = fakeOvn.controller.lsManager
 		base.localZoneNodes.Store("test-node", true)
 		remoteNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "remote-node"}}
+		var deleteNode func(*corev1.Node) error
+		var gatewayManagers *sync.Map
 		By("checking that remote objects exist before removal")
 		Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveDataSubset(remotePort))
 		if layer2 {
-			controller := &Layer2UserDefinedNetworkController{BaseLayer2UserDefinedNetworkController: BaseLayer2UserDefinedNetworkController{BaseUserDefinedNetworkController: base}}
-			Expect(controller.deleteNodeEvent(remoteNode)).To(Succeed())
-			Expect(controller.deleteNodeEvent(remoteNode)).To(Succeed())
+			controller := layer2Controller
+			controller.gatewayManagers.Store("test-node", controller.newGatewayManager("test-node"))
+			deleteNode = controller.deleteNodeEvent
+			gatewayManagers = &controller.gatewayManagers
 		} else {
 			base.zoneICHandler = zoneic.NewZoneInterconnectHandler(netInfo, fakeOvn.nbClient, fakeOvn.sbClient, nil)
-			controller := &Layer3UserDefinedNetworkController{BaseUserDefinedNetworkController: base}
-			Expect(controller.deleteNodeEvent(remoteNode)).To(Succeed())
-			Expect(controller.deleteNodeEvent(remoteNode)).To(Succeed())
+			controller := layer3Controller
+			controller.gatewayManagers.Store("test-node", controller.newGatewayManager("test-node"))
+			deleteNode = controller.deleteNodeEvent
+			gatewayManagers = &controller.gatewayManagers
 		}
+		Expect(deleteNode(remoteNode)).To(Succeed())
+		Expect(deleteNode(remoteNode)).To(Succeed())
 		By("checking the complete remaining database, including local port attachments")
 		Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(localData...))
 		_, local := base.localZoneNodes.Load("test-node")
 		Expect(local).To(BeTrue())
+		_, localGateway := gatewayManagers.Load("test-node")
+		Expect(localGateway).To(BeTrue())
+
+		By("checking that deleting the local node still cleans up its gateway")
+		Expect(deleteNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}})).To(Succeed())
+		if layer2 {
+			localData = []libovsdbtest.TestData{&nbdb.LogicalSwitch{UUID: localSwitch.UUID, Name: localSwitch.Name}}
+		} else {
+			remainingClusterRouter := *clusterRouter
+			remainingClusterRouter.Ports = []string{localTransitPort.UUID}
+			localData = []libovsdbtest.TestData{&nbdb.LogicalSwitch{UUID: localSwitch.UUID, Name: localSwitch.Name}, &remainingClusterRouter, localTransitPort, localTransitSwitchPort, transitSwitch}
+		}
+		Eventually(fakeOvn.nbClient).Should(libovsdbtest.HaveData(localData...))
+		_, local = base.localZoneNodes.Load("test-node")
+		Expect(local).To(BeFalse())
+		_, localGateway = gatewayManagers.Load("test-node")
+		Expect(localGateway).To(BeFalse())
 	}, Entry("Layer2", true), Entry("Layer3", false))
 })
