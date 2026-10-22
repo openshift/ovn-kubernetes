@@ -18,7 +18,6 @@ var (
 			`[Feature:AdminNetworkPolicy]`,
 			`[Feature:BaselineNetworkPolicy]`,
 			`[Feature:EgressService]`,
-			`[Feature:EgressFirewall]`,
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
@@ -108,6 +107,9 @@ var (
 			// These tests need bgpServerNetwork "bgpnet" which is not configured
 			// for downstream tests, so disable it.
 			"It cannot reach an external server on a different network",
+			// Multiple host-networked external containers with different IP addresses
+			// are needed for these tests. Currently, this is not supported.
+			"e2e egress firewall policy validation with external containers",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
