@@ -1,22 +1,18 @@
 package deploymentconfig
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
-
-var deploymentConfig api.DeploymentConfig
-
-func init() {
-	deploymentConfig = openshift{}
-	deploymentconfig.Set(deploymentConfig)
-}
 
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -36,10 +32,12 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 	return false, nil
 }
 
-type openshift struct{}
+type openshift struct {
+	kubeConfig *rest.Config
+}
 
-func New() api.DeploymentConfig {
-	return deploymentConfig
+func New(config *rest.Config) api.DeploymentConfig {
+	return &openshift{kubeConfig: config}
 }
 
 func (m openshift) OVNKubernetesNamespace() string {
@@ -68,4 +66,43 @@ func (m openshift) GetAgnHostContainerImage() string {
 
 func (m openshift) IsConfigurationEnabled(config api.Config) bool {
 	return false
+}
+
+func (m *openshift) GetNodeMachineNetworks() (map[string][]string, error) {
+	if m.kubeConfig == nil {
+		return make(map[string][]string), nil
+	}
+	kubeClient, err := kubernetes.NewForConfig(m.kubeConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	nodes, err := kubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
+	}
+	result := make(map[string][]string, len(nodes.Items))
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
+		// On cloud platforms, CNCC sets the cloud egress IP annotation
+		// with the actual routable subnet. Use it when present, fall
+		// back to node-primary-ifaddr for baremetal.
+		parsed, err := util.ParseCloudEgressIPConfig(node)
+		if err != nil {
+			parsed, err = util.ParseNodePrimaryIfAddr(node)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse node %s primary address: %w", node.Name, err)
+		}
+		var subnets []string
+		if parsed.V4.Net != nil {
+			subnets = append(subnets, parsed.V4.Net.String())
+		}
+		if parsed.V6.Net != nil {
+			subnets = append(subnets, parsed.V6.Net.String())
+		}
+		result[node.Name] = subnets
+	}
+	return result, nil
 }

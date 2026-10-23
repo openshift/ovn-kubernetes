@@ -200,18 +200,18 @@ require (
 	k8s.io/cloud-provider v0.36.2 // indirect
 	k8s.io/component-helpers v0.36.2 // indirect
 	k8s.io/controller-manager v0.36.2 // indirect
-	k8s.io/cri-api v0.34.1 // indirect
-	k8s.io/cri-client v0.34.1 // indirect
+	k8s.io/cri-api v0.0.0 // indirect
+	k8s.io/cri-client v0.0.0 // indirect
 	k8s.io/cri-streaming v0.0.0 // indirect
-	k8s.io/csi-translation-lib v0.34.1 // indirect
+	k8s.io/csi-translation-lib v0.0.0 // indirect
 	k8s.io/dynamic-resource-allocation v0.36.2 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kms v0.36.2 // indirect
 	k8s.io/kube-openapi v0.0.0-20260519202549-bbf5c5577288 // indirect
-	k8s.io/kube-scheduler v0.34.1 // indirect
+	k8s.io/kube-scheduler v0.0.0 // indirect
 	k8s.io/kubectl v0.36.2 // indirect
 	k8s.io/kubelet v0.36.2 // indirect
-	k8s.io/mount-utils v0.34.1 // indirect
+	k8s.io/mount-utils v0.0.0 // indirect
 	k8s.io/pod-security-admission v0.36.2 // indirect
 	k8s.io/streaming v0.36.2 // indirect
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3 // indirect
