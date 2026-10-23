@@ -17,7 +17,6 @@ var (
 			`[Feature:NetworkPolicy]`,
 			`[Feature:AdminNetworkPolicy]`,
 			`[Feature:BaselineNetworkPolicy]`,
-			`[Feature:EgressService]`,
 			`[Feature:EgressFirewall]`,
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
@@ -51,6 +50,9 @@ var (
 			// reference kind nodes
 			`Should validate connectivity within a namespace of pods on separate nodes`,
 			// tied to KinD / container runtime
+			// attaches cluster node (by name) directly to a podman/docker network;
+			// baremetal nodes aren't podman containers so this can't work there.
+			`EgressService Multiple Networks, external clients sharing ip`,
 			`e2e delete databases`,
 			`test e2e inter-node connectivity between worker nodes`,
 			`e2e control plane`,
