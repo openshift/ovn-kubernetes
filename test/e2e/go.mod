@@ -155,7 +155,7 @@ require (
 	k8s.io/component-base v0.36.2 // indirect
 	k8s.io/component-helpers v0.36.2 // indirect
 	k8s.io/controller-manager v0.36.2 // indirect
-	k8s.io/kube-openapi v0.0.0-20260512234627-ef417d054102 // indirect
+	k8s.io/kube-openapi v0.0.0-20260519202549-bbf5c5577288 // indirect
 	k8s.io/kubelet v0.36.2 // indirect
 	k8s.io/streaming v0.36.2 // indirect
 	kubevirt.io/containerized-data-importer-api v1.57.0-alpha1 // indirect
@@ -176,7 +176,7 @@ require (
 	github.com/onsi/ginkgo v1.16.5
 	github.com/openshift-kni/k8sreporter v1.0.6
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller v1.0.0
-	go.universe.tf/metallb v0.0.0-00010101000000-000000000000
+	go.universe.tf/metallb v0.14.9
 	golang.org/x/crypto v0.54.0
 	google.golang.org/grpc v1.84.0
 	gopkg.in/yaml.v2 v2.4.0
@@ -187,10 +187,6 @@ require (
 )
 
 replace (
-	// libovsdb's transitive deps want docker v28+, but
-	// multihoming_utils.go uses pre-v28 types.NetworkInspectOptions.
 	github.com/coreos/go-iptables => github.com/trozet/go-iptables v0.0.0-20240328221912-077e672b3808
-	github.com/docker/docker => github.com/docker/docker v26.1.5+incompatible
 	github.com/ovn-kubernetes/ovn-kubernetes/go-controller => ../../go-controller
-	go.universe.tf/metallb => github.com/metallb/metallb v0.14.9
 )
