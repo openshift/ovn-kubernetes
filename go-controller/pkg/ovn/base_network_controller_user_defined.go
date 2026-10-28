@@ -595,6 +595,15 @@ func (bsnc *BaseUserDefinedNetworkController) syncPodsForUserDefinedNetwork(pods
 						bsnc.GetNetworkName(), pod.Namespace, pod.Name)
 					continue
 				}
+				if util.IsInvalidPrimaryNetworkError(err) {
+					// If network manager isn't aware of the primary network for this pod's namespace,
+					// it can't possibly be already wired to our network unless someone is directly messing
+					// with the NADs owned by a CUDN, as network manager syncs all NADs at startup.
+					// Skip during initial sync to avoid blocking startup.
+					klog.V(5).Infof("%s network controller pod sync: pod %s/%s namespace network not ready, skipping",
+						bsnc.GetNetworkName(), pod.Namespace, pod.Name)
+					continue
+				}
 				return fmt.Errorf("failed looking for the active network at namespace '%s': %w", pod.Namespace, err)
 			}
 		}
