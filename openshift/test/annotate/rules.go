@@ -21,7 +21,6 @@ var (
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
-			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
 			`[Feature:Multicast]`,
 			`[Feature:MultiHoming]`,
@@ -29,6 +28,9 @@ var (
 			`[Feature:NodeIPMACMigration]`,
 			`[Feature:OVSCPUPin]`,
 			`[Feature:Unidle]`,
+		},
+		"[Suite:ovn-kubernetes/conformance/serial/virtualization]": {
+			`[Feature:VirtualMachineSupport]`,
 		},
 	}
 	// if a test name partially or fully contains one of the map value strings, then add the label to the test
@@ -110,6 +112,17 @@ var (
 			// Multiple host-networked external containers with different IP addresses
 			// are needed for these tests. Currently, this is not supported.
 			"e2e egress firewall policy validation with external containers",
+			// MAC security pod tests not implemented yet
+			"Network Segmentation: MAC security",
+			// Pending to implement virt tests
+			"Kubevirt Virtual Machines with user defined networks and persistent ips",
+			"Kubevirt Virtual Machines IP family validation",
+			"Kubevirt Virtual Machines duplicate addresses validation",
+			"Kubevirt Virtual Machines with default pod network",
+			"Kubevirt Virtual Machines ipv4 subnet exhaustion",
+			"Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP",
+			"Kubevirt Virtual Machines with user defined networks with ipamless localnet",
+			"Kubevirt Virtual Machines user-defined network port-security.*localnet",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},

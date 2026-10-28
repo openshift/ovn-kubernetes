@@ -229,4 +229,5 @@ var BlockingTests = []string{
 	"[Feature:EgressFirewall][ovn-kubernetes-ote][sig-network] ACL Logging for EgressFirewall when the namespace's entire ACL logging annotation is set to {} when the denied destination is poked there should be no trace in the ACL logs [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:EgressFirewall][ovn-kubernetes-ote][sig-network] e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:EgressFirewall][ovn-kubernetes-ote][sig-network] Status manager validation Should validate the egress firewall status when adding a new node zone [Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"[Feature:MACSecurity][Feature:VirtualMachineSupport][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over secondary layer2 [Suite:ovn-kubernetes/conformance/serial/virtualization]",
 }
