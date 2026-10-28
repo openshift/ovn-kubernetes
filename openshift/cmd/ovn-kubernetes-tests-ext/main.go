@@ -46,10 +46,11 @@ var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 
 const (
 	// Feature labels used for test categorization and filtering
-	featureLabelEVPN                = "Feature:EVPN"
-	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
-	featureLabelEgressIP            = "Feature:EgressIP"
-	featureLabelMACSecurity         = "Feature:MACSecurity"
+	featureLabelEVPN                  = "Feature:EVPN"
+	featureLabelNetworkSegmentation   = "Feature:NetworkSegmentation"
+	featureLabelVirtualMachineSupport = "Feature:VirtualMachineSupport"
+	featureLabelEgressIP              = "Feature:EgressIP"
+	featureLabelMACSecurity           = "Feature:MACSecurity"
 	// Test constants used for test categorization and filtering
 	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
 )
@@ -121,12 +122,17 @@ func main() {
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:        "ovn-kubernetes/conformance/serial",
 		Parallelism: 1,
-		Qualifiers:  []string{"name.contains('[Suite:ovn-kubernetes/conformance/serial')"},
+		Qualifiers:  []string{"name.contains('[Suite:ovn-kubernetes/conformance/serial') && !name.contains('virtualization')"},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/parallel')"},
+		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/parallel') && !name.contains('virtualization')"},
+	})
+
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name:       "ovn-kubernetes/conformance/serial/virtualization",
+		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/serial/virtualization')"},
 	})
 
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
@@ -205,9 +211,9 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
+		// Exclude Network Segmentation and Kubevirt tests on SingleReplica topology (e.g., MicroShift, SNO)
 		// These tests require at least 2 nodes and will fail on single-node deployments
-		if spec.Labels.Has(featureLabelNetworkSegmentation) {
+		if spec.Labels.HasAny(featureLabelNetworkSegmentation, featureLabelVirtualMachineSupport) {
 			spec.Exclude(extensiontests.TopologyEquals("SingleReplica"))
 		}
 

@@ -1234,7 +1234,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over localnet": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over secondary layer2": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over secondary layer2": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
 
 	"Kubevirt Virtual Machines with default pod network when live migration with post-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
 

@@ -215,7 +215,11 @@ func (r *labelAppender) generate(name string, node types.TestSpec) {
 	if !r.excludedTestsFilter.MatchString(newName) && !strings.Contains(newName, "[Suite:") {
 		isSerial := strings.Contains(newName, "[Serial]")
 		isConformance := strings.Contains(newName, "[Conformance]")
+		isVirtualization := containsLabel(node.Labels(), "Feature:VirtualMachineSupport")
+
 		switch {
+		case isVirtualization:
+			newLabels += "[Suite:ovn-kubernetes/conformance/serial/virtualization]"
 		case isSerial && isConformance:
 			newLabels += "[Suite:ovn-kubernetes/conformance/serial/minimal]"
 		case isSerial:
