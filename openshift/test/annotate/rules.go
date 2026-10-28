@@ -15,8 +15,6 @@ var (
 		"[Disabled:Unimplemented]": {
 			`[Feature:Service]`,
 			`[Feature:NetworkPolicy]`,
-			`[Feature:AdminNetworkPolicy]`,
-			`[Feature:BaselineNetworkPolicy]`,
 			`[Feature:EgressService]`,
 			`[Feature:EgressFirewall]`,
 			`[Feature:EgressQos]`,
