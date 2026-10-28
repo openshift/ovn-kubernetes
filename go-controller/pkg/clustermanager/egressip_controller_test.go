@@ -140,7 +140,7 @@ func newEgressIPMeta(name string) metav1.ObjectMeta {
 }
 
 func newCloudPrivateIPConfigMeta(egressIP string) metav1.ObjectMeta {
-	name := ipStringToCloudPrivateIPConfigName(egressIP)
+	name := util.IPStringToCloudPrivateIPConfigName(egressIP)
 	return metav1.ObjectMeta{
 		UID:  k8stypes.UID(name),
 		Name: name,
@@ -2100,7 +2100,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				// in the allocator cache). The IPv6 EgressIP remains unassigned because
 				// the node's cloud egress-ipconfig has no IPv6 subnet yet.
 				gomega.Eventually(doesEgressIPAllocatorContainSafely).WithArguments(node1Name).Should(gomega.BeTrue())
-				ipv6CPIPCName := ipStringToCloudPrivateIPConfigName(egressIPv6)
+				ipv6CPIPCName := util.IPStringToCloudPrivateIPConfigName(egressIPv6)
 				gomega.Consistently(func() error {
 					_, err := fakeClusterManagerOVN.fakeClient.CloudNetworkClient.CloudV1().
 						CloudPrivateIPConfigs().Get(context.TODO(), ipv6CPIPCName, metav1.GetOptions{})
@@ -2187,7 +2187,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 
 				// IPv6 CloudPrivateIPConfig must remain absent throughout — the
 				// early-return guard should fire since no relevant annotation changed.
-				ipv6CPIPCName := ipStringToCloudPrivateIPConfigName(egressIPv6)
+				ipv6CPIPCName := util.IPStringToCloudPrivateIPConfigName(egressIPv6)
 				gomega.Consistently(func() error {
 					_, err := fakeClusterManagerOVN.fakeClient.CloudNetworkClient.CloudV1().
 						CloudPrivateIPConfigs().Get(context.TODO(), ipv6CPIPCName, metav1.GetOptions{})

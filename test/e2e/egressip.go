@@ -258,6 +258,66 @@ spec:
 
 }
 
+type cloudPrivateIPConfigCondition struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
+}
+
+// cloudPrivateIPConfig is a minimal local representation for `kubectl get ... -o json` parsing in tests.
+type cloudPrivateIPConfig struct {
+	Metadata struct {
+		Annotations map[string]string `json:"annotations"`
+	} `json:"metadata"`
+	Spec struct {
+		Node string `json:"node"`
+	} `json:"spec"`
+	Status struct {
+		Node       string                          `json:"node"`
+		Conditions []cloudPrivateIPConfigCondition `json:"conditions"`
+	} `json:"status"`
+}
+
+// getCloudPrivateIPConfig fetches a CloudPrivateIPConfig by name, or returns (nil, false) if absent.
+func getCloudPrivateIPConfig(cpicName string) (*cloudPrivateIPConfig, bool) {
+	out, err := e2ekubectl.RunKubectl("default", "get", "cloudprivateipconfig", cpicName, "--ignore-not-found", "-o", "json")
+	framework.ExpectNoError(err, "failed to get cloudprivateipconfig %s", cpicName)
+	if strings.TrimSpace(out) == "" {
+		return nil, false
+	}
+	cpic := &cloudPrivateIPConfig{}
+	if err := json.Unmarshal([]byte(out), cpic); err != nil {
+		framework.Failf("failed to unmarshal cloudprivateipconfig %s: %v", cpicName, err)
+	}
+	return cpic, true
+}
+
+// isCloudPrivateIPConfigAssigned reports whether spec.node == status.node and the Assigned condition is True.
+func isCloudPrivateIPConfigAssigned(cpic *cloudPrivateIPConfig) bool {
+	if cpic.Spec.Node == "" || cpic.Spec.Node != cpic.Status.Node {
+		return false
+	}
+	for _, c := range cpic.Status.Conditions {
+		if c.Type == "Assigned" && c.Status == "True" {
+			return true
+		}
+	}
+	return false
+}
+
+// waitForCloudPrivateIPConfigAssigned waits until the named CloudPrivateIPConfig is Assigned.
+func waitForCloudPrivateIPConfigAssigned(cpicName string, timeout time.Duration) {
+	gomega.Eventually(func() bool {
+		cpic, ok := getCloudPrivateIPConfig(cpicName)
+		return ok && isCloudPrivateIPConfigAssigned(cpic)
+	}, timeout, retryInterval).Should(gomega.BeTrue(),
+		"CloudPrivateIPConfig %q never reached Assigned=True (spec.node == status.node)", cpicName)
+}
+
+// deleteEgressIPNoWait deletes an EgressIP without waiting for the controller to finish cleanup.
+func deleteEgressIPNoWait(name string) {
+	e2ekubectl.RunKubectlOrDie("default", "delete", "eip", name, "--ignore-not-found=true", "--wait=false")
+}
+
 // targetHostNetworkContainerAndTest targets the internal host network test container from
 // our test pods, collects its logs and verifies that the logs have traces
 // of the `verifyIPs` provided. We need to target the test
@@ -4541,4 +4601,189 @@ spec:
 			},
 		),
 	)
+})
+
+// e2e egress IP validation: no external containers is a lighter-weight home for EgressIP tests
+// that only need a node and a namespace (no external test containers, no pods).
+var _ = ginkgo.Describe("e2e egress IP validation: no external containers", feature.EgressIP, ginkgo.Serial, func() {
+	var (
+		egress1Node   node
+		isIPv6TestRun bool
+	)
+
+	f := wrappedTestFramework("egressip-no-ext-containers")
+	f.SkipNamespaceCreation = true
+
+	ginkgo.BeforeEach(func() {
+		nodes, err := e2enode.GetBoundedReadySchedulableNodes(context.TODO(), f.ClientSet, 1)
+		framework.ExpectNoError(err)
+		if len(nodes.Items) < 1 {
+			framework.Failf("Test requires >= 1 Ready node, but there are only %v nodes", len(nodes.Items))
+		}
+		node0 := nodes.Items[0]
+		var nodeIP string
+		for _, addr := range node0.Status.Addresses {
+			if addr.Type != corev1.NodeInternalIP {
+				continue
+			}
+			if utilnet.IsIPv6String(addr.Address) {
+				nodeIP = addr.Address
+				isIPv6TestRun = true
+				break
+			}
+			if nodeIP == "" {
+				nodeIP = addr.Address
+			}
+		}
+		if nodeIP == "" {
+			framework.Failf("expected at least one Node InternalIP")
+		}
+		egress1Node = node{name: node0.Name, nodeIP: nodeIP}
+
+		namespace, err := f.CreateNamespace(context.TODO(), f.BaseName, map[string]string{"e2e-framework": f.BaseName})
+		framework.ExpectNoError(err)
+		f.Namespace = namespace
+	})
+
+	/* This test does the following (mirrors reproduce-deterministic.sh):
+	   0. Add the "k8s.ovn.org/egress-assignable" label to one node
+	   1. Create an EgressIP and wait for its CloudPrivateIPConfig to reach Assigned=True
+	   2. Non-gracefully crash the cluster-manager leader (SIGKILL the real binary, force-delete
+	      its Pod) and delete the EgressIP into the resulting leaderless gap, verifying via the
+	      new leader's Lease acquireTime that the delete landed before handover, with retries
+	   3. Best-effort: check the new leader's logs for the owning-EgressIP-not-found race
+	   4. Assert the CloudPrivateIPConfig is NOT permanently orphaned (OCPBUGS-85540)
+	*/
+	ginkgo.It("should not permanently leak a CloudPrivateIPConfig when its owning EgressIP is deleted during a cluster-manager leader crash (OCPBUGS-85540)", func() {
+		const (
+			crashEIPName          = "egressip-cm-crash"
+			crashEIPYaml          = "/tmp/egressip-cm-crash.yaml"
+			clusterManagerCtr     = "ovnkube-cluster-manager"
+			controlPlaneLease     = "ovn-kubernetes-master"
+			maxKillAttempts       = 5
+			killRetryCooldown     = 15 * time.Second
+			cpicAssignTimeout     = 2 * time.Minute
+			leaderHandoverTimeout = 200 * time.Second
+			// Retry queue backs off 1s..60s over 15 attempts (go-controller/pkg/retry/obj_retry.go), ~10.5min worst case.
+			orphanCheckTimeout = 15 * time.Minute
+		)
+		podEgressLabel := map[string]string{"wants": "egress"}
+		namespaceLabel := map[string]string{"name": f.Namespace.Name}
+		ovnKubeNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
+
+		writeAndCreateEgressIP := func(ip net.IP) {
+			egressIPConfig := createEIPManifest(crashEIPName, podEgressLabel, namespaceLabel, ip.String())
+			if err := os.WriteFile(crashEIPYaml, []byte(egressIPConfig), 0644); err != nil {
+				framework.Failf("Unable to write CRD config to disk: %v", err)
+			}
+			e2ekubectl.RunKubectlOrDie("default", "create", "-f", crashEIPYaml)
+		}
+
+		ginkgo.By("0. Add the \"k8s.ovn.org/egress-assignable\" label to one node")
+		e2enode.AddOrUpdateLabelOnNode(f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable", "dummy")
+		ginkgo.DeferCleanup(e2enode.RemoveLabelOffNode, f.ClientSet, egress1Node.name, "k8s.ovn.org/egress-assignable")
+
+		var egressIP net.IP
+		var err error
+		if isIPv6TestRun {
+			egressIP, err = allocators.NewPrimaryIPv6(egress1Node.name)
+		} else {
+			egressIP, err = allocators.NewPrimaryIPv4(egress1Node.name)
+		}
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new egress IP")
+		cpicName := util.IPStringToCloudPrivateIPConfigName(egressIP.String())
+
+		// Best-effort cleanup of leftovers from a previous failed run (names here are fixed, not per-run random).
+		e2ekubectl.RunKubectl("default", "delete", "eip", crashEIPName, "--ignore-not-found=true")
+		e2ekubectl.RunKubectl("default", "delete", "cloudprivateipconfig", cpicName, "--ignore-not-found=true")
+
+		ginkgo.DeferCleanup(func() {
+			e2ekubectl.RunKubectl("default", "delete", "eip", crashEIPName, "--ignore-not-found=true")
+			e2ekubectl.RunKubectl("default", "delete", "cloudprivateipconfig", cpicName, "--ignore-not-found=true")
+			if err := os.Remove(crashEIPYaml); err != nil {
+				framework.Logf("Unable to remove the CRD config from disk: %v", err)
+			}
+		})
+
+		ginkgo.By(fmt.Sprintf("1. Create EgressIP %q requesting IP %s and wait for CloudPrivateIPConfig %q to be Assigned", crashEIPName, egressIP.String(), cpicName))
+		writeAndCreateEgressIP(egressIP)
+		waitForCloudPrivateIPConfigAssigned(cpicName, cpicAssignTimeout)
+
+		ginkgo.By("2. Non-gracefully kill the cluster-manager leader and delete the EgressIP into the leaderless gap, retrying until the delete is confirmed to land before a new leader takes over")
+		var newLeader string
+		landedInGap := false
+		for attempt := 1; attempt <= maxKillAttempts; attempt++ {
+			oldLeader := leaseHolderIdentity(getLease(f.ClientSet, ovnKubeNamespace, controlPlaneLease))
+			gomega.Expect(oldLeader).NotTo(gomega.BeEmpty(), "could not determine current cluster-manager leader")
+			framework.Logf("Attempt %d/%d: current leader is %q", attempt, maxKillAttempts, oldLeader)
+
+			crashProcessAndDeletePod(f.ClientSet, ovnKubeNamespace, oldLeader, clusterManagerCtr, "/usr/bin/ovnkube")
+			deleteEgressIPNoWait(crashEIPName)
+			deleteTime := time.Now()
+			framework.Logf("Leader %q SIGKILLed and its pod force-deleted, EgressIP %q deleted back-to-back at %s",
+				oldLeader, crashEIPName, deleteTime.Format(time.RFC3339Nano))
+
+			newLeader = waitForNewLeaseHolder(f.ClientSet, ovnKubeNamespace, controlPlaneLease, oldLeader, leaderHandoverTimeout)
+			acquireMicroTime := getLease(f.ClientSet, ovnKubeNamespace, controlPlaneLease).Spec.AcquireTime
+			gomega.Expect(acquireMicroTime).NotTo(gomega.BeNil(), "new leader's lease has no acquireTime set")
+			acquireTime := acquireMicroTime.Time
+
+			if !acquireTime.After(deleteTime) {
+				framework.Logf("New leader %q acquired the lease at %s, at or before our delete at %s — invalid attempt, it would have processed the delete live; retrying",
+					newLeader, acquireTime.Format(time.RFC3339Nano), deleteTime.Format(time.RFC3339Nano))
+				e2ekubectl.RunKubectl("default", "delete", "eip", crashEIPName, "--ignore-not-found=true")
+				e2ekubectl.RunKubectl("default", "delete", "cloudprivateipconfig", cpicName, "--ignore-not-found=true")
+				if attempt == maxKillAttempts {
+					break
+				}
+				time.Sleep(killRetryCooldown)
+				writeAndCreateEgressIP(egressIP)
+				waitForCloudPrivateIPConfigAssigned(cpicName, cpicAssignTimeout)
+				continue
+			}
+
+			framework.Logf("New leader %q acquired the lease at %s, AFTER our delete at %s — confirmed inside the leaderless gap",
+				newLeader, acquireTime.Format(time.RFC3339Nano), deleteTime.Format(time.RFC3339Nano))
+			landedInGap = true
+			break
+		}
+		gomega.Expect(landedInGap).To(gomega.BeTrue(),
+			"exhausted %d attempts without landing the EgressIP delete inside the cluster-manager leaderless gap", maxKillAttempts)
+
+		ginkgo.By(fmt.Sprintf("3. Check whether new leader %q hit the owning-EgressIP-not-found race while reconciling CloudPrivateIPConfig %q (best effort)", newLeader, cpicName))
+		logs, err := e2ekubectl.RunKubectl(ovnKubeNamespace, "logs", newLeader, "-c", clusterManagerCtr, "--since=10m")
+		if err != nil {
+			framework.Logf("Could not fetch logs from new leader %q: %v", newLeader, err)
+		} else if strings.Contains(logs, fmt.Sprintf("CloudPrivateIPConfig %s", cpicName)) &&
+			strings.Contains(logs, fmt.Sprintf("egressips.k8s.ovn.org %q not found", crashEIPName)) {
+			framework.Logf("Confirmed: new leader hit %q not found while processing CloudPrivateIPConfig %q Add event", crashEIPName, cpicName)
+		} else {
+			framework.Logf("Did not observe the expected race log line (timing-dependent); proceeding to check final state anyway")
+		}
+
+		ginkgo.By(fmt.Sprintf("4. CloudPrivateIPConfig %q must not remain permanently orphaned now that its owning EgressIP %q is gone", cpicName, crashEIPName))
+		var finalCPIC *cloudPrivateIPConfig
+		var cpicExists bool
+		_ = wait.PollImmediate(retryInterval, orphanCheckTimeout, func() (bool, error) {
+			finalCPIC, cpicExists = getCloudPrivateIPConfig(cpicName)
+			return !cpicExists, nil
+		})
+
+		eipOut, _ := e2ekubectl.RunKubectl("default", "get", "eip", crashEIPName, "--ignore-not-found", "-o", "name")
+		owner := ""
+		cond := "n/a"
+		if cpicExists {
+			owner = finalCPIC.Metadata.Annotations[util.OVNEgressIPOwnerRefLabel]
+			if len(finalCPIC.Status.Conditions) > 0 {
+				cond = finalCPIC.Status.Conditions[0].Status
+			}
+		}
+		framework.Logf("EgressIP %s exists: %v", crashEIPName, strings.TrimSpace(eipOut) != "")
+		framework.Logf("CloudPrivateIPConfig %s exists: %v, condition: %s, owner-ref: %s", cpicName, cpicExists, cond, owner)
+
+		gomega.Expect(cpicExists).To(gomega.BeFalse(),
+			"BUG OCPBUGS-85540 reproduced: CloudPrivateIPConfig %q is permanently orphaned "+
+				"(owner-ref %q points to the deleted EgressIP %q, condition still %q, the underlying cloud IP reservation is leaked forever)",
+			cpicName, owner, crashEIPName, cond)
+	})
 })
