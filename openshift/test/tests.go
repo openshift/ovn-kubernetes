@@ -115,6 +115,7 @@ var BlockingTests = []string{
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] Network Segmentation when primary network exist, UserDefinedNetwork status should report not-ready [Suite:ovn-kubernetes/conformance/parallel]",
 	// EgressIP serial tests
+	"[Feature:EgressIP][ovn-kubernetes-ote][sig-network] e2e egress IP validation: no external containers should not permanently leak a CloudPrivateIPConfig when its owning EgressIP is deleted during a cluster-manager leader crash (OCPBUGS-85540) [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:EgressIP][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type Cluster Default Should fail if egressip-mark annotation is being added by a regular user [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:EgressIP][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type Cluster Default Should fail if egressip-mark annotation is present during EgressIP creation [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:EgressIP][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates [Serial][Suite:ovn-kubernetes/conformance/serial]",

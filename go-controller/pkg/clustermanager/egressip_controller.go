@@ -5,7 +5,6 @@ package clustermanager
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -157,34 +156,9 @@ type cloudPrivateIPConfigOp struct {
 	toDelete string
 }
 
-// ipStringToCloudPrivateIPConfigName converts the net.IP string representation
-// to a CloudPrivateIPConfig compatible name.
-
-// The string representation of the IPv6 address fc00:f853:ccd:e793::54 will be
-// represented as: fc00.f853.0ccd.e793.0000.0000.0000.0054
-
-// We thus need to fully expand the IP string and replace every fifth
-// character's colon with a dot.
-func ipStringToCloudPrivateIPConfigName(ipString string) (name string) {
-	ip := net.ParseIP(ipString)
-	if ip.To4() != nil {
-		return ipString
-	}
-	dst := make([]byte, hex.EncodedLen(len(ip)))
-	hex.Encode(dst, ip)
-	for i := 0; i < len(dst); i += 4 {
-		if len(dst)-i == 4 {
-			name += string(dst[i : i+4])
-		} else {
-			name += string(dst[i:i+4]) + "."
-		}
-	}
-	return
-}
-
 func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(egressIPName string, ops map[string]*cloudPrivateIPConfigOp) error {
 	for egressIP, op := range ops {
-		cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(egressIP)
+		cloudPrivateIPConfigName := util.IPStringToCloudPrivateIPConfigName(egressIP)
 		cloudPrivateIPConfig, err := eIPC.watchFactory.GetCloudPrivateIPConfig(cloudPrivateIPConfigName)
 		// toAdd and toDelete is non-empty, this indicates an UPDATE for which
 		// the object **must** exist, if not: that's an error.
@@ -1160,7 +1134,7 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(objs []interfac
 		updatedStatus := []egressipv1.EgressIPStatusItem{}
 		cloudPrivateIPNotFound := false
 		for _, status := range egressIP.Status.Items {
-			cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(status.EgressIP)
+			cloudPrivateIPConfigName := util.IPStringToCloudPrivateIPConfigName(status.EgressIP)
 			if _, exists := cloudPrivateIPConfigMap[cloudPrivateIPConfigName]; exists {
 				updatedStatus = append(updatedStatus, status)
 			} else {

@@ -29,6 +29,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -50,6 +51,7 @@ import (
 	testutils "k8s.io/kubernetes/test/utils"
 	admissionapi "k8s.io/pod-security-admission/api"
 	utilnet "k8s.io/utils/net"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -1890,6 +1892,47 @@ func waitForNodeReadyState(f *framework.Framework, nodeName string, timeout time
 		}
 		return false
 	}, timeout, 10*time.Second).Should(gomega.BeTrue(), expectationMessage)
+}
+
+// getLease fetches a Lease by namespace/name.
+func getLease(c clientset.Interface, namespace, name string) *coordinationv1.Lease {
+	lease, err := c.CoordinationV1().Leases(namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	framework.ExpectNoError(err, "failed to get lease %s/%s", namespace, name)
+	return lease
+}
+
+// leaseHolderIdentity returns a Lease's current holder identity, or "" if unset.
+func leaseHolderIdentity(lease *coordinationv1.Lease) string {
+	if lease.Spec.HolderIdentity == nil {
+		return ""
+	}
+	return *lease.Spec.HolderIdentity
+}
+
+// crashProcessAndDeletePod SIGKILLs pkillPattern in a Pod's container and force-deletes the Pod, so a leader-elected process is forced into a non-graceful, identity-changing restart.
+func crashProcessAndDeletePod(c clientset.Interface, namespace, podName, container, pkillPattern string) {
+	_, _ = e2ekubectl.RunKubectl(namespace, "exec", podName, "-c", container, "--", "pkill", "-9", "-f", pkillPattern)
+	err := c.CoreV1().Pods(namespace).Delete(context.TODO(), podName, metav1.DeleteOptions{GracePeriodSeconds: ptr.To(int64(0))})
+	if err != nil && !apierrors.IsNotFound(err) {
+		framework.Failf("failed to force-delete pod %s/%s: %v", namespace, podName, err)
+	}
+}
+
+// waitForNewLeaseHolder waits for a Lease's holder to change away from oldHolder and its Pod to become Running, returning the new holder's name.
+func waitForNewLeaseHolder(c clientset.Interface, namespace, leaseName, oldHolder string, timeout time.Duration) string {
+	var newHolder string
+	err := wait.PollImmediate(2*time.Second, timeout, func() (bool, error) {
+		cand := leaseHolderIdentity(getLease(c, namespace, leaseName))
+		if cand == "" || cand == oldHolder {
+			return false, nil
+		}
+		newHolder = cand
+		return true, nil
+	})
+	framework.ExpectNoError(err, "no new holder of lease %s/%s took over from %q within %s", namespace, leaseName, oldHolder, timeout)
+	framework.ExpectNoError(e2epod.WaitTimeoutForPodRunningInNamespace(context.TODO(), c, newHolder, namespace, timeout),
+		"new lease holder pod %q never became Running", newHolder)
+	return newHolder
 }
 
 // firstSubnetOf returns the first subnet of a given size within the provided
