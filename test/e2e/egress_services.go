@@ -98,9 +98,13 @@ var _ = ginkgo.Describe("EgressService", feature.EgressService, func() {
 		// ponytail: unique name avoids collisions with other parallel Ginkgo workers reusing the same fixed
 		// container name on the shared external host; bump portalloc-style uniqueness if collisions recur.
 		externalContainerName := fmt.Sprintf("%s-%s", externalContainerBaseName, rand.String(5))
+		// Host-networked primary-network containers (see openshift/test/infraprovider/base.go)
+		// share the hypervisor's single network namespace. A fixed port would collide across
+		// tests. Allocate a unique port instead, matching egressip.go and service.go.
+		externalContainerPort := infraprovider.Get().GetExternalContainerPort()
 		externalContainer = infraapi.ExternalContainer{Name: externalContainerName, Image: images.AgnHost(),
-			Network: primaryProviderNetwork, ExtPort: 8080,
-			CmdArgs: getAgnHostHTTPPortBindCMDArgs(8080)}
+			Network: primaryProviderNetwork, ExtPort: externalContainerPort,
+			CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort)}
 		externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 		framework.ExpectNoError(err, "failed to create external container")
 	})
