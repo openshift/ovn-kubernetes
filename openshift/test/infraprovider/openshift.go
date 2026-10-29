@@ -23,9 +23,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
@@ -47,7 +47,6 @@ type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
-	hostPort                *portalloc.PortAllocator
 	clusterInfra            platformInfra
 	initialized             bool // true when New() was called with cluster access
 	platformType            configv1.PlatformType
@@ -61,7 +60,6 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
-		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
 		initialized:  true,
 		platformType: platformType,
@@ -282,8 +280,24 @@ func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
 
 }
 
-func (o *OpenshiftInfraProvider) GetK8HostPort() uint16 {
-	return o.hostPort.Allocate()
+// hostPortRangeStart and hostPortRangeEnd bound the host ports tests may bind
+// on cluster nodes. 9000-9999 is the only range besides NodePort
+// (30000-32767) that the installer opens for node-to-node traffic, and unlike
+// NodePort it cannot collide with service allocations. Node components already
+// hold 15 ports in that range (9001 machine-config-daemon, 9099
+// cluster-version-operator, 9100 node-exporter, 9103 and 9105 ovnkube-node,
+// 9104 network-operator, 9108 ovnkube-control-plane, 9258-9260 and 9443
+// cloud-controller-manager-operator, 9637 kube-rbac-proxy-crio, 9978-9980
+// etcd), so only hand out the 9700-9899 window, which none of them use.
+const (
+	hostPortRangeStart = 9700
+	hostPortRangeEnd   = 9899
+)
+
+func (o *OpenshiftInfraProvider) GetK8HostPort(f *framework.Framework) uint16 {
+	port, err := allocators.AllocateHostPort(f, hostPortRangeStart, hostPortRangeEnd)
+	framework.ExpectNoError(err)
+	return port
 }
 
 // GetK8NodeNetworkInterface returns the network interface on the given node whose
