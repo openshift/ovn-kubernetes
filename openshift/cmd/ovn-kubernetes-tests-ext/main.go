@@ -221,6 +221,11 @@ func main() {
 			if spec.Labels.Has("Level0") {
 				spec.Name = "[Level0] " + spec.Name
 			}
+			// Current suites select by [Suite:...] in the test name. OTP skips the
+			// annotate/prepend path, so append the parallel suite tag explicitly.
+			if !strings.Contains(spec.Name, "[Suite:") {
+				spec.Name += " [Suite:ovn-kubernetes/conformance/parallel]"
+			}
 		} else {
 			// prepend other labels by matching on existing spec labels
 			for _, label := range getPrependLabels(spec.Labels) {
