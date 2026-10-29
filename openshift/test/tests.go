@@ -208,4 +208,13 @@ var BlockingTests = []string{
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] EVPN: VTEP API validations api-server should reject invalid VTEP updates Invalid VTEP update configurations [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:EVPN][Feature:RouteAdvertisements][FeatureGate:EVPN][ovn-kubernetes-ote][sig-network] BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP When a pod runs on the tested network It can be reached by an external server on the same network When the network is IPv4 [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] OVN Features 45146-should create healthy pod with single-stack gateway on dual-stack cluster",
+	"[OTP] OVN Features 69761-should show aggregated status from all zones in AdminPolicyBasedExternalRoute",
+	"[OTP] OVN Networking Tools 55889-should execute ovn-db-run-command script successfully",
+	"[OTP] OVN Networking Tools 55890-should verify network-tools ovn-get script functionality",
+	"[OTP] OVN Networking Tools 67625-should trace pod-to-pod traffic successfully",
+	"[OTP] OVN Networking Tools 67648-should trace pod-to-hostnetworkpod traffic successfully",
+	"[OTP] SDN network segmentation security 49216-should not expose API tokens in ovnkube-node logs",
+	"[OTP] UDN Port Isolation 80526-should test UDN with mixed port isolation on bridge CNI",
+	"[OTP] UDN Port Isolation 81757-should test port isolation with UDN and bridge CNI",
 }
