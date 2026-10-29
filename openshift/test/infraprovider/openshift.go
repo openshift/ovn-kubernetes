@@ -281,10 +281,22 @@ func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
 
 }
 
+// hostPortRangeStart and hostPortRangeEnd bound the host ports tests may bind
+// on cluster nodes. 9000-9999 is the only range besides NodePort
+// (30000-32767) that the installer opens for node-to-node traffic, and unlike
+// NodePort it cannot collide with service allocations. Node components already
+// hold 15 ports in that range (9001 machine-config-daemon, 9099
+// cluster-version-operator, 9100 node-exporter, 9103 and 9105 ovnkube-node,
+// 9104 network-operator, 9108 ovnkube-control-plane, 9258-9260 and 9443
+// cloud-controller-manager-operator, 9637 kube-rbac-proxy-crio, 9978-9980
+// etcd), so only hand out the 9700-9899 window, which none of them use.
+const (
+	hostPortRangeStart = 9700
+	hostPortRangeEnd   = 9899
+)
+
 func (o *OpenshiftInfraProvider) GetK8HostPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
-	// Stay within the NodePort range (30000-32767) because it is the range expected
-	// to be reachable on cluster nodes (see openshift/test/README.md).
-	port, err := allocators.AllocateHostPort(f, cleanup, 30000, 32767)
+	port, err := allocators.AllocateHostPort(f, cleanup, hostPortRangeStart, hostPortRangeEnd)
 	framework.ExpectNoError(err)
 	return port
 }
