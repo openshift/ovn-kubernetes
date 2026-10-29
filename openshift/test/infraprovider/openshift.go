@@ -60,7 +60,14 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
-		hostPort:     portalloc.New(30000, 32767),
+		// 9000-9999 is the only range besides NodePort (30000-32767) that the installer
+		// opens for node-to-node traffic, and it cannot collide with NodePort allocations.
+		// Node components already hold 15 ports in that range (9001 machine-config-daemon,
+		// 9099 cluster-version-operator, 9100 node-exporter, 9103 and 9105 ovnkube-node,
+		// 9104 network-operator, 9108 ovnkube-control-plane, 9258-9260 and 9443
+		// cloud-controller-manager-operator, 9637 kube-rbac-proxy-crio, 9978-9980 etcd),
+		// so allocate from the 9700-9899 window, which none of them use.
+		hostPort:     portalloc.New(9700, 9899),
 		clusterInfra: clusterInfra,
 		initialized:  true,
 		platformType: platformType,
