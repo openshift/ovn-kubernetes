@@ -208,7 +208,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 			}
 
 			checkConnectivity := func(srcPodName, dstIP string, dstPort string, shouldSucceed bool) {
-				testContainer := fmt.Sprintf("%s-container", srcPodName)
+				testContainer := testContainerName
 				testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 				if shouldSucceed {
 					gomega.Eventually(func() bool {
@@ -248,7 +248,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				podName, nodeName string, ipCheckInterval, ipCheckTimeout time.Duration, f *framework.Framework) {
 				for i := 0; i < retries; i++ {
 					createSrcPod(podName, nodeName, ipCheckInterval, ipCheckTimeout, f)
-					testContainer := fmt.Sprintf("%s-container", podName)
+					testContainer := testContainerName
 					testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 					for connectRetry := 0; connectRetry < 5; connectRetry++ {
 						_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", podName, testContainerFlag, "--",
@@ -586,7 +586,7 @@ spec:
 				}
 
 				srcPodName := "e2e-egress-fw-src-pod"
-				testContainer := fmt.Sprintf("%s-container", srcPodName)
+				testContainer := testContainerName
 				testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 				// use random labels in case test runs again since it's a pain to remove the label from the node
 				labelMatch := randStr(5)
