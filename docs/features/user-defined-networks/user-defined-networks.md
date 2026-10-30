@@ -132,6 +132,23 @@ The cluster default network still refreshes IPv4 gateway neighbors after live
 migration because its gateway MAC can change between the subnet owner and
 foreign nodes. See [Live Migration](../live-migration.md) for that behavior.
 
+## Allocation annotations
+
+Cluster manager owns the network ID and tunnel key annotations on
+NetworkAttachmentDefinitions. Configure networks through the UDN/CUDN API or
+NAD network configuration; do not assign these allocation annotations manually.
+
+An admission policy permits only cluster manager to add, change, or remove
+`k8s.ovn.org/network-id` and `k8s.ovn.org/tunnel-keys`, including during NAD
+creation. When restoring a NAD from saved YAML, omit these annotations and let
+cluster manager regenerate them.
+Unchanged annotations, including legacy invalid values, do not block unrelated
+updates.
+
+Cluster manager preserves allocated tunnel keys across restarts and NAD
+configuration changes. A failed annotation update does not release the
+network's existing tunnel keys.
+
 ## Performance/Scale Optimizations for UDN
 
 UDN scale is currently constrained to a couple of hundred UDNs when every UDN is
@@ -662,6 +679,12 @@ left out, so ovnkube-node keeps running. The node reports a
 * the kubelet cgroup is not found, and no usable path is configured
 * the kernel is built without `CONFIG_NFT_SOCKET`, so it has no `socket`
   expression and the rule cannot load
+* ovnkube-node runs in unprivileged mode (`global.unprivilegedMode`). An
+  unprivileged container has its own cgroup namespace, and since kernel
+  6.12 the kernel reads the match's `level` relative to the cgroup
+  namespace of the process that loads the rule, so a rule loaded from the
+  container can never match kubelet's cgroup. Only a privileged container
+  shares the host cgroup namespace
 
 `httpGet`, `tcpSocket` and `grpc` probes to primary UDN pods are dropped
 in that case. The rules drop rather than reject, so a probe times out

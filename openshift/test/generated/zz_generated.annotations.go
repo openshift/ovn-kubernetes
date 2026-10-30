@@ -960,6 +960,8 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
 
+	"BGP: managed self-peer filtering filters InternalIPs and reconciles address changes without a primary address annotation": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"Check whether gateway-mtu-support annotation on node is set based on disable-pkt-mtu-check value when DisablePacketMTUCheck is either not set or set to false Verify whether gateway-mtu-support annotation is not set on nodes when DisablePacketMTUCheck is either not set or set to false": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect ClusterManagerController CNC lifecycle CNC deletion and recreation - tunnel ID is allocated after recreate": "[Disabled:Unimplemented]",
@@ -1744,7 +1746,9 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: Default network multus annotation when added with static IP and MAC to a pod belonging to primary UDN should create the pod with the specified static IP and MAC address without persistent IPAM enabled": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation: Localnet should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart": "[Disabled:Unimplemented]",
+	"Network Segmentation: Localnet should preserve the LSP of a localnet pod after ovnkube-node restart with no IPAM": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation: Localnet should preserve the LSP of a localnet pod after ovnkube-node restart with subnets": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology": "[Disabled:Unimplemented]",
 
@@ -1802,6 +1806,8 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: integration should recover ovnkube pods after restart with primary and secondary UDN resources": "[Disabled:Unimplemented]",
 
+	"Network Segmentation: services on a user defined primary network replays NodePort programming when a namespace joins an active primary network": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"Network Segmentation: services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L2 primary UDN with custom network, cluster-networked pods, NodePort service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L2 primary UDN, cluster-networked pods, NodePort service": "[Disabled:Unimplemented]",
@@ -1842,7 +1848,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup": "[Disabled:Unimplemented]",
 
-	"Node subnet claims rejects a node claiming a sub-prefix of another node's subnet": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Node subnet claims rejects a node claiming controller-owned network allocations": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"OVS CPU affinity pinning can be enabled on specific nodes by creating enable_dynamic_cpu_affinity file": "[Disabled:Unimplemented]",
 
