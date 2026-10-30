@@ -6,6 +6,7 @@ package deploymentconfig
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -17,24 +18,12 @@ import (
 	"k8s.io/client-go/rest"
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 	imageutils "k8s.io/kubernetes/test/utils/image"
+
+	imageclient "github.com/openshift/client-go/image/clientset/versioned"
 )
 
-var (
-	imageIDMapping map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
-		api.Agnhost: imageutils.Agnhost,
-	}
-	imageConfigMap map[api.ImageID]api.ImageConfig
-)
-
-func init() {
-	// Add images that are needed by the test suite.
-	imageConfigMap = map[api.ImageID]api.ImageConfig{
-		api.Agnhost: {
-			ImageID:  api.Agnhost,
-			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
-		},
-	}
-}
+// FedoraKubevirtContainerDiskImage is the source image for virtualization tests.
+const FedoraKubevirtContainerDiskImage = "quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2"
 
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -57,11 +46,47 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 type openshift struct {
 	kubeConfig     *rest.Config
 	requiredImages map[api.ImageID]struct{}
+	imageConfigMap map[api.ImageID]api.ImageConfig
 }
 
-func New(config *rest.Config) api.DeploymentConfig {
-	return &openshift{kubeConfig: config,
-		requiredImages: make(map[api.ImageID]struct{})}
+func New(config *rest.Config) *openshift {
+	return &openshift{
+		kubeConfig:     config,
+		requiredImages: make(map[api.ImageID]struct{}),
+	}
+}
+
+// SetupImages resolves the test images for this deployment configuration.
+func (m *openshift) SetupImages() error {
+	// Add images that are needed by the test suite.
+	imageConfigMap := map[api.ImageID]api.ImageConfig{
+		api.Agnhost: {
+			ImageID:  api.Agnhost,
+			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
+		},
+	}
+
+	var err error
+	imageConfigMap[api.FedoraKubevirtContainerDisk], err = imageConfigWithPullSpecFromMirror(
+		api.FedoraKubevirtContainerDisk,
+		FedoraKubevirtContainerDiskImage)
+	if err != nil {
+		return err
+	}
+
+	// ImageStream resolution requires cluster access; keep offline discovery
+	// available when no kubeconfig is supplied.
+	if m.kubeConfig != nil {
+		imageConfigMap[api.Netshoot], err = imageConfigWithPullSpecFromImageStream(m.kubeConfig,
+			api.Netshoot,
+			"network-tools")
+		if err != nil {
+			return err
+		}
+	}
+
+	m.imageConfigMap = imageConfigMap
+	return nil
 }
 
 func (m *openshift) OVNKubernetesNamespace() string {
@@ -106,8 +131,41 @@ func (m *openshift) NBDBContainerName() string {
 	return "nbdb"
 }
 
+func imageConfigWithPullSpecFromMirror(imageID api.ImageID, pullSpec string) (api.ImageConfig, error) {
+	// The repository mapping supports images outside the Kubernetes registry
+	// list. Without it, discovery uses the source pull spec.
+	if os.Getenv("KUBE_TEST_REPO") != "" {
+		mirroredPullSpec, err := imageutils.ReplaceRegistryInImageURL(pullSpec)
+		if err != nil {
+			return api.ImageConfig{}, fmt.Errorf("failed resolving pull spec %q from mirror: %w", pullSpec, err)
+		}
+		pullSpec = mirroredPullSpec
+	}
+	return api.ImageConfig{
+		ImageID:  imageID,
+		PullSpec: pullSpec,
+	}, nil
+}
+
+func imageConfigWithPullSpecFromImageStream(kubeConfig *rest.Config, imageID api.ImageID, imageStream string) (api.ImageConfig, error) {
+	imageClient, err := imageclient.NewForConfig(kubeConfig)
+	if err != nil {
+		return api.ImageConfig{}, fmt.Errorf("failed resolving pull spec while retrieving openshift image client: %w", err)
+	}
+
+	istag, err := imageClient.ImageV1().ImageStreamTags("openshift").Get(context.Background(), imageStream+":latest", metav1.GetOptions{})
+	if err != nil {
+		return api.ImageConfig{}, fmt.Errorf("failed resolving pull spec while retrieving image stream tags from %q: %w", imageStream, err)
+	}
+
+	return api.ImageConfig{
+		ImageID:  imageID,
+		PullSpec: istag.Image.DockerImageReference,
+	}, nil
+}
+
 func (m *openshift) GetImage(imageID api.ImageID) api.ImageConfig {
-	return imageConfigMap[imageID]
+	return m.imageConfigMap[imageID]
 }
 
 func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {
@@ -119,14 +177,7 @@ func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {
 func (m *openshift) GetRequiredImages() []api.ImageConfig {
 	imageConfigs := []api.ImageConfig{}
 	for imageID := range m.requiredImages {
-		newID, ok := imageIDMapping[imageID]
-		if !ok {
-			newID = imageutils.None
-		}
-		imageConfigs = append(imageConfigs, api.ImageConfig{
-			ImageID:  api.ImageID(newID),
-			PullSpec: m.GetImage(imageID).PullSpec,
-		})
+		imageConfigs = append(imageConfigs, m.GetImage(imageID))
 	}
 	return imageConfigs
 }

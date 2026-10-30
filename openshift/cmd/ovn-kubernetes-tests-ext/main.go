@@ -49,6 +49,7 @@ const (
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 	featureLabelEgressIP            = "Feature:EgressIP"
+	featureLabelMACSecurity         = "Feature:MACSecurity"
 	// Test constants used for test categorization and filtering
 	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
 )
@@ -128,6 +129,12 @@ func main() {
 		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/parallel')"},
 	})
 
+	// The dedicated virtualization OTE lane selects this suite directly.
+	ovnTestsExtension.AddSuite(extension.Suite{
+		Name:       "ovn-kubernetes/conformance/serial/virtualization",
+		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/serial/virtualization')"},
+	})
+
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
 	// Must happen before BuildExtensionTestSpecsFromOpenShiftGinkgoSuite because Ginkgo
@@ -138,7 +145,8 @@ func main() {
 	cfg, cfgErr := getKubeConfig()
 	// Set deployment config before infra provider initialization, because
 	// ocpinfraprovider.New → configureTestEnvs calls deploymentconfig.Get().
-	deploymentconfig.Set(ocpdeploymentconfig.New(cfg))
+	ocpDeploymentConfig := ocpdeploymentconfig.New(cfg)
+	deploymentconfig.Set(ocpDeploymentConfig)
 	var infraErr error
 	if cfgErr == nil {
 		infra, err := ocpinfraprovider.New(cfg)
@@ -161,8 +169,15 @@ func main() {
 		panic(err)
 	}
 
-	// Add the agnhost image to the required images
-	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+	if err := ocpDeploymentConfig.SetupImages(); err != nil {
+		panic(err)
+	}
+
+	// Add the agnhost and Fedora KubeVirt container disk images to the required images
+	deploymentconfig.Get().AddRequiredImage(
+		deploymentconfigapi.Agnhost,
+		deploymentconfigapi.FedoraKubevirtContainerDisk)
+
 	// Register OVN-Kubernetes e2e images to the openshift-tests extension
 	err = registerTestImages(ovnTestsExtension)
 	if err != nil {

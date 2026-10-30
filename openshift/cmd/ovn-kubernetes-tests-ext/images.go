@@ -9,7 +9,17 @@ import (
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
+
+	imageutils "k8s.io/kubernetes/test/utils/image"
 )
+
+// imageIDMapping translates OVN-Kubernetes image IDs into the Kubernetes image
+// IDs used to derive mirrored image tags. Images missing from the mapping have
+// no numeric tag prefix.
+var imageIDMapping = map[deploymentconfigapi.ImageID]imageutils.ImageID{
+	deploymentconfigapi.Agnhost: imageutils.Agnhost,
+}
 
 func registerTestImages(ext *extension.Extension) error {
 	for _, ri := range deploymentconfig.Get().GetRequiredImages() {
@@ -17,7 +27,7 @@ func registerTestImages(ext *extension.Extension) error {
 		if err != nil {
 			return fmt.Errorf("failed to register test image %q: %v", ri.PullSpec, err)
 		}
-		img.Index = int(ri.ImageID)
+		img.Index = int(imageIDMapping[ri.ImageID])
 		ext.RegisterImage(img)
 	}
 	return nil
