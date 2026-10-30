@@ -20,6 +20,9 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
+	// import OTP (OpenShift Tests Private) migration tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/otp"
+
 	kclientset "k8s.io/client-go/kubernetes"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
@@ -196,8 +199,12 @@ func main() {
 	blockingTests := sets.New(test.BlockingTests...)
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
-		for _, label := range getTestExtensionLabels() {
-			spec.Labels.Insert(label)
+		isOTP := strings.Contains(spec.Name, "[OTP]")
+
+		if !isOTP {
+			for _, label := range getTestExtensionLabels() {
+				spec.Labels.Insert(label)
+			}
 		}
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
@@ -210,14 +217,27 @@ func main() {
 			spec.Name += " " + annotations
 		}
 
-		// prepend other labels by matching on existing spec labels
-		for _, label := range getPrependLabels(spec.Labels) {
-			spec.Labels.Insert(label)
+		if isOTP {
+			if spec.Labels.Has("Level0") {
+				spec.Name = "[Level0] " + spec.Name
+			}
+			// Current suites select by [Suite:...] in the test name. OTP skips the
+			// annotate/prepend path, so append the parallel suite tag explicitly.
+			if !strings.Contains(spec.Name, "[Suite:") {
+				spec.Name += " [Suite:ovn-kubernetes/conformance/parallel]"
+			}
+		} else {
+			// prepend other labels by matching on existing spec labels
+			for _, label := range getPrependLabels(spec.Labels) {
+				spec.Labels.Insert(label)
+			}
+
+			spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
-
 		switch {
+		case isOTP:
+			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case blockingTests.Has(spec.Name):
