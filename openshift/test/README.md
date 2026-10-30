@@ -86,6 +86,28 @@ These EgressIP tests are not enabled on any platform:
 +----------------------+----------------------------------------------------------------+
 ```
 
+## Service Tests
+
+Of the 37 upstream `[Feature:Service]` specs, 31 run on every platform and 6
+are disabled by name in [annotate/rules.go](annotate/rules.go).
+
+Disabled on all platforms (BM, AWS, Azure, GCP):
+
+```
++-----------------------------------------------------------+--------+
+| Disabled spec                                             | Reason |
++-----------------------------------------------------------+--------+
+| Load Balancer Service Tests with MetalLB (6 specs)        | [5]    |
++-----------------------------------------------------------+--------+
+```
+
+**Footnotes**:
+
+- **[5]** MetalLB is not deployed on any downstream lane.
+
+Unskipping is tracked by
+[CORENET-6761](https://redhat.atlassian.net/browse/CORENET-6761).
+
 ## Egress Firewall Tests
 
 Skipped on all platforms.

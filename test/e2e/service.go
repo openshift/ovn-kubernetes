@@ -1229,19 +1229,12 @@ spec:
         matchLabels:
             kubernetes.io/metadata.name: ` + f.Namespace.Name + `
 `
-			if err := os.WriteFile("egressip.yaml", []byte(egressIPConfig), 0644); err != nil {
-				framework.Failf("Unable to write CRD config to disk: %v", err)
-			}
-			ginkgo.DeferCleanup(func() error {
-				e2ekubectl.RunKubectlOrDie("default", "delete", "-f", "egressip.yaml", "--ignore-not-found=true")
-				if err := os.Remove("egressip.yaml"); err != nil {
-					return fmt.Errorf("unable to remove the CRD config from disk: %v", err)
-				}
-				return nil
+			ginkgo.DeferCleanup(func() {
+				e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "delete", "-f", "-", "--ignore-not-found=true")
 			})
 
 			framework.Logf("Create the EgressIP configuration")
-			e2ekubectl.RunKubectlOrDie("default", "create", "-f", "egressip.yaml")
+			e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "create", "-f", "-")
 
 			ginkgo.By("Check that the status is of length one and that it is assigned to " + egressNode)
 			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
@@ -3381,19 +3374,12 @@ spec:
         matchLabels:
             kubernetes.io/metadata.name: ` + namespaceName + `
 `
-		if err := os.WriteFile("egressip.yaml", []byte(egressIPConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		ginkgo.DeferCleanup(func() error {
-			e2ekubectl.RunKubectlOrDie("default", "delete", "-f", "egressip.yaml", "--ignore-not-found=true")
-			if err := os.Remove("egressip.yaml"); err != nil {
-				return fmt.Errorf("unable to remove the CRD config from disk: %v", err)
-			}
-			return nil
+		ginkgo.DeferCleanup(func() {
+			e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "delete", "-f", "-", "--ignore-not-found=true")
 		})
 
 		framework.Logf("Create the EgressIP configuration")
-		e2ekubectl.RunKubectlOrDie("default", "create", "-f", "egressip.yaml")
+		e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "create", "-f", "-")
 
 		ginkgo.By("4. Check that the status is of length one and that it is assigned to " + nonBackendNodeName)
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {

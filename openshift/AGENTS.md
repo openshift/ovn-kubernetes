@@ -86,6 +86,18 @@ Labels are prepended to test names sorted alphabetically in `[Label]` format.
 Label-to-label mappings are in `cmd/ovn-kubernetes-tests-ext/labels.go`.
 Label-to-test-name mappings are in `test/annotate/rules.go`.
 
+## Disabling a Test
+
+Tests are disabled by name in `test/annotate/rules.go`:
+
+- `[Disabled:Unimplemented]` -- downstream infra cannot provide what the test needs
+- `[Disabled:SpecialConfig]` -- needs an operator or config the lanes do not deploy
+- `[Disabled:Broken]` -- known broken; always link an issue
+
+Disabled specs are not listed by the OTE binary at all, so they appear in no
+junit -- not as skips, not as failures. When you add an entry, also record the
+reason in [test/README.md](test/README.md) so the coverage gap stays visible.
+
 ## Initialization Order
 
 In `cmd/ovn-kubernetes-tests-ext/main.go`, order matters:

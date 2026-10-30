@@ -1005,7 +1005,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 				var (
 					gwContainers             []infraapi.ExternalContainer
-					testContainer            = fmt.Sprintf("%s-container", srcPodName)
+					testContainer            = testContainerName
 					testContainerFlag        = fmt.Sprintf("--container=%s", testContainer)
 					f                        = wrappedTestFramework(svcname)
 					providerCtx              infraapi.Context
