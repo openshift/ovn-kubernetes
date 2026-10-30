@@ -461,10 +461,6 @@ func (o *contextOpenshift) DeleteNetwork(network api.Network) error {
 	return o.externalContainerContextProvider.DeleteNetwork(network)
 }
 
-func (o *contextOpenshift) SetupUnderlay(f *framework.Framework, underlay api.Underlay) error {
-	panic("not implemented")
-}
-
 // initializePlatformInfra fetches the cluster infrastructure object, checks the
 // platform type, and dispatches to the appropriate platform initializer.
 // Returns nil when no platform-specific infra is needed.

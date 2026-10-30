@@ -125,6 +125,11 @@ var (
 		// tests that must be run without competition
 		"[Serial]": {
 			"e2e egress IP validation",
+			"connectivity between client and server pods over localnet, when mac-security",
+		},
+
+		"[Suite:ovn-kubernetes/conformance/serial/virtualization]": {
+			".*Network Segmentation: MAC security.*over localnet.*",
 		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
