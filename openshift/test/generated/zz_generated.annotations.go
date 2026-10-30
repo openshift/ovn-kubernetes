@@ -762,203 +762,203 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created tests are run towards the external agnhost echo server": "[Disabled:Unimplemented]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to a different node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to a different node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to local node should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to local node should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks host to a different node UDN pod should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks host to a different node UDN pod should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks host to a local UDN pod should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks host to a local UDN pod should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should be able to access a service in the same network": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should be able to access a service in the same network": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should be able to access kapi in default network service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should be able to access kapi in default network service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should be able to access kapi service cluster IP directly": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should be able to access kapi service cluster IP directly": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should not be able to access a default network service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should not be able to access a default network service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should not be able to access a service in a different UDN": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the UDN should not be able to access a service in a different UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the default network should not be able to access a UDN service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the default network should not be able to access a UDN service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the default network should not be able to access an advertised UDN pod on a different node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the default network should not be able to access an advertised UDN pod on a different node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the default network should not be able to access an advertised UDN pod on the same node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod in the default network should not be able to access an advertised UDN pod on the same node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod connectivity on different networks and different nodes": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod connectivity on different networks and different nodes": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod connectivity on different networks and same node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod connectivity on different networks and same node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod on the same network and different nodes should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod on the same network and different nodes should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer2 connectivity between networks pod to pod on the same network and same node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to a different node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to a different node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to local node should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks UDN pod to local node should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks host to a different node UDN pod should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks host to a different node UDN pod should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks host to a local UDN pod should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks host to a local UDN pod should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should be able to access a service in the same network": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should be able to access a service in the same network": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should be able to access kapi in default network service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should be able to access kapi in default network service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should be able to access kapi service cluster IP directly": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should be able to access kapi service cluster IP directly": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should not be able to access a default network service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should not be able to access a default network service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should not be able to access a service in a different UDN": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the UDN should not be able to access a service in a different UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the default network should not be able to access a UDN service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the default network should not be able to access a UDN service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the default network should not be able to access an advertised UDN pod on a different node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the default network should not be able to access an advertised UDN pod on a different node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the default network should not be able to access an advertised UDN pod on the same node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod in the default network should not be able to access an advertised UDN pod on the same node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod connectivity on different networks and different nodes": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod connectivity on different networks and different nodes": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod connectivity on different networks and same node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod connectivity on different networks and same node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod on the same network and different nodes should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod on the same network and different nodes should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 connectivity between networks pod to pod on the same network and same node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks UDN pod to a different node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks UDN pod to a different node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks UDN pod to local node should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks UDN pod to local node should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in default network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in different UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on a different node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on client node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a different node nodeport service in same UDN network with backend on nodeport node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to a nodeport service in a different UDN network via a node where that network is not active should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in default network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in different UDN network should only work for IPv6": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=Cluster] UDN pod to the same node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] Default network pod to different node nodeport service in UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] Default network pod to same node nodeport service in UDN network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in default network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in different UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to a different node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in default network should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in different UDN network should only work for IPv6 in SGW": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks [ETP=LOCAL] UDN pod to the same node nodeport service in same UDN network should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks host to a different node UDN pod should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks host to a different node UDN pod should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks host to a local UDN pod should not work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks host to a local UDN pod should not work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access a service in the same network": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access a service in the same network": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access kapi in default network service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access kapi in default network service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access kapi service cluster IP directly": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should be able to access kapi service cluster IP directly": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should not be able to access a default network service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should not be able to access a default network service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should not be able to access a service in a different UDN": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the UDN should not be able to access a service in a different UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access a UDN service": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access a UDN service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access an advertised UDN pod on a different node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access an advertised UDN pod on a different node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access an advertised UDN pod on the same node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod in the default network should not be able to access an advertised UDN pod on the same node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod connectivity on different networks and different nodes": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod connectivity on different networks and different nodes": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod connectivity on different networks and same node": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod connectivity on different networks and same node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and different nodes should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and different nodes should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
+	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and same node should work": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: managed self-peer filtering filters InternalIPs and reconciles address changes without a primary address annotation": "[Suite:ovn-kubernetes/conformance/parallel]",
 

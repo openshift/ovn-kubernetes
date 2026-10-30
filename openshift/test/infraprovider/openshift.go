@@ -42,6 +42,14 @@ type platformInfra interface {
 	InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string])
 }
 
+// Names of the OpenShift cluster feature gates the e2e suites depend on.
+const (
+	evpnFeatureGateName = "EVPN"
+	// NoOverlayMode gates both the default network transport field and the
+	// per-network no-overlay configuration on (C)UDNs.
+	noOverlayFeatureGateName = "NoOverlayMode"
+)
+
 type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
@@ -182,25 +190,92 @@ func (o *OpenshiftInfraProvider) CheckForEVPN() bool {
 	if o.operNetwork == nil {
 		return false
 	}
-	return hasEVPNFeatureGate(o.clusterFeatureGate) &&
+	return hasFeatureGate(o.clusterFeatureGate, evpnFeatureGateName) &&
 		hasFRRRouteProvider(o.operNetwork) &&
 		isLocalGatewayMode(o.operNetwork) &&
 		o.hasFRRExternalContainer
 }
 
-// hasEVPNFeatureGate checks if the EVPN feature gate is enabled in the cluster
-func hasEVPNFeatureGate(clusterFeatureGate *configv1.FeatureGate) bool {
+// CheckForRouteAdvertisements checks the prerequisites shared by every BGP e2e:
+// the cluster must advertise routes through FRR and an external FRR router must
+// be reachable to inspect the advertised routes with.
+func (o *OpenshiftInfraProvider) CheckForRouteAdvertisements() bool {
+	if o.operNetwork == nil {
+		return false
+	}
+	return hasFRRRouteProvider(o.operNetwork) &&
+		hasRouteAdvertisementsEnabled(o.operNetwork) &&
+		o.hasFRRExternalContainer
+}
+
+// CheckForNoOverlay reports whether the cluster can run no-overlay specs. These
+// configure no-overlay per network (for example on a CUDN), which needs the
+// NoOverlayMode feature gate and route advertisements through FRR.
+//
+// Deliberately not CheckForRouteAdvertisements: that one also demands an
+// external FRR router, and no-overlay with managed routing peers the nodes with
+// each other only, so it needs no router outside the cluster. Specs that do
+// inspect the external router carry Feature:RouteAdvertisements and are gated on
+// it separately.
+//
+// Specs exercising no-overlay on the cluster default network additionally need
+// IsDefaultNetworkNoOverlay, and specs using managed routing need HasManagedBGP.
+func (o *OpenshiftInfraProvider) CheckForNoOverlay() bool {
+	if o.operNetwork == nil {
+		return false
+	}
+	return hasFeatureGate(o.clusterFeatureGate, noOverlayFeatureGateName) &&
+		hasFRRRouteProvider(o.operNetwork) &&
+		hasRouteAdvertisementsEnabled(o.operNetwork)
+}
+
+// HasManagedBGP reports whether the cluster is configured with the internal BGP
+// fabric that no-overlay networks with managed routing peer over. ovn-kubernetes
+// requires a topology to be set before it will run its managed BGP controller
+// (see ManagedBGPConfig.Topology, "Required when transport=no-overlay and
+// routing=managed"), and on OpenShift that is rendered from bgpManagedConfig.
+//
+// Note that a cluster can have managed CUDNs without the cluster default network
+// itself being managed, so this is independent of IsDefaultNetworkNoOverlay.
+func (o *OpenshiftInfraProvider) HasManagedBGP() bool {
+	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+		return false
+	}
+	return o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.BGPManagedConfig.BGPTopology != ""
+}
+
+// IsDefaultNetworkNoOverlay reports whether the cluster default network itself
+// runs unencapsulated. Transport is immutable after installation, so this is a
+// property of how the cluster was installed, not something a test can turn on.
+func (o *OpenshiftInfraProvider) IsDefaultNetworkNoOverlay() bool {
+	if o.operNetwork == nil || o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+		return false
+	}
+	return o.operNetwork.Spec.DefaultNetwork.OVNKubernetesConfig.Transport == operv1.TransportOptionNoOverlay
+}
+
+// hasFeatureGate checks if the named feature gate is enabled in the cluster
+func hasFeatureGate(clusterFeatureGate *configv1.FeatureGate, name string) bool {
 	if clusterFeatureGate == nil {
 		return false
 	}
 	for _, featureGate := range clusterFeatureGate.Status.FeatureGates {
 		for _, feature := range featureGate.Enabled {
-			if feature.Name == "EVPN" {
+			if string(feature.Name) == name {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// hasRouteAdvertisementsEnabled checks if the cluster advertises its network
+// routes through a dynamic routing protocol.
+func hasRouteAdvertisementsEnabled(network *operv1.Network) bool {
+	if network.Spec.DefaultNetwork.OVNKubernetesConfig == nil {
+		return false
+	}
+	return network.Spec.DefaultNetwork.OVNKubernetesConfig.RouteAdvertisements == operv1.RouteAdvertisementsEnabled
 }
 
 // hasFRRRouteProvider checks if FRR is configured as a routing capability provider.
