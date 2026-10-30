@@ -11,6 +11,7 @@ import (
 	operv1 "github.com/openshift/api/operator/v1"
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func TestHasEVPNFeatureGate(t *testing.T) {
@@ -408,6 +409,77 @@ func TestFindNetworkInterfaceForSubnets(t *testing.T) {
 
 	t.Run("no match", func(t *testing.T) {
 		_, err := findNetworkInterfaceForSubnets(links, "10.0.0.0/24", "")
+		if err == nil {
+			t.Fatal("expected error for no match, got nil")
+		}
+	})
+}
+
+func TestFindNetworkInterfaceForAddresses(t *testing.T) {
+	links := []linkInfo{
+		{
+			IfName: "lo",
+			Mac:    "00:00:00:00:00:00",
+			AddrInfo: []ipAddressInfo{
+				{Family: "inet", Local: "127.0.0.1", PrefixLen: 8},
+				{Family: "inet6", Local: "::1", PrefixLen: 128},
+			},
+		},
+		{
+			IfName: "ens5",
+			Mac:    "02:00:00:00:00:01",
+			AddrInfo: []ipAddressInfo{
+				{Family: "inet", Local: "10.0.13.58", PrefixLen: 18},
+				{Family: "inet6", Local: "fd2e:6f44:5dd8:c956::22", PrefixLen: 64},
+			},
+		},
+	}
+
+	t.Run("dual stack", func(t *testing.T) {
+		got, err := findNetworkInterfaceForAddresses(links, sets.New("10.0.13.58", "fd2e:6f44:5dd8:c956::22"))
+		if err != nil {
+			t.Fatalf("findNetworkInterfaceForAddresses() error = %v", err)
+		}
+		if got.InfName != "ens5" {
+			t.Errorf("InfName = %q, want %q", got.InfName, "ens5")
+		}
+		if got.MAC != "02:00:00:00:00:01" {
+			t.Errorf("MAC = %q, want %q", got.MAC, "02:00:00:00:00:01")
+		}
+		if got.IPv4 != "10.0.13.58" {
+			t.Errorf("IPv4 = %q, want %q", got.IPv4, "10.0.13.58")
+		}
+		if got.IPv4Prefix != "18" {
+			t.Errorf("IPv4Prefix = %q, want %q", got.IPv4Prefix, "18")
+		}
+		if got.IPv6 != "fd2e:6f44:5dd8:c956::22" {
+			t.Errorf("IPv6 = %q, want %q", got.IPv6, "fd2e:6f44:5dd8:c956::22")
+		}
+		if got.IPv6Prefix != "64" {
+			t.Errorf("IPv6Prefix = %q, want %q", got.IPv6Prefix, "64")
+		}
+	})
+
+	// The node address is outside the bastion's availability-zone subnet, which
+	// is exactly the case CIDR matching cannot handle.
+	t.Run("IPv4 only", func(t *testing.T) {
+		got, err := findNetworkInterfaceForAddresses(links, sets.New("10.0.13.58"))
+		if err != nil {
+			t.Fatalf("findNetworkInterfaceForAddresses() error = %v", err)
+		}
+		if got.InfName != "ens5" {
+			t.Errorf("InfName = %q, want %q", got.InfName, "ens5")
+		}
+		if got.IPv4 != "10.0.13.58" {
+			t.Errorf("IPv4 = %q, want %q", got.IPv4, "10.0.13.58")
+		}
+		if got.IPv6 != "" {
+			t.Errorf("IPv6 = %q, want empty", got.IPv6)
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		_, err := findNetworkInterfaceForAddresses(links, sets.New("192.0.2.1"))
 		if err == nil {
 			t.Fatal("expected error for no match, got nil")
 		}
