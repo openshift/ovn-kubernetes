@@ -756,6 +756,8 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3": "[Disabled:Unimplemented]",
 
+	"BGP: UDN service marks after advertisement updates refreshes unchanged services when network selection changes": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"BGP: When an advertised CUDN network is dynamically allocated is accepted when the network is allocated on a subset of the nodes only": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created can connect to an external server and another cluster node after toggling default network advertisement off and back on": "[Disabled:Unimplemented]",
@@ -1945,8 +1947,6 @@ var AppendedAnnotations = map[string]string{
 	"Uplink route advertisements with Dynamic UDN allocation allows node-disjoint Dynamic CUDNs to share a targetVRF auto Uplink and rejects overlap": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Uplink route advertisements with Dynamic UDN allocation rebuilds the CUDN gateway with the reallocated node subnets after an inactive interval": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"UplinkState API validation accepts up to 256 default gateways across both IP families": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"blocking ICMP needs frag when a client VM pod with 1500 MTU targets a host networked pod should be able to send large TCP packet and not get a route cache entry": "[Disabled:Unimplemented]",
 
