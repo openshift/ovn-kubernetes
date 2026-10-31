@@ -1,23 +1,46 @@
-// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
-// SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import (
 	"fmt"
 	"strings"
 
+	imageutils "k8s.io/kubernetes/test/utils/image"
+
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 )
 
+// requiredImage associates an e2e image pullspec with an index used to generate
+// the image tag so that it matches with the tag in quay.io/openshift/community-e2e-images.
+type requiredImage struct {
+	pullSpec string
+	index    int
+}
+
+var requiredImages []requiredImage
+
+func init() {
+	agnhostImage := requiredImage{
+		pullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
+		index:    int(imageutils.Agnhost),
+	}
+	requiredImages = append(requiredImages, agnhostImage)
+
+	helloSDNImage := requiredImage{
+		pullSpec: "quay.io/openshifttest/hello-sdn:1.2.0",
+		index:    -1,
+	}
+	requiredImages = append(requiredImages, helloSDNImage)
+}
+
+// registerTestImages advertises OVN-Kubernetes e2e images to the openshift-tests
+// extension so origin can list and mirror them (see "images" subcommand).
 func registerTestImages(ext *extension.Extension) error {
-	for _, ri := range deploymentconfig.Get().GetRequiredImages() {
-		img, err := extensionImageFromPullSpec(ri.PullSpec)
+	for _, ri := range requiredImages {
+		img, err := extensionImageFromPullSpec(ri.pullSpec)
 		if err != nil {
-			return fmt.Errorf("failed to register test image %q: %v", ri.PullSpec, err)
+			return fmt.Errorf("failed to register test image %q: %v", ri.pullSpec, err)
 		}
-		img.Index = int(ri.ImageID)
+		img.Index = ri.index
 		ext.RegisterImage(img)
 	}
 	return nil
