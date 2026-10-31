@@ -1,26 +1,19 @@
-// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
-// SPDX-License-Identifier: Apache-2.0
-
 package main
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
+	exutil "github.com/openshift/origin/test/extended/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
-	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
-	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	// import ovn-kubernetes tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
-
-	kclientset "k8s.io/client-go/kubernetes"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -48,9 +41,6 @@ const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
-	featureLabelEgressIP            = "Feature:EgressIP"
-	// Test constants used for test categorization and filtering
-	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -66,7 +56,7 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	}
 
 	// Without cluster access, include all eligible tests
-	if ocpInfra == nil || !ocpInfra.HasClusterInfra() {
+	if ocpInfra == nil {
 		return true
 	}
 
@@ -76,31 +66,7 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 		return false
 	}
 
-	// secondary-host-eip tests: only include on platforms with a
-	// pre-configured secondary network (currently baremetal only)
-	if strings.Contains(spec.Name, EIPSecondaryNetworkTestPrefix) && !ocpInfra.HasSecondaryHostEIPSupport() {
-		return false
-	}
-	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
-	// which is not yet configured on bastion-based platforms.
-	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsCloudPlatform() {
-		return false
-	}
-	// On GCP, nodes have a /32 primary interface address
-	// (k8s.ovn.org/node-primary-ifaddr: {"ipv4":"10.0.128.x/32"}), so
-	// isOVNNetworkIP returns false for any EgressIP because no IP other
-	// than the node's own can fall within a /32 network. This causes
-	// BridgeEIPAddrManager to skip assigning the EIP to the bridge
-	// interface, breaking IFA_PROTO verification. On OpenShift, network
-	// segmentation is enabled by default so the IFA_PROTO check runs for
-	// all network types including Cluster Default — hence the
-	// "disabling egress nodes" test is also skipped for Cluster Default.
-	// Tracking via https://redhat.atlassian.net/browse/OCPBUGS-122016.
-	if ocpInfra.IsGCPPlatform() && spec.Labels.Has(featureLabelEgressIP) &&
-		(spec.Labels.Has(featureLabelNetworkSegmentation) || strings.Contains(spec.Name, "Primary UDN") ||
-			strings.Contains(spec.Name, "disabling egress nodes with egress-assignable label")) {
-		return false
-	}
+	// Future feature-based filters can be added here
 
 	// FUP: not having to detect the environment, and just be able to
 	// run what we want through the definition of the appropriate test
@@ -113,32 +79,34 @@ func main() {
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
 	ovnTestsExtension := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
+	// register OVN-Kubernetes e2e images to the openshift-tests extension
+	if err := registerTestImages(ovnTestsExtension); err != nil {
+		panic(err)
+	}
 	// add ovn-kubernetes test suites into openshift suites
 	// by default, we treat all tests as parallel and only expose tests as Serial if the appropriate label is added - "Serial"
 	// No Parents: these tests run only in ovn-kubernetes/conformance/*, not the product-wide openshift/conformance/*.
 	// To inject a subset later, label those tests and add a suite with Parents=[openshift/conformance/parallel] + a matching qualifier.
 	ovnTestsExtension.AddSuite(extension.Suite{
-		Name:        "ovn-kubernetes/conformance/serial",
-		Parallelism: 1,
-		Qualifiers:  []string{"name.contains('[Suite:ovn-kubernetes/conformance/serial')"},
+		Name:       "ovn-kubernetes/conformance/serial",
+		Qualifiers: []string{`labels.exists(l, l == "Serial")`},
 	})
 
 	ovnTestsExtension.AddSuite(extension.Suite{
 		Name:       "ovn-kubernetes/conformance/parallel",
-		Qualifiers: []string{"name.contains('[Suite:ovn-kubernetes/conformance/parallel')"},
+		Qualifiers: []string{`!labels.exists(l, l == "Serial")`},
 	})
+
+	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
+	if err != nil {
+		panic(err)
+	}
 
 	// Initialize cluster infra if kubeconfig is available. When no kubeconfig is present
 	// (e.g. during "info" or "list tests"), ocpInfra stays nil and all tests are listed.
-	// Must happen before BuildExtensionTestSpecsFromOpenShiftGinkgoSuite because Ginkgo
-	// Entry() arguments are evaluated during tree construction, triggering UDN subnet
-	// allocation which queries the infra provider for network exclusions.
 	// Ensure calling methods do not log any output, as this can break test listing with
 	// errors such as: "invalid character 'I' looking for beginning of value"
 	cfg, cfgErr := getKubeConfig()
-	// Set deployment config before infra provider initialization, because
-	// ocpinfraprovider.New → configureTestEnvs calls deploymentconfig.Get().
-	deploymentconfig.Set(ocpdeploymentconfig.New(cfg))
 	var infraErr error
 	if cfgErr == nil {
 		infra, err := ocpinfraprovider.New(cfg)
@@ -146,27 +114,8 @@ func main() {
 			infraErr = err
 		} else {
 			ocpInfra = infra
+			infraprovider.Set(ocpInfra)
 		}
-	}
-	// Always set the infra provider so that tree-construction-time calls
-	// (e.g. UDN subnet allocation) do not panic. When no cluster is
-	// available, the provider returns safe zero-value defaults.
-	if ocpInfra == nil {
-		ocpInfra = &ocpinfraprovider.OpenshiftInfraProvider{}
-	}
-	infraprovider.Set(ocpInfra)
-
-	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
-	if err != nil {
-		panic(err)
-	}
-
-	// Add the agnhost image to the required images
-	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
-	// Register OVN-Kubernetes e2e images to the openshift-tests extension
-	err = registerTestImages(ovnTestsExtension)
-	if err != nil {
-		panic(err)
 	}
 
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
@@ -180,24 +129,19 @@ func main() {
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
 		}
-		client, err := kclientset.NewForConfig(cfg)
-		if err != nil {
-			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
-		}
-		if err := ocpInfra.EnableSecondaryForwarding(client); err != nil {
-			panic(fmt.Sprintf("failed to enable secondary network forwarding: %v", err))
-		}
-		if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
-			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
-		}
+		exutil.WithCleanup(func() {})
 	})
 
 	informingTests := sets.New(test.InformingTests...)
 	blockingTests := sets.New(test.BlockingTests...)
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
-		for _, label := range getTestExtensionLabels() {
-			spec.Labels.Insert(label)
+		isOTP := strings.Contains(spec.Name, "[OTP]")
+
+		if !isOTP {
+			for _, label := range getTestExtensionLabels() {
+				spec.Labels.Insert(label)
+			}
 		}
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
@@ -215,9 +159,11 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name
 
 		switch {
+		case isOTP:
+			spec.Lifecycle = extensiontests.LifecycleInforming
 		case informingTests.Has(spec.Name):
 			spec.Lifecycle = extensiontests.LifecycleInforming
 		case blockingTests.Has(spec.Name):
