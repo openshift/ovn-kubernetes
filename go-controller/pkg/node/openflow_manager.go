@@ -83,6 +83,7 @@ func newOpenflowBridge(bridge *bridgeconfig.BridgeConfiguration) *openflowBridge
 var openFlowGroupIDRegexp = regexp.MustCompile(`(?:^|,)group_id=([^,]+)`)
 
 const localnetPortEventDebounce = 100 * time.Millisecond
+const flowSyncEventDebounce = 200 * time.Millisecond
 
 // UTILs Needed for UDN (also leveraged for default netInfo) in openflowmanager
 
@@ -712,6 +713,7 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 		timer := time.NewTicker(syncPeriod)
 		defer timer.Stop()
 		var localnetDebounce <-chan time.Time
+		var flowDebounce <-chan time.Time
 		for {
 			select {
 			case <-timer.C:
@@ -760,8 +762,11 @@ func (c *openflowManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) 
 					timer.Reset(syncPeriod)
 				}
 			case <-c.flowChan:
-				// Requests reset the periodic timer: check the uplink bridge
-				// ports here too, or a bridge whose check failed stays skipped.
+				if flowDebounce == nil {
+					flowDebounce = time.After(flowSyncEventDebounce)
+				}
+			case <-flowDebounce:
+				flowDebounce = nil
 				c.checkUplinkBridgePorts()
 				c.syncFlows()
 				timer.Reset(syncPeriod)
