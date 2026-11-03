@@ -6,9 +6,11 @@ package node
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -327,6 +329,12 @@ func (b *openflowBridge) getFlowsByKey(key string) []string {
 	return b.flowCache[key]
 }
 
+func (b *openflowBridge) flowskeys() []string {
+	b.flowMutex.Lock()
+	defer b.flowMutex.Unlock()
+	return slices.Collect(maps.Keys(b.flowCache))
+}
+
 func (b *openflowBridge) updateGroupCacheEntry(key string, groups []string) {
 	b.groupMutex.Lock()
 	defer b.groupMutex.Unlock()
@@ -384,6 +392,10 @@ func (c *openflowManager) getFlowsByKey(key string) []string {
 
 func (c *openflowManager) updateGroupCacheEntry(key string, groups []string) {
 	c.defaultBridge.updateGroupCacheEntry(key, groups)
+}
+
+func (c *openflowManager) flowskeys() []string {
+	return c.defaultBridge.flowskeys()
 }
 
 func (c *openflowManager) getGroupsByKey(key string) []string {
@@ -693,6 +705,10 @@ func (c *openflowManager) updateBridgeFlowCache(hostIPs []net.IP, hostSubnets []
 		bridge.updateFlowCacheEntry("DEFAULT", uplinkBridgeDftFlows)
 		return nil
 	})
+}
+
+func (c *openflowManager) GetMacBindingSourceForUplinks() map[string]string {
+	return map[string]string{}
 }
 
 // getOfport returns the current ofport of the given OVS interface as a string,

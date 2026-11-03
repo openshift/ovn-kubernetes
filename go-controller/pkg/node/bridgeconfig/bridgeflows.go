@@ -818,7 +818,14 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 		if defaultNetConfig := b.netConfig[types.DefaultNetworkName]; defaultNetConfig != nil && defaultNetConfig.OfPortPatch != "" {
 			actions = append(actions, "output:"+defaultNetConfig.OfPortPatch)
 		}
-		actions = append(actions, b.primaryUDNPatchOutputActions()...)
+		if config.Gateway.DisableUDNARPNDPFlood {
+			defaultNetConfig, found := b.netConfig[types.DefaultNetworkName]
+			if found && defaultNetConfig.OfPortPatch != "" {
+				actions = append(actions, "output:"+defaultNetConfig.OfPortPatch)
+			}
+		} else {
+			actions = append(actions, b.primaryUDNPatchOutputActions()...)
+		}
 		actions = append(actions, "NORMAL")
 		dftFlows = append(dftFlows,
 			fmt.Sprintf("cookie=%s, priority=10, table=0, %s dl_dst=%s, actions=%s",
@@ -1161,9 +1168,12 @@ func (b *BridgeConfiguration) commonFlows(hostSubnets []*net.IPNet) ([]string, e
 		if config.IPv6Mode {
 			// REMOVEME(trozet) when https://bugzilla.kernel.org/show_bug.cgi?id=11797 is resolved
 			// must flood icmpv6 Route Advertisement and Neighbor Advertisement traffic as it fails to create a CT entry.
-			// FLOOD reaches default and host first. UDN patches are no-flood,
-			// so append explicit outputs after the protected delivery.
-			actions := strings.Join(append([]string{"FLOOD"}, b.primaryUDNPatchOutputActions()...), ",")
+			// CUDN patches are no-flood so FLOOD alone won't reach them; prepend explicit outputs.
+			var cudnParts []string
+			if !config.Gateway.DisableUDNARPNDPFlood {
+				cudnParts = b.primaryUDNPatchOutputActions()
+			}
+			actions := strings.Join(append([]string{"FLOOD"}, cudnParts...), ",")
 			for _, icmpType := range []int{types.RouteAdvertisementICMPType, types.NeighborAdvertisementICMPType} {
 				dftFlows = append(dftFlows,
 					fmt.Sprintf("cookie=%s, priority=14, table=1,icmp6,icmpv6_type=%d actions=%s",
@@ -1340,6 +1350,28 @@ func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN string)
 
 	var flows []string
 
+	if config.Gateway.DisableUDNARPNDPFlood {
+		// Priority-45: external broadcast ARP (including GARPs) arriving on the
+		// physical port → explicitly forward to all default GR and NORMAL
+		defaultPatchActions := "output:" + defaultNetConfig.OfPortPatch + ","
+		if ofPortPhys != "" {
+			if config.IPv4Mode {
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s, priority=45, table=0, in_port=%s, %s arp, "+
+						"actions=%sNORMAL",
+						nodetypes.DefaultOpenFlowCookie, ofPortPhys, matchVLAN, defaultPatchActions))
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s, priority=45, table=0, in_port=LOCAL, %s arp, "+
+						"actions=%sNORMAL",
+						nodetypes.DefaultOpenFlowCookie, matchVLAN, defaultPatchActions))
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s, priority=45, table=0, in_port=%s, %s arp, "+
+						"actions=NORMAL",
+						nodetypes.DefaultOpenFlowCookie, defaultNetConfig.OfPortPatch, matchVLAN))
+			}
+		}
+	}
+
 	// Priority-12: ARP/NS for node IP → only default patch + NORMAL.
 	// NORMAL learns the external source MAC in the FDB and delivers to
 	// LOCAL (static FDB entry). No-flood on UDN ports prevents them from
@@ -1378,6 +1410,11 @@ func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN string)
 	// Only generated when UDN patches exist (without them, NORMAL already
 	// floods to the default patch which is not no-flood).
 	udnActions := b.primaryUDNPatchOutputActions()
+	if config.Gateway.DisableUDNARPNDPFlood {
+		if defaultNetConfig := b.netConfig[types.DefaultNetworkName]; defaultNetConfig != nil && defaultNetConfig.OfPortPatch != "" {
+			udnActions = []string{"output:" + defaultNetConfig.OfPortPatch}
+		}
+	}
 	if ofPortPhys != "" && len(udnActions) > 0 {
 		actions := strings.Join(append([]string{"NORMAL"}, udnActions...), ",")
 		if config.IPv4Mode {
