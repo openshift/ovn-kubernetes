@@ -4,7 +4,7 @@
 #
 # The standard name for this image is ovn-kube
 
-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-5.0 AS builder
+FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.26-openshift-5.1 AS builder
 
 WORKDIR /go/src/github.com/openshift/ovn-kubernetes
 COPY . .
@@ -21,7 +21,7 @@ RUN cd openshift; CGO_ENABLED=0 ./hack/build-tests-ext.sh && \
 # - creating directories required by ovn-kubernetes
 # - git commit number
 # - ovnkube.sh script
-FROM registry.ci.openshift.org/ocp/5.0:ovn-kubernetes-base
+FROM registry.ci.openshift.org/ocp/5.1:ovn-kubernetes-base
 
 USER root
 
