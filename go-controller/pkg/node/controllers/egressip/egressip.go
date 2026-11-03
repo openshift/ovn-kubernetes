@@ -1147,8 +1147,12 @@ func (c *Controller) migrateFromAddrLabelToAnnotation() error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
-		return c.kube.UpdateNodeStatus(node)
+		nodeToUpdate := node.DeepCopy()
+		if nodeToUpdate.Annotations == nil {
+			nodeToUpdate.Annotations = map[string]string{}
+		}
+		nodeToUpdate.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
+		return c.kube.UpdateNodeStatus(nodeToUpdate)
 	})
 }
 
@@ -1179,8 +1183,12 @@ func (c *Controller) addIPToAnnotation(ip string) error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
-		return c.kube.UpdateNodeStatus(node)
+		nodeToUpdate := node.DeepCopy()
+		if nodeToUpdate.Annotations == nil {
+			nodeToUpdate.Annotations = map[string]string{}
+		}
+		nodeToUpdate.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
+		return c.kube.UpdateNodeStatus(nodeToUpdate)
 	})
 }
 
@@ -1211,8 +1219,12 @@ func (c *Controller) deleteIPFromAnnotation(ip string) error {
 		if err != nil {
 			return err
 		}
-		node.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
-		return c.kube.UpdateNodeStatus(node)
+		nodeToUpdate := node.DeepCopy()
+		if nodeToUpdate.Annotations == nil {
+			nodeToUpdate.Annotations = map[string]string{}
+		}
+		nodeToUpdate.Annotations[util.OVNNodeSecondaryHostEgressIPs] = string(patch)
+		return c.kube.UpdateNodeStatus(nodeToUpdate)
 	})
 }
 
