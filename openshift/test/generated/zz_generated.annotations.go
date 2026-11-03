@@ -1444,6 +1444,10 @@ var AppendedAnnotations = map[string]string{
 
 	"Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that deny traffic using pod selectors and wrong port range for a localnet topology": "[Disabled:Unimplemented]",
 
+	"Multi Homing persistent IPAM claims enforces claim scope rejects a claim from another network": "[Disabled:Unimplemented]",
+
+	"Multi Homing persistent IPAM claims enforces claim scope resolves claims in the pod namespace when the NAD is elsewhere": "[Disabled:Unimplemented]",
+
 	"Multicast when multicast enabled for namespace should be able to receive multicast IGMP query": "[Disabled:Unimplemented]",
 
 	"Multicast when multicast enabled for namespace should be able to send multicast UDP traffic between nodes": "[Disabled:Unimplemented]",
