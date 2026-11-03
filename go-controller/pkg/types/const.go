@@ -464,3 +464,5 @@ const (
 	NFTMgmtPortNoSNATSubnetsV4 = "mgmtport-no-snat-subnets-v4"
 	NFTMgmtPortNoSNATSubnetsV6 = "mgmtport-no-snat-subnets-v6"
 )
+
+// test-only: trigger e2e-aws-ovn-fdp-qe to verify tests-private image propagation (do not merge)
