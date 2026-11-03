@@ -61,7 +61,16 @@ func (h *baseInfra) ListNetworks() ([]string, error) {
 }
 
 func (h *baseInfra) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
-	return h.engine.ExecExternalContainerCommand(container, cmd)
+	out, err := h.engine.ExecExternalContainerCommand(container, cmd)
+	if err != nil {
+		// DEBUG(CORENET-6742): podman reports "container state improper" when the
+		// container exited, which says nothing about why. Dump its state and logs.
+		state, _ := h.runner.Run(containerRuntime, "container", "inspect", "--format",
+			"running={{.State.Running}} exitcode={{.State.ExitCode}} err={{.State.Error}}", container.Name)
+		logs, _ := h.runner.Run(containerRuntime, "logs", "--tail", "50", container.Name)
+		framework.Logf("exec failed on external container %q: %s\nlogs:\n%s", container.Name, strings.TrimSpace(state), logs)
+	}
+	return out, err
 }
 
 // ExternalContainerPrimaryInterfaceName returns the host's interface name,
