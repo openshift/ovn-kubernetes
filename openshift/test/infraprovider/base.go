@@ -64,7 +64,13 @@ func (h *baseInfra) ExecExternalContainerCommand(container api.ExternalContainer
 	return h.engine.ExecExternalContainerCommand(container, cmd)
 }
 
+// ExternalContainerPrimaryInterfaceName returns the host's interface name,
+// because primary network containers run with --network host and therefore see
+// the host's links rather than the engine's default "eth0".
 func (h *baseInfra) ExternalContainerPrimaryInterfaceName() string {
+	if h.hostNetworkInfo != nil && h.hostNetworkInfo.InfName != "" {
+		return h.hostNetworkInfo.InfName
+	}
 	return h.engine.ExternalContainerPrimaryInterfaceName()
 }
 
