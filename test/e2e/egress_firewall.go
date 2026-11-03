@@ -227,6 +227,24 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				}
 			}
 
+			checkConnectivityRejected := func(srcPodName, dstIP, dstPort string) {
+				testContainer := fmt.Sprintf("%s-container", srcPodName)
+				testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
+				gomega.Eventually(func() error {
+					_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", srcPodName, testContainerFlag, "--",
+						"curl", "-s", "--connect-timeout", "1", net.JoinHostPort(dstIP, dstPort))
+					if err == nil {
+						return fmt.Errorf("connection to [%s]:%s succeeded but should be rejected", dstIP, dstPort)
+					}
+					if strings.Contains(err.Error(), "exit code 7") {
+						return nil
+					}
+					return fmt.Errorf("expected connection refused (exit code 7) to [%s]:%s, got: %w", dstIP, dstPort, err)
+				}, 15*time.Second, 500*time.Millisecond).Should(gomega.Succeed(),
+					fmt.Sprintf("expected pod %s to receive connection refused for denied egress to [%s]:%s",
+						srcPodName, dstIP, dstPort))
+			}
+
 			checkExternalContainerConnectivity := func(externalContainer infraapi.ExternalContainer, dstIP string, dstPort int) {
 				gomega.Eventually(func() error {
 					_, err := infraprovider.Get().ExecExternalContainerCommand(externalContainer, []string{
@@ -348,6 +366,31 @@ spec:
 				ginkgo.By(fmt.Sprintf("Verifying connectivity to an implicitly denied host %s is not permitted as defined "+
 					"by the external firewall policy", getExternalContainerIP(externalContainer2)))
 				checkConnectivity(srcPodName, getExternalContainerIP(externalContainer2), externalContainer2.GetPortStr(), false)
+			})
+
+			ginkgo.It("Should reject denied egress firewall connections instead of timing out", func() {
+				srcPodName := "e2e-egress-fw-reject-pod"
+				createSrcPod(srcPodName, serverNodeInfo.name, retryInterval, retryTimeout, f)
+
+				var egressFirewallConfig = fmt.Sprintf(`kind: EgressFirewall
+apiVersion: k8s.ovn.org/v1
+metadata:
+  name: default
+  namespace: %s
+spec:
+  egress:
+  - type: Allow
+    to:
+      cidrSelector: %s/%s
+  - type: Deny
+    to:
+      cidrSelector: %s
+`, f.Namespace.Name, getExternalContainerIP(externalContainer1), singleIPMask, denyAllCIDR)
+				applyEF(egressFirewallConfig, f.Namespace.Name)
+
+				ginkgo.By(fmt.Sprintf("Verifying denied egress to %s is rejected immediately with connection refused",
+					getExternalContainerIP(externalContainer2)))
+				checkConnectivityRejected(srcPodName, getExternalContainerIP(externalContainer2), externalContainer2.GetPortStr())
 			})
 
 			ginkgo.It("Should validate the egress firewall policy functionality for allowed CIDR and port", func() {
