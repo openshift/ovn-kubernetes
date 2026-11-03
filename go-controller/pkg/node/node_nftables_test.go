@@ -267,3 +267,94 @@ func TestCleanupEgressIPARPBlockNFT(t *testing.T) {
 		})
 	}
 }
+
+func TestSetupEgressIPARPBlockNFTables(t *testing.T) {
+	const testUplinkName = "eth0"
+
+	tests := []struct {
+		name        string
+		egressIPs   []string
+		uplinkName  string
+		ipv4Mode    bool
+		ipv6Mode    bool
+		expectError string
+	}{
+		{
+			name:        "empty egress IPs - early return",
+			egressIPs:   []string{},
+			uplinkName:  testUplinkName,
+			ipv4Mode:    true,
+			ipv6Mode:    false,
+			expectError: "",
+		},
+	}
+
+	gomega.RegisterTestingT(t)
+	g := gomega.NewWithT(t)
+
+	for _, tt := range tests {
+		config.IPv4Mode = tt.ipv4Mode
+		config.IPv6Mode = tt.ipv6Mode
+
+		nft := nodenft.SetFakeEgressIPNFTablesHelper()
+
+		err := SetupEgressIPARPBlockNFTables(tt.egressIPs, tt.uplinkName)
+
+		if tt.expectError != "" {
+			g.Expect(err).To(gomega.HaveOccurred())
+			g.Expect(err.Error()).To(gomega.ContainSubstring(tt.expectError))
+		} else {
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+	}
+}
+
+func TestCleanupEgressIPARPBlockNFTTable(t *testing.T) {
+	const testUplinkName = "eth0"
+
+	tests := []struct {
+		name        string
+		setupTable  bool
+		egressIPs   []string
+		uplinkName  string
+		ipv4Mode    bool
+		ipv6Mode    bool
+		expectError string
+	}{
+		{
+			name:        "cleanup with table",
+			setupTable:  true,
+			egressIPs:   []string{"192.168.1.10"},
+			uplinkName:  testUplinkName,
+			ipv4Mode:    true,
+			ipv6Mode:    false,
+			expectError: "",
+		},
+	}
+
+	gomega.RegisterTestingT(t)
+	g := gomega.NewWithT(t)
+
+	for _, tt := range tests {
+		config.IPv4Mode = tt.ipv4Mode
+		config.IPv6Mode = tt.ipv6Mode
+
+		nft := nodenft.SetFakeEgressIPNFTablesHelper()
+
+		if tt.setupTable {
+			// Create the table first by calling SetupEgressIPARPBlockNFTables
+			err := SetupEgressIPARPBlockNFTables(tt.egressIPs, tt.uplinkName)
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+
+		// Call the cleanup function
+		err := CleanupEgressIPARPBlockNFTTable(context.TODO())
+
+		if tt.expectError != "" {
+			g.Expect(err).To(gomega.HaveOccurred())
+			g.Expect(err.Error()).To(gomega.ContainSubstring(tt.expectError))
+		} else {
+			g.Expect(err).NotTo(gomega.HaveOccurred())
+		}
+	}
+}
