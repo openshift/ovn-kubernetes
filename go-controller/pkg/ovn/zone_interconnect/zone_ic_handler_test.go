@@ -740,6 +740,81 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("adds the remote dst-ip route when a referenced static route row is missing from the cache", func() {
+			app.Action = func(ctx *cli.Context) error {
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: initialNBDB,
+					SBData: initialSBDB,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				staleRoute := &nbdb.LogicalRouterStaticRoute{
+					IPPrefix: "10.244.9.0/24",
+					Nexthop:  "100.88.0.99",
+				}
+				ops, err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(
+					libovsdbOvnNBClient, nil, types.OVNClusterRouter, staleRoute,
+					func(item *nbdb.LogicalRouterStaticRoute) bool {
+						return item.IPPrefix == staleRoute.IPPrefix && item.Nexthop == staleRoute.Nexthop
+					})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = libovsdbops.TransactAndCheck(libovsdbOvnNBClient, ops)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				staleRoutes, err := libovsdbops.GetRouterLogicalRouterStaticRoutesWithPredicate(
+					libovsdbOvnNBClient, &nbdb.LogicalRouter{Name: types.OVNClusterRouter},
+					func(item *nbdb.LogicalRouterStaticRoute) bool {
+						return item.IPPrefix == staleRoute.IPPrefix
+					})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(staleRoutes).To(gomega.HaveLen(1))
+				err = libovsdbOvnNBClient.Cache().Table(nbdb.LogicalRouterStaticRouteTable).Delete(staleRoutes[0].UUID)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				_, subnet, err := net.ParseCIDR("10.244.4.0/24")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, transitIP, err := net.ParseCIDR("100.88.0.4/16")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, grIP, err := net.ParseCIDR("100.64.0.4/16")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient, nil)
+				err = zoneICHandler.addRemoteNodeStaticRoutes(&testNode3, []*net.IPNet{transitIP}, []*net.IPNet{subnet}, []*net.IPNet{grIP})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				routes, err := libovsdbops.GetRouterLogicalRouterStaticRoutesWithPredicate(
+					libovsdbOvnNBClient, &nbdb.LogicalRouter{Name: types.OVNClusterRouter},
+					func(item *nbdb.LogicalRouterStaticRoute) bool {
+						return item.IPPrefix == "10.244.4.0/24" || item.IPPrefix == "100.64.0.4/32"
+					})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(routes).To(gomega.ConsistOf(
+					gomega.HaveField("IPPrefix", "10.244.4.0/24"),
+					gomega.HaveField("IPPrefix", "100.64.0.4/32"),
+				))
+				for _, route := range routes {
+					gomega.Expect(route.Nexthop).To(gomega.Equal("100.88.0.4"))
+					gomega.Expect(route.Policy == nil || *route.Policy == nbdb.LogicalRouterStaticRoutePolicyDstIP).To(gomega.BeTrue())
+					gomega.Expect(route.ExternalIDs["ic-node"]).To(gomega.Equal(testNode3.Name))
+				}
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+				"-init-cluster-manager",
+				"-zone-join-switch-subnets=" + joinSubnetCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("CleanupStaleNodes with nil should cleanup all transit switch ports for no-overlay migration", func() {
 			app.Action = func(ctx *cli.Context) error {
 				dbSetup := libovsdbtest.TestSetup{
