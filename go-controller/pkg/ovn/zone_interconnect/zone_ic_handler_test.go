@@ -667,6 +667,79 @@ var _ = ginkgo.Describe("Zone Interconnect Operations", func() {
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		})
 
+		ginkgo.It("keeps a src-ip route when adding the dst-ip route for the same pod subnet", func() {
+			app.Action = func(ctx *cli.Context) error {
+				dbSetup := libovsdbtest.TestSetup{
+					NBData: initialNBDB,
+					SBData: initialSBDB,
+				}
+
+				_, err := config.InitConfig(ctx, nil, nil)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				var libovsdbOvnNBClient, libovsdbOvnSBClient libovsdbclient.Client
+				libovsdbOvnNBClient, libovsdbOvnSBClient, libovsdbCleanup, err = libovsdbtest.NewNBSBTestHarness(dbSetup)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				err = createTransitSwitchPortBindings(libovsdbOvnSBClient, types.DefaultNetworkName, &testNode1, &testNode2, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				// Egress route for node3's pod subnet. It shares the prefix of the
+				// interconnect dst-ip route that AddRemoteZoneNode is about to add.
+				srcPolicy := nbdb.LogicalRouterStaticRoutePolicySrcIP
+				egressRoute := &nbdb.LogicalRouterStaticRoute{
+					Policy:   &srcPolicy,
+					IPPrefix: "10.244.4.0/24",
+					Nexthop:  "100.64.0.99",
+				}
+				ops, err := libovsdbops.CreateOrUpdateLogicalRouterStaticRoutesWithPredicateOps(
+					libovsdbOvnNBClient, nil, types.OVNClusterRouter, egressRoute,
+					func(item *nbdb.LogicalRouterStaticRoute) bool {
+						return item.IPPrefix == egressRoute.IPPrefix && item.Policy != nil && *item.Policy == srcPolicy
+					})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				_, err = libovsdbops.TransactAndCheck(libovsdbOvnNBClient, ops)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				zoneICHandler := NewZoneInterconnectHandler(&util.DefaultNetInfo{}, libovsdbOvnNBClient, libovsdbOvnSBClient, nil)
+				err = zoneICHandler.createOrUpdateTransitSwitch(0)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				err = invokeICHandlerAddNodeFunction("global", zoneICHandler, &testNode1, &testNode2, &testNode3)
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				clusterRouter, err := libovsdbops.GetLogicalRouter(libovsdbOvnNBClient, &nbdb.LogicalRouter{Name: types.OVNClusterRouter})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				routes, err := libovsdbops.GetRouterLogicalRouterStaticRoutesWithPredicate(libovsdbOvnNBClient, clusterRouter,
+					func(route *nbdb.LogicalRouterStaticRoute) bool {
+						return route.IPPrefix == "10.244.4.0/24"
+					})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+				var sawSrcIP, sawDstIP bool
+				for _, route := range routes {
+					if route.Policy != nil && *route.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP {
+						sawSrcIP = true
+						gomega.Expect(route.Nexthop).To(gomega.Equal("100.64.0.99"))
+						continue
+					}
+					gomega.Expect(route.Policy == nil || *route.Policy == nbdb.LogicalRouterStaticRoutePolicyDstIP).To(gomega.BeTrue())
+					gomega.Expect(route.Nexthop).To(gomega.Equal("100.88.0.4"))
+					sawDstIP = true
+				}
+				gomega.Expect(sawSrcIP).To(gomega.BeTrue(), "src-ip egress route for the pod subnet must be left alone")
+				gomega.Expect(sawDstIP).To(gomega.BeTrue(), "dst-ip interconnect route to the remote pod subnet must exist")
+				return nil
+			}
+
+			err := app.Run([]string{
+				app.Name,
+				"-cluster-subnets=" + clusterCIDR,
+				"-init-cluster-manager",
+				"-zone-join-switch-subnets=" + joinSubnetCIDR,
+			})
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		})
+
 		ginkgo.It("CleanupStaleNodes with nil should cleanup all transit switch ports for no-overlay migration", func() {
 			app.Action = func(ctx *cli.Context) error {
 				dbSetup := libovsdbtest.TestSetup{
