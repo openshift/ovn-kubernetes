@@ -18,7 +18,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	"k8s.io/utils/ptr"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/kube"
@@ -1166,82 +1165,26 @@ func TestIsNodeAnnotationPatchRetryable(t *testing.T) {
 // These tests verify that IPv4, IPv6, and IP capacity fields use independent pointers
 // and that values are correctly preserved during JSON unmarshaling.
 //
-// Bug context: Before the fix, all three capacity pointers pointed to the same variable,
-// causing JSON unmarshal to overwrite IPv4 with IPv6's value. For example, unmarshaling
-// {"ipv4":14,"ipv6":15} would result in both IPv4=15 and IPv6=15 instead of the correct
-// IPv4=14 and IPv6=15.
-
-// TestParseCloudEgressIPConfig_DifferentIPv4IPv6Capacity verifies that ParseCloudEgressIPConfig
-// correctly handles different IPv4 and IPv6 capacity values without pointer aliasing issues.
-// This is the primary test case that would fail with the pointer aliasing bug.
-func TestParseCloudEgressIPConfig_DifferentIPv4IPv6Capacity(t *testing.T) {
-	tests := []struct {
-		name          string
-		capacityJSON  string
-		expectedIPv4  *int
-		expectedIPv6  *int
-		expectedIP    *int
-		expectError   bool
-		errorContains string
-	}{
-		{
-			name:         "All three capacity fields set",
-			capacityJSON: `[{"capacity":{"ip":100,"ipv4":14,"ipv6":15}}]`,
-			expectedIPv4: ptr.To(14),
-			expectedIPv6: ptr.To(15),
-			expectedIP:   ptr.To(100),
-			expectError:  false,
+// TestParseCloudEgressIPConfigCapacity verifies that ParseCloudEgressIPConfig
+// correctly parses all three capacity fields (IPv4, IPv6, IP) independently without pointer aliasing.
+func TestParseCloudEgressIPConfigCapacity(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Annotations: map[string]string{
+				"cloud.network.openshift.io/egress-ipconfig": `[{"interface":"eni-xxxx","ifaddr":{"ipv4":"10.0.128.0/18"},"capacity":{"ipv4":14,"ipv6":15,"ip":100}}]`,
+				OvnNodeIfAddr: `{"ipv4":"10.0.128.5/18"}`,
+			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-node",
-					Annotations: map[string]string{
-						OvnNodeIfAddr:                    `{"ipv4":"192.168.1.10/24"}`,
-						cloudEgressIPConfigAnnotationKey: tt.capacityJSON,
-					},
-				},
-			}
+	parsed, err := ParseCloudEgressIPConfig(node)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Capacity.IPv4)
+	require.NotNil(t, parsed.Capacity.IPv6)
+	require.NotNil(t, parsed.Capacity.IP)
 
-			config, err := ParseCloudEgressIPConfig(node)
-
-			if tt.expectError {
-				require.Error(t, err)
-				if tt.errorContains != "" {
-					assert.Contains(t, err.Error(), tt.errorContains)
-				}
-				return
-			}
-
-			require.NoError(t, err)
-			require.NotNil(t, config)
-
-			// Verify IPv4 capacity
-			if tt.expectedIPv4 == nil {
-				assert.Nil(t, config.Capacity.IPv4, "IPv4 capacity should be nil")
-			} else {
-				require.NotNil(t, config.Capacity.IPv4, "IPv4 capacity should not be nil")
-				assert.Equal(t, *tt.expectedIPv4, *config.Capacity.IPv4, "IPv4 capacity value mismatch")
-			}
-
-			// Verify IPv6 capacity
-			if tt.expectedIPv6 == nil {
-				assert.Nil(t, config.Capacity.IPv6, "IPv6 capacity should be nil")
-			} else {
-				require.NotNil(t, config.Capacity.IPv6, "IPv6 capacity should not be nil")
-				assert.Equal(t, *tt.expectedIPv6, *config.Capacity.IPv6, "IPv6 capacity value mismatch")
-			}
-
-			// Verify IP capacity
-			if tt.expectedIP == nil {
-				assert.Nil(t, config.Capacity.IP, "IP capacity should be nil")
-			} else {
-				require.NotNil(t, config.Capacity.IP, "IP capacity should not be nil")
-				assert.Equal(t, *tt.expectedIP, *config.Capacity.IP, "IP capacity value mismatch")
-			}
-		})
-	}
+	assert.Equal(t, 14, *parsed.Capacity.IPv4, "IPv4 capacity must not be corrupted by other capacity values")
+	assert.Equal(t, 15, *parsed.Capacity.IPv6, "IPv6 capacity must not be corrupted by other capacity values")
+	assert.Equal(t, 100, *parsed.Capacity.IP, "IP capacity must not be corrupted by other capacity values")
 }
