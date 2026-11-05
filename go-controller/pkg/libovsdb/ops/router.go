@@ -649,24 +649,19 @@ func GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient libovsdbclient.Cli
 		return []*nbdb.LogicalRouterStaticRoute{}, nil
 	}
 
-	// Filter only the router's routes in the cache before cloning rows. The
-	// previous implementation performed one cache lookup per referenced UUID.
-	// Track every candidate seen because WhereCacheByUUIDs intentionally skips
-	// missing UUIDs, while this helper historically returned ErrNotFound.
-	foundRoutes := 0
-	predicate := func(route *nbdb.LogicalRouterStaticRoute) bool {
-		foundRoutes++
-		return p(route)
-	}
+	// Filter only the router's routes in the cache before cloning rows.
+	// WhereCacheByUUIDs skips UUIDs whose rows are absent from the cache. A
+	// monitor update can remove a route row before it updates the router that
+	// still references it. Those UUIDs are not matches. Do not fail the lookup:
+	// CreateOrReplace would abort and the interconnect dst-ip route would never
+	// be added. Do not delete the reference here; the row may only be missing
+	// from the cache.
 	ctx, cancel := context.WithTimeout(context.Background(), config.Default.OVSDBTxnTimeout)
 	defer cancel()
 	matches := []*nbdb.LogicalRouterStaticRoute{}
-	err = nbClient.WhereCacheByUUIDs(predicate, r.StaticRoutes...).List(ctx, &matches)
+	err = nbClient.WhereCacheByUUIDs(p, r.StaticRoutes...).List(ctx, &matches)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list static routes for router %s: %w", router.Name, err)
-	}
-	if foundRoutes != len(r.StaticRoutes) {
-		return nil, fmt.Errorf("failed to find all static routes referenced by router %s: %w", router.Name, libovsdbclient.ErrNotFound)
 	}
 	if len(matches) < 2 {
 		return matches, nil

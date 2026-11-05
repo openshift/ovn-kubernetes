@@ -649,11 +649,17 @@ func (zic *ZoneInterconnectHandler) addRemoteNodeStaticRoutes(node *corev1.Node,
 			Nexthop:  nexthop,
 			IPPrefix: prefix,
 		}
-		// Note that because logical router static routes were originally created without types.NetworkExternalID
-		// external-ids, skip types.NetworkExternalID check in the predicate function to replace existing static route
-		// with correct external-ids on an upgrade scenario.
+		// Match every dst-ip route for this prefix so a stale interconnect route
+		// (same prefix, dead nexthop, possibly missing network external-id) is
+		// replaced instead of left behind as ECMP. Policy unset is dst-ip.
+		// Do not match src-ip. The egress route for a pod subnet uses the same
+		// prefix with policy src-ip. CreateOrReplace keeps the first match and
+		// deletes the rest, and the route written here leaves Policy unset, so
+		// libovsdb will not clear an existing src-ip policy. The interconnect
+		// dst-ip route is then never created, and pods on this node cannot
+		// reach that remote pod subnet.
 		p := func(lrsr *nbdb.LogicalRouterStaticRoute) bool {
-			return lrsr.IPPrefix == prefix
+			return lrsr.IPPrefix == prefix && libovsdbops.PolicyEqualPredicate(nil, lrsr.Policy)
 		}
 		var err error
 		ops, err = libovsdbops.CreateOrReplaceLogicalRouterStaticRouteWithPredicateOps(zic.nbClient, ops, zic.networkClusterRouterName, &logicalRouterStaticRoute, p)
