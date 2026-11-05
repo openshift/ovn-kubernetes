@@ -1129,63 +1129,65 @@ func (eIPC *egressIPClusterController) reconcileEgressIP(ctx context.Context, ol
 		// Execute CloudPrivateIPConfig changes for assignments which need to be
 		// added/removed, assignments which don't change do not require any
 		// further setup.
-		// Validate CloudPrivateIPConfig creation for both IPv4 and IPv6
-		var validStatusToAdd []egressipv1.EgressIPStatusItem
-		if len(statusToAdd) > 0 {
-			eIPC.nodeAllocator.Lock()
-			validStatusToAdd = []egressipv1.EgressIPStatusItem{}
+		/*
+			// Validate CloudPrivateIPConfig creation for both IPv4 and IPv6
+			var validStatusToAdd []egressipv1.EgressIPStatusItem
+			if len(statusToAdd) > 0 {
+				eIPC.nodeAllocator.Lock()
+				validStatusToAdd = []egressipv1.EgressIPStatusItem{}
 
-			for _, item := range statusToAdd {
-				eNode, exists := eIPC.nodeAllocator.cache[item.Node]
-				if !exists {
-					klog.Warningf("Node %s not in allocator cache for EgressIP %s, skipping CloudPrivateIPConfig for %s",
-						item.Node, name, item.EgressIP)
-					continue
-				}
+				for _, item := range statusToAdd {
+					eNode, exists := eIPC.nodeAllocator.cache[item.Node]
+					if !exists {
+						klog.Warningf("Node %s not in allocator cache for EgressIP %s, skipping CloudPrivateIPConfig for %s",
+							item.Node, name, item.EgressIP)
+						continue
+					}
 
-				if _, alreadyAllocated := eNode.allocations[item.EgressIP]; !alreadyAllocated {
-					klog.Warningf("IP %s for EgressIP %s NOT in allocations for Node %s, skipping CloudPrivateIPConfig",
-						item.EgressIP, name, item.Node)
-					continue
-				}
+					if _, alreadyAllocated := eNode.allocations[item.EgressIP]; !alreadyAllocated {
+						klog.Warningf("IP %s for EgressIP %s NOT in allocations for Node %s, skipping CloudPrivateIPConfig",
+							item.EgressIP, name, item.Node)
+						continue
+					}
 
-				// Validate capacity for IPv4
-				eIP := net.ParseIP(item.EgressIP)
-				if utilnet.IsIPv4(eIP) && eNode.egressIPConfig.Capacity.IPv4 != nil {
-					if *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity {
-						ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
-						if ipv4Allocated > *eNode.egressIPConfig.Capacity.IPv4 {
-							klog.Warningf("IPv4 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
-								item.Node, ipv4Allocated, *eNode.egressIPConfig.Capacity.IPv4, item.EgressIP)
-							// Remove rejected IPv4 from allocation map to clear stale cache
-							delete(eNode.allocations, item.EgressIP)
-							continue
+					// Validate capacity for IPv4
+					eIP := net.ParseIP(item.EgressIP)
+					if utilnet.IsIPv4(eIP) && eNode.egressIPConfig.Capacity.IPv4 != nil {
+						if *eNode.egressIPConfig.Capacity.IPv4 < util.UnlimitedNodeCapacity {
+							ipv4Allocated := getIPFamilyAllocationCount(eNode.allocations, false)
+							if ipv4Allocated > *eNode.egressIPConfig.Capacity.IPv4 {
+								klog.Warningf("IPv4 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
+									item.Node, ipv4Allocated, *eNode.egressIPConfig.Capacity.IPv4, item.EgressIP)
+								// Remove rejected IPv4 from allocation map to clear stale cache
+								delete(eNode.allocations, item.EgressIP)
+								continue
+							}
 						}
 					}
-				}
 
-				// Validate capacity for IPv6
-				if utilnet.IsIPv6(eIP) && eNode.egressIPConfig.Capacity.IPv6 != nil {
-					if *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity {
-						ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
-						if ipv6Allocated > *eNode.egressIPConfig.Capacity.IPv6 {
-							klog.Warningf("IPv6 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
-								item.Node, ipv6Allocated, *eNode.egressIPConfig.Capacity.IPv6, item.EgressIP)
-							// Remove rejected IPv6 from allocation map to clear stale cache
-							delete(eNode.allocations, item.EgressIP)
-							continue
+					// Validate capacity for IPv6
+					if utilnet.IsIPv6(eIP) && eNode.egressIPConfig.Capacity.IPv6 != nil {
+						if *eNode.egressIPConfig.Capacity.IPv6 < util.UnlimitedNodeCapacity {
+							ipv6Allocated := getIPFamilyAllocationCount(eNode.allocations, true)
+							if ipv6Allocated > *eNode.egressIPConfig.Capacity.IPv6 {
+								klog.Warningf("IPv6 capacity exceeded for Node %s: allocated=%d, capacity=%d, rejecting %s",
+									item.Node, ipv6Allocated, *eNode.egressIPConfig.Capacity.IPv6, item.EgressIP)
+								// Remove rejected IPv6 from allocation map to clear stale cache
+								delete(eNode.allocations, item.EgressIP)
+								continue
+							}
 						}
 					}
+
+					validStatusToAdd = append(validStatusToAdd, item)
 				}
+				eIPC.nodeAllocator.Unlock()
 
-				validStatusToAdd = append(validStatusToAdd, item)
+				if len(validStatusToAdd) == 0 {
+					klog.Warningf("No valid IPs for CloudPrivateIPConfig creation for EgressIP %s", name)
+				}
 			}
-			eIPC.nodeAllocator.Unlock()
-
-			if len(validStatusToAdd) == 0 {
-				klog.Warningf("No valid IPs for CloudPrivateIPConfig creation for EgressIP %s", name)
-			}
-		}
+		*/
 		if err := eIPC.executeCloudPrivateIPConfigChange(ctx, name, statusToAdd, statusToRemove); err != nil {
 			return err
 		}
