@@ -686,7 +686,10 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 			oc.gatewayManagers.Store(node.Name, gwManager)
 
 			err := func() error {
-				gwConfig, err := oc.nodeGatewayConfig(node)
+				// Read advertisement state once so that all SNATs and isolation
+				// configured in this pass agree with each other.
+				isUDNAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
+				gwConfig, err := oc.nodeGatewayConfig(node, isUDNAdvertised)
 				if err != nil {
 					return err
 				}
@@ -696,7 +699,6 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 				); err != nil {
 					return err
 				}
-				isUDNAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
 				err = oc.addOrUpdateUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, node.Name, isUDNAdvertised)
 				if err != nil {
 					return err
@@ -1107,7 +1109,7 @@ func (oc *Layer2UserDefinedNetworkController) addOrUpdateUDNClusterSubnetEgressS
 	return nil
 }
 
-func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
+func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Node, isPodNetworkAdvertised bool) (*GatewayConfig, error) {
 	networkName := oc.GetNetworkName()
 	l3GatewayConfig, hasUplink, err := oc.uplinkGatewayConfig(node)
 	if err != nil {
@@ -1162,6 +1164,7 @@ func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Nod
 		hostAddrs:                  nil,
 		externalIPs:                externalIPs,
 		ovnClusterLRPToJoinIfAddrs: nil,
+		isPodNetworkAdvertised:     isPodNetworkAdvertised,
 	}, nil
 }
 
