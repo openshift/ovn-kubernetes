@@ -163,6 +163,8 @@ func main() {
 
 	// Add the agnhost image to the required images
 	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Netshoot)
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.FRR)
 	// Register OVN-Kubernetes e2e images to the openshift-tests extension
 	err = registerTestImages(ovnTestsExtension)
 	if err != nil {

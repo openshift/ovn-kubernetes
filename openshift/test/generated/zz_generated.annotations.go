@@ -1124,95 +1124,95 @@ var AppendedAnnotations = map[string]string{
 
 	"EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv6 pods": "[Disabled:Unimplemented]",
 
-	"External Gateway When validating the Admin Policy Based External Route status Should update the status of a successful and failed CRs": "[Disabled:Unimplemented]",
+	"External Gateway When validating the Admin Policy Based External Route status Should update the status of a successful and failed CRs": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate ICMP connectivity to an external gateway's loopback address via a pod with dynamic hop ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate ICMP connectivity to an external gateway's loopback address via a pod with dynamic hop ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate ICMP connectivity to an external gateway's loopback address via a pod with dynamic hop ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate ICMP connectivity to an external gateway's loopback address via a pod with dynamic hop ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop TCP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop TCP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop TCP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop TCP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod deletion timestamp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod label update": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod label update": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod not ready": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod not ready": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod deletion timestamp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod label update": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod label update": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod not ready": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod not ready": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod deletion timestamp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod label update": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod label update": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod not ready": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod not ready": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod deletion timestamp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod label update": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod label update": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod not ready": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod not ready": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress TCP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress TCP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress TCP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress TCP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress UDP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress UDP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress UDP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress UDP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod TCP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod TCP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod TCP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod TCP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"Hybrid-overlay subnet claims rejects a remote node claiming an arbitrary subnet": "[Suite:ovn-kubernetes/conformance/parallel]",
 
