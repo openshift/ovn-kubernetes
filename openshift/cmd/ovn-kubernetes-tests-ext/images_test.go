@@ -210,7 +210,8 @@ func TestRegisterTestImages(t *testing.T) {
 			deploymentconfig.Set(ocpConfig)
 			ocpConfig.AddRequiredImage(deploymentconfigapi.Agnhost,
 				deploymentconfigapi.FedoraKubevirtContainerDisk,
-				deploymentconfigapi.Netshoot)
+				deploymentconfigapi.Netshoot,
+				deploymentconfigapi.FRR)
 			ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
 			if err := registerTestImages(ext); err != nil {
 				t.Fatalf("failed to register test images: %v", err)
@@ -222,6 +223,7 @@ func TestRegisterTestImages(t *testing.T) {
 				agnhost.GetE2EImage(): int(imageutils.Agnhost),
 				"quay.io/kubevirt/fedora-with-test-tooling-container-disk:v1.8.2": int(imageutils.None),
 				"ghcr.io/nicolaka/netshoot:v0.16":                                 int(imageutils.None),
+				"quay.io/frrouting/frr:10.5.3":                                    int(imageutils.None),
 			}
 			if got := len(images); got != len(want) {
 				t.Fatalf("returned %d images, want %d", got, len(want))

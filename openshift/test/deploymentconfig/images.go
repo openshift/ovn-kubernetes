@@ -28,6 +28,9 @@ var (
 		api.Netshoot: {
 			PullSpec: "ghcr.io/nicolaka/netshoot:v0.16",
 		},
+		api.FRR: {
+			PullSpec: "quay.io/frrouting/frr:10.5.3",
+		},
 	}
 )
 

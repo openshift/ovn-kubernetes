@@ -191,7 +191,8 @@ func main() {
 	// Select the external images used by the enabled OTE tests.
 	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost,
 		deploymentconfigapi.FedoraKubevirtContainerDisk,
-		deploymentconfigapi.Netshoot)
+		deploymentconfigapi.Netshoot,
+		deploymentconfigapi.FRR)
 	if err := registerTestImages(ovnTestsExtension); err != nil {
 		panic(err)
 	}
