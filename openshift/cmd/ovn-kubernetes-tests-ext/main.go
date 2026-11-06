@@ -214,7 +214,11 @@ func main() {
 		if err := ocpInfra.EnableSecondaryForwarding(client); err != nil {
 			panic(fmt.Sprintf("failed to enable secondary network forwarding: %v", err))
 		}
-		if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+		exclusions, err := ocpInfra.ExternalGatewayIPAMExclusions()
+		if err != nil {
+			panic(fmt.Sprintf("failed to reserve external gateway addresses: %v", err))
+		}
+		if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes(), exclusions...); err != nil {
 			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
 	})

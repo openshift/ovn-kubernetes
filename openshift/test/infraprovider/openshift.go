@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -134,6 +135,21 @@ func (o *OpenshiftInfraProvider) configureTestEnvs() {
 	if featureGateEnabled(o.clusterFeatureGate, apifeatures.FeatureGateDNSNameResolver) {
 		_ = os.Setenv("OVN_ENABLE_DNSNAMERESOLVER", "true")
 	}
+	o.configureExternalGatewayEnvs()
+}
+
+// configureExternalGatewayEnvs exports OVN_TEST_EX_GW_NETWORK for upstream
+// External Gateway e2es on baremetal. EG specs are filtered out on cloud
+// platforms (no L2 adjacency from bastion to worker InternalIPs), so host
+// networking env vars are never set. On baremetal, point tests at the
+// dedicated macvlan (xgw); do not set IPV4/IPV6 — the engine discovers
+// addresses from isolated containers.
+func (o *OpenshiftInfraProvider) configureExternalGatewayEnvs() {
+	bm, ok := o.clusterInfra.(*baremetalInfra)
+	if !ok || bm == nil || os.Getenv("OVN_TEST_EX_GW_NETWORK") != "" {
+		return
+	}
+	_ = os.Setenv("OVN_TEST_EX_GW_NETWORK", bmExGwNetworkName)
 }
 
 // IsArpfloodDisabled reports whether the CNO config override that disables
@@ -151,6 +167,88 @@ func (o *OpenshiftInfraProvider) IsArpfloodDisabled() bool {
 // during test listing without a kubeconfig.
 func (o *OpenshiftInfraProvider) HasClusterInfra() bool {
 	return o.initialized
+}
+
+// HasExternalGatewaySupport reports whether external containers can share the
+// cluster machine network through an initialized bare-metal provider.
+func (o *OpenshiftInfraProvider) HasExternalGatewaySupport() bool {
+	_, ok := o.clusterInfra.(*baremetalInfra)
+	return ok
+}
+
+// ExternalGatewayIPAMExclusions keeps the persistent host sibling and Podman
+// pool unavailable to the isolated-container allocator, even between serial specs.
+func (o *OpenshiftInfraProvider) ExternalGatewayIPAMExclusions() ([]string, error) {
+	bm, ok := o.clusterInfra.(*baremetalInfra)
+	if !ok {
+		return nil, nil
+	}
+	v4, v6, err := bm.base.machineNetwork.IPv4IPv6Subnets()
+	if err != nil {
+		return nil, err
+	}
+	var ranges []string
+	for _, subnet := range []string{v4, v6} {
+		if subnet == "" {
+			continue
+		}
+		// A valid but undersized subnet has no gateway pool to reserve.
+		// GetNetwork reports that limitation when a gateway spec requests xgw.
+		_, network, err := net.ParseCIDR(subnet)
+		if err != nil {
+			return nil, err
+		}
+		ones, subnetBits := network.Mask.Size()
+		if subnetBits-ones < exGwPoolBits+1 {
+			continue
+		}
+		ipam, err := reservedExGwIPAM(subnet)
+		if err != nil {
+			return nil, err
+		}
+		bits := 128
+		if net.ParseIP(ipam.Gateway).To4() != nil {
+			bits = 32
+		}
+		ranges = append(ranges, fmt.Sprintf("%s/%d", ipam.Gateway, bits), ipam.IPRange)
+	}
+	// Lazy setup has not reconciled the sibling yet. Reserve its actual
+	// addresses too, including gateways left by a previous subnet size.
+	var links []ipAddrShowEntry
+	var existingPool []string
+	for attempt := 0; attempt < 3; attempt++ {
+		links, err = listDeviceAddrs(bm.base.runner, "")
+		if err == nil {
+			existingPool, err = existingExGwPoolExclusions(bm.base.runner)
+		}
+		if err == nil {
+			break
+		}
+		if attempt < 2 {
+			time.Sleep(time.Second)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inventory existing gateway reservations after retries: %w", err)
+	}
+	ranges = append(ranges, existingPool...)
+	for _, link := range links {
+		if link.IfName != bmExGwHostLinkName {
+			continue
+		}
+		for _, address := range link.AddrInfo {
+			ip := net.ParseIP(address.Local)
+			if ip == nil || ip.IsLinkLocalUnicast() || ip.IsLoopback() {
+				continue
+			}
+			bits := 128
+			if ip.To4() != nil {
+				bits = 32
+			}
+			ranges = append(ranges, fmt.Sprintf("%s/%d", ip, bits))
+		}
+	}
+	return ranges, nil
 }
 
 // HasSecondaryHostEIPSupport checks if the platform supports secondary-host-eip
@@ -514,6 +612,22 @@ func initializePlatformInfra(config *rest.Config) (platformInfra, configv1.Platf
 		bm, err := initializeBaremetalInfra(infra)
 		if err != nil || bm == nil {
 			return nil, platformType, err
+		}
+		kubeClient, err := kubernetes.NewForConfig(config)
+		if err != nil {
+			return nil, platformType, err
+		}
+		bm.nodes = kubeClient.CoreV1().Nodes()
+		for _, ip := range infra.Spec.PlatformSpec.BareMetal.APIServerInternalIPs {
+			bm.gatewayVIPs = append(bm.gatewayVIPs, string(ip))
+		}
+		for _, ip := range infra.Spec.PlatformSpec.BareMetal.IngressIPs {
+			bm.gatewayVIPs = append(bm.gatewayVIPs, string(ip))
+		}
+		if infra.Status.PlatformStatus != nil && infra.Status.PlatformStatus.BareMetal != nil {
+			status := infra.Status.PlatformStatus.BareMetal
+			bm.gatewayVIPs = append(bm.gatewayVIPs, status.APIServerInternalIPs...)
+			bm.gatewayVIPs = append(bm.gatewayVIPs, status.IngressIPs...)
 		}
 		return bm, platformType, nil
 	case configv1.AWSPlatformType, configv1.AzurePlatformType, configv1.GCPPlatformType:
