@@ -4,7 +4,13 @@
 package infraprovider
 
 import (
+	"encoding/json"
+	"errors"
+	"net"
+	"strings"
 	"testing"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 )
 
 func TestIpInCIDR(t *testing.T) {
@@ -243,4 +249,251 @@ func TestTryMatchLink(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReservedExGwIPAM(t *testing.T) {
+	tests := []struct {
+		name       string
+		subnet     string
+		wantGW     string
+		wantRange  string
+		wantPrefix int
+		wantErr    bool
+	}{
+		{
+			name:       "IPv4 /24",
+			subnet:     "192.168.111.0/24",
+			wantGW:     "192.168.111.239",
+			wantRange:  "192.168.111.240/28",
+			wantPrefix: 24,
+		},
+		{
+			name:       "IPv6 /64",
+			subnet:     "fd2e:6f44:5dd8:c956::/64",
+			wantGW:     "fd2e:6f44:5dd8:c956:ffff:ffff:ffff:ffef",
+			wantRange:  "fd2e:6f44:5dd8:c956:ffff:ffff:ffff:fff0/124",
+			wantPrefix: 64,
+		},
+		{
+			// Metal dualstack MachineNetworks IPv6 is typically /120.
+			name:       "IPv6 /120 metal machine network",
+			subnet:     "fd2e:6f44:5dd8:c956::/120",
+			wantGW:     "fd2e:6f44:5dd8:c956::ef",
+			wantRange:  "fd2e:6f44:5dd8:c956::f0/124",
+			wantPrefix: 120,
+		},
+		{
+			name:    "IPv4 too small",
+			subnet:  "192.168.111.0/28",
+			wantErr: true,
+		},
+		{
+			name:    "invalid subnet",
+			subnet:  "not-a-cidr",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := reservedExGwIPAM(tt.subnet)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("reservedExGwIPAM() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if got.Gateway != tt.wantGW || got.IPRange != tt.wantRange || got.SubnetPrefix != tt.wantPrefix {
+				t.Errorf("reservedExGwIPAM(%q) = %+v, want gw=%s range=%s prefix=%d",
+					tt.subnet, got, tt.wantGW, tt.wantRange, tt.wantPrefix)
+			}
+		})
+	}
+}
+
+type egMockAddr struct {
+	Family    string `json:"family"`
+	Local     string `json:"local"`
+	PrefixLen int    `json:"prefixlen"`
+}
+
+// egNetRunner records hypervisor commands for ensureExternalGatewayNetwork.
+type egNetRunner struct {
+	networkExists bool
+	linkExists    bool
+	cmds          []string
+	createCmd     string
+	removed       bool
+	// addrs is returned (and mutated) for "ip -j addr show" / "ip addr del".
+	addrs []egMockAddr
+}
+
+func (r *egNetRunner) addrShowJSON() string {
+	type wrap struct {
+		AddrInfo []egMockAddr `json:"addr_info"`
+	}
+	b, _ := json.Marshal([]wrap{{AddrInfo: r.addrs}})
+	return string(b)
+}
+
+func (r *egNetRunner) Run(command string, args ...string) (string, error) {
+	joined := strings.Join(append([]string{command}, args...), " ")
+	r.cmds = append(r.cmds, joined)
+
+	switch {
+	case command == "podman" && len(args) >= 2 && args[0] == "network" && args[1] == "exists":
+		if r.networkExists {
+			return "", nil
+		}
+		return "", errors.New("network not found")
+	case command == "podman" && len(args) >= 2 && args[0] == "network" && args[1] == "rm":
+		r.removed = true
+		r.networkExists = false
+		return "", nil
+	case command == "podman" && len(args) >= 2 && args[0] == "network" && args[1] == "create":
+		r.createCmd = joined
+		return "", nil
+	case command == "ip" && len(args) >= 3 && args[0] == "link" && args[1] == "show":
+		if r.linkExists {
+			return "", nil
+		}
+		return "", errors.New("Device does not exist")
+	case command == "ip" && len(args) >= 4 && args[0] == "-j" && args[1] == "addr" && args[2] == "show":
+		return r.addrShowJSON(), nil
+	case command == "ip" && len(args) >= 5 && args[0] == "addr" && args[1] == "del":
+		ip, ipNet, err := net.ParseCIDR(args[2])
+		if err == nil {
+			prefix, _ := ipNet.Mask.Size()
+			kept := r.addrs[:0]
+			for _, a := range r.addrs {
+				existing := net.ParseIP(a.Local)
+				if existing != nil && existing.Equal(ip) && a.PrefixLen == prefix {
+					continue
+				}
+				kept = append(kept, a)
+			}
+			r.addrs = kept
+		}
+		return "", nil
+	case command == "ip" && len(args) >= 2 && args[len(args)-2] == "route" && args[len(args)-1] == "default":
+		return `[{"dst":"default","gateway":"192.168.111.254","dev":"baremetal"}]`, nil
+	case command == "firewall-cmd" && len(args) >= 1 && args[0] == "--state":
+		return "running", nil
+	case command == "firewall-cmd" && len(args) >= 1 && strings.HasPrefix(args[0], "--get-zone-of-interface="):
+		return "public", nil
+	case command == "iptables" || command == "ip6tables":
+		if len(args) >= 1 && (args[0] == "-C" || (len(args) >= 3 && args[2] == "-C")) {
+			return "", errors.New("Bad rule")
+		}
+		return "", nil
+	default:
+		// ip link add/set, ip addr add, sysctl, firewall-cmd mutations succeed.
+		return "", nil
+	}
+}
+
+func TestEnsureExternalGatewayNetwork(t *testing.T) {
+	hostNet := &api.NetworkInterface{
+		InfName: "baremetal",
+		IPv4:    "192.168.111.1",
+		IPv6:    "fd2e:6f44:5dd8:c956::1",
+	}
+
+	t.Run("recreates existing network with sibling gateway", func(t *testing.T) {
+		r := &egNetRunner{networkExists: true}
+		if err := ensureExternalGatewayNetwork(r, hostNet, "192.168.111.0/24", "fd2e:6f44:5dd8:c956::/120"); err != nil {
+			t.Fatalf("ensureExternalGatewayNetwork() error = %v", err)
+		}
+		if !r.removed {
+			t.Fatal("expected existing network to be removed before recreate")
+		}
+		if r.createCmd == "" {
+			t.Fatal("expected network create after remove")
+		}
+	})
+
+	t.Run("creates macvlan with host sibling gateway and NAT", func(t *testing.T) {
+		r := &egNetRunner{}
+		// Use /120 IPv6 like metal dualstack MachineNetworks.
+		if err := ensureExternalGatewayNetwork(r, hostNet, "192.168.111.0/24", "fd2e:6f44:5dd8:c956::/120"); err != nil {
+			t.Fatalf("ensureExternalGatewayNetwork() error = %v", err)
+		}
+		all := strings.Join(r.cmds, "\n")
+		for _, want := range []string{
+			"ip link add " + bmExGwHostLinkName + " link baremetal type macvlan mode bridge",
+			"ip addr add 192.168.111.239/32 dev " + bmExGwHostLinkName,
+			"ip addr add fd2e:6f44:5dd8:c956::ef/128 dev " + bmExGwHostLinkName + " nodad",
+			"ip route replace 192.168.111.240/28 dev " + bmExGwHostLinkName,
+			"ip -6 route replace fd2e:6f44:5dd8:c956::f0/124 dev " + bmExGwHostLinkName,
+			"sysctl -w net.ipv4.ip_forward=1",
+			"sysctl -w net.ipv6.conf.all.forwarding=1",
+			"firewall-cmd --permanent --zone=trusted --add-interface=" + bmExGwHostLinkName,
+			"firewall-cmd --permanent --zone=public --add-masquerade",
+			"firewall-cmd --reload",
+			"iptables -t nat -A POSTROUTING -s 192.168.111.240/28 -j MASQUERADE",
+			"ip6tables -t nat -A POSTROUTING -s fd2e:6f44:5dd8:c956::f0/124 -j MASQUERADE",
+		} {
+			if !strings.Contains(all, want) {
+				t.Errorf("commands missing %q\n%s", want, all)
+			}
+		}
+		for _, want := range []string{
+			"podman network create",
+			"-d macvlan",
+			"parent=baremetal",
+			"--subnet 192.168.111.0/24",
+			"--ip-range 192.168.111.240/28",
+			"--gateway 192.168.111.239",
+			"--subnet fd2e:6f44:5dd8:c956::/120",
+			"--ip-range fd2e:6f44:5dd8:c956::f0/124",
+			"--gateway fd2e:6f44:5dd8:c956::ef",
+			"--ipv6",
+			bmExGwNetworkName,
+		} {
+			if !strings.Contains(r.createCmd, want) {
+				t.Errorf("create command %q missing %q", r.createCmd, want)
+			}
+		}
+		if strings.Contains(r.createCmd, "--gateway 192.168.111.1") {
+			t.Errorf("must not use parent host IP as gateway: %q", r.createCmd)
+		}
+		if strings.Contains(r.createCmd, "--internal") {
+			t.Errorf("create command must not use --internal: %q", r.createCmd)
+		}
+	})
+
+	t.Run("replaces leftover wide-prefix gateway addresses on reuse", func(t *testing.T) {
+		r := &egNetRunner{
+			linkExists: true,
+			addrs: []egMockAddr{
+				{Family: "inet", Local: "192.168.111.239", PrefixLen: 24},
+				{Family: "inet6", Local: "fd2e:6f44:5dd8:c956::ef", PrefixLen: 120},
+			},
+		}
+		if err := ensureExternalGatewayNetwork(r, hostNet, "192.168.111.0/24", "fd2e:6f44:5dd8:c956::/120"); err != nil {
+			t.Fatalf("ensureExternalGatewayNetwork() error = %v", err)
+		}
+		all := strings.Join(r.cmds, "\n")
+		for _, want := range []string{
+			"ip addr del 192.168.111.239/24 dev " + bmExGwHostLinkName,
+			"ip addr del fd2e:6f44:5dd8:c956::ef/120 dev " + bmExGwHostLinkName,
+			"ip addr add 192.168.111.239/32 dev " + bmExGwHostLinkName,
+			"ip addr add fd2e:6f44:5dd8:c956::ef/128 dev " + bmExGwHostLinkName + " nodad",
+		} {
+			if !strings.Contains(all, want) {
+				t.Errorf("commands missing %q\n%s", want, all)
+			}
+		}
+		if strings.Contains(all, "ip link add "+bmExGwHostLinkName) {
+			t.Errorf("must not recreate existing %s link", bmExGwHostLinkName)
+		}
+	})
+
+	t.Run("requires parent interface", func(t *testing.T) {
+		r := &egNetRunner{}
+		err := ensureExternalGatewayNetwork(r, &api.NetworkInterface{}, "192.168.111.0/24", "")
+		if err == nil {
+			t.Fatal("expected error for missing parent interface")
+		}
+	})
 }

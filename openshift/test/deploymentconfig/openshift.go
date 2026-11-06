@@ -23,16 +23,15 @@ var (
 	imageIDMapping map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
 		api.Agnhost: imageutils.Agnhost,
 	}
-	imageConfigMap map[api.ImageID]api.ImageConfig
+	imageConfigMap map[api.ImageID]string
 )
 
 func init() {
 	// Add images that are needed by the test suite.
-	imageConfigMap = map[api.ImageID]api.ImageConfig{
-		api.Agnhost: {
-			ImageID:  api.Agnhost,
-			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
-		},
+	imageConfigMap = map[api.ImageID]string{
+		api.Agnhost:  imageutils.GetE2EImage(imageutils.Agnhost),
+		api.Netshoot: "ghcr.io/nicolaka/netshoot:v0.16",
+		api.FRR:      "quay.io/frrouting/frr:10.5.3",
 	}
 }
 
@@ -107,7 +106,10 @@ func (m *openshift) NBDBContainerName() string {
 }
 
 func (m *openshift) GetImage(imageID api.ImageID) api.ImageConfig {
-	return imageConfigMap[imageID]
+	return api.ImageConfig{
+		ImageID:  imageID,
+		PullSpec: imageConfigMap[imageID],
+	}
 }
 
 func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {

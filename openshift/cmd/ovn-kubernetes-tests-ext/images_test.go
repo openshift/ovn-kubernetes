@@ -163,6 +163,8 @@ func TestExtensionImageFromPullSpec(t *testing.T) {
 func TestRegisterTestImages(t *testing.T) {
 	deploymentconfig.Set(ocpdeploymentconfig.New(nil))
 	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Netshoot)
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.FRR)
 
 	ext := extension.NewExtension("openshift", "payload", "ovn-kubernetes")
 	err := registerTestImages(ext)
