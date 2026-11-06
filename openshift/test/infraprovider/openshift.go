@@ -123,6 +123,26 @@ func (o *OpenshiftInfraProvider) configureTestEnvs() {
 	if featureGateEnabled(o.clusterFeatureGate, apifeatures.FeatureGateDNSNameResolver) {
 		_ = os.Setenv("OVN_ENABLE_DNSNAMERESOLVER", "true")
 	}
+	o.configureExternalGatewayEnvs()
+}
+
+// configureExternalGatewayEnvs exports OVN_TEST_EX_GW_* for upstream External
+// Gateway e2es when the primary infra network is host networking (cloud
+// bastion). Those tests require OVN_TEST_EX_GW_NETWORK=host and at least one
+// of OVN_TEST_EX_GW_IPV4/IPV6 because container engines cannot discover IPs
+// for --network host. Baremetal uses ostestbm_net and must not set these.
+func (o *OpenshiftInfraProvider) configureExternalGatewayEnvs() {
+	bi, ok := o.clusterInfra.(*baseInfra)
+	if !ok || bi == nil || bi.primaryNetworkName != bastionPrimaryNetworkName || bi.hostNetworkInfo == nil {
+		return
+	}
+	_ = os.Setenv("OVN_TEST_EX_GW_NETWORK", bastionPrimaryNetworkName)
+	if bi.hostNetworkInfo.IPv4 != "" {
+		_ = os.Setenv("OVN_TEST_EX_GW_IPV4", bi.hostNetworkInfo.IPv4)
+	}
+	if bi.hostNetworkInfo.IPv6 != "" {
+		_ = os.Setenv("OVN_TEST_EX_GW_IPV6", bi.hostNetworkInfo.IPv6)
+	}
 }
 
 // HasClusterInfra returns true when the provider was fully initialized with
