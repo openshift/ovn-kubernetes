@@ -30,6 +30,19 @@ const (
 	frrContainerPrimaryNetIPv6 = "fd2e:6f44:5dd8:c956::3"
 	externalFRRContainerName   = "frr"
 
+	// bmExGwNetworkName is a dedicated macvlan on the machine-network parent
+	// for External Gateway e2es. It must differ from bmPrimaryNetworkName so
+	// CreateExternalContainer uses the engine path (isolated netns / eth0)
+	// instead of host networking. Name matches Kind's OVN_TEST_EX_GW_NETWORK.
+	bmExGwNetworkName = "xgw"
+	// bmExGwHostLinkName is a host-side macvlan sibling on the same parent.
+	// Containers cannot reach the parent's host IP (macvlan filter); they use
+	// this sibling as their default gateway so the hypervisor can NAT apk /
+	// internet traffic while keeping L2 adjacency to cluster nodes on xgw.
+	bmExGwHostLinkName = "xgw-host"
+	// exGwPoolBits sizes the container IPAM slice (2^exGwPoolBits addresses).
+	exGwPoolBits = 4
+
 	bmSecondaryNetworkName = "secondarynetwork"
 	// Secondary subnets must match the values in test/e2e/egressip.go
 	// (secondaryIPV4Subnet / secondaryIPV6Subnet) because EgressIP tests
@@ -96,6 +109,9 @@ func initializeBaremetalInfra(infra *configv1.Infrastructure) (*baremetalInfra, 
 	if h.hostNetworkInfo != nil {
 		if err := configureFirewallForExternalContainerPorts(sshRunner, h.hostNetworkInfo.InfName); err != nil {
 			return nil, fmt.Errorf("failed to configure firewall for external container ports: %w", err)
+		}
+		if err := ensureExternalGatewayNetwork(sshRunner, h.hostNetworkInfo, v4, v6); err != nil {
+			return nil, fmt.Errorf("failed to ensure external gateway network %s: %w", bmExGwNetworkName, err)
 		}
 	}
 
@@ -347,6 +363,292 @@ func tryMatchLink(link linkInfo, v4Subnet, v6Subnet string) *api.NetworkInterfac
 	}
 
 	// Not a complete match, return nil
+	return nil
+}
+
+// ensureExternalGatewayNetwork creates a podman macvlan on the hypervisor
+// machine-network interface for External Gateway e2es. Containers get isolated
+// netns and eth0 on the same L2 as cluster nodes. A host macvlan sibling
+// (xgw-host) is the containers' default gateway so the hypervisor can NAT
+// internet access (apk) — macvlan cannot reach the parent's host IP. Must not
+// use --internal bridge create (unreachable from nodes).
+func ensureExternalGatewayNetwork(runner api.Runner, hostNet *api.NetworkInterface, v4Subnet, v6Subnet string) error {
+	if hostNet == nil || hostNet.InfName == "" {
+		return fmt.Errorf("hypervisor machine-network interface is required to create %s", bmExGwNetworkName)
+	}
+	if v4Subnet == "" && v6Subnet == "" {
+		return fmt.Errorf("machine-network subnets are required to create %s", bmExGwNetworkName)
+	}
+
+	var (
+		v4GW, v6GW       string
+		v4Range, v6Range string
+		v4Prefix         int
+		v6Prefix         int
+	)
+	if v4Subnet != "" {
+		ipam, err := reservedExGwIPAM(v4Subnet)
+		if err != nil {
+			return err
+		}
+		v4GW, v4Range, v4Prefix = ipam.Gateway, ipam.IPRange, ipam.SubnetPrefix
+	}
+	if v6Subnet != "" {
+		ipam, err := reservedExGwIPAM(v6Subnet)
+		if err != nil {
+			return err
+		}
+		v6GW, v6Range, v6Prefix = ipam.Gateway, ipam.IPRange, ipam.SubnetPrefix
+	}
+
+	if err := ensureExGwHostMacvlan(runner, hostNet.InfName, v4GW, v4Prefix, v6GW, v6Prefix); err != nil {
+		return err
+	}
+	if err := ensureExGwInternetNAT(runner, hostNet.InfName, v4Range, v6Range); err != nil {
+		return err
+	}
+
+	if _, err := runner.Run("podman", "network", "exists", bmExGwNetworkName); err == nil {
+		// Recreate so gateway points at the host sibling (older runs may have
+		// used the unreachable parent IP). Safe at infra init before EG containers.
+		if _, err := runner.Run("podman", "network", "rm", bmExGwNetworkName); err != nil {
+			return fmt.Errorf("failed to remove existing %s network before recreate: %w", bmExGwNetworkName, err)
+		}
+	}
+
+	cmdArgs := []string{
+		"network", "create",
+		"-d", "macvlan",
+		"-o", "parent=" + hostNet.InfName,
+	}
+	if v4Subnet != "" {
+		cmdArgs = append(cmdArgs, "--subnet", v4Subnet, "--ip-range", v4Range, "--gateway", v4GW)
+	}
+	if v6Subnet != "" {
+		cmdArgs = append(cmdArgs, "--subnet", v6Subnet, "--ip-range", v6Range, "--gateway", v6GW, "--ipv6")
+	}
+	cmdArgs = append(cmdArgs, bmExGwNetworkName)
+
+	stdOut, err := runner.Run("podman", cmdArgs...)
+	if err != nil {
+		return fmt.Errorf("podman %s failed: %w (%s)", strings.Join(cmdArgs, " "), err, stdOut)
+	}
+	return nil
+}
+
+// exGwIPAM holds the host-sibling gateway and container IPAM slice for one family.
+type exGwIPAM struct {
+	Gateway      string // host sibling IP (podman --gateway)
+	IPRange      string // CIDR for podman --ip-range
+	SubnetPrefix int    // machine-network prefix for ip addr add on the sibling
+}
+
+// reservedExGwIPAM returns a high IPAM slice and the address immediately before
+// it for the host macvlan sibling gateway. The pool avoids VIPs, node IPs, and
+// FRR (.3 / ::3). Fits /24 and /64 as well as metal dualstack IPv6 /120.
+func reservedExGwIPAM(subnet string) (exGwIPAM, error) {
+	_, ipNet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return exGwIPAM{}, fmt.Errorf("invalid subnet %q: %w", subnet, err)
+	}
+	ones, bits := ipNet.Mask.Size()
+	hostBits := bits - ones
+	// Need room for the host gateway plus a 16-address container pool.
+	if hostBits < exGwPoolBits+1 {
+		return exGwIPAM{}, fmt.Errorf("subnet %s too small for EG IPAM (need at least %d host bits)", subnet, exGwPoolBits+1)
+	}
+	rangePrefix := bits - exGwPoolBits
+
+	poolStart := make(net.IP, bits/8)
+	if bits == 32 {
+		copy(poolStart, ipNet.IP.To4())
+	} else {
+		copy(poolStart, ipNet.IP.To16())
+	}
+	for b := 0; b < hostBits; b++ {
+		byteIdx := len(poolStart) - 1 - b/8
+		poolStart[byteIdx] |= 1 << (b % 8)
+	}
+	for b := 0; b < exGwPoolBits; b++ {
+		byteIdx := len(poolStart) - 1 - b/8
+		poolStart[byteIdx] &^= 1 << (b % 8)
+	}
+	if !ipNet.Contains(poolStart) {
+		return exGwIPAM{}, fmt.Errorf("EG IP range start %s is outside subnet %s", poolStart, subnet)
+	}
+
+	gw := decIP(poolStart)
+	if !ipNet.Contains(gw) {
+		return exGwIPAM{}, fmt.Errorf("EG host gateway %s is outside subnet %s", gw, subnet)
+	}
+	return exGwIPAM{
+		Gateway:      gw.String(),
+		IPRange:      fmt.Sprintf("%s/%d", poolStart.String(), rangePrefix),
+		SubnetPrefix: ones,
+	}, nil
+}
+
+// reservedExGwIPRange is kept for tests that only assert the container pool.
+func reservedExGwIPRange(subnet string) (string, error) {
+	ipam, err := reservedExGwIPAM(subnet)
+	if err != nil {
+		return "", err
+	}
+	return ipam.IPRange, nil
+}
+
+func decIP(ip net.IP) net.IP {
+	out := make(net.IP, len(ip))
+	copy(out, ip)
+	for i := len(out) - 1; i >= 0; i-- {
+		out[i]--
+		if out[i] != 0xff {
+			break
+		}
+	}
+	return out
+}
+
+// ensureExGwHostMacvlan creates/up the host sibling macvlan used as xgw gateway.
+func ensureExGwHostMacvlan(runner api.Runner, parent, v4GW string, v4Prefix int, v6GW string, v6Prefix int) error {
+	if _, err := runner.Run("ip", "link", "show", "dev", bmExGwHostLinkName); err != nil {
+		stdOut, err := runner.Run("ip", "link", "add", bmExGwHostLinkName, "link", parent, "type", "macvlan", "mode", "bridge")
+		if err != nil {
+			return fmt.Errorf("failed to create host macvlan %s on parent %s: %w (%s)", bmExGwHostLinkName, parent, err, stdOut)
+		}
+	}
+	if v4GW != "" {
+		if err := ensureAddrOnDevice(runner, bmExGwHostLinkName, fmt.Sprintf("%s/%d", v4GW, v4Prefix)); err != nil {
+			return err
+		}
+	}
+	if v6GW != "" {
+		if err := ensureAddrOnDevice(runner, bmExGwHostLinkName, fmt.Sprintf("%s/%d", v6GW, v6Prefix)); err != nil {
+			return err
+		}
+	}
+	if stdOut, err := runner.Run("ip", "link", "set", "dev", bmExGwHostLinkName, "up"); err != nil {
+		return fmt.Errorf("failed to bring up %s: %w (%s)", bmExGwHostLinkName, err, stdOut)
+	}
+	return nil
+}
+
+func ensureAddrOnDevice(runner api.Runner, dev, cidr string) error {
+	out, err := runner.Run("ip", "-j", "addr", "show", "dev", dev)
+	if err == nil && strings.Contains(out, strings.Split(cidr, "/")[0]) {
+		return nil
+	}
+	args := []string{"addr", "add", cidr, "dev", dev}
+	if strings.Contains(cidr, ":") {
+		args = append(args, "nodad")
+	}
+	stdOut, err := runner.Run("ip", args...)
+	if err != nil && !strings.Contains(stdOut, "File exists") {
+		return fmt.Errorf("failed to add %s on %s: %w (%s)", cidr, dev, err, stdOut)
+	}
+	return nil
+}
+
+// ensureExGwInternetNAT enables forwarding and MASQUERADE so xgw containers
+// can reach the public internet via the hypervisor (for apk on official FRR).
+// Metal CI squid only allows cluster domains, so EG containers must use direct
+// egress through this NAT path rather than HTTP_PROXY.
+func ensureExGwInternetNAT(runner api.Runner, parentIface, v4Range, v6Range string) error {
+	if _, err := runner.Run("sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+		return fmt.Errorf("failed to enable IPv4 forwarding: %w", err)
+	}
+	if v6Range != "" {
+		if _, err := runner.Run("sysctl", "-w", "net.ipv6.conf.all.forwarding=1"); err != nil {
+			return fmt.Errorf("failed to enable IPv6 forwarding: %w", err)
+		}
+	}
+	if err := ensureExGwFirewalldNAT(runner, parentIface); err != nil {
+		return err
+	}
+	if v4Range != "" {
+		if err := ensureIptablesMasquerade(runner, "iptables", v4Range); err != nil {
+			return err
+		}
+		if err := ensureIptablesForward(runner, "iptables", v4Range); err != nil {
+			return err
+		}
+	}
+	if v6Range != "" {
+		if err := ensureIptablesMasquerade(runner, "ip6tables", v6Range); err != nil {
+			return err
+		}
+		if err := ensureIptablesForward(runner, "ip6tables", v6Range); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureExGwFirewalldNAT trusts the host sibling and enables zone masquerade so
+// firewalld (nft) does not drop forwarded xgw traffic on metal hypervisors.
+func ensureExGwFirewalldNAT(runner api.Runner, parentIface string) error {
+	if _, err := runner.Run("firewall-cmd", "--state"); err != nil {
+		return nil
+	}
+	if _, err := runner.Run("firewall-cmd", "--permanent", "--zone=trusted", "--add-interface="+bmExGwHostLinkName); err != nil {
+		return fmt.Errorf("failed to add %s to trusted zone: %w", bmExGwHostLinkName, err)
+	}
+	zones := map[string]struct{}{}
+	for _, iface := range []string{parentIface} {
+		if iface == "" {
+			continue
+		}
+		zone, err := runner.Run("firewall-cmd", "--get-zone-of-interface="+iface)
+		if err != nil {
+			continue
+		}
+		zones[strings.TrimSpace(zone)] = struct{}{}
+	}
+	if uplink, err := findDefaultRouteDev(runner, false); err == nil && uplink != "" {
+		if zone, err := runner.Run("firewall-cmd", "--get-zone-of-interface="+uplink); err == nil {
+			zones[strings.TrimSpace(zone)] = struct{}{}
+		}
+	}
+	for zone := range zones {
+		if zone == "" || zone == "trusted" {
+			continue
+		}
+		if _, err := runner.Run("firewall-cmd", "--permanent", "--zone="+zone, "--add-masquerade"); err != nil {
+			return fmt.Errorf("failed to enable masquerade on zone %s: %w", zone, err)
+		}
+	}
+	if _, err := runner.Run("firewall-cmd", "--reload"); err != nil {
+		return fmt.Errorf("failed to reload firewalld after EG NAT config: %w", err)
+	}
+	return nil
+}
+
+func ensureIptablesMasquerade(runner api.Runner, bin, cidr string) error {
+	check := []string{"-t", "nat", "-C", "POSTROUTING", "-s", cidr, "-j", "MASQUERADE"}
+	if _, err := runner.Run(bin, check...); err == nil {
+		return nil
+	}
+	stdOut, err := runner.Run(bin, "-t", "nat", "-A", "POSTROUTING", "-s", cidr, "-j", "MASQUERADE")
+	if err != nil {
+		return fmt.Errorf("%s MASQUERADE for %s failed: %w (%s)", bin, cidr, err, stdOut)
+	}
+	return nil
+}
+
+func ensureIptablesForward(runner api.Runner, bin, cidr string) error {
+	for _, args := range [][]string{
+		{"-C", "FORWARD", "-s", cidr, "-j", "ACCEPT"},
+		{"-C", "FORWARD", "-d", cidr, "-j", "ACCEPT"},
+	} {
+		if _, err := runner.Run(bin, args...); err == nil {
+			continue
+		}
+		add := append([]string{"-I", "FORWARD", "1"}, args[2:]...)
+		stdOut, err := runner.Run(bin, add...)
+		if err != nil {
+			return fmt.Errorf("%s FORWARD for %s failed: %w (%s)", bin, cidr, err, stdOut)
+		}
+	}
 	return nil
 }
 

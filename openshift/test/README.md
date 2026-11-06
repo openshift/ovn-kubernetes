@@ -95,6 +95,24 @@ containers. On both baremetal (hypervisor with host networking) and cloud
 (bastion with `--network host`), all containers share the host IP, making
 CIDR-based firewall rules ineffective.
 
+## External Gateway Tests
+
+Baremetal only -- return-route setup requires L2 adjacency to worker nodes.
+
+```
++--------------------------------------------+--------+------+-------+------+
+| Test Scenario                              | BM[5]  | AWS  | Azure | GCP  |
++--------------------------------------------+--------+------+-------+------+
+| External Gateway (APB / non-vxlan)         | Y      | -    | -     | -    |
++--------------------------------------------+--------+------+-------+------+
+```
+
+**[5]** Non-vxlan External Gateway setup adds a return route on the gateway
+container (`ip route add <podIP> via <nodeInternalIP>`), which requires L2
+adjacency to the worker. Baremetal shares the machine network with nodes. On
+bastion-based clouds the node InternalIP is in another VPC subnet, so the
+kernel rejects the nexthop (`Nexthop has invalid gateway`).
+
 ## EVPN Tests
 
 ```
@@ -148,6 +166,15 @@ All external containers on cloud platforms share the bastion host's IP via
 EgressIP tests against host-networked pods require opening NodePort range
 (30000-32767) on cluster nodes via firewall rules. This is not yet configured
 on bastion-based cloud platforms.
+
+### Cloud Platforms: External Gateway Return Route
+
+External Gateway tests require installing a return route on the external
+gateway container via the worker's InternalIP. That assumes L2 adjacency
+(Kind/baremetal). Cloud bastion hosts are typically in a different VPC subnet
+than workers, so `via <nodeInternalIP>` fails with `Nexthop has invalid
+gateway`. These tests are filtered out on AWS/Azure/GCP via
+`shouldIncludeTest`.
 
 ### UDN Subnet Overlap with Bastion Network
 

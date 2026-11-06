@@ -19,7 +19,6 @@ var (
 			`[Feature:BaselineNetworkPolicy]`,
 			`[Feature:EgressService]`,
 			`[Feature:EgressQos]`,
-			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
 			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
@@ -130,6 +129,7 @@ var (
 		"[Serial]": {
 			"e2e egress IP validation",
 			"Status manager validation Should validate the egress firewall status when adding a new node zone",
+			"External Gateway",
 		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or

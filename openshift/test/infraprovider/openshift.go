@@ -123,6 +123,21 @@ func (o *OpenshiftInfraProvider) configureTestEnvs() {
 	if featureGateEnabled(o.clusterFeatureGate, apifeatures.FeatureGateDNSNameResolver) {
 		_ = os.Setenv("OVN_ENABLE_DNSNAMERESOLVER", "true")
 	}
+	o.configureExternalGatewayEnvs()
+}
+
+// configureExternalGatewayEnvs exports OVN_TEST_EX_GW_NETWORK for upstream
+// External Gateway e2es on baremetal. EG specs are filtered out on cloud
+// platforms (no L2 adjacency from bastion to worker InternalIPs), so host
+// networking env vars are never set. On baremetal, point tests at the
+// dedicated macvlan (xgw); do not set IPV4/IPV6 — the engine discovers
+// addresses from isolated containers.
+func (o *OpenshiftInfraProvider) configureExternalGatewayEnvs() {
+	bm, ok := o.clusterInfra.(*baremetalInfra)
+	if !ok || bm == nil {
+		return
+	}
+	_ = os.Setenv("OVN_TEST_EX_GW_NETWORK", bmExGwNetworkName)
 }
 
 // HasClusterInfra returns true when the provider was fully initialized with
