@@ -486,6 +486,21 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	}
 	c.setNetworkState(network.GetNetworkName(), &networkControllerState{controller: nc})
 
+	// Sync the network once more now that it is running. RouteAdvertisements
+	// and node changes reach networks through syncRunningNetworks, which
+	// skips a network until its Start returns, so such a change while the
+	// network was starting, such as its RouteAdvertisements becoming
+	// accepted, would otherwise never reach it. Queued from within the
+	// network's own sync on a worker, this runs once that sync finishes;
+	// from the initial sync, once the workers start. Only the
+	// RouteAdvertisements and node controllers run syncRunningNetworks, so
+	// there is nothing to catch up on without route advertisements. The
+	// default network's controller belongs to the controller manager, not
+	// to this controller, so it is not synced again here.
+	if networkName != types.DefaultNetworkName && c.hasRouteAdvertisements() {
+		c.networkReconciler.Reconcile(networkName)
+	}
+
 	return nil
 }
 
