@@ -81,6 +81,12 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, EIPSecondaryNetworkTestPrefix) && !ocpInfra.HasSecondaryHostEIPSupport() {
 		return false
 	}
+	// This Service spec also needs the pre-configured secondary network: it
+	// attaches one to every node, which is a no-op on platforms whose nodes are
+	// not container engine containers, leaving its EgressIP unassignable.
+	if strings.Contains(spec.Name, "should work on secondary node interfaces") && !ocpInfra.HasSecondaryHostEIPSupport() {
+		return false
+	}
 	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
 	// which is not yet configured on bastion-based platforms.
 	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsCloudPlatform() {

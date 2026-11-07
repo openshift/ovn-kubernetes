@@ -127,7 +127,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		jig := e2eservice.NewTestJig(cs, namespace, serviceName)
 
 		ginkgo.By("Creating a ClusterIP service")
-		targetPort := infraprovider.Get().GetK8HostPort()
+		targetPort := infraprovider.Get().GetK8HostPort(f)
 		service, err := jig.CreateUDPService(context.TODO(), func(s *v1.Service) {
 			s.Spec.Ports = []v1.ServicePort{
 				{
@@ -142,7 +142,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 
 		ginkgo.By("creating a host-network backend pod")
 
-		httpPort := infraprovider.Get().GetK8HostPort()
+		httpPort := infraprovider.Get().GetK8HostPort(f)
 		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: (int32(targetPort))}, {ContainerPort: (int32(targetPort)), Protocol: "UDP"}},
 			"netexec", fmt.Sprintf("--http-port=%d", httpPort), fmt.Sprintf("--udp-port=%d", targetPort))
 		serverPod.Labels = jig.Labels
@@ -171,7 +171,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		var createdPods []*v1.Pod
 		maxContainerFailures := 0
 		replicas := 3
-		targetPort := infraprovider.Get().GetK8HostPort()
+		targetPort := infraprovider.Get().GetK8HostPort(f)
 		config := testutils.RCConfig{
 			Client:               cs,
 			Image:                images.AgnHost(),
@@ -304,8 +304,8 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 						var serverPodPortTCP, serverPodPortUDP uint16
 						gomega.Eventually(func() error {
 							// May be a host net or cluster net pod but select host port anyway.
-							serverPodPortTCP = infraprovider.Get().GetK8HostPort()
-							serverPodPortUDP = infraprovider.Get().GetK8HostPort()
+							serverPodPortTCP = infraprovider.Get().GetK8HostPort(f)
+							serverPodPortUDP = infraprovider.Get().GetK8HostPort(f)
 							serverPodName = fmt.Sprintf(echoServerPodNameTemplate, serverPodPortTCP)
 							framework.Logf("Creating server pod listening on TCP port %d and UDP port %d",
 								serverPodPortTCP, serverPodPortUDP)
@@ -639,7 +639,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		ginkgo.By("Using node" + nodeName + " and pod " + clientPod.Name)
 
 		ginkgo.By("Creating an empty ClusterIP service")
-		udpHostNsPort := infraprovider.Get().GetK8HostPort()
+		udpHostNsPort := infraprovider.Get().GetK8HostPort(f)
 		service, err := jig.CreateUDPService(context.TODO(), func(s *v1.Service) {
 			s.Spec.Ports = []v1.ServicePort{
 				{
@@ -683,7 +683,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		ginkgo.By("Starting a UDP server listening on the additional IP")
 		// now that 2.2.2.2 exists on the node's lo interface, let's start a server listening on it
 		// we use UDP here since agnhost lets us pick the listen address only for UDP
-		httpPort := infraprovider.Get().GetK8HostPort()
+		httpPort := infraprovider.Get().GetK8HostPort(f)
 		serverPod := e2epod.NewAgnhostPod(namespace, "backend", nil, nil, []v1.ContainerPort{{ContainerPort: int32(udpHostNsPort)}, {ContainerPort: int32(udpHostNsPort), Protocol: "UDP"}},
 			"netexec", fmt.Sprintf("--http-port=%d", httpPort), "--udp-port="+fmt.Sprintf("%d", udpHostNsPort), "--udp-listen-addresses="+extraIP)
 		serverPod.Labels = jig.Labels
@@ -1229,19 +1229,12 @@ spec:
         matchLabels:
             kubernetes.io/metadata.name: ` + f.Namespace.Name + `
 `
-			if err := os.WriteFile("egressip.yaml", []byte(egressIPConfig), 0644); err != nil {
-				framework.Failf("Unable to write CRD config to disk: %v", err)
-			}
-			ginkgo.DeferCleanup(func() error {
-				e2ekubectl.RunKubectlOrDie("default", "delete", "-f", "egressip.yaml", "--ignore-not-found=true")
-				if err := os.Remove("egressip.yaml"); err != nil {
-					return fmt.Errorf("unable to remove the CRD config from disk: %v", err)
-				}
-				return nil
+			ginkgo.DeferCleanup(func() {
+				e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "delete", "-f", "-", "--ignore-not-found=true")
 			})
 
 			framework.Logf("Create the EgressIP configuration")
-			e2ekubectl.RunKubectlOrDie("default", "create", "-f", "egressip.yaml")
+			e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "create", "-f", "-")
 
 			ginkgo.By("Check that the status is of length one and that it is assigned to " + egressNode)
 			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
@@ -2093,8 +2086,8 @@ spec:
 			portName = "http"
 			svcPort  = int32(80)
 		)
-		port1 := int32(infraprovider.Get().GetK8HostPort())
-		port2 := int32(infraprovider.Get().GetK8HostPort())
+		port1 := int32(infraprovider.Get().GetK8HostPort(f))
+		port2 := int32(infraprovider.Get().GetK8HostPort(f))
 		gomega.Expect(port1).ToNot(gomega.Equal(port2),
 			"allocated host ports must differ")
 
@@ -2265,8 +2258,8 @@ spec:
 			portName = "http"
 			svcPort  = int32(80)
 		)
-		port1 := int32(infraprovider.Get().GetK8HostPort())
-		port2 := int32(infraprovider.Get().GetK8HostPort())
+		port1 := int32(infraprovider.Get().GetK8HostPort(f))
+		port2 := int32(infraprovider.Get().GetK8HostPort(f))
 		gomega.Expect(port1).ToNot(gomega.Equal(port2),
 			"allocated host ports must differ")
 
@@ -2578,7 +2571,7 @@ var _ = ginkgo.Describe("Service Hairpin SNAT", feature.Service, func() {
 
 		ginkgo.By("creating an host-network backend pod on " + backendNodeName)
 		// create hostNeworkedPods
-		hostNetPort := infraprovider.Get().GetK8HostPort()
+		hostNetPort := infraprovider.Get().GetK8HostPort(f)
 		_, err := createPod(f, backendName, backendNodeName, namespaceName, []string{}, hairpinPodSel, func(p *v1.Pod) {
 			p.Spec.Containers[0].Command = getAgnHostHTTPPortBindFullCMD(hostNetPort)
 			p.Spec.HostNetwork = true
@@ -3381,19 +3374,12 @@ spec:
         matchLabels:
             kubernetes.io/metadata.name: ` + namespaceName + `
 `
-		if err := os.WriteFile("egressip.yaml", []byte(egressIPConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		ginkgo.DeferCleanup(func() error {
-			e2ekubectl.RunKubectlOrDie("default", "delete", "-f", "egressip.yaml", "--ignore-not-found=true")
-			if err := os.Remove("egressip.yaml"); err != nil {
-				return fmt.Errorf("unable to remove the CRD config from disk: %v", err)
-			}
-			return nil
+		ginkgo.DeferCleanup(func() {
+			e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "delete", "-f", "-", "--ignore-not-found=true")
 		})
 
 		framework.Logf("Create the EgressIP configuration")
-		e2ekubectl.RunKubectlOrDie("default", "create", "-f", "egressip.yaml")
+		e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "create", "-f", "-")
 
 		ginkgo.By("4. Check that the status is of length one and that it is assigned to " + nonBackendNodeName)
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
