@@ -12,7 +12,11 @@ import (
 )
 
 func main() {
-	deploymentconfig.Set(ocpdeploymentconfig.New(nil))
+	ocpDeploymentConfig, err := ocpdeploymentconfig.New(nil)
+	if err != nil {
+		panic(err)
+	}
+	deploymentconfig.Set(ocpDeploymentConfig)
 	infraprovider.Set(&ocpinfraprovider.OpenshiftInfraProvider{})
 	annotate.Run(annotate.LabelToTestNameMatchMaps, annotate.LabelToLabelMaps, func(name string) bool { return false })
 }
