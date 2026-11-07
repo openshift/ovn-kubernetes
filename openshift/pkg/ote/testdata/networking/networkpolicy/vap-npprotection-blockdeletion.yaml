@@ -1,0 +1,27 @@
+kind: ValidatingAdmissionPolicy
+apiVersion: admissionregistration.k8s.io/v1
+metadata:
+  name: fine-grained-network-policy-protection
+spec:
+  matchConstraints:
+    resourceRules:
+      - operations:
+          - DELETE
+        apiGroups:
+          - networking.k8s.io
+        apiVersions:
+          - v1
+        resources:
+          - networkpolicies
+  validations:
+    - expression: '!(has(oldObject.metadata.labels) && oldObject.metadata.labels[''npprotection/blockdeletion''] == "true")'
+      message: "Cannot delete NetworkPolicy with 'npprotection/blockdeletion: true' label. This policy is not allowed for deletion."
+---
+kind: ValidatingAdmissionPolicyBinding
+apiVersion: admissionregistration.k8s.io/v1
+metadata:
+  name: fine-grained-network-policy-protection-binding
+spec:
+  policyName: fine-grained-network-policy-protection
+  validationActions:
+    - Deny
