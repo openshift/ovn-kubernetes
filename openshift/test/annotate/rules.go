@@ -110,6 +110,8 @@ var (
 			// Multiple host-networked external containers with different IP addresses
 			// are needed for these tests. Currently, this is not supported.
 			"e2e egress firewall policy validation with external containers",
+			// network-segmentation mac-security tests over localnet topology
+			".*MAC security.*localnet.*",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
