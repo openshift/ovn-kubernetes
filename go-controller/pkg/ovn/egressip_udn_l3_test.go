@@ -140,6 +140,8 @@ var _ = ginkgo.Describe("EgressIP Operations for user defined network with topol
 
 			l3Controller, ok := fakeOvn.fullL3UDNControllers[netInfoBefore.netName]
 			gomega.Expect(ok).To(gomega.BeTrue())
+			gomega.Expect(fakeOvn.registerUDNNodeHandler(netInfoBefore.netName)).To(gomega.Succeed())
+			defer l3Controller.DeregisterNodeHandler()
 			l3Controller.lastNADKeys = sets.New[string](ns + "/" + nadName)
 
 			netInfoAfter := dummyPrimaryLayer3UserDefinedNetwork("192.168.0.0/16,192.169.0.0/16", "192.168.1.0/24")
