@@ -15,6 +15,9 @@ var labelToPrependLabelsMap = map[string][]string{
 	"Feature:EVPN": {
 		"FeatureGate:EVPN",
 	},
+	featureLabelMACSecurity: {
+		"FeatureGate:MACSecurity",
+	},
 }
 
 // getTestExtensionLabels returns labels that should be applied to all tests in this extension
