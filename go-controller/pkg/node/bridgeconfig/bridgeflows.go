@@ -1340,6 +1340,28 @@ func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN string)
 
 	var flows []string
 
+	if config.Gateway.DisableUDNARPNDPFlood {
+		// Priority-45: external broadcast ARP (including GARPs) arriving on the
+		// physical port → explicitly forward to all default GR and NORMAL
+		defaultPatchActions := "output:" + defaultNetConfig.OfPortPatch + ","
+		if ofPortPhys != "" {
+			if config.IPv4Mode {
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s, priority=45, table=0, in_port=%s, %s arp, "+
+						"actions=%sNORMAL",
+						nodetypes.DefaultOpenFlowCookie, ofPortPhys, matchVLAN, defaultPatchActions))
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s, priority=45, table=0, in_port=LOCAL, %s arp, "+
+						"actions=%sNORMAL",
+						nodetypes.DefaultOpenFlowCookie, matchVLAN, defaultPatchActions))
+				flows = append(flows,
+					fmt.Sprintf("cookie=%s, priority=45, table=0, in_port=%s, %s arp, "+
+						"actions=NORMAL",
+						nodetypes.DefaultOpenFlowCookie, defaultNetConfig.OfPortPatch, matchVLAN))
+			}
+		}
+	}
+
 	// Priority-12: ARP/NS for node IP → only default patch + NORMAL.
 	// NORMAL learns the external source MAC in the FDB and delivers to
 	// LOCAL (static FDB entry). No-flood on UDN ports prevents them from
@@ -1407,6 +1429,9 @@ func (b *BridgeConfiguration) arpFanoutFilterFlows(ofPortPhys, matchVLAN string)
 // from UDN fan-out exhausting the resubmit budget.
 // Must be called with bridge.mutex held.
 func (b *BridgeConfiguration) primaryUDNPatchOutputActions() []string {
+	if config.Gateway.DisableUDNARPNDPFlood {
+		return nil
+	}
 	defaultNetConfig := b.netConfig[types.DefaultNetworkName]
 	var actions []string
 	for _, netConfig := range b.patchedNetConfigs() {
