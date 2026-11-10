@@ -822,7 +822,7 @@ func TestNetworkControllerSyncRunningNetworksQueuesKnownNetworks(t *testing.T) {
 	var reconciled []string
 	fakeReconciler := controller.NewReconciler("test-network-reconciler", &controller.ReconcilerConfig{
 		RateLimiter: workqueue.DefaultTypedControllerRateLimiter[string](),
-		Reconcile: func(_ context.Context, key string) error {
+		Reconcile: func(key string) error {
 			mu.Lock()
 			defer mu.Unlock()
 			reconciled = append(reconciled, key)
@@ -834,7 +834,7 @@ func TestNetworkControllerSyncRunningNetworksQueuesKnownNetworks(t *testing.T) {
 	g.Expect(controller.Start(fakeReconciler)).To(gomega.Succeed())
 	t.Cleanup(func() { controller.Stop(fakeReconciler) })
 
-	nm := newNetworkController("", "", &testControllerManager{controllers: map[string]NetworkController{}}, nil, false)
+	nm := newNetworkController("", "", &testControllerManager{controllers: map[string]NetworkController{}}, nil)
 	nm.networkReconciler = fakeReconciler
 	// Place the network directly in c.networks without going through
 	// EnsureNetwork/Start, so no networkControllerState exists for it yet.
