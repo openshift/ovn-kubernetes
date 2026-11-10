@@ -19,7 +19,11 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+<<<<<<< HEAD
 func TestSetupEgressIPARPBlockNFT(t *testing.T) {
+=======
+func TestSetupEgressIPARPBlockNFTables(t *testing.T) {
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 	const testUplinkName = "eth0"
 
 	tests := []struct {
@@ -143,7 +147,11 @@ func TestSetupEgressIPARPBlockNFT(t *testing.T) {
 
 			nft := nodenft.SetFakeEgressIPNFTablesHelper()
 
+<<<<<<< HEAD
 			err := SetupEgressIPARPBlockNFT(tt.egressIPs, tt.uplinkName)
+=======
+			err := SetupEgressIPARPBlockNFTables(tt.egressIPs, tt.uplinkName)
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 
 			if tt.expectError != "" {
 				g.Expect(err).To(HaveOccurred())
@@ -186,7 +194,11 @@ func TestSetupEgressIPARPBlockNFT(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestCleanupEgressIPARPBlockNFT(t *testing.T) {
+=======
+func TestCleanupEgressIPARPBlockNFTTable(t *testing.T) {
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 	const testUplinkName = "eth0"
 
 	tests := []struct {
@@ -244,8 +256,13 @@ func TestCleanupEgressIPARPBlockNFT(t *testing.T) {
 			nft := nodenft.SetFakeEgressIPNFTablesHelper()
 
 			if tt.setupTable {
+<<<<<<< HEAD
 				// Create the table first by calling SetupEgressIPARPBlockNFT
 				err := SetupEgressIPARPBlockNFT(tt.egressIPs, tt.uplinkName)
+=======
+				// Create the table first by calling SetupEgressIPARPBlockNFTables
+				err := SetupEgressIPARPBlockNFTables(tt.egressIPs, tt.uplinkName)
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 				g.Expect(err).NotTo(HaveOccurred())
 				rules, err := nft.ListRules(context.TODO(), nftEgressIPDropChain)
 				g.Expect(err).NotTo(HaveOccurred())
@@ -253,7 +270,11 @@ func TestCleanupEgressIPARPBlockNFT(t *testing.T) {
 			}
 
 			// Call the cleanup function
+<<<<<<< HEAD
 			err := CleanupEgressIPARPBlockNFT(context.TODO())
+=======
+			err := CleanupEgressIPARPBlockNFTTable(context.TODO())
+>>>>>>> 693a5f612 (Prevent duplicate MAC responses during egress IP failover with nftables)
 
 			if tt.expectError != "" {
 				g.Expect(err).To(HaveOccurred())
