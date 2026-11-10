@@ -245,10 +245,14 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(ctx contex
 
 					// If the node exists but we are reassigning to another node with capacity:
 					if op.toAdd != "" && op.toAdd != cloudPrivateIPConfig.Spec.Node {
+						if cloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel] != egressIPName {
+							return fmt.Errorf("CloudPrivateIPConfig %s is not owned by EgressIP %s", cloudPrivateIPConfigName, egressIPName)
+						}
 						klog.Warningf("CloudPrivateIPConfig: %s is in Failed state on node %s (message: %s), updating node to %s",
 							cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node, assignedCondition.Message, op.toAdd)
-						cloudPrivateIPConfig.Spec.Node = op.toAdd
-						if _, err := eIPC.kube.UpdateCloudPrivateIPConfig(ctx, cloudPrivateIPConfig); err != nil {
+						cpicToUpdate := cloudPrivateIPConfig.DeepCopy()
+						cpicToUpdate.Spec.Node = op.toAdd
+						if _, err := eIPC.kube.UpdateCloudPrivateIPConfig(ctx, cpicToUpdate); err != nil {
 							return fmt.Errorf("failed to update failed CloudPrivateIPConfig %s to node %s: %w", cloudPrivateIPConfigName, op.toAdd, err)
 						}
 						continue
