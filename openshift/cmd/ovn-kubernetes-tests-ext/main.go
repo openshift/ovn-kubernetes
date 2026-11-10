@@ -47,6 +47,7 @@ var ocpInfra *ocpinfraprovider.OpenshiftInfraProvider
 const (
 	// Feature labels used for test categorization and filtering
 	featureLabelEVPN                  = "Feature:EVPN"
+	featureLabelEgressService         = "Feature:EgressService"
 	featureLabelNetworkSegmentation   = "Feature:NetworkSegmentation"
 	featureLabelVirtualMachineSupport = "Feature:VirtualMachineSupport"
 	featureLabelEgressIP              = "Feature:EgressIP"
@@ -75,6 +76,11 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// EVPN tests: only include if EVPN is enabled in the cluster
 	evpnEnabled := ocpInfra.CheckForEVPN()
 	if !evpnEnabled && spec.Labels.Has(featureLabelEVPN) {
+		return false
+	}
+
+	// EgressService tests: only include if the cluster can create external containers
+	if _, err := ocpInfra.PrimaryNetwork(); err != nil && spec.Labels.Has(featureLabelEgressService) {
 		return false
 	}
 
