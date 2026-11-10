@@ -18,10 +18,12 @@ import (
 	udnclientset "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/userdefinednetwork/v1/apis/clientset/versioned"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/kubevirt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -179,11 +181,9 @@ var _ = ginkgo.Describe("Kubevirt Virtual Machines: advertised flows survive CUD
 		ginkgo.By(fmt.Sprintf("booting %d VMs together, without waiting for the CUDN or RA to settle first", numVMs))
 		vms := make([]*kubevirtv1.VirtualMachine, numVMs)
 		for i := 0; i < numVMs; i++ {
-			vm := composeFedoraWithTestToolingVM(
+			vm := composeRouteAdvertisementsRaceVM(
 				f.Namespace.Name,
 				map[string]string{"app": "churn"},
-				nil,
-				nil,
 				kubevirtv1.NetworkSource{Pod: &kubevirtv1.PodNetwork{}},
 				"#cloud-config\npassword: fedora\nchpasswd: { expire: False }\n",
 				"version: 2\nethernets:\n  eth0:\n    dhcp4: true\n    dhcp6: true\n",
@@ -205,7 +205,7 @@ var _ = ginkgo.Describe("Kubevirt Virtual Machines: advertised flows survive CUD
 				},
 			}
 			vms[i] = vm
-			createVirtualMachineWithClient(crClient, vm)
+			createRouteAdvertisementsRaceVM(crClient, vm)
 			ginkgo.DeferCleanup(func(cleanupCtx context.Context) error {
 				err := crClient.Delete(cleanupCtx, vm)
 				if err == nil || apierrors.IsNotFound(err) {
@@ -304,3 +304,86 @@ var _ = ginkgo.Describe("Kubevirt Virtual Machines: advertised flows survive CUD
 // idempotent, so running it twice is safe.
 
 func int64Ptr(v int64) *int64 { return &v }
+
+// These helpers mirror the KubeVirt suite's VM construction on release-5.0.
+// They are local to this regression test because that branch does not expose
+// the suite's equivalent helpers at package scope.
+func composeRouteAdvertisementsRaceVM(namespace string, labels map[string]string,
+	networkSource kubevirtv1.NetworkSource, userData, networkData string) *kubevirtv1.VirtualMachine {
+	runStrategy := kubevirtv1.RunStrategyAlways
+	return &kubevirtv1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:    namespace,
+			GenerateName: "worker-",
+		},
+		Spec: kubevirtv1.VirtualMachineSpec{
+			RunStrategy: &runStrategy,
+			Template: &kubevirtv1.VirtualMachineInstanceTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				Spec: kubevirtv1.VirtualMachineInstanceSpec{
+					Domain: kubevirtv1.DomainSpec{
+						Resources: kubevirtv1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("1024Mi"),
+							},
+						},
+						Devices: kubevirtv1.Devices{
+							Disks: []kubevirtv1.Disk{
+								{
+									DiskDevice: kubevirtv1.DiskDevice{Disk: &kubevirtv1.DiskTarget{Bus: kubevirtv1.DiskBusVirtio}},
+									Name:       "containerdisk",
+								},
+								{
+									DiskDevice: kubevirtv1.DiskDevice{Disk: &kubevirtv1.DiskTarget{Bus: kubevirtv1.DiskBusVirtio}},
+									Name:       "cloudinitdisk",
+								},
+							},
+							Interfaces: []kubevirtv1.Interface{{
+								Name: "net1",
+								InterfaceBindingMethod: kubevirtv1.InterfaceBindingMethod{
+									Bridge: &kubevirtv1.InterfaceBridge{},
+								},
+							}},
+							Rng: &kubevirtv1.Rng{},
+						},
+					},
+					Networks: []kubevirtv1.Network{{
+						Name:          "net1",
+						NetworkSource: networkSource,
+					}},
+					TerminationGracePeriodSeconds: int64Ptr(5),
+					Volumes: []kubevirtv1.Volume{
+						{
+							Name: "containerdisk",
+							VolumeSource: kubevirtv1.VolumeSource{
+								ContainerDisk: &kubevirtv1.ContainerDiskSource{Image: kubevirt.FedoraWithTestToolingContainerDiskImage},
+							},
+						},
+						{
+							Name: "cloudinitdisk",
+							VolumeSource: kubevirtv1.VolumeSource{
+								CloudInitNoCloud: &kubevirtv1.CloudInitNoCloudSource{
+									UserData:    userData,
+									NetworkData: networkData,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func createRouteAdvertisementsRaceVM(client crclient.Client, vm *kubevirtv1.VirtualMachine) {
+	ginkgo.GinkgoHelper()
+	ginkgo.By(fmt.Sprintf("creating virtual machine %s", vm.Name))
+	creationAttempts := 0
+	gomega.Eventually(func() error {
+		if creationAttempts > 0 {
+			ginkgo.By(fmt.Sprintf("retrying virtual machine %s creation", vm.Name))
+		}
+		creationAttempts++
+		return client.Create(context.Background(), vm)
+	}).WithPolling(time.Second).WithTimeout(time.Minute).Should(gomega.Succeed())
+}
