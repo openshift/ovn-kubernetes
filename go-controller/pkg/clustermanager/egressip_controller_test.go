@@ -4588,11 +4588,11 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				)
 
 				_, err := fakeClusterManagerOVN.eIPC.WatchEgressNodes()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to start WatchEgressNodes")
 				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to start WatchEgressIP")
 				_, err = fakeClusterManagerOVN.eIPC.WatchCloudPrivateIPConfig()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to start WatchCloudPrivateIPConfig")
 
 				// 1. Verify CPIC spec is updated to node1
 				gomega.Eventually(func() string {
@@ -4607,7 +4607,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				// 2. Emulate CNCC setting Assigned=True on node1
 				cpic, err := fakeClusterManagerOVN.fakeClient.CloudNetworkClient.CloudV1().
 					CloudPrivateIPConfigs().Get(context.TODO(), cpicName, metav1.GetOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to get CloudPrivateIPConfig %s", cpicName)
 				cpic.Status.Node = node1Name
 				cpic.Status.Conditions = []metav1.Condition{
 					{
@@ -4617,7 +4617,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				}
 				_, err = fakeClusterManagerOVN.fakeClient.CloudNetworkClient.CloudV1().
 					CloudPrivateIPConfigs().UpdateStatus(context.TODO(), cpic, metav1.UpdateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to update status on CloudPrivateIPConfig %s", cpicName)
 
 				// 3. Verify EgressIP status is populated with node1 assignment
 				gomega.Eventually(func() []egressipv1.EgressIPStatusItem {
@@ -4729,11 +4729,11 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				)
 
 				_, err := fakeClusterManagerOVN.eIPC.WatchEgressNodes()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to start WatchEgressNodes")
 				_, err = fakeClusterManagerOVN.eIPC.WatchEgressIP()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to start WatchEgressIP")
 				_, err = fakeClusterManagerOVN.eIPC.WatchCloudPrivateIPConfig()
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to start WatchCloudPrivateIPConfig")
 
 				// Step 5: Validate that exactly 5 CloudPrivateIPConfigs are created for node1.
 				gomega.Eventually(func() int {
@@ -4776,7 +4776,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				node2Updated.Labels["k8s.ovn.org/egress-assignable"] = ""
 				_, err = fakeClusterManagerOVN.fakeClient.KubeClient.CoreV1().Nodes().
 					Update(context.TODO(), node2Updated, metav1.UpdateOptions{})
-				gomega.Expect(err).NotTo(gomega.HaveOccurred())
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to update node2 with egress-assignable label")
 
 				// Step 8: Validate that the last 2 overflow EgressIPs are assigned to node2.
 				gomega.Eventually(func() int {
@@ -4795,7 +4795,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 				for _, cpicName := range cpicNames {
 					cpic, err := fakeClusterManagerOVN.fakeClient.CloudNetworkClient.CloudV1().
 						CloudPrivateIPConfigs().Get(context.TODO(), cpicName, metav1.GetOptions{})
-					gomega.Expect(err).NotTo(gomega.HaveOccurred())
+					gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to get CloudPrivateIPConfig %s", cpicName)
 					gomega.Expect(cpic.Spec.Node).To(gomega.BeElementOf([]string{node1Name, node2Name}))
 				}
 
