@@ -59,6 +59,14 @@ Before setting up KinD and before running the actual tests, export essential env
 
 The environment variables and their values depend on the actual test scenario that you want to run.
 
+Export `OVN_ENABLE_PERSISTENT_IPS=true` before deploying KinD and running tests
+to enable persistent IPs and include tests labeled `Feature:PersistentIPs`.
+Use `false` to disable the feature and exclude those tests. KinD defaults to
+enabling the feature, but the control-plane test runner excludes these tests
+unless the variable is explicitly set to `true`. When invoking the E2E binary
+directly against a cluster without persistent IPs, pass
+`-ginkgo.label-filter='!Feature:PersistentIPs'`.
+
 Look at the `e2e` action (search for `name: e2e`) in [ovn-kubernetes/.github/workflows/test.yml](https://github.com/ovn-kubernetes/ovn-kubernetes/blob/master/.github/workflows/test.yml). Prior to installing KinD, set the following environment variables according to your needs:
 ```
 export KIND_CLUSTER_NAME=ovn
@@ -218,9 +226,8 @@ kube-apiserver + etcd started by [envtest](https://pkg.go.dev/sigs.k8s.io/contro
 They verify CRD admission behaviour — defaulting, validation, and CEL rules —
 without requiring a full KinD cluster.
 
-The tests are the intended future home for scenarios currently living in
-`test/e2e/testscenario/` that do not need live pod networking. This migration
-is tracked in
+Some scenarios that do not need live pod networking have been migrated to
+`test/crd-integration/testscenario/`. The remaining scenarios are tracked in
 [ovn-kubernetes#6932](https://github.com/ovn-kubernetes/ovn-kubernetes/issues/6932).
 
 ### Prerequisites
