@@ -583,7 +583,7 @@ var _ = Describe("OVN Multi-Homed pod operations for layer 2 network", func() {
 
 				l2Controller, ok := fakeOvn.fullL2UDNControllers[userDefinedNetworkName]
 				Expect(ok).To(BeTrue())
-				Expect(l2Controller.init(context.Background())).To(Succeed())
+				Expect(l2Controller.init()).To(Succeed())
 				udnNetController, ok := fakeOvn.userDefinedNetworkControllers[userDefinedNetworkName]
 				Expect(ok).To(BeTrue())
 				udnNetController.bnc.ovnClusterLRPToJoinIfAddrs = dummyJoinIPs()

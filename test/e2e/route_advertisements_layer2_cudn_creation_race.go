@@ -158,7 +158,7 @@ var _ = ginkgo.Describe("BGP: advertised Layer2 CUDN creation race", feature.Rou
 		})
 
 		ginkgo.By("waiting for the CUDN and RouteAdvertisements API conditions")
-		gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cUDN.Name), 2*time.Minute, time.Second).
+		gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cUDN.Name), 2*time.Minute, time.Second).
 			Should(gomega.Succeed(), "CUDN %s did not become ready", cUDN.Name)
 		gomega.Eventually(func() error {
 			current, err := raClient.K8sV1().RouteAdvertisements().Get(ctx, raName, metav1.GetOptions{})
@@ -227,7 +227,7 @@ var _ = ginkgo.Describe("BGP: advertised Layer2 CUDN creation race", feature.Rou
 		}
 
 		networkName := ovntypes.CUDNPrefix + cUDN.Name
-		switchName := ovnutil.GetNetworkScopedNameForNetwork(networkName, ovntypes.OVNLayer2Switch)
+		switchName := ovnutil.GetUserDefinedNetworkPrefix(networkName) + ovntypes.OVNLayer2Switch
 		stotrPortName := ovntypes.SwitchToTransitRouterPrefix + switchName
 		gomega.Eventually(func() []string {
 			var diagnostics []string
@@ -334,7 +334,7 @@ var _ = ginkgo.Describe("BGP: advertised Layer2 CUDN creation race", feature.Rou
 		ginkgo.By("checking external-to-pod traffic for one pod on every node")
 		// The agnhost server sits behind FRR and provides curl. The FRR image is
 		// the intermediary router only and intentionally has no HTTP client.
-		externalClient := infraapi.ExternalContainer{Name: bgpExternalServerContainerName}
+		externalClient := infraapi.ExternalContainer{Name: serverContainerName}
 		for _, pod := range pods {
 			for _, family := range supportedIPFamilies {
 				var podIP string
