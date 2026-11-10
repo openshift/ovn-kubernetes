@@ -1756,9 +1756,9 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled reconverges after ovnkube-node restarts, without leaving orphan static bindings": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security enabled, should fail": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security enabled, should fail": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Suite:ovn-kubernetes/conformance/parallel]",
 

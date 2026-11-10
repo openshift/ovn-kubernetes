@@ -49,6 +49,7 @@ const (
 	featureLabelEVPN                = "Feature:EVPN"
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 	featureLabelEgressIP            = "Feature:EgressIP"
+	featureLabelMACSecurity         = "Feature:MACSecurity"
 	// Test constants used for test categorization and filtering
 	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
 )
