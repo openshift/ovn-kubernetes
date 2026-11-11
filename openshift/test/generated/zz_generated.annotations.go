@@ -1652,6 +1652,46 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology": "[Disabled:Unimplemented]",
 
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink ages out every binding on every member once the traffic stops": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink backfills a CUDN that joins the uplink after the bindings were learned, and reaps it when it leaves": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink designates exactly one CUDN gateway router as the ARP/NDP source of the uplink": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink keeps the uplink group's bindings stable and isolated while the traffic lasts": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink mirrors a binding resolved by the source CUDN onto every follower": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink mirrors a binding resolved on behalf of a follower CUDN onto the source and the other followers": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink re-designates the source and keeps the followers resolved when the source CUDN leaves the uplink": "[Suite:ovn-kubernetes/conformance/parallel]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the CDN-triggered binding on every gateway router once traffic stops": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the UDN-triggered binding on every gateway router once traffic stops": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled backfills a CUDN created after the bindings were learned, and reaps it on delete": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled binds node IPs statically on the UDNs instead of mirroring them": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled converges every gateway router onto the new MAC when the external container changes it": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not leak the bindings into the other nodes' zones": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not mirror onto a secondary CUDN": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled has no MAC bindings for the external containers before any traffic": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled keeps the mirrored bindings stable while the traffic lasts": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled mirrors a binding triggered by a UDN pod to the CDN and every other UDN": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled mirrors the binding learned by the CDN gateway router to every UDN": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled never adds a static MAC binding to the default network gateway router": "[Suite:ovn-kubernetes/conformance/serial]",
+
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled reconverges after ovnkube-node restarts, without leaving orphan static bindings": "[Suite:ovn-kubernetes/conformance/serial]",
+
 	"Network Segmentation: Network Policies on a user defined primary network ICMP should bypass default deny policy for UDNs when enabled in L2 dualstack primary UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: Network Policies on a user defined primary network ICMP should bypass default deny policy for UDNs when enabled in L3 dualstack primary UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
@@ -1670,7 +1710,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: Node Annotations Tunnel ID Annotations should NOT allocate tunnel ID annotations for secondary L2 networks": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation: Node Annotations Tunnel ID Annotations should clean up tunnel ID annotations when UDN is deleted with transit router topology": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: Node Annotations Tunnel ID Annotations should clean up tunnel ID annotations when UDN is deleted with transit router topology": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"Network Segmentation: Node Annotations Tunnel ID Annotations should have all nodes with transit router settings Layer2TopologyVersion set to 2.0": "[Suite:ovn-kubernetes/conformance/parallel]",
 
