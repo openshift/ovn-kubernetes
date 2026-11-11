@@ -40,7 +40,7 @@ openshift/
 # Build the OTE binary
 ./hack/build-tests-ext.sh
 
-# Run unit tests (excludes annotate, deploymentconfig, generated packages)
+# Run unit tests (excludes the generated package)
 make test
 
 # Regenerate annotations after upstream test changes
@@ -80,6 +80,8 @@ list are filtered out. Instead:
 - `sig-network`, `ovn-kubernetes-ote` -- applied to all OTE tests
 - `Feature:EVPN` -- EVPN tests, auto-prepends `FeatureGate:EVPN`
 - `Feature:NetworkSegmentation` -- UDN tests, excluded on SingleReplica topology
+- `Serial` -- added by the Ginkgo `Serial` decorator; prepended to the name like any
+  label, and the annotation generator assigns `[Suite:ovn-kubernetes/conformance/serial]`
 - `Feature:EgressIP` -- EgressIP tests, GCP-specific filtering
 
 Labels are prepended to test names sorted alphabetically in `[Label]` format.
