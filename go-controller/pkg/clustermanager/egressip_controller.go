@@ -183,7 +183,6 @@ func ipStringToCloudPrivateIPConfigName(ipString string) (name string) {
 }
 
 func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(ctx context.Context, egressIPName string, ops map[string]*cloudPrivateIPConfigOp) error {
-	var retryErr error
 	for egressIP, op := range ops {
 		cloudPrivateIPConfigName := ipStringToCloudPrivateIPConfigName(egressIP)
 		cloudPrivateIPConfig, err := eIPC.watchFactory.GetCloudPrivateIPConfig(cloudPrivateIPConfigName)
@@ -252,8 +251,7 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(ctx contex
 						if err := eIPC.kube.DeleteCloudPrivateIPConfig(ctx, cloudPrivateIPConfigName); err != nil {
 							return fmt.Errorf("failed to delete failed CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 						}
-						retryErr = fmt.Errorf("deleted failed CloudPrivateIPConfig: %s, will retry creation in next reconciliation", cloudPrivateIPConfigName)
-						continue
+						return fmt.Errorf("deleted failed CloudPrivateIPConfig: %s, will retry creation in next reconciliation", cloudPrivateIPConfigName)
 					} else if nodeErr != nil {
 						klog.Errorf("Failed to check if node %s exists for CloudPrivateIPConfig %s: %v", cloudPrivateIPConfig.Status.Node, cloudPrivateIPConfigName, nodeErr)
 					}
@@ -307,9 +305,6 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(ctx contex
 				return fmt.Errorf("cloud deletion request failed for CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 			}
 		}
-	}
-	if retryErr != nil {
-		return retryErr
 	}
 	return nil
 }
