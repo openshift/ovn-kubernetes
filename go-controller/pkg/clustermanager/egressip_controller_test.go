@@ -4630,6 +4630,31 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 					{Node: node1Name, EgressIP: egressIP1},
 				}))
 
+				// 4. Verify the existing EgressIP and CPIC on node2 remain intact
+				existingEIPObj, err := fakeClusterManagerOVN.eIPC.kube.GetEgressIP("other-egressip")
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to get existing EgressIP other-egressip")
+				gomega.Expect(existingEIPObj.Status.Items).To(gomega.HaveLen(1))
+				gomega.Expect(existingEIPObj.Status.Items[0].Node).To(gomega.Equal(node2Name))
+				gomega.Expect(existingEIPObj.Status.Items[0].EgressIP).To(gomega.Equal(existingNode2EgressIP))
+
+				existingCPICObj, err := fakeClusterManagerOVN.fakeClient.CloudNetworkClient.CloudV1().
+					CloudPrivateIPConfigs().Get(context.TODO(), ipStringToCloudPrivateIPConfigName(existingNode2EgressIP), metav1.GetOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to get existing CloudPrivateIPConfig for node2")
+				gomega.Expect(existingCPICObj.Spec.Node).To(gomega.Equal(node2Name))
+
+				// 5. Delete the EgressIP object and verify the corresponding CPIC
+				// is also cleaned up via reconcileEgressIP(old, nil).
+				err = fakeClusterManagerOVN.fakeClient.EgressIPClient.K8sV1().EgressIPs().
+					Delete(context.TODO(), egressIPName, metav1.DeleteOptions{})
+				gomega.Expect(err).NotTo(gomega.HaveOccurred(), "failed to delete EgressIP %s", egressIPName)
+
+				// The CPIC for egressIP1 should be deleted.
+				gomega.Eventually(func() bool {
+					_, err := fakeClusterManagerOVN.fakeClient.CloudNetworkClient.CloudV1().
+						CloudPrivateIPConfigs().Get(context.TODO(), cpicName, metav1.GetOptions{})
+					return apierrors.IsNotFound(err)
+				}, 5*time.Second).Should(gomega.BeTrue(), "timed out waiting for CloudPrivateIPConfig %s to be deleted", cpicName)
+
 				return nil
 			}
 			err := app.Run([]string{app.Name})
