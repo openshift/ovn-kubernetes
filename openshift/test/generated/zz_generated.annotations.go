@@ -756,6 +756,8 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3": "[Disabled:Unimplemented]",
 
+	"BGP: RouteAdvertisements waits for selected network state generates the selected CUDN routes before reporting Accepted": "[Suite:ovn-kubernetes/conformance/parallel]",
+
 	"BGP: UDN service marks after advertisement updates refreshes unchanged services when network selection changes": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: When an advertised CUDN network is dynamically allocated is accepted when the network is allocated on a subset of the nodes only": "[Suite:ovn-kubernetes/conformance/parallel]",
@@ -763,6 +765,8 @@ var AppendedAnnotations = map[string]string{
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created can connect to an external server and another cluster node after toggling default network advertisement off and back on": "[Disabled:Unimplemented]",
 
 	"BGP: When default podNetwork is advertised when a client ovnk pod is created tests are run towards the external agnhost echo server": "[Disabled:Unimplemented]",
+
+	"BGP: advertised Layer2 CUDN creation race programs every node before accepting traffic, without restarting ovnkube-node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: isolation between advertised networks Layer2 connectivity between networks UDN pod to a different node should work": "[Disabled:Unimplemented]",
 
@@ -1283,6 +1287,8 @@ var AppendedAnnotations = map[string]string{
 	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should maintain tcp connection with minimal downtime after succeeded live migration": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should start multiple VMs with same hostname": "[Disabled:Unimplemented]",
+
+	"Kubevirt Virtual Machines: advertised flows survive CUDN, RA, and VM recreation programs advertised-route OpenFlow rules on every node without restarting ovnkube-node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Load Balancer Service Tests with MetalLB Should ensure connectivity works on an external service when mtu changes in intermediate node": "[Disabled:Unimplemented]",
 
