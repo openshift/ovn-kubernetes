@@ -217,7 +217,7 @@ var _ = ginkgo.Describe("BGP: RouteAdvertisements waits for selected network sta
 			"RouteAdvertisements became Accepted before every node had a generated FRRConfiguration")
 
 		ginkgo.By("waiting for the selected CUDN to finish provisioning")
-		gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(ctx, f.DynamicClient, cudn.Name),
+		gomega.Eventually(ctx, clusterUserDefinedNetworkReadyFunc(f.DynamicClient, cudn.Name),
 			time.Minute, time.Second).Should(gomega.Succeed())
 
 		ginkgo.By("checking that the external FRR router learns the selected Layer2 CUDN prefixes")
