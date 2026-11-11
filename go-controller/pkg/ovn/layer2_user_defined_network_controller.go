@@ -194,6 +194,10 @@ type Layer2UserDefinedNetworkController struct {
 	syncEIPNodeRerouteFailed    sync.Map
 	nodeClusterRouterPortFailed sync.Map
 
+	// gatewaySyncedAdvertised records, per node, whether the network was
+	// advertised when its gateway was last synchronized successfully.
+	gatewaySyncedAdvertised sync.Map
+
 	// Cluster-wide router default Control Plane Protection (COPP) UUID
 	defaultCOPPUUID string
 
@@ -593,6 +597,7 @@ func (oc *Layer2UserDefinedNetworkController) localNodeSyncs(oldNode, newNode *c
 	shouldSyncMgmtPort := mgmtUpdateFailed || nodeSubnetChange
 	_, gwUpdateFailed := oc.gatewaysFailed.Load(newNode.Name)
 	shouldSyncGW := gwUpdateFailed ||
+		oc.gatewayAdvertisementChanged(newNode.Name) ||
 		gatewayChanged(oldNode, newNode, oldState, newState, oc.GetNetworkName()) ||
 		nodeChassisChanged(oldNode, newNode) ||
 		hostCIDRsChanged(oldNode, newNode) ||
@@ -606,6 +611,15 @@ func (oc *Layer2UserDefinedNetworkController) localNodeSyncs(oldNode, newNode *c
 		syncReroute:           shouldSyncReroute,
 		syncClusterRouterPort: clusterRouterPortFailed,
 	}
+}
+
+// gatewayAdvertisementChanged reports whether the current advertisement state
+// differs from the state applied by the last successful gateway synchronization.
+// Checking the applied state makes a newer reconciliation retry durable even if
+// an older in-flight synchronization clears its failure marker after it finishes.
+func (oc *Layer2UserDefinedNetworkController) gatewayAdvertisementChanged(nodeName string) bool {
+	synced, ok := oc.gatewaySyncedAdvertised.Load(nodeName)
+	return !ok || synced.(bool) != util.IsPodNetworkAdvertisedAtNode(oc, nodeName)
 }
 
 // ReconcileNode reconciles a node for a layer2 UDN controller.
@@ -749,6 +763,7 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 						return err
 					}
 				}
+				oc.gatewaySyncedAdvertised.Store(node.Name, isUDNAdvertised)
 				oc.gatewaysFailed.Delete(node.Name)
 				return nil
 			}()
@@ -1078,6 +1093,7 @@ func (oc *Layer2UserDefinedNetworkController) deleteNodeEvent(node *corev1.Node)
 				return fmt.Errorf("failed to cleanup gateway on node %q: %w", node.Name, err)
 			}
 			oc.gatewayManagers.Delete(node.Name)
+			oc.gatewaySyncedAdvertised.Delete(node.Name)
 		}
 	} else if oc.hasInterconnectTransport() {
 		if err := oc.cleanupInterconnectSetupForRemoteNode(node); err != nil {
