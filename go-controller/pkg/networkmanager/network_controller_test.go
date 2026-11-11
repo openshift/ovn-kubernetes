@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 
 	ovncnitypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/cni/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	ratypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/routeadvertisements/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
@@ -337,6 +339,441 @@ func TestNetworkControllerIsNodeManaged(t *testing.T) {
 			g.Expect(tt.controller.isNodeManaged(tt.node)).To(gomega.Equal(tt.want))
 		})
 	}
+}
+
+// A RouteAdvertisements that becomes Accepted while a network's controller
+// is starting must still leave the network advertised once Start returns.
+// The network's sync read the RouteAdvertisements before it was accepted,
+// and syncRunningNetworks, which the Accepted transition triggers, skips a
+// network whose Start has not returned.
+//
+// The RouteAdvertisements and node workers are not started, so the test's
+// own call to syncRunningNetworks is the only one: either worker running
+// it after Start returns would reconcile the network without the fix. Their
+// listers, which setAdvertisements reads, still work. The path from those
+// informers to syncRunningNetworks is not covered here.
+func TestSetAdvertisementsWhenAcceptedDuringStart(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+
+	const (
+		nodeName = "testNode"
+		nadName  = "test/NAD"
+		raName   = "testRA"
+	)
+	network := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "primary",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: "layer3",
+		Role:     "primary",
+		MTU:      1400,
+	}
+	ra := &ratypes.RouteAdvertisements{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       raName,
+			Generation: 1,
+		},
+		Spec: ratypes.RouteAdvertisementsSpec{
+			NodeSelector:   metav1.LabelSelector{},
+			Advertisements: []ratypes.AdvertisementType{ratypes.PodNetwork},
+		},
+		Status: ratypes.RouteAdvertisementsStatus{
+			Conditions: []metav1.Condition{{
+				Type:               "Accepted",
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: 1,
+			}},
+		},
+	}
+
+	fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, nodeName)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	netInfo, err := util.NewNetInfo(network)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	startEntered := make(chan struct{})
+	enter := sync.OnceFunc(func() { close(startEntered) })
+	releaseStart := make(chan struct{})
+	release := sync.OnceFunc(func() { close(releaseStart) })
+	tcm := &testControllerManager{
+		controllers: map[string]NetworkController{},
+		defaultNetwork: &testNetworkController{
+			ReconcilableNetInfo: &util.DefaultNetInfo{},
+		},
+		startHook: func(networkName string) {
+			if networkName != netInfo.GetNetworkName() {
+				return
+			}
+			enter()
+			<-releaseStart
+		},
+	}
+	nm := newNetworkController("", nodeName, tcm, wf)
+	// Their queues start at construction, so stop them before dropping them.
+	controller.Stop(nm.raController, nm.nodeController)
+	nm.raController = nil
+	nm.nodeController = nil
+
+	namespace, name, err := cache.SplitMetaNamespaceKey(nadName)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	nad, err := buildNADWithAnnotations(name, namespace, network, map[string]string{
+		types.OvnRouteAdvertisementsKey: "[\"" + raName + "\"]",
+	})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	ctx := context.Background()
+	_, err = fakeClient.KubeClient.CoreV1().Nodes().Create(ctx,
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(ctx, ra, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(ctx, nad, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	g.Expect(wf.Start()).To(gomega.Succeed())
+	defer wf.Shutdown()
+
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.AddNADs(nadName)
+	nm.getNADKeysForNetwork = func(networkName string) []string {
+		if networkName == netInfo.GetNetworkName() {
+			return []string{nadName}
+		}
+		return nil
+	}
+
+	// Started before the network is known, so the network is synced by the
+	// reconciler as one created at runtime is, not by the initial sync.
+	g.Expect(nm.Start()).To(gomega.Succeed())
+	// Release a held Start before stopping, or Stop waits on it forever.
+	defer func() {
+		release()
+		nm.Stop()
+	}()
+	nm.EnsureNetwork(mutableNetInfo)
+
+	// The network's controller is inside Start, created by a sync that
+	// read the RouteAdvertisements as not accepted.
+	g.Eventually(startEntered).WithTimeout(5 * time.Second).Should(gomega.BeClosed())
+
+	// Accept the RouteAdvertisements and wait for the lister to show it.
+	accepted, err := fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(ctx, raName, metav1.GetOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	accepted.Status.Conditions[0].Status = metav1.ConditionTrue
+	_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().UpdateStatus(ctx, accepted, metav1.UpdateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Eventually(func() metav1.ConditionStatus {
+		got, err := nm.raLister.Get(raName)
+		if err != nil || len(got.Status.Conditions) == 0 {
+			return ""
+		}
+		return got.Status.Conditions[0].Status
+	}).WithTimeout(5 * time.Second).Should(gomega.Equal(metav1.ConditionTrue))
+
+	// Do what the RouteAdvertisements controller does for the transition,
+	// and finish it, while Start is still held.
+	g.Expect(nm.syncRunningNetworks()).To(gomega.Succeed())
+	release()
+
+	advertised := func(g gomega.Gomega) {
+		tcm.Lock()
+		defer tcm.Unlock()
+		reconcilable := tcm.controllers[testNetworkKey(netInfo)]
+		g.Expect(reconcilable).ToNot(gomega.BeNil())
+		g.Expect(reconcilable.GetPodNetworkAdvertisedVRFs()).To(gomega.Equal(map[string][]string{
+			nodeName: {types.DefaultNetworkName},
+		}))
+	}
+	g.Eventually(advertised).WithTimeout(5 * time.Second).Should(gomega.Succeed())
+}
+
+// recordingReconciler reports each key before passing it to the wrapped
+// reconciler.
+type recordingReconciler struct {
+	controller.Reconciler
+	onReconcile func(key string)
+}
+
+func (r *recordingReconciler) Reconcile(key string) {
+	r.onReconcile(key)
+	r.Reconciler.Reconcile(key)
+}
+
+// A RouteAdvertisements that becomes Accepted after a network is running
+// reaches the network through the RouteAdvertisements informer and worker
+// and syncRunningNetworks, and leaves the network advertised.
+//
+// The node worker is not started, so after the update only the
+// RouteAdvertisements worker runs syncRunningNetworks, which queues the
+// default network and then each running network. The test requires that
+// sequence as well as the advertisement, so pending start-up work that reads
+// the accepted RouteAdvertisements cannot satisfy it alone.
+func TestSetAdvertisementsWhenAcceptedAfterStart(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+
+	const (
+		nodeName = "testNode"
+		nadName  = "test/NAD"
+		raName   = "testRA"
+	)
+	network := &ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "primary",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: "layer3",
+		Role:     "primary",
+		MTU:      1400,
+	}
+	// The fake clientset does not set resourceVersion, and raNeedsUpdate
+	// ignores an update that does not change it.
+	ra := &ratypes.RouteAdvertisements{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            raName,
+			Generation:      1,
+			ResourceVersion: "1",
+		},
+		Spec: ratypes.RouteAdvertisementsSpec{
+			NodeSelector:   metav1.LabelSelector{},
+			Advertisements: []ratypes.AdvertisementType{ratypes.PodNetwork},
+		},
+		Status: ratypes.RouteAdvertisementsStatus{
+			Conditions: []metav1.Condition{{
+				Type:               "Accepted",
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: 1,
+			}},
+		},
+	}
+
+	fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, nodeName)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	netInfo, err := util.NewNetInfo(network)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	tcm := &testControllerManager{
+		controllers: map[string]NetworkController{},
+		defaultNetwork: &testNetworkController{
+			ReconcilableNetInfo: &util.DefaultNetInfo{},
+		},
+	}
+	nm := newNetworkController("", nodeName, tcm, wf)
+	// Its queue starts at construction, so stop it before dropping it.
+	controller.Stop(nm.nodeController)
+	nm.nodeController = nil
+
+	var updateSent, defaultQueued atomic.Bool
+	queuedAfterUpdate := make(chan struct{})
+	markQueued := sync.OnceFunc(func() { close(queuedAfterUpdate) })
+	nm.networkReconciler = &recordingReconciler{
+		Reconciler: nm.networkReconciler,
+		onReconcile: func(key string) {
+			if !updateSent.Load() {
+				return
+			}
+			switch key {
+			case types.DefaultNetworkName:
+				defaultQueued.Store(true)
+			case netInfo.GetNetworkName():
+				if defaultQueued.Load() {
+					markQueued()
+				}
+			}
+		},
+	}
+
+	namespace, name, err := cache.SplitMetaNamespaceKey(nadName)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	nad, err := buildNADWithAnnotations(name, namespace, network, map[string]string{
+		types.OvnRouteAdvertisementsKey: "[\"" + raName + "\"]",
+	})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	ctx := context.Background()
+	_, err = fakeClient.KubeClient.CoreV1().Nodes().Create(ctx,
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Create(ctx, ra, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	_, err = fakeClient.NetworkAttchDefClient.K8sCniCncfIoV1().NetworkAttachmentDefinitions(namespace).Create(ctx, nad, metav1.CreateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	g.Expect(wf.Start()).To(gomega.Succeed())
+	defer wf.Shutdown()
+
+	mutableNetInfo := util.NewMutableNetInfo(netInfo)
+	mutableNetInfo.AddNADs(nadName)
+	nm.getNADKeysForNetwork = func(networkName string) []string {
+		if networkName == netInfo.GetNetworkName() {
+			return []string{nadName}
+		}
+		return nil
+	}
+
+	g.Expect(nm.Start()).To(gomega.Succeed())
+	defer nm.Stop()
+	nm.EnsureNetwork(mutableNetInfo)
+
+	// The network is running, without advertisements: the
+	// RouteAdvertisements is not accepted yet.
+	advertisements := func() map[string][]string {
+		tcm.Lock()
+		defer tcm.Unlock()
+		reconcilable := tcm.controllers[testNetworkKey(netInfo)]
+		if reconcilable == nil {
+			return nil
+		}
+		return reconcilable.GetPodNetworkAdvertisedVRFs()
+	}
+	g.Eventually(func() bool {
+		return nm.getNetworkState(netInfo.GetNetworkName()).controller != nil
+	}).WithTimeout(5 * time.Second).Should(gomega.BeTrue())
+	g.Expect(advertisements()).To(gomega.BeEmpty())
+
+	accepted, err := fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().Get(ctx, raName, metav1.GetOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	accepted.Status.Conditions[0].Status = metav1.ConditionTrue
+	accepted.ResourceVersion = "2"
+	updateSent.Store(true)
+	_, err = fakeClient.RouteAdvertisementsClient.K8sV1().RouteAdvertisements().UpdateStatus(ctx, accepted, metav1.UpdateOptions{})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	g.Eventually(queuedAfterUpdate).WithTimeout(5 * time.Second).Should(gomega.BeClosed())
+
+	g.Eventually(advertisements).WithTimeout(5 * time.Second).Should(gomega.Equal(map[string][]string{
+		nodeName: {types.DefaultNetworkName},
+	}))
+}
+
+// noDefaultControllerManager reports no default network controller, as
+// FakeControllerManager does.
+type noDefaultControllerManager struct {
+	*testControllerManager
+}
+
+func (m noDefaultControllerManager) GetDefaultNetworkController() ReconcilableNetworkController {
+	return nil
+}
+
+// The network manager does not own the default network's lifecycle, so
+// starting its controller must not queue it again: with a manager that
+// reports no default controller, each such sync would start another one.
+func TestDefaultNetworkIsNotSyncedAgainAfterStart(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableRouteAdvertisements = true
+
+	const nodeName = "testNode"
+	fakeClient := util.GetOVNClientset().GetOVNKubeControllerClientset()
+	wf, err := factory.NewOVNKubeControllerWatchFactory(fakeClient, nodeName)
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+	g.Expect(wf.Start()).To(gomega.Succeed())
+	defer wf.Shutdown()
+
+	tcm := &testControllerManager{controllers: map[string]NetworkController{}}
+	nm := newNetworkController("", nodeName, noDefaultControllerManager{tcm}, wf)
+	// Their queues start at construction, so stop them before dropping them.
+	controller.Stop(nm.raController, nm.nodeController)
+	nm.raController = nil
+	nm.nodeController = nil
+	nm.getNADKeysForNetwork = func(string) []string { return nil }
+
+	netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: types.DefaultNetworkName,
+			Type: "ovn-k8s-cni-overlay",
+		},
+		MTU: 1400,
+	})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	g.Expect(nm.Start()).To(gomega.Succeed())
+	defer nm.Stop()
+	nm.EnsureNetwork(util.NewMutableNetInfo(netInfo))
+
+	starts := func() int {
+		tcm.Lock()
+		defer tcm.Unlock()
+		n := 0
+		for _, key := range tcm.started {
+			if key == testNetworkKey(netInfo) {
+				n++
+			}
+		}
+		return n
+	}
+	g.Eventually(starts).WithTimeout(5 * time.Second).Should(gomega.BeNumerically(">=", 1))
+	g.Consistently(starts, time.Second).Should(gomega.BeNumerically("<=", 3))
+}
+
+// Without route advertisements nothing runs syncRunningNetworks, so a
+// network that has started is not queued again.
+func TestNetworkIsNotSyncedAgainWithoutRouteAdvertisements(t *testing.T) {
+	g := gomega.NewWithT(t)
+	g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	t.Cleanup(func() {
+		g.Expect(config.PrepareTestConfig()).To(gomega.Succeed())
+	})
+	config.OVNKubernetesFeature.EnableMultiNetwork = true
+	config.OVNKubernetesFeature.EnableRouteAdvertisements = false
+
+	netInfo, err := util.NewNetInfo(&ovncnitypes.NetConf{
+		NetConf: cnitypes.NetConf{
+			Name: "primary",
+			Type: "ovn-k8s-cni-overlay",
+		},
+		Topology: "layer3",
+		Role:     "primary",
+		MTU:      1400,
+	})
+	g.Expect(err).ToNot(gomega.HaveOccurred())
+
+	tcm := &testControllerManager{
+		controllers: map[string]NetworkController{},
+		defaultNetwork: &testNetworkController{
+			ReconcilableNetInfo: &util.DefaultNetInfo{},
+		},
+	}
+	nm := newNetworkController("", "testNode", tcm, nil)
+	var queued atomic.Int32
+	nm.networkReconciler = &recordingReconciler{
+		Reconciler: nm.networkReconciler,
+		onReconcile: func(key string) {
+			if key == netInfo.GetNetworkName() {
+				queued.Add(1)
+			}
+		},
+	}
+
+	g.Expect(nm.Start()).To(gomega.Succeed())
+	defer nm.Stop()
+	nm.EnsureNetwork(util.NewMutableNetInfo(netInfo))
+
+	g.Eventually(func() bool {
+		return nm.getNetworkState(netInfo.GetNetworkName()).controller != nil
+	}).WithTimeout(5 * time.Second).Should(gomega.BeTrue())
+	g.Consistently(queued.Load, 500*time.Millisecond).Should(gomega.BeEquivalentTo(1))
 }
 
 func TestNetworkControllerReconcilePendingNetworkRefChange(t *testing.T) {
