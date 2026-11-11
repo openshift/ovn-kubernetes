@@ -748,7 +748,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks withdraws and restores VTEP advertisements after an invalid node annotation": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"BGP: For BGP configured networks withdraws and restores VTEP advertisements after an invalid node annotation": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer2": "[Disabled:Unimplemented]",
 
@@ -1500,7 +1500,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Disabled:Unimplemented]",
 
-	"Network Segmentation Uplink DPU VF lifecycle recovers the management port device after an ovnkube-node restart": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation Uplink DPU VF lifecycle recovers the management port device after an ovnkube-node restart": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"Network Segmentation Uplink DPU VF lifecycle returns simulated VF netdevices to the host when the pod is deleted": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1778,7 +1778,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: Node Annotations Tunnel ID Annotations should NOT allocate tunnel ID annotations for secondary L2 networks": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation: Node Annotations Tunnel ID Annotations should clean up tunnel ID annotations when UDN is deleted with transit router topology": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: Node Annotations Tunnel ID Annotations should clean up tunnel ID annotations when UDN is deleted with transit router topology": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"Network Segmentation: Node Annotations Tunnel ID Annotations should have all nodes with transit router settings Layer2TopologyVersion set to 2.0": "[Suite:ovn-kubernetes/conformance/parallel]",
 
