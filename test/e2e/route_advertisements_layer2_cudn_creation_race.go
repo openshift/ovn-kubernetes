@@ -229,7 +229,7 @@ var _ = ginkgo.Describe("BGP: advertised Layer2 CUDN creation race", feature.Rou
 		networkName := ovntypes.CUDNPrefix + cUDN.Name
 		switchName := ovnutil.GetUserDefinedNetworkPrefix(networkName) + ovntypes.OVNLayer2Switch
 		stotrPortName := ovntypes.SwitchToTransitRouterPrefix + switchName
-		transitRouterName := ovnutil.GetNetworkScopedNameForNetwork(networkName, ovntypes.TransitRouter)
+		transitRouterName := ovnutil.GetUserDefinedNetworkPrefix(networkName) + ovntypes.TransitRouter
 		gomega.Eventually(func() []string {
 			var diagnostics []string
 
