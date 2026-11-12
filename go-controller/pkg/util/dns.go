@@ -87,10 +87,10 @@ func (d *DNS) Add(dns string) error {
 	defer d.lock.Unlock()
 
 	d.dnsMap[dns] = dnsValue{}
+	// Keep the entry when the lookup fails. updateOne sets nextQueryTime so the
+	// name is refreshed later. Deleting it leaves an EgressFirewall address set
+	// empty until the process restarts or the name is removed and added again.
 	_, err := d.updateOne(dns)
-	if err != nil {
-		delete(d.dnsMap, dns)
-	}
 	return err
 }
 
