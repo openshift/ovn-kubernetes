@@ -30,10 +30,14 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 	})
 
 	g.AfterEach(func() {
+		var nsCleanupErrs []error
 		for _, ns := range nsList {
-			_ = exec.Command("oc", "delete", "ns", ns, "--ignore-not-found=true").Run()
+			if err := exec.Command("oc", "delete", "ns", ns, "--ignore-not-found=true").Run(); err != nil {
+				nsCleanupErrs = append(nsCleanupErrs, fmt.Errorf("delete namespace %s: %w", ns, err))
+			}
 		}
 		nsList = nil
+		o.Expect(nsCleanupErrs).To(o.BeEmpty(), "namespace cleanup failures: %v", nsCleanupErrs)
 	})
 
 	g.It("73189-BANP and ANP ACL audit log works [Serial]", func() {
@@ -49,7 +53,12 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 			unColoredPods            = make(map[string]string)
 			ovnkubeNodeColoredPods   = make(map[string]string)
 			ovnkubeNodeUnColoredPods = make(map[string]string)
+			cleanupErrs              []error
 		)
+		// Fail the test if any deferred policy cleanup fails, after all cleanups run.
+		defer func() {
+			o.Expect(cleanupErrs).To(o.BeEmpty(), "policy cleanup failures: %v", cleanupErrs)
+		}()
 
 		g.By("1. Get the first namespace (subject) and create three peer namespaces")
 		subjectNs = fmt.Sprintf("otp-%s-subject-%d", testID, time.Now().Unix())
@@ -133,13 +142,19 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 			Template:      banpCRTemplate,
 		}
 		// Cluster-scoped singleton: never overwrite/delete a pre-existing BANP.
-		err = exec.Command("oc", "get", "banp", banp.Name).Run()
-		o.Expect(err).To(o.HaveOccurred(),
+		banpOut, banpGetErr := exec.Command("oc", "get", "banp", banp.Name).CombinedOutput()
+		o.Expect(banpGetErr).To(o.HaveOccurred(),
 			"cluster already has BaselineAdminNetworkPolicy %q; refusing to overwrite or delete it", banp.Name)
+		o.Expect(string(banpOut)).To(o.ContainSubstring("NotFound"),
+			"unexpected error checking BANP %q absence (want NotFound): %v\n%s", banp.Name, banpGetErr, banpOut)
 
 		err = banp.Create()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		defer func() { _ = otputils.RemoveResource("banp", banp.Name) }()
+		defer func() {
+			if err := otputils.RemoveResource("banp", banp.Name); err != nil {
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("delete banp %s: %w", banp.Name, err))
+			}
+		}()
 
 		g.By("3.1 Update BANP subject pod selector.")
 		patchBANP := `[{"op": "add", "path": "/spec/subject/pods/podSelector", "value": {}}]`
@@ -180,7 +195,8 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 
 		g.By(fmt.Sprintf("6. Create Admin Network Policy with ingress deny from %s to %s and egress allow to %s and pass to %s from %s namespace", nsList[1], nsList[0], nsList[2], nsList[3], nsList[0]))
 		anp := otputils.MultiPodMixedRuleANPPolicyResource{
-			Name:          "anp-" + testID + "-1",
+			// Unique name so we never apply/delete a pre-existing ANP (unlike BANP, name is not fixed).
+			Name:          fmt.Sprintf("anp-%s-%d", testID, time.Now().Unix()),
 			SubjectKey:    matchLabelKey,
 			SubjectVal:    subjectNs,
 			SubjectPodKey: podKey,
@@ -212,7 +228,11 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 		}
 		err = anp.Create()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		defer func() { _ = otputils.RemoveResource("anp", anp.Name) }()
+		defer func() {
+			if err := otputils.RemoveResource("anp", anp.Name); err != nil {
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("delete anp %s: %w", anp.Name, err))
+			}
+		}()
 
 		aclLogSearchString = fmt.Sprintf("name=\"ANP:%s:Ingress:0\", verdict=drop, severity=alert", anp.Name)
 		g.By(fmt.Sprintf("6.1 Verify ACL Logging for rule %s", aclLogSearchString))
