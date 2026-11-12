@@ -118,9 +118,19 @@ Current primary Layer2 networks use a network-wide gateway MAC and IPv6
 link-local address, independent of the node hosting a VM. OVN-Kubernetes no
 longer sends synthetic gateway GARPs or Router Advertisements after Layer2 VM
 live migration. Native OVN Router Advertisements continue to provide IPv6
-default-router discovery and refresh; the CNI RA filter continues to allow the
-stable gateway identity. VM addressing and source/target logical-port handoff
+default-router discovery and refresh. VM addressing and source/target logical-port handoff
 continue to be managed by the live-migration controllers.
+
+The CNI plugin no longer installs the Router Advertisement source filter on
+primary Layer2 pod interfaces. With a stable gateway identity across nodes,
+the node-specific source restriction is no longer needed. Newly created
+interfaces can receive RAs from other router sources, subject to the rest of
+the network datapath and guest configuration.
+
+New workload annotations omit `ipv6_lla_gateway_ip`; existing values are
+preserved during annotation updates. Older CNI versions skip the filter when
+this field is absent. Installed filters keep their source restriction until
+the pod namespace is recreated.
 
 Before upgrading, surviving VMs must have completed legacy gateway-state repair,
 including removal of old node-specific IPv6 default routers and legacy join-subnet
@@ -352,6 +362,26 @@ spec:
     - cidr: 203.203.0.0/16
       hostSubnet: 24
 ```
+
+### Deleting UserDefinedNetworks
+
+OVN-Kubernetes keeps the `k8s.ovn.org/user-defined-network-protection` finalizer on
+every `UserDefinedNetwork` and `ClusterUserDefinedNetwork`, and on the
+`NetworkAttachmentDefinition` it creates for them. Deleting the network resource
+sets its deletion timestamp, but the resource and its NADs stay until no pod uses
+the network any more.
+
+While a pod is still attached, the `NetworkCreated` condition turns `False`, with
+reason `SyncError` for a `UserDefinedNetwork` or
+`NetworkAttachmentDefinitionSyncError` for a `ClusterUserDefinedNetwork`. The
+message names the pods still using the network. The cluster manager retries the
+deletion with an exponential backoff, from 100 ms up to 5 s between attempts, so a
+network blocked for a long time is checked a few times a minute instead of on
+every pass. Once the last pod is gone, the next attempt removes the finalizer from
+the NADs, deletes them, waits for the network controller to stop, and then removes
+the finalizer from the network resource. A NAD is released even if its creation
+response was lost or a later step of the sync failed, so a network deleted right
+after its creation does not stay stuck.
 
 ### Expanding a Primary Layer3 UDN with additional cluster subnets
 
