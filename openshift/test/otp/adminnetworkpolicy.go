@@ -61,9 +61,9 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 			peerNs := fmt.Sprintf("otp-%s-peer-%d-%d", testID, i, time.Now().Unix())
 			err := exec.Command("oc", "create", "ns", peerNs).Run()
 			o.Expect(err).NotTo(o.HaveOccurred())
+			nsList = append(nsList, peerNs)
 			err = exec.Command("oc", "label", "ns", peerNs, "team=qe").Run()
 			o.Expect(err).NotTo(o.HaveOccurred())
-			nsList = append(nsList, peerNs)
 		}
 
 		g.By("2. Create pods in all the namespaces, label one of the pod and obtain ovnkube-node pod for the scheduled pods in subject namespace.")
