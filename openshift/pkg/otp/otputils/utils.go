@@ -107,7 +107,7 @@ func CurlPod2PodPass(namespaceSrc, podNameSrc, namespaceDst, podNameDst string) 
 	podIPs, err := getPodIPs(namespaceDst, podNameDst)
 	o.Expect(err).NotTo(o.HaveOccurred())
 	for _, ip := range podIPs {
-		_, err := e2eoutput.RunHostCmd(namespaceSrc, podNameSrc, "curl --connect-timeout 5 -s "+net.JoinHostPort(ip, "8080"))
+		_, err := e2eoutput.RunHostCmd(namespaceSrc, podNameSrc, "curl --connect-timeout 5 --max-time 10 -s "+net.JoinHostPort(ip, "8080"))
 		o.Expect(err).NotTo(o.HaveOccurred())
 	}
 }
@@ -123,7 +123,7 @@ func CurlPod2PodFail(namespaceSrc, podNameSrc, namespaceDst, podNameDst string) 
 		stdout, stderr, err := e2eoutput.RunHostCmdWithFullOutput(
 			namespaceSrc,
 			podNameSrc,
-			fmt.Sprintf("curl --connect-timeout 5 -s %s; echo CURL_RC:$?", addr),
+			fmt.Sprintf("curl --connect-timeout 5 --max-time 10 -s %s; echo CURL_RC:$?", addr),
 		)
 		o.Expect(err).NotTo(o.HaveOccurred(),
 			"pod exec failed before curl could run toward %s\nstdout=%s\nstderr=%s", addr, stdout, stderr)
@@ -161,25 +161,34 @@ func getPodIPs(namespace, podName string) ([]string, error) {
 	return ips, nil
 }
 
+// flowFieldValue returns the value of a comma-delimited OVS flow field (e.g. nw_dst=).
+func flowFieldValue(line, field string) string {
+	key := field + "="
+	idx := strings.Index(line, key)
+	if idx < 0 {
+		return ""
+	}
+	val := line[idx+len(key):]
+	if end := strings.IndexByte(val, ','); end >= 0 {
+		val = val[:end]
+	}
+	return strings.TrimSpace(val)
+}
+
 // flowContainsDestIP reports whether an ACL audit log line's flow addresses
 // include the destination IP that curl probed (IPv4 nw_dst / IPv6 ipv6_dst).
 func flowContainsDestIP(line, ip string) bool {
-	parsed := net.ParseIP(ip)
-	if parsed == nil {
+	want := net.ParseIP(ip)
+	if want == nil {
 		return false
 	}
-	forms := []string{ip}
-	if canonical := parsed.String(); canonical != ip {
-		forms = append(forms, canonical)
-	}
-	for _, form := range forms {
-		if parsed.To4() != nil {
-			if strings.Contains(line, "nw_dst="+form) {
-				return true
-			}
+	for _, field := range []string{"nw_dst", "ipv6_dst"} {
+		raw := flowFieldValue(line, field)
+		if raw == "" {
 			continue
 		}
-		if strings.Contains(line, "ipv6_dst="+form) || strings.Contains(line, "nw_dst="+form) {
+		got := net.ParseIP(raw)
+		if got != nil && got.Equal(want) {
 			return true
 		}
 	}
