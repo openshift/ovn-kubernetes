@@ -132,9 +132,14 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 			RulePodVal2:   podVal,
 			Template:      banpCRTemplate,
 		}
+		// Cluster-scoped singleton: never overwrite/delete a pre-existing BANP.
+		err = exec.Command("oc", "get", "banp", banp.Name).Run()
+		o.Expect(err).To(o.HaveOccurred(),
+			"cluster already has BaselineAdminNetworkPolicy %q; refusing to overwrite or delete it", banp.Name)
+
 		err = banp.Create()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		defer otputils.RemoveResource("banp", banp.Name)
+		defer func() { _ = otputils.RemoveResource("banp", banp.Name) }()
 
 		g.By("3.1 Update BANP subject pod selector.")
 		patchBANP := `[{"op": "add", "path": "/spec/subject/pods/podSelector", "value": {}}]`
@@ -207,7 +212,7 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 		}
 		err = anp.Create()
 		o.Expect(err).NotTo(o.HaveOccurred())
-		defer otputils.RemoveResource("anp", anp.Name)
+		defer func() { _ = otputils.RemoveResource("anp", anp.Name) }()
 
 		aclLogSearchString = fmt.Sprintf("name=\"ANP:%s:Ingress:0\", verdict=drop, severity=alert", anp.Name)
 		g.By(fmt.Sprintf("6.1 Verify ACL Logging for rule %s", aclLogSearchString))
@@ -226,13 +231,19 @@ var _ = g.Describe("[OTP] SDN adminnetworkpolicy", func() {
 		err = exec.Command("oc", "annotate", "--overwrite", "baselineadminnetworkpolicy", "default", aclSettings.GetJSONString()).Run()
 		o.Expect(err).NotTo(o.HaveOccurred())
 
-		g.By("8. Update ANP Policy ingress rule from allow to pass to verify BANP ACL logging change")
+		g.By("8. Update ANP Policy ingress rule from deny to pass to verify BANP ACL logging change")
 		patchANP := `[{"op": "replace", "path": "/spec/ingress/0/action", "value": "Pass" }]`
 		err = exec.Command("oc", "patch", "anp", anp.Name, "--type=json", "-p", patchANP).Run()
 		o.Expect(err).NotTo(o.HaveOccurred())
 
-		aclLogSearchString = "name=\"BANP:default:Ingress:0\", verdict=drop, severity=alert"
-		g.By(fmt.Sprintf("8.1 Verify ACL for rule %s in BANP is not logged", aclLogSearchString))
+		// Patch success is not dataplane reconciliation: require ANP Pass audit before BANP absence.
+		aclLogSearchString = fmt.Sprintf("name=\"ANP:%s:Ingress:0\", verdict=pass, severity=info", anp.Name)
+		g.By(fmt.Sprintf("8.1 Verify ANP Pass is handling the ingress flow: %s", aclLogSearchString))
+		otputils.CheckACLLogs(nsList[1], coloredPods[nsList[1]], subjectNs, coloredPods[subjectNs], "fail", aclLogSearchString, ovnkubeNodeColoredPods[subjectNs], true)
+
+		// Absence check: match name+verdict only so a deny at any severity still fails.
+		aclLogSearchString = "name=\"BANP:default:Ingress:0\", verdict=drop"
+		g.By(fmt.Sprintf("8.2 Verify ACL for rule %s in BANP is not logged", aclLogSearchString))
 		otputils.CheckACLLogs(nsList[1], coloredPods[nsList[1]], subjectNs, coloredPods[subjectNs], "fail", aclLogSearchString, ovnkubeNodeColoredPods[subjectNs], false)
 	})
 })
