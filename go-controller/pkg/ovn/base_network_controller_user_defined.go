@@ -361,9 +361,12 @@ func (bsnc *BaseUserDefinedNetworkController) addLogicalPortToNetworkForNAD(pod 
 		// We have a source pod LSP at this zone if the source pod and:
 		// - layer2 IC There is one at all the zones since we have the remote LSP to implement east/west
 		// - localnet only if this is the zone where the source pod is running
-		ops, err = bsnc.disableLiveMigrationSourceLSPOps(kubevirtLiveMigrationStatus, nadName, ops)
-		if err != nil {
-			return fmt.Errorf("failed to create LSP ops for source pod during Live-migration status: %w", err)
+		hasSourcePodLogicalPort := kubevirtLiveMigrationStatus.SourcePod != nil && (bsnc.isPodScheduledinLocalZone(kubevirtLiveMigrationStatus.SourcePod) || bsnc.isLayer2Interconnect())
+		if hasSourcePodLogicalPort {
+			ops, err = bsnc.disableLiveMigrationSourceLSPOps(kubevirtLiveMigrationStatus, nadName, ops)
+			if err != nil {
+				return fmt.Errorf("failed to create LSP ops for source pod during Live-migration status: %w", err)
+			}
 		}
 	}
 
