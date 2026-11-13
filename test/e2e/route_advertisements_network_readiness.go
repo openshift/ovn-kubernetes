@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"time"
 
 	frrclient "github.com/metallb/frr-k8s/pkg/client/clientset/versioned"
@@ -247,7 +248,7 @@ func checkRouteViaPeerInFRR(nodeName string, peerInterface infraapi.NetworkInter
 		family = utilnet.IPv6
 		command = []string{"ip", "-6", "--json", "route", "show", cidr}
 	}
-	nextHops := bgpNextHopsForPeer(family, peerInterface)
+	nextHops := routeReadinessBGPNextHops(family, peerInterface)
 	externalRouter := infraapi.ExternalContainer{Name: routerName}
 
 	gomega.Eventually(func() (bool, error) {
@@ -260,7 +261,32 @@ func checkRouteViaPeerInFRR(nodeName string, peerInterface infraapi.NetworkInter
 			return false, fmt.Errorf("failed to parse routes from external FRR router %s: %w; output: %s", routerName, err, out)
 		}
 		framework.Logf("Routes in external FRR router %s for %s: %s", routerName, cidr, out)
-		return hasBGPRoute(routes, cidr, nextHops...), nil
+		for _, nextHop := range nextHops {
+			if hasBGPRoute(routes, cidr, nextHop) {
+				return true, nil
+			}
+		}
+		return false, nil
 	}, 30*time.Second, time.Second).Should(gomega.BeTrue(),
 		"BGP route for %s via node %s peer next hops %v not found on %s", cidr, nodeName, nextHops, routerName)
+}
+
+// routeReadinessBGPNextHops returns the next hops a route learned from the
+// peer may carry. IPv6 peers may advertise their link-local address instead
+// of their global address, so accept the EUI-64 address derived from the MAC.
+func routeReadinessBGPNextHops(family utilnet.IPFamily, peer infraapi.NetworkInterface) []string {
+	nextHops := []string{getFirstIPStringOfFamily(family, []string{peer.IPv4, peer.IPv6})}
+	if family != utilnet.IPv6 {
+		return nextHops
+	}
+
+	hw, err := net.ParseMAC(peer.MAC)
+	if err != nil || len(hw) != 6 {
+		return nextHops
+	}
+	linkLocal := net.IP{
+		0xfe, 0x80, 0, 0, 0, 0, 0, 0,
+		hw[0] ^ 0x02, hw[1], hw[2], 0xff, 0xfe, hw[3], hw[4], hw[5],
+	}.String()
+	return append(nextHops, linkLocal)
 }
