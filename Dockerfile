@@ -53,6 +53,7 @@ COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_o
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/hybrid-overlay-node /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/go-controller/_output/go/bin/ovnkube-observ /usr/bin/
 COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/openshift/bin/ovn-kubernetes-tests-ext.gz /usr/bin/
+COPY --from=builder /go/src/github.com/openshift/ovn-kubernetes/openshift/pkg/otp/testdata/fixtures /opt/ovn-kubernetes-tests-ext/fixtures
 
 RUN stat /usr/bin/oc
 
