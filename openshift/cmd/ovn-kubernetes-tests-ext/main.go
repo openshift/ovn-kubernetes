@@ -15,7 +15,7 @@ import (
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	// import OTP tests (side-effect registration)
-	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/otp"
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
