@@ -5,13 +5,16 @@ package deploymentconfig
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -145,25 +148,77 @@ func (m *openshift) GetNodeMachineNetworks() (map[string][]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
-	result := make(map[string][]string, len(nodes.Items))
-	for i := range nodes.Items {
-		node := &nodes.Items[i]
+	return nodeMachineNetworks(nodes.Items)
+}
+
+// cloudEgressIPConfigAnnotation is set by cloud-network-config-controller and
+// carries the node's routable subnet in its ifaddr field.
+const cloudEgressIPConfigAnnotation = "cloud.network.openshift.io/egress-ipconfig"
+
+type cloudEgressIPConfig struct {
+	IFAddr struct {
+		IPv4 string `json:"ipv4,omitempty"`
+		IPv6 string `json:"ipv6,omitempty"`
+	} `json:"ifaddr"`
+}
+
+// cloudEgressIPConfigSubnets returns the routable subnet CIDRs from a node's
+// cloud egress IP config annotation, one per IP family. It reads only the
+// ifaddr field, so unlike util.ParseCloudEgressIPConfig it does not require
+// node-primary-ifaddr.
+func cloudEgressIPConfigSubnets(node *corev1.Node) ([]string, error) {
+	annotation, ok := node.Annotations[cloudEgressIPConfigAnnotation]
+	if !ok {
+		return nil, fmt.Errorf("%s annotation not found for node %q", cloudEgressIPConfigAnnotation, node.Name)
+	}
+	var configs []cloudEgressIPConfig
+	if err := json.Unmarshal([]byte(annotation), &configs); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal annotation %s for node %q: %w", cloudEgressIPConfigAnnotation, node.Name, err)
+	}
+	if len(configs) == 0 {
+		return nil, fmt.Errorf("empty annotation: %s for node %q", cloudEgressIPConfigAnnotation, node.Name)
+	}
+	// Match util.ParseCloudEgressIPConfig and only read the first entry.
+	var subnets []string
+	for _, ifAddr := range []string{configs[0].IFAddr.IPv4, configs[0].IFAddr.IPv6} {
+		if ifAddr == "" {
+			continue
+		}
+		_, subnet, err := net.ParseCIDR(ifAddr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse %q from %s for node %q: %w", ifAddr, cloudEgressIPConfigAnnotation, node.Name, err)
+		}
+		subnets = append(subnets, subnet.String())
+	}
+	if len(subnets) == 0 {
+		return nil, fmt.Errorf("node %q does not have any IP information set in %s", node.Name, cloudEgressIPConfigAnnotation)
+	}
+	return subnets, nil
+}
+
+// nodeMachineNetworks maps each node to its routable machine network CIDRs,
+// preferring the cloud egress IP config annotation and falling back to
+// node-primary-ifaddr. A node resolvable by neither is an error.
+func nodeMachineNetworks(nodes []corev1.Node) (map[string][]string, error) {
+	result := make(map[string][]string, len(nodes))
+	for i := range nodes {
+		node := &nodes[i]
 		// On cloud platforms, CNCC sets the cloud egress IP annotation
 		// with the actual routable subnet. Use it when present, fall
 		// back to node-primary-ifaddr for baremetal.
-		parsed, err := util.ParseCloudEgressIPConfig(node)
+		subnets, err := cloudEgressIPConfigSubnets(node)
 		if err != nil {
-			parsed, err = util.ParseNodePrimaryIfAddr(node)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse node %s primary address: %w", node.Name, err)
-		}
-		var subnets []string
-		if parsed.V4.Net != nil {
-			subnets = append(subnets, parsed.V4.Net.String())
-		}
-		if parsed.V6.Net != nil {
-			subnets = append(subnets, parsed.V6.Net.String())
+			parsed, ifAddrErr := util.ParseNodePrimaryIfAddr(node)
+			if ifAddrErr != nil {
+				return nil, fmt.Errorf("failed to parse node %s primary address: %w", node.Name, ifAddrErr)
+			}
+			subnets = nil
+			if parsed.V4.Net != nil {
+				subnets = append(subnets, parsed.V4.Net.String())
+			}
+			if parsed.V6.Net != nil {
+				subnets = append(subnets, parsed.V6.Net.String())
+			}
 		}
 		result[node.Name] = subnets
 	}
