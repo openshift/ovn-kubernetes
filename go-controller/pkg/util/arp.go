@@ -55,11 +55,22 @@ func (g *garp) MAC() *net.HardwareAddr {
 	return g.mac
 }
 
-// BroadcastGARP send a pair of GARPs with "request" and "reply" operations
-// since some system response to request and others to reply.
-// If "garp.MAC" is not passed the link form "interfaceName" mac will be
-// advertise
+// BroadcastGARP sends a pair of gratuitous ARP requests and replies to the
+// Ethernet broadcast address. If garp.MAC() is nil, it advertises the interface MAC.
 func BroadcastGARP(interfaceName string, garp GARP) error {
+	return sendGARP(interfaceName, garp,
+		net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		net.HardwareAddr{0, 0, 0, 0, 0, 0})
+}
+
+// UnicastGARP sends a pair of gratuitous ARP requests and replies to destinationMAC,
+// using it for both the Ethernet destination and ARP target hardware address.
+// If garp.MAC() is nil, it advertises the interface MAC.
+func UnicastGARP(interfaceName string, garp GARP, destinationMAC net.HardwareAddr) error {
+	return sendGARP(interfaceName, garp, destinationMAC, destinationMAC)
+}
+
+func sendGARP(interfaceName string, garp GARP, destinationMAC, targetMAC net.HardwareAddr) error {
 	iface, err := net.InterfaceByName(interfaceName)
 	if err != nil {
 		return fmt.Errorf("failed finding interface %s: %v", interfaceName, err)
@@ -88,18 +99,17 @@ func BroadcastGARP(interfaceName string, garp GARP) error {
 	//
 	// ref: https://wiki.wireshark.org/Gratuitous_ARP
 	for _, op := range []arp.Operation{arp.OperationRequest, arp.OperationReply} {
-		// At at GARP the source and target IP should be the same and point to the
-		// the IP we want to reconcile -> https://wiki.wireshark.org/Gratuitous_ARP
-		p, err := arp.NewPacket(op, *mac /* srcHw */, srcIP, net.HardwareAddr{0, 0, 0, 0, 0, 0}, srcIP)
+		// The sender and target IP both identify the address being advertised.
+		p, err := arp.NewPacket(op, *mac /* srcHw */, srcIP, targetMAC, srcIP)
 		if err != nil {
 			return fmt.Errorf("failed creating %q GARP %+v: %w", op, garp, err)
 		}
 
-		if err := c.WriteTo(p, net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}); err != nil {
+		if err := c.WriteTo(p, destinationMAC); err != nil {
 			return fmt.Errorf("failed sending %q GARP %+v:  %w", op, garp, err)
 		}
 	}
 
-	klog.Infof("BroadcastGARP: completed GARP broadcast for IP %s on interface %s with MAC: %s", garp.IP().String(), interfaceName, mac.String())
+	klog.Infof("Sent GARP for IP %s on interface %s with MAC %s to %s", garp.IP().String(), interfaceName, mac.String(), destinationMAC.String())
 	return nil
 }
