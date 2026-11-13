@@ -436,12 +436,12 @@ var _ = Describe("ControllerManager Start order", func() {
 
 		fexec := ovntest.NewFakeExec()
 		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
-			Cmd: "ovn-nbctl --timeout=15 --columns=_uuid list Chassis_Template_Var",
-			Err: fmt.Errorf("not supported"),
-		})
-		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
 			Cmd:    "ovn-nbctl --timeout=15 --columns=_uuid list Load_Balancer_Group",
 			Output: "uuid",
+		})
+		fexec.AddFakeCmd(&ovntest.ExpectedCmd{
+			Cmd: "ovn-nbctl --timeout=15 --columns=_uuid list Chassis_Template_Var",
+			Err: fmt.Errorf("not supported"),
 		})
 		Expect(util.SetExec(fexec)).To(Succeed())
 
