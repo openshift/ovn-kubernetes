@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +26,7 @@ import (
 	nodeutil "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/node/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/vswitchd"
 )
 
 // BridgeUDNConfiguration holds the patchport and ctMark
@@ -43,6 +46,8 @@ type BridgeUDNConfiguration struct {
 	Transport string
 	// OutboundSNAT setting for this network ("enabled", "disabled", or "")
 	OutboundSNAT string
+	// UplinkName is the name of the uplink associated with the UDN configuration
+	UplinkName string
 }
 
 func (netConfig *BridgeUDNConfiguration) ShallowCopy() *BridgeUDNConfiguration {
@@ -57,6 +62,7 @@ func (netConfig *BridgeUDNConfiguration) ShallowCopy() *BridgeUDNConfiguration {
 		NodeSubnets:  netConfig.NodeSubnets,
 		Transport:    netConfig.Transport,
 		OutboundSNAT: netConfig.OutboundSNAT,
+		UplinkName:   netConfig.UplinkName,
 	}
 	copy.Advertised.Store(netConfig.Advertised.Load())
 	return copy
@@ -97,9 +103,64 @@ type BridgeConfiguration struct {
 	ips        []*net.IPNet
 	macAddress net.HardwareAddr
 	ofPortPhys string
-	netConfig  map[string]*BridgeUDNConfiguration
-	eipMarkIPs *egressip.MarkIPsCache
-	dropGARP   bool
+	// sourceNetConfigName when set is one of the keys in netConfig map, it is the network whose
+	// gateway router is designated as the source of ARP/NDP neighbour resolution for this bridge;
+	// this is needed as an uplink bridge has no default network to fall back on.
+	sourceNetConfigName string
+	netConfig           map[string]*BridgeUDNConfiguration
+	eipMarkIPs          *egressip.MarkIPsCache
+	dropGARP            bool
+}
+
+// IsLocalnetTopologyPort reports whether port is an OVN patch port for a
+// localnet topology. The ovn-localnet-port external ID is also set on gateway
+// patch ports, so the key's presence alone is not sufficient.
+func IsLocalnetTopologyPort(port *vswitchd.Port) bool {
+	if port == nil {
+		return false
+	}
+	logicalPort, ok := port.ExternalIDs["ovn-localnet-port"]
+	return ok && (logicalPort == types.OVNLocalnetPort ||
+		strings.HasSuffix(logicalPort, "_"+types.OVNLocalnetPort))
+}
+
+// localnetPatchPortNames returns the names of the OVN patch ports for localnet
+// topologies on this bridge.
+func (b *BridgeConfiguration) localnetPatchPortNames() ([]string, error) {
+	bridge, err := ovsops.GetBridge(b.ovsClient, b.bridgeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find OVS bridge %s: %w", b.bridgeName, err)
+	}
+	bridgePortIDs := make(map[string]struct{}, len(bridge.Ports))
+	for _, portID := range bridge.Ports {
+		bridgePortIDs[portID] = struct{}{}
+	}
+
+	ports, err := ovsops.FindOVSPortsWithPredicate(b.ovsClient, func(port *vswitchd.Port) bool {
+		if _, ok := bridgePortIDs[port.UUID]; !ok {
+			return false
+		}
+		return IsLocalnetTopologyPort(port)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list localnet ports on OVS bridge %s: %w", b.bridgeName, err)
+	}
+	names := make([]string, 0, len(ports))
+	for _, port := range ports {
+		names = append(names, port.Name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// ofPortOf returns the ofport of the named OVS interface as a string, or "" if
+// the interface does not exist yet or has no valid ofport assigned.
+func (b *BridgeConfiguration) ofPortOf(name string) string {
+	iface, err := ovsops.GetOVSInterface(b.ovsClient, name)
+	if err != nil || iface.Ofport == nil || *iface.Ofport <= 0 {
+		return ""
+	}
+	return strconv.Itoa(*iface.Ofport)
 }
 
 func NewBridgeConfiguration(ovsClient libovsdbclient.Client, intfName, nodeName,
@@ -346,6 +407,7 @@ func NewUnmanagedBridgeConfiguration(ovsClient libovsdbclient.Client, bridgeName
 	}
 
 	return &BridgeConfiguration{
+		ovsClient:   ovsClient,
 		nodeName:    nodeName,
 		bridgeName:  bridgeName,
 		uplinkName:  uplinkName,
@@ -441,9 +503,12 @@ func (b *BridgeConfiguration) AddNetworkConfig(nInfo util.NetInfo, nodeSubnets, 
 			NodeSubnets:   nodeSubnets,
 			Transport:     nInfo.Transport(),
 			OutboundSNAT:  nInfo.OutboundSNAT(),
+			UplinkName:    nInfo.Uplink(),
 		}
 		netConfig.Advertised.Store(util.IsPodNetworkAdvertisedAtNode(nInfo, b.nodeName))
-
+		if len(b.netConfig) == 0 {
+			b.sourceNetConfigName = netName
+		}
 		b.netConfig[netName] = netConfig
 	} else {
 		klog.Warningf("Trying to update bridge config for network %s which already"+
@@ -452,12 +517,27 @@ func (b *BridgeConfiguration) AddNetworkConfig(nInfo util.NetInfo, nodeSubnets, 
 	return nil
 }
 
+// GetSourceNetworkConfigName returns the sourceNetConfigName
+func (b *BridgeConfiguration) GetSourceNetworkConfigName() string {
+	return b.sourceNetConfigName
+}
+
 // DelNetworkConfig deletes the provided netInfo from the bridge configuration cache
 func (b *BridgeConfiguration) DelNetworkConfig(nInfo util.NetInfo) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
 	delete(b.netConfig, nInfo.GetNetworkName())
+	// Updates sourceNetConfigName
+	if b.sourceNetConfigName == nInfo.GetNetworkName() {
+		b.sourceNetConfigName = ""
+		if len(b.netConfig) > 0 {
+			for netName := range b.netConfig {
+				b.sourceNetConfigName = netName
+				break
+			}
+		}
+	}
 }
 
 func (b *BridgeConfiguration) GetNetworkConfig(networkName string) *BridgeUDNConfiguration {
