@@ -1828,10 +1828,19 @@ func ovsPodNameOnNode(namespace, nodeName string) (string, error) {
 
 // prepareExternalGatewayContainer installs packages the official FRR image
 // does not include but that external-gateway e2e needs.
+//
+// On OpenShift metal CI, HTTP_PROXY points at a squid that only allows cluster
+// API domains, so Alpine mirrors must be fetched via direct egress (hypervisor
+// NAT). Prefer IPv4 for those fetches when dual-stack IPv6 NAT is incomplete.
 func prepareExternalGatewayContainer(container infraapi.ExternalContainer) {
-	_, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{
-		"apk", "add", "--no-cache", "tcpdump", "iputils", "iproute2", "netcat-openbsd", "curl", "libndp",
-	})
+	const install = `set -e
+# Do not use CI squid — its ACL denies dl-cdn.alpinelinux.org.
+unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
+# Prefer IPv4 when resolving package mirrors.
+printf 'precedence :ffff:0:0/96  100\n' > /etc/gai.conf
+apk add --no-cache tcpdump iputils iproute2 netcat-openbsd curl libndp
+`
+	_, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{"sh", "-c", install})
 	framework.ExpectNoError(err, "failed to install gateway tools on external gateway %s", container.Name)
 }
 
