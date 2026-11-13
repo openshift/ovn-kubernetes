@@ -34,9 +34,14 @@ func FixturePath(parts ...string) string {
 	return filepath.Join(append([]string{base}, parts...)...)
 }
 
-// ApplyResourceFromTemplate processes an OpenShift template and applies it
+// ApplyResourceFromTemplate processes an OpenShift template and applies it.
+// --local avoids depending on the current kubeconfig namespace existing (CI
+// contexts often point at a short-lived ci-op-* project that is not on the DUT).
 func ApplyResourceFromTemplate(namespace string, templatePath string, parameters ...string) error {
-	args := append([]string{"process", "-f", templatePath, "--ignore-unknown-parameters=true"}, parameters...)
+	args := append([]string{"process", "--local", "-f", templatePath, "--ignore-unknown-parameters=true"}, parameters...)
+	if namespace != "" {
+		args = append(args, "-p", "NAMESPACE="+namespace)
+	}
 	processCmd := exec.Command("oc", args...)
 	var processed bytes.Buffer
 	var errOut bytes.Buffer
