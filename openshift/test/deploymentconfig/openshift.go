@@ -12,6 +12,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -145,9 +146,26 @@ func (m *openshift) GetNodeMachineNetworks() (map[string][]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
-	result := make(map[string][]string, len(nodes.Items))
-	for i := range nodes.Items {
-		node := &nodes.Items[i]
+	return nodeMachineNetworks(nodes.Items)
+}
+
+// isOVNManagedNode reports whether ovnkube annotates this node. Windows nodes
+// join through hybrid overlay and never carry OVN annotations; Linux
+// hybrid-overlay nodes are still OVN-managed, so the OS label is sufficient.
+func isOVNManagedNode(node *corev1.Node) bool {
+	return node.Labels[corev1.LabelOSStable] != "windows"
+}
+
+// nodeMachineNetworks maps each OVN-managed node to its routable machine
+// network CIDRs. Unmanaged nodes are omitted; a managed node that fails to
+// parse is still an error, so real ovnkube problems are not masked.
+func nodeMachineNetworks(nodes []corev1.Node) (map[string][]string, error) {
+	result := make(map[string][]string, len(nodes))
+	for i := range nodes {
+		node := &nodes[i]
+		if !isOVNManagedNode(node) {
+			continue
+		}
 		// On cloud platforms, CNCC sets the cloud egress IP annotation
 		// with the actual routable subnet. Use it when present, fall
 		// back to node-primary-ifaddr for baremetal.
