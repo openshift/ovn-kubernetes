@@ -1,4 +1,4 @@
-package otp
+package ote
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	g "github.com/onsi/ginkgo/v2"
 	o "github.com/onsi/gomega"
 
-	otputils "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/otp/otputils"
+	otputils "github.com/ovn-kubernetes/ovn-kubernetes/openshift/pkg/ote/otputils"
 )
 
 var _ = g.Describe("[OTP] SDN adminnetworkpolicy metrics", func() {

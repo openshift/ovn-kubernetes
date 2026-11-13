@@ -22,10 +22,10 @@ import (
 func FixturePath(parts ...string) string {
 	cwd, _ := os.Getwd()
 	// Try relative paths first (development mode)
-	base := filepath.Join(cwd, "pkg", "otp", "testdata", "fixtures")
+	base := filepath.Join(cwd, "pkg", "ote", "testdata", "fixtures")
 	if _, err := os.Stat(base); os.IsNotExist(err) {
 		// Try with openshift prefix
-		base = filepath.Join(cwd, "openshift", "pkg", "otp", "testdata", "fixtures")
+		base = filepath.Join(cwd, "openshift", "pkg", "ote", "testdata", "fixtures")
 		if _, err := os.Stat(base); os.IsNotExist(err) {
 			// Fall back to packaged location (in container image)
 			base = "/opt/ovn-kubernetes-tests-ext/fixtures"
@@ -34,9 +34,14 @@ func FixturePath(parts ...string) string {
 	return filepath.Join(append([]string{base}, parts...)...)
 }
 
-// ApplyResourceFromTemplate processes an OpenShift template and applies it
+// ApplyResourceFromTemplate processes an OpenShift template and applies it.
+// --local avoids depending on the current kubeconfig namespace existing (CI
+// contexts often point at a short-lived ci-op-* project that is not on the DUT).
 func ApplyResourceFromTemplate(namespace string, templatePath string, parameters ...string) error {
-	args := append([]string{"process", "-f", templatePath, "--ignore-unknown-parameters=true"}, parameters...)
+	args := append([]string{"process", "--local", "-f", templatePath, "--ignore-unknown-parameters=true"}, parameters...)
+	if namespace != "" {
+		args = append(args, "-p", "NAMESPACE="+namespace)
+	}
 	processCmd := exec.Command("oc", args...)
 	var processed bytes.Buffer
 	var errOut bytes.Buffer
