@@ -128,6 +128,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 		isNewReady := h.eIPC.isEgressNodeReady(newNode)
 		isNewReachable := h.eIPC.isEgressNodeReachable(newNode)
 		isHostCIDRsAltered := util.NodeHostCIDRsAnnotationChanged(oldNode, newNode)
+		isEgressIPHostCIDRsAltered := util.NodeEgressIPHostCIDRsAnnotationChanged(oldNode, newNode)
 		isCloudEgressIPConfigAltered := util.CloudEgressIPConfigAnnotationChanged(oldNode, newNode)
 		h.eIPC.setNodeEgressReady(newNode.Name, isNewReady)
 		if !oldHadEgressLabel && newHasEgressLabel {
@@ -143,7 +144,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 			}
 			return nil
 		}
-		if isOldReady == isNewReady && !isHostCIDRsAltered && !isCloudEgressIPConfigAltered {
+		if isOldReady == isNewReady && !isHostCIDRsAltered && !isEgressIPHostCIDRsAltered && !isCloudEgressIPConfigAltered {
 			return nil
 		}
 		if !isNewReady {
@@ -160,6 +161,8 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 				klog.Infof("Node: %s cloud egress IP config annotation and host CIDRs changed, re-evaluating egress IP assignments", newNode.Name)
 			case isCloudEgressIPConfigAltered:
 				klog.Infof("Node: %s cloud egress IP config annotation changed, re-evaluating egress IP assignments", newNode.Name)
+			case isEgressIPHostCIDRsAltered:
+				klog.Infof("Node: %s egress IP host CIDRs changed, re-evaluating egress IP assignments", newNode.Name)
 			default:
 				klog.Infof("Node: %s is ready and reachable, adding it for egress assignment", newNode.Name)
 			}
@@ -168,7 +171,7 @@ func (h *egressIPClusterControllerEventHandler) UpdateResource(oldObj, newObj in
 				return err
 			}
 		}
-		if isHostCIDRsAltered {
+		if isHostCIDRsAltered || isEgressIPHostCIDRsAltered {
 			// we only need to consider EIPs that are assigned to networks that aren't managed by OVN
 			if err := h.eIPC.reconcileSecondaryHostNetworkEIPs(newNode); err != nil {
 				return fmt.Errorf("failed to reconsider egress IPs that are secondary host networks: %v", err)

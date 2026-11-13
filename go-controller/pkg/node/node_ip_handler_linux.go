@@ -35,12 +35,15 @@ import (
 )
 
 type addressManager struct {
-	nodeName      string
-	watchFactory  factory.NodeWatchFactory
-	cidrs         sets.Set[string]
-	nodeAnnotator kube.Annotator
-	mgmtPort      managementport.Interface
-	ovsClient     libovsdbclient.Client
+	nodeName     string
+	watchFactory factory.NodeWatchFactory
+	cidrs        sets.Set[string]
+	// egressIPHostCIDRs is the subset of cidrs whose prefixes may host an EgressIP.
+	// VIP addresses remain in cidrs and are omitted here.
+	egressIPHostCIDRs sets.Set[string]
+	nodeAnnotator     kube.Annotator
+	mgmtPort          managementport.Interface
+	ovsClient         libovsdbclient.Client
 	// useNetlink indicates the addressManager should use machine
 	// information from netlink. Set to false for testcases.
 	useNetlink bool
@@ -72,6 +75,7 @@ func newAddressManagerInternal(nodeName string, k kube.Interface, mgmtPort manag
 		nodeName:              nodeName,
 		watchFactory:          watchFactory,
 		cidrs:                 sets.New[string](),
+		egressIPHostCIDRs:     sets.New[string](),
 		mgmtPort:              mgmtPort,
 		gatewayBridge:         gwBridge,
 		ovsClient:             ovsClient,
@@ -115,13 +119,17 @@ func (c *addressManager) addAddr(ipnet net.IPNet, linkIndex int) bool {
 func (c *addressManager) delAddr(ipnet net.IPNet) bool {
 	c.Lock()
 	defer c.Unlock()
+	changed := false
 	if c.cidrs.Has(ipnet.String()) {
 		klog.Infof("Removing IP: %s, from node IP manager", ipnet)
 		c.cidrs.Delete(ipnet.String())
-		return true
+		changed = true
 	}
-
-	return false
+	if c.egressIPHostCIDRs.Has(ipnet.String()) {
+		c.egressIPHostCIDRs.Delete(ipnet.String())
+		changed = true
+	}
+	return changed
 }
 
 // ListAddresses returns all the addresses we know about
@@ -181,7 +189,8 @@ func (c *addressManager) Run(stopChan <-chan struct{}, doneWg *sync.WaitGroup) {
 }
 
 // runInternal gathers node IP information and publishes it on the k8 node annotations.
-// The annotations it updates are k8s.ovn.org/host-cidrs, k8s.ovn.org/node-primary-ifaddr and k8s.ovn.org/l3-gateway-config.
+// The annotations it updates are k8s.ovn.org/host-cidrs, k8s.ovn.org/egressip-host-cidrs,
+// k8s.ovn.org/node-primary-ifaddr and k8s.ovn.org/l3-gateway-config.
 // It waits on 3 events and only the "stop" event may end execution.
 // Event 1: Address change events using a subscription func. In normal execution, this is a netlink addr subscription func that returns a channel that
 // conveys address updates that can be processed upon immediately.
@@ -220,6 +229,11 @@ func (c *addressManager) runInternal(stopChan <-chan struct{}, subscribe subscri
 				addrChanged = c.addAddr(a.LinkAddress, a.LinkIndex)
 			} else {
 				addrChanged = c.delAddr(a.LinkAddress)
+			}
+			// Address events carry no keepalived label, so rebuild the EgressIP
+			// prefix set from a full address list when netlink is available.
+			if c.useNetlink && c.refreshEgressIPHostCIDRs() {
+				addrChanged = true
 			}
 
 			c.handleNodePrimaryAddrChange()
@@ -323,8 +337,8 @@ func (c *addressManager) handleNodePrimaryAddrChange() {
 // updateNodeAddressAnnotations updates the node address annotations. In DPUHost mode
 // the host has no gateway bridge and node-primary-ifaddr / l3-gateway-config are owned
 // by the DPU, so only host-cidrs is maintained; in all other modes the full set
-// (k8s.ovn.org/host-cidrs, k8s.ovn.org/node-primary-ifaddr, k8s.ovn.org/l3-gateway-config)
-// is updated.
+// (k8s.ovn.org/host-cidrs, k8s.ovn.org/egressip-host-cidrs, k8s.ovn.org/node-primary-ifaddr,
+// k8s.ovn.org/l3-gateway-config) is updated.
 func (c *addressManager) updateNodeAddressAnnotations() error {
 	if config.OvnKubeNode.Mode == types.NodeModeDPUHost {
 		return c.updateDPUHostAddressAnnotations()
@@ -353,8 +367,8 @@ func (c *addressManager) updateDPUHostAddressAnnotations() error {
 }
 
 // updateGatewayAddressAnnotations updates k8s.ovn.org/host-cidrs,
-// k8s.ovn.org/node-primary-ifaddr and k8s.ovn.org/l3-gateway-config from the gateway
-// bridge addresses.
+// k8s.ovn.org/egressip-host-cidrs, k8s.ovn.org/node-primary-ifaddr and
+// k8s.ovn.org/l3-gateway-config from the gateway bridge addresses.
 func (c *addressManager) updateGatewayAddressAnnotations() error {
 	var ifAddrs []*net.IPNet
 
@@ -412,17 +426,72 @@ func (c *addressManager) updateHostCIDRs() error {
 		return nil
 	}
 
-	return util.SetNodeHostCIDRs(c.nodeAnnotator, c.cidrs)
+	if err := util.SetNodeHostCIDRs(c.nodeAnnotator, c.cidrs); err != nil {
+		return err
+	}
+	return util.SetNodeEgressIPHostCIDRs(c.nodeAnnotator, c.egressIPHostCIDRs)
 }
 
-func (c *addressManager) assignCIDRs(nodeHostCIDRs sets.Set[string]) bool {
+// refreshEgressIPHostCIDRs reloads the EgressIP prefix set from netlink so VIP
+// flags and labels, which address events do not carry, are applied.
+func (c *addressManager) refreshEgressIPHostCIDRs() bool {
+	addrs, err := util.GetNetLinkOps().AddrList(nil, getSupportedIPFamily())
+	if err != nil {
+		klog.Errorf("Failed to list addresses while updating egress IP host CIDRs: %v", err)
+		return false
+	}
+	return c.setEgressIPHostCIDRs(c.egressIPHostCIDRsFromAddrs(addrs))
+}
+
+func (c *addressManager) setEgressIPHostCIDRs(cidrs sets.Set[string]) bool {
+	c.Lock()
+	defer c.Unlock()
+	if cidrs.Equal(c.egressIPHostCIDRs) {
+		return false
+	}
+	c.egressIPHostCIDRs = cidrs
+	return true
+}
+
+func (c *addressManager) egressIPHostCIDRsFromAddrs(addrs []netlink.Addr) sets.Set[string] {
+	cidrs := sets.New[string]()
+	linkUp := map[int]bool{}
+	for _, addr := range addrs {
+		if !c.isValidNodeIP(addr.IP, addr.LinkIndex) {
+			continue
+		}
+		if !c.linkEligibleForEgressIP(addr.LinkIndex, linkUp) || !util.AddrDefinesSecondaryHostNetwork(addr) {
+			continue
+		}
+		cidrs.Insert((&net.IPNet{IP: addr.IP, Mask: addr.Mask}).String())
+	}
+	return cidrs
+}
+
+func (c *addressManager) linkEligibleForEgressIP(linkIndex int, cache map[int]bool) bool {
+	if up, ok := cache[linkIndex]; ok {
+		return up
+	}
+	link, err := util.GetNetLinkOps().LinkByIndex(linkIndex)
+	if err != nil {
+		klog.Errorf("Unable to determine if link index %d can host an EgressIP: %v", linkIndex, err)
+		cache[linkIndex] = false
+		return false
+	}
+	up := strings.Contains(link.Attrs().Flags.String(), "up")
+	cache[linkIndex] = up
+	return up
+}
+
+func (c *addressManager) assignCIDRs(nodeHostCIDRs, egressIPCIDRs sets.Set[string]) bool {
 	c.Lock()
 	defer c.Unlock()
 
-	if nodeHostCIDRs.Equal(c.cidrs) {
+	if nodeHostCIDRs.Equal(c.cidrs) && egressIPCIDRs.Equal(c.egressIPHostCIDRs) {
 		return false
 	}
 	c.cidrs = nodeHostCIDRs
+	c.egressIPHostCIDRs = egressIPCIDRs
 	return true
 }
 
@@ -443,7 +512,17 @@ func (c *addressManager) doNodeHostCIDRsMatch() bool {
 		return false
 	}
 
-	return nodeHostAddresses.Equal(c.cidrs)
+	if !nodeHostAddresses.Equal(c.cidrs) {
+		return false
+	}
+	egressCIDRs, err := util.ParseNodeEgressIPHostCIDRs(node)
+	if err != nil {
+		if !util.IsAnnotationNotSetError(err) {
+			klog.Errorf("Unable to parse egress IP host CIDRs from node %s: %s", node.Name, err.Error())
+		}
+		return false
+	}
+	return egressCIDRs.Equal(c.egressIPHostCIDRs)
 }
 
 // nodePrimaryAddrChanged returns false if there is an error or if the IP does
@@ -606,7 +685,7 @@ func (c *addressManager) sync() {
 		currAddresses.Insert(netAddr.String())
 	}
 
-	addrChanged := c.assignCIDRs(currAddresses)
+	addrChanged := c.assignCIDRs(currAddresses, c.egressIPHostCIDRsFromAddrs(addrs))
 	c.handleNodePrimaryAddrChange()
 	if addrChanged || !c.doNodeHostCIDRsMatch() {
 		klog.Infof("Node address changed to %v. Updating annotations.", currAddresses)

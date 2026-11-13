@@ -1212,7 +1212,8 @@ func (eIPC *egressIPClusterController) getCloudPrivateIPConfigMap(objs []interfa
 // assign the egress IP to the node with the lowest amount of allocations every
 // time, this does not guarantee complete balance, but mostly complete.
 // For Egress IPs that are hosted by secondary host networks, there must be at least
-// one node that hosts the network and exposed via the nodes host-cidrs annotation.
+// one node that exposes the network via k8s.ovn.org/egressip-host-cidrs. Nodes that
+// have not published that annotation yet are evaluated from host-cidrs.
 func (eIPC *egressIPClusterController) assignEgressIPs(name string, egressIPs []string) []egressipv1.EgressIPStatusItem {
 	eIPC.nodeAllocator.Lock()
 	defer eIPC.nodeAllocator.Unlock()

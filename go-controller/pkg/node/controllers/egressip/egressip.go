@@ -1422,7 +1422,7 @@ func getFilteredPrefixes(link netlink.Link, v4, v6 bool) ([]netip.Prefix, error)
 		return nil, fmt.Errorf("failed to get link %s addresses: %v", link.Attrs().Name, err)
 	}
 	for _, address := range linkAddresses {
-		if isOneIPNetwork(address.IPNet) {
+		if !util.AddrDefinesSecondaryHostNetwork(address) {
 			continue
 		}
 		addr, err := netip.ParsePrefix(address.IPNet.String())
@@ -1432,20 +1432,6 @@ func getFilteredPrefixes(link netlink.Link, v4, v6 bool) ([]netip.Prefix, error)
 		validAddresses = append(validAddresses, addr)
 	}
 	return validAddresses, nil
-}
-
-// isOneIPNetwork returns true if only one address exists in the network attached to the IPs mask - itself.
-func isOneIPNetwork(ipnet *net.IPNet) bool {
-	ones, bits := ipnet.Mask.Size()
-	// IPv4
-	if ones == 32 && bits == 32 {
-		return true
-	}
-	// IPv6
-	if ones == 128 && bits == 128 {
-		return true
-	}
-	return false
 }
 
 func isLinkUp(flags string) bool {

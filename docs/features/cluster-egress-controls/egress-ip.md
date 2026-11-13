@@ -87,6 +87,13 @@ Routing Policies
 
 ### EgressIP IP is assigned to a secondary host interface
 Note that this is unsupported for user defined networks.
+
+ovnkube-node publishes the prefixes it can program in `k8s.ovn.org/egressip-host-cidrs`.
+Assignment uses that list. `k8s.ovn.org/host-cidrs` still contains every host address,
+including keepalived, kube-vip, and MetalLB VIPs. A VIP prefix is omitted from
+`k8s.ovn.org/egressip-host-cidrs` when the address is labeled `vip`, marked secondary
+or deprecated (kube-vip sets `preferred_lft 0`), or is a `/32` or `/128`. An EgressIP
+that falls only in an omitted range stays unassigned.
 Lets now imagine the Egress IP(s) mentioned previously, are not hosted by the OVN primary network and is hosted
 by a secondary host network which is assigned to a standard linux interface, in addition to the policy we saw previously to redirect to the egress node,
 another policy is added to the egress node itself redirecting the egressIP traffic to the secondary host interface via the 

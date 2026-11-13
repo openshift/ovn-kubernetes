@@ -885,6 +885,24 @@ func IsAddressAddedByKeepAlived(addr netlink.Addr) bool {
 	return strings.HasSuffix(addr.Label, "vip")
 }
 
+// AddrDefinesSecondaryHostNetwork reports whether addr can define a secondary host
+// network for EgressIP. Callers also require the link to be up. keepalived addresses
+// use a "vip" label. kube-vip and MetalLB mark addresses secondary or deprecated;
+// kube-vip does this by setting preferred lifetime to 0. A /32 or /128 prefix has no
+// room for another address, so it cannot host an EgressIP.
+func AddrDefinesSecondaryHostNetwork(addr netlink.Addr) bool {
+	if addr.IP == nil || addr.IPNet == nil {
+		return false
+	}
+	if addr.IP.IsLinkLocalUnicast() || IsAddressReservedForInternalUse(addr.IP) || IsAddressAddedByKeepAlived(addr) {
+		return false
+	}
+	if addr.Flags&(unix.IFA_F_SECONDARY|unix.IFA_F_DEPRECATED) != 0 {
+		return false
+	}
+	return !IsSingleIPPrefix(addr.IPNet)
+}
+
 // GetIPv6OnSubnet when given an IPv6 address with a 128 prefix for an interface,
 // looks for possible broadest subnet on-link routes and returns the same address
 // with the found subnet prefix. Otherwise it returns the provided address unchanged.

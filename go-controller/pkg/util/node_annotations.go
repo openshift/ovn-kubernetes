@@ -98,8 +98,16 @@ const (
 	// OvnNodeEgressLabel is a user assigned node label indicating to ovn-kubernetes that the node is to be used for egress IP assignment
 	ovnNodeEgressLabel = "k8s.ovn.org/egress-assignable"
 
-	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node
+	// OVNNodeHostCIDRs is used to track the different host IP addresses and subnet masks on the node.
+	// The list includes keepalived, kube-vip, and MetalLB addresses.
 	OVNNodeHostCIDRs = "k8s.ovn.org/host-cidrs"
+
+	// OVNNodeEgressIPHostCIDRs lists host addresses whose prefixes may host an EgressIP on a
+	// secondary interface. ovnkube-node publishes the same prefixes it can program: the link is
+	// up, and keepalived, kube-vip, and MetalLB addresses are omitted. Those addresses are
+	// labeled "vip", marked secondary or deprecated (kube-vip uses preferred lifetime 0), or
+	// use a /32 or /128 prefix. EgressIP assignment reads this annotation when it is set.
+	OVNNodeEgressIPHostCIDRs = "k8s.ovn.org/egressip-host-cidrs"
 
 	// OVNNodePrimaryDPUHostAddr is used to track the primary DPU host address on the node
 	OVNNodePrimaryDPUHostAddr = "k8s.ovn.org/primary-dpu-host-addr"
@@ -886,6 +894,34 @@ func NodeHostCIDRsAnnotationChanged(oldNode, newNode *corev1.Node) bool {
 	return oldNode.Annotations[OVNNodeHostCIDRs] != newNode.Annotations[OVNNodeHostCIDRs]
 }
 
+// SetNodeEgressIPHostCIDRs publishes the host prefixes that may host an EgressIP.
+func SetNodeEgressIPHostCIDRs(nodeAnnotator kube.Annotator, cidrs sets.Set[string]) error {
+	if cidrs == nil {
+		cidrs = sets.New[string]()
+	}
+	return nodeAnnotator.Set(OVNNodeEgressIPHostCIDRs, sets.List(cidrs))
+}
+
+// NodeEgressIPHostCIDRsAnnotationChanged reports whether the EgressIP host CIDR annotation changed.
+func NodeEgressIPHostCIDRsAnnotationChanged(oldNode, newNode *corev1.Node) bool {
+	return oldNode.Annotations[OVNNodeEgressIPHostCIDRs] != newNode.Annotations[OVNNodeEgressIPHostCIDRs]
+}
+
+// ParseNodeEgressIPHostCIDRs returns the host prefixes that may host an EgressIP.
+func ParseNodeEgressIPHostCIDRs(node *corev1.Node) (sets.Set[string], error) {
+	addrAnnotation, ok := node.Annotations[OVNNodeEgressIPHostCIDRs]
+	if !ok {
+		return nil, newAnnotationNotSetError("%s annotation not found for node %q", OVNNodeEgressIPHostCIDRs, node.Name)
+	}
+
+	var cfg []string
+	if err := json.Unmarshal([]byte(addrAnnotation), &cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal %s annotation %s for node %q: %v",
+			OVNNodeEgressIPHostCIDRs, addrAnnotation, node.Name, err)
+	}
+	return sets.New(cfg...), nil
+}
+
 // CloudEgressIPConfigAnnotationChanged returns true if the cloud egress IP
 // configuration annotation changed between oldNode and newNode. This annotation
 // is managed by cloud-network-config-controller and carries the IPv4/IPv6
@@ -948,6 +984,10 @@ func ParseNodeHostCIDRsExcludeOVNNetworks(node *corev1.Node) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return excludePrimaryIfAddrCIDRs(node, networks)
+}
+
+func excludePrimaryIfAddrCIDRs(node *corev1.Node, networks []string) ([]string, error) {
 	ovnNetworks, err := GetNodeIfAddrAnnotation(node)
 	if err != nil {
 		return nil, err
@@ -959,6 +999,38 @@ func ParseNodeHostCIDRsExcludeOVNNetworks(node *corev1.Node) ([]string, error) {
 		networks = RemoveItemFromSliceUnstable(networks, ovnNetworks.IPv6)
 	}
 	return networks, nil
+}
+
+// secondaryHostNetworkCIDRs returns prefixes that may host an EgressIP on a secondary
+// interface. Once ovnkube-node has published OVNNodeEgressIPHostCIDRs, that list is the
+// source of truth because host-cidrs also contains VIP prefixes. Older nodes omit the
+// annotation, and host-cidrs excluding the primary interface address is used instead.
+func secondaryHostNetworkCIDRs(node *corev1.Node) ([]string, error) {
+	annotation := OVNNodeHostCIDRs
+	if _, published := node.Annotations[OVNNodeEgressIPHostCIDRs]; published {
+		annotation = OVNNodeEgressIPHostCIDRs
+	}
+	networks, err := parseNodeAnnotationList(node, annotation)
+	if err != nil {
+		return nil, err
+	}
+	networks, err = excludePrimaryIfAddrCIDRs(node, networks)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]string, 0, len(networks))
+	for _, cidr := range networks {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse host CIDR %q: %v", cidr, err)
+		}
+		// A /32 or /128 contains only the address already configured on the host.
+		if IsSingleIPPrefix(ipNet) {
+			continue
+		}
+		filtered = append(filtered, cidr)
+	}
+	return filtered, nil
 }
 
 func ParseNodeHostCIDRsList(node *corev1.Node) ([]string, error) {
@@ -1100,11 +1172,12 @@ func IsOVNNetwork(eIPConfig *ParsedNodeEgressIPConfiguration, ip net.IP) bool {
 }
 
 // GetSecondaryHostNetworkContainingIP attempts to find a secondary host network to host the argument IP
-// and includes only global unicast addresses.
+// and includes only global unicast addresses. VIP prefixes that ovnkube-node will not program are omitted
+// when k8s.ovn.org/egressip-host-cidrs is set.
 func GetSecondaryHostNetworkContainingIP(node *corev1.Node, ip net.IP) (string, error) {
-	networks, err := ParseNodeHostCIDRsExcludeOVNNetworks(node)
+	networks, err := secondaryHostNetworkCIDRs(node)
 	if err != nil {
-		return "", fmt.Errorf("failed to get host-cidrs annotation excluding OVN networks for node %s: %v",
+		return "", fmt.Errorf("failed to get secondary host networks for node %s: %v",
 			node.Name, err)
 	}
 	cidrs, err := makeCIDRs(networks...)

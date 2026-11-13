@@ -1030,3 +1030,48 @@ func TestParseNodeManagementPortAnnotation(t *testing.T) {
 		})
 	}
 }
+
+func TestGetSecondaryHostNetworkContainingIP(t *testing.T) {
+	primary := "192.168.126.202/24"
+	secondary := "10.10.10.3/24"
+	vip := "10.199.0.5/24"
+	nodeWith := func(extra map[string]string) *corev1.Node {
+		annotations := map[string]string{
+			"k8s.ovn.org/node-primary-ifaddr": fmt.Sprintf("{\"ipv4\": %q, \"ipv6\": \"\"}", primary),
+			OVNNodeHostCIDRs:                  fmt.Sprintf("[\"%s\",\"%s\",\"%s\"]", primary, secondary, vip),
+		}
+		for key, value := range extra {
+			annotations[key] = value
+		}
+		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1", Annotations: annotations}}
+	}
+	maskedEqual := func(t *testing.T, got, want string) {
+		t.Helper()
+		_, gotNet, err := net.ParseCIDR(got)
+		require.NoError(t, err)
+		_, wantNet, err := net.ParseCIDR(want)
+		require.NoError(t, err)
+		assert.Equal(t, wantNet.String(), gotNet.String())
+	}
+
+	// Nodes that have not published the EgressIP prefix list still match host-cidrs.
+	got, err := GetSecondaryHostNetworkContainingIP(nodeWith(nil), net.ParseIP("10.199.0.77"))
+	require.NoError(t, err)
+	maskedEqual(t, got, "10.199.0.0/24")
+
+	published := nodeWith(map[string]string{
+		OVNNodeEgressIPHostCIDRs: fmt.Sprintf("[\"%s\",\"%s\"]", primary, secondary),
+	})
+	got, err = GetSecondaryHostNetworkContainingIP(published, net.ParseIP("10.199.0.77"))
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	got, err = GetSecondaryHostNetworkContainingIP(published, net.ParseIP("10.10.10.100"))
+	require.NoError(t, err)
+	maskedEqual(t, got, "10.10.10.0/24")
+
+	published.Annotations[OVNNodeEgressIPHostCIDRs] = fmt.Sprintf("[\"%s\",\"192.168.111.4/32\"]", primary)
+	got, err = GetSecondaryHostNetworkContainingIP(published, net.ParseIP("192.168.111.4"))
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}

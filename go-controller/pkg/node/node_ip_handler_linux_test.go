@@ -70,6 +70,16 @@ func nodeHasAddress(fakeClient kubernetes.Interface, nodeName string, ipNet *net
 	return addrs.Has(ipNet.IP.String())
 }
 
+func nodeHasEgressIPHostCIDR(fakeClient kubernetes.Interface, nodeName string, ipNet *net.IPNet) bool {
+	node, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	cidrs, err := util.ParseNodeEgressIPHostCIDRs(node)
+	if err != nil {
+		return false
+	}
+	return cidrs.Has(ipNet.String())
+}
+
 type testCtx struct {
 	ns           ns.NetNS
 	ipManager    *addressManager
@@ -517,6 +527,39 @@ var _ = Describe("Node IP Handler helper tests", func() {
 		Expect(networks).To(BeEmpty())
 	})
 
+	It("omits VIP addresses from the egress IP host CIDR set", func() {
+		Expect(config.PrepareTestConfig()).To(Succeed())
+		tc := configureKubeOVNContext(nodeName, false)
+		defer tc.watchFactory.Shutdown()
+		defer tc.ovsCleanup.Cleanup()
+
+		nlMock := new(utilMocks.NetLinkOps)
+		linkMock := new(netlink_mocks.Link)
+		util.SetNetLinkOpMockInst(nlMock)
+		defer util.ResetNetLinkOpMockInst()
+
+		linkMock.On("Attrs").Return(&netlink.LinkAttrs{Index: 4, Name: "breth0", Flags: net.FlagUp})
+		nlMock.On("LinkByIndex", 4).Return(linkMock, nil)
+
+		primary := ovntest.MustParseIPNet("10.1.1.10/24")
+		deprecatedVIP := ovntest.MustParseIPNet("10.199.0.5/24")
+		keepalivedVIP := ovntest.MustParseIPNet("192.168.2.2/24")
+		secondary := ovntest.MustParseIPNet("10.198.0.8/24")
+		hostRoute := ovntest.MustParseIPNet("192.168.111.4/32")
+		cidrs := tc.ipManager.egressIPHostCIDRsFromAddrs([]netlink.Addr{
+			{LinkIndex: 4, IPNet: primary},
+			{LinkIndex: 4, IPNet: deprecatedVIP, Flags: unix.IFA_F_DEPRECATED},
+			{LinkIndex: 4, IPNet: keepalivedVIP, Label: "breth0:vip"},
+			{LinkIndex: 4, IPNet: secondary, Flags: unix.IFA_F_SECONDARY},
+			{LinkIndex: 4, IPNet: hostRoute},
+		})
+		Expect(cidrs.Has(primary.String())).To(BeTrue())
+		Expect(cidrs.Has(deprecatedVIP.String())).To(BeFalse())
+		Expect(cidrs.Has(keepalivedVIP.String())).To(BeFalse())
+		Expect(cidrs.Has(secondary.String())).To(BeFalse())
+		Expect(cidrs.Has(hostRoute.String())).To(BeFalse())
+	})
+
 	It("syncs stale host-cidrs when egress IP annotations change", func() {
 		Expect(config.PrepareTestConfig()).To(Succeed())
 		tc := configureKubeOVNContext(nodeName, false)
@@ -607,6 +650,43 @@ var _ = Describe("Node IP Handler tests", func() {
 			Consistently(func() bool {
 				return nodeHasAddress(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR))
 			}, 3).Should(BeTrue())
+			// The VIP stays in host-cidrs. A published primary prefix shows the EgressIP
+			// list is present, and the VIP is omitted from it.
+			Eventually(func() bool {
+				return nodeHasEgressIPHostCIDR(tc.fakeClient, nodeName, ovntest.MustParseIPNet("10.1.1.10/24"))
+			}, 5).Should(BeTrue())
+			Consistently(func() bool {
+				return nodeHasEgressIPHostCIDR(tc.fakeClient, nodeName, ovntest.MustParseIPNet(dummyAdditionalIPv4CIDR))
+			}, 3).Should(BeFalse())
+		})
+
+		ovntest.OnSupportedPlatformsIt("omits a deprecated wide-prefix VIP from egress IP host CIDRs", func() {
+			runIpManagerRoutine(tc)
+			vip := ovntest.MustParseIPNet("10.199.0.5/24")
+			primary := ovntest.MustParseIPNet("10.1.1.10/24")
+			Expect(tc.ns.Do(func(ns.NetNS) error {
+				link, err := netlink.LinkByName(dummyBrName)
+				if err != nil {
+					return err
+				}
+				return netlink.AddrAdd(link, &netlink.Addr{
+					LinkIndex:   link.Attrs().Index,
+					Scope:       unix.RT_SCOPE_UNIVERSE,
+					IPNet:       vip,
+					Flags:       unix.IFA_F_DEPRECATED,
+					ValidLft:    0xffffffff,
+					PreferedLft: 0,
+				})
+			})).ShouldNot(HaveOccurred())
+			Eventually(func() bool {
+				return nodeHasAddress(tc.fakeClient, nodeName, vip)
+			}, 5).Should(BeTrue())
+			Eventually(func() bool {
+				return nodeHasEgressIPHostCIDR(tc.fakeClient, nodeName, primary)
+			}, 5).Should(BeTrue())
+			Consistently(func() bool {
+				return nodeHasEgressIPHostCIDR(tc.fakeClient, nodeName, vip)
+			}, 3).Should(BeFalse())
 		})
 
 		ovntest.OnSupportedPlatformsIt("allows unique local address", func() {

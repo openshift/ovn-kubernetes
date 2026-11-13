@@ -575,6 +575,16 @@ func GetLastIPOfSubnet(subnet *net.IPNet, indexFromLast int) *net.IPNet {
 	return &net.IPNet{IP: lastIP, Mask: subnet.Mask}
 }
 
+// IsSingleIPPrefix reports whether ipnet contains only its own address.
+// IPv4 /32 and IPv6 /128 prefixes cannot host an additional EgressIP.
+func IsSingleIPPrefix(ipnet *net.IPNet) bool {
+	if ipnet == nil || len(ipnet.Mask) == 0 {
+		return false
+	}
+	ones, bits := ipnet.Mask.Size()
+	return (ones == 32 && bits == 32) || (ones == 128 && bits == 128)
+}
+
 func NetworksOverlap(n1, n2 []*net.IPNet) bool {
 	for _, s1 := range n1 {
 		for _, s2 := range n2 {
