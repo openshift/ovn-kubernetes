@@ -1273,6 +1273,25 @@ func TestGetPodNADToNetworkMapping(t *testing.T) {
 	}
 }
 
+func TestNADKeyWithoutIndex(t *testing.T) {
+	tests := []struct {
+		nadKey string
+		want   string
+	}{
+		{nadKey: "ns1/vlan70", want: "ns1/vlan70"},
+		{nadKey: "ns1/vlan70/1", want: "ns1/vlan70"},
+		{nadKey: "ns1/vlan70/2", want: "ns1/vlan70"},
+		{nadKey: ovntypes.DefaultNetworkName, want: ovntypes.DefaultNetworkName},
+		{nadKey: "malformed", want: "malformed"},
+	}
+	for _, test := range tests {
+		t.Run(test.nadKey, func(t *testing.T) {
+			g := gomega.NewWithT(t)
+			g.Expect(NADKeyWithoutIndex(test.nadKey)).To(gomega.Equal(test.want))
+		})
+	}
+}
+
 func TestGetPodNADToNetworkMappingWithActiveNetwork(t *testing.T) {
 	const (
 		attachmentName = "attachment1"

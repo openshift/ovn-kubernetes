@@ -41,6 +41,20 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
+func TestGetNetworkNameForNADKey_IndexedKey(t *testing.T) {
+	g := gomega.NewWithT(t)
+	c := &nadController{
+		nads: map[string]string{
+			"ns1/vlan70": "vlan70",
+		},
+	}
+	g.Expect(c.GetNetworkNameForNADKey("ns1/vlan70")).To(gomega.Equal("vlan70"))
+	g.Expect(c.GetNetworkNameForNADKey("ns1/vlan70/1")).To(gomega.Equal("vlan70"))
+	g.Expect(c.GetNetworkNameForNADKey("ns1/vlan70/2")).To(gomega.Equal("vlan70"))
+	g.Expect(c.GetNetworkNameForNADKey("ns1/unknown/1")).To(gomega.Equal(""))
+	g.Expect(c.GetNetworkNameForNADKey(types.DefaultNetworkName)).To(gomega.Equal(""))
+}
+
 func TestNADNeedsUpdate_NotifiesReconcilersOnNoopUpdate(t *testing.T) {
 	g := gomega.NewWithT(t)
 

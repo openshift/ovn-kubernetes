@@ -206,6 +206,80 @@ var _ = Describe("BaseUserDefinedNetworkController", func() {
 		Entry("reattachment requires successful IP reacquisition", true),
 	)
 
+	It("deletes LSPs for every attachment when a pod uses the same NAD more than once", func() {
+		config.OVNKubernetesFeature.EnableMultiNetwork = true
+		const (
+			namespaceName = "ns1"
+			nadName       = "vlan70"
+			networkName   = "vlan70"
+			nodeName      = "worker1"
+			podName       = "virt-launcher-vm"
+			chassisID     = "chassis-worker1"
+		)
+		nadKey := namespaceName + "/" + nadName
+		indexedNADKey := util.GetIndexedNADKey(nadKey, 1)
+		nad := ovntest.GenerateNADWithConfig(nadName, namespaceName, fmt.Sprintf(`
+{
+        "cniVersion": "0.4.0",
+        "name": %q,
+        "type": "ovn-k8s-cni-overlay",
+        "topology": "localnet",
+        "netAttachDefName": %q,
+        "physicalNetworkName": "physnet-vlan70",
+        "mtu": 1500
+}
+`, networkName, nadKey))
+		ovntest.AnnotateNADWithNetworkID("3", nad)
+		netInfo, err := util.ParseNADInfo(nad)
+		Expect(err).NotTo(HaveOccurred())
+		switchName := netInfo.GetNetworkScopedName(types.OVNLocalnetSwitch)
+
+		pod := ovntest.NewPod(namespaceName, podName, nodeName, "")
+		pod.UID = "pod-uid"
+		pod.Annotations = map[string]string{
+			nettypes.NetworkAttachmentAnnot: `[{"name":"vlan70","namespace":"ns1","interface":"net1","mac":"02:00:00:00:00:01"},{"name":"vlan70","namespace":"ns1","interface":"net2","mac":"02:00:00:00:00:02"}]`,
+		}
+		for i, key := range []string{nadKey, indexedNADKey} {
+			pod.Annotations, err = util.MarshalPodAnnotation(pod.Annotations, &util.PodAnnotation{
+				MAC: ovntest.MustParseMAC(fmt.Sprintf("02:00:00:00:00:0%d", i+1)), Role: types.NetworkRoleSecondary,
+			}, key)
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		fakeOVN := NewFakeOVN(false, nodeName)
+		fakeOVN.startWithDBSetup(
+			libovsdbtest.TestSetup{NBData: []libovsdbtest.TestData{&nbdb.LogicalSwitch{UUID: switchName + "-UUID", Name: switchName}}},
+			pod,
+			ovntest.NewNamespace(namespaceName),
+			&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+				Name:        nodeName,
+				Annotations: map[string]string{"k8s.ovn.org/node-chassis-id": chassisID},
+			}},
+			&nettypes.NetworkAttachmentDefinitionList{Items: []nettypes.NetworkAttachmentDefinition{*nad}},
+		)
+		DeferCleanup(fakeOVN.shutdown)
+		bnc := fakeOVN.userDefinedNetworkControllers[networkName].bnc
+		Eventually(func() string { return bnc.networkManager.GetNetworkNameForNADKey(nadKey) }).Should(Equal(networkName))
+		Expect(bnc.networkManager.GetNetworkNameForNADKey(indexedNADKey)).To(Equal(networkName))
+		Expect(bnc.lsManager.AddOrUpdateSwitch(switchName, nil, nil, nil)).To(Succeed())
+
+		Expect(bnc.ensurePodForUserDefinedNetwork(context.Background(), pod, true)).To(Succeed())
+		podPorts := func() ([]*nbdb.LogicalSwitchPort, error) {
+			return libovsdbops.FindLogicalSwitchPortWithPredicate(fakeOVN.nbClient, func(lsp *nbdb.LogicalSwitchPort) bool {
+				return lsp.Options["iface-id-ver"] == string(pod.UID)
+			})
+		}
+		Eventually(podPorts).Should(HaveLen(2))
+		portInfoMap, err := bnc.logicalPortCache.getAll(pod)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(portInfoMap).To(HaveLen(2))
+		Expect(portInfoMap).To(HaveKey(nadKey))
+		Expect(portInfoMap).To(HaveKey(indexedNADKey))
+
+		Expect(bnc.removePodForUserDefinedNetwork(context.Background(), pod, portInfoMap)).To(Succeed())
+		Eventually(podPorts).Should(BeEmpty())
+	})
+
 	DescribeTable("restores ownership after a completed pod's IPs are reused", func(defaultNetwork, completedOwner, ownerFirst bool) {
 		config.OVNKubernetesFeature.EnableMultiNetwork = true
 		config.IPv4Mode, config.IPv6Mode = true, true
@@ -1451,6 +1525,10 @@ var _ = Describe("dhcpPodNetworkUpdated", func() {
 			types.IPAMTypeDHCP,
 			podNetworks{nadKey: dhcpMACOnly, "default": defaultNetEntry},
 			podNetworks{nadKey: dhcpLeased, "default": defaultNetEntry}),
+		Entry("when an indexed attachment of this NAD gains DHCP-learned IPs",
+			types.IPAMTypeDHCP,
+			podNetworks{nadKey + "/1": dhcpMACOnly},
+			podNetworks{nadKey + "/1": dhcpLeased}),
 	)
 
 	DescribeTable("does not re-trigger port processing",
