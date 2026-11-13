@@ -3,12 +3,16 @@ package otputils
 import (
 	"bytes"
 	"context"
+	"embed"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	o "github.com/onsi/gomega"
@@ -18,10 +22,47 @@ import (
 	e2eoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
 )
 
-// FixturePath returns the absolute path to a fixture file in the OTE extension
+// Fixtures ship inside the OTE binary: CI extracts only ovn-kubernetes-tests-ext
+// (cwd has no source tree), so disk paths under Getwd() do not work there.
+//
+//go:embed all:testdata/fixtures
+var fixtureFS embed.FS
+
+var materializedFixtures sync.Map // embed rel path -> temp file path
+
+// FixturePath returns a filesystem path to an OTP fixture for `oc process -f`.
+// Content is read from the embedded FS and written to a temp file once per path.
 func FixturePath(parts ...string) string {
-	cwd, _ := os.Getwd()
-	return filepath.Join(append([]string{cwd, "pkg", "otp", "testdata", "fixtures"}, parts...)...)
+	rel := path.Join(append([]string{"testdata", "fixtures"}, parts...)...)
+	if cached, ok := materializedFixtures.Load(rel); ok {
+		return cached.(string)
+	}
+
+	data, err := fs.ReadFile(fixtureFS, rel)
+	if err != nil {
+		framework.Failf("embedded OTP fixture %s missing: %v", rel, err)
+	}
+
+	tmp, err := os.CreateTemp("", "otp-fixture-*-"+filepath.Base(rel))
+	if err != nil {
+		framework.Failf("failed to create temp file for fixture %s: %v", rel, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		framework.Failf("failed to write fixture %s: %v", rel, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		framework.Failf("failed to close fixture temp file %s: %v", rel, err)
+	}
+
+	abs := tmp.Name()
+	if actual, loaded := materializedFixtures.LoadOrStore(rel, abs); loaded {
+		_ = os.Remove(abs)
+		return actual.(string)
+	}
+	return abs
 }
 
 // ApplyResourceFromTemplate processes an OpenShift template and applies it
