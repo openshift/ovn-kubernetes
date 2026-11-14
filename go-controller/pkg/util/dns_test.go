@@ -362,6 +362,11 @@ func TestAdd(t *testing.T) {
 			err := dns.Add(dnsName)
 			if tc.errExp {
 				require.Error(t, err)
+				res, ok := dns.dnsMap[dnsName]
+				require.True(t, ok, "failed lookup should remain scheduled for retry")
+				assert.Empty(t, res.ips)
+				assert.Equal(t, defaultMinTTL, res.ttl)
+				assert.WithinDuration(t, time.Now().Add(defaultMinTTL), res.nextQueryTime, time.Second)
 			} else {
 				require.NoError(t, err)
 				assert.Len(t, dns.dnsMap[dnsName].ips, 1)
