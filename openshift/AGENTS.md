@@ -61,7 +61,7 @@ make license-fix
 3. Each spec gets labels (`sig-network`, `ovn-kubernetes-ote`) and prepended feature labels
 4. `zz_generated.annotations.go` appends suite names (`[Suite:ovn-kubernetes/conformance/...]`)
 5. Specs are matched against `tests.go` to assign lifecycle (informing/blocking); unmatched tests get empty lifecycle and are filtered out
-6. `shouldIncludeTest` filters based on cluster capabilities (EVPN, GCP, secondary-host-eip)
+6. `shouldIncludeTest` filters based on cluster capabilities (EVPN, GCP, secondary-host-eip, ExternalGateway on cloud)
 
 ## How to Add a Test to tests.go
 

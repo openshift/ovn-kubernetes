@@ -12,6 +12,7 @@ import (
 	operv1 "github.com/openshift/api/operator/v1"
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 )
 
 func TestFeatureGateEnabled(t *testing.T) {
@@ -527,6 +528,9 @@ func TestConfigureTestEnvs(t *testing.T) {
 			// cleanup to restore the original value when the subtest ends.
 			t.Setenv("OVN_GATEWAY_MODE", "")
 			t.Setenv("ENABLE_NETWORK_SEGMENTATION", "")
+			t.Setenv("OVN_TEST_EX_GW_NETWORK", "")
+			t.Setenv("OVN_TEST_EX_GW_IPV4", "")
+			t.Setenv("OVN_TEST_EX_GW_IPV6", "")
 
 			o := &OpenshiftInfraProvider{operNetwork: tt.operNetwork}
 			o.configureTestEnvs()
@@ -536,6 +540,65 @@ func TestConfigureTestEnvs(t *testing.T) {
 			}
 			if got := os.Getenv("ENABLE_NETWORK_SEGMENTATION"); got != tt.wantNetSegment {
 				t.Errorf("ENABLE_NETWORK_SEGMENTATION = %q, want %q", got, tt.wantNetSegment)
+			}
+			if got := os.Getenv("OVN_TEST_EX_GW_NETWORK"); got != "" {
+				t.Errorf("OVN_TEST_EX_GW_NETWORK = %q, want empty without host infra", got)
+			}
+		})
+	}
+}
+
+func TestConfigureExternalGatewayEnvs(t *testing.T) {
+	tests := []struct {
+		name        string
+		infra       platformInfra
+		wantNetwork string
+	}{
+		{
+			name: "nil clusterInfra leaves EX_GW unset",
+		},
+		{
+			name: "baremetal sets EX_GW network to xgw",
+			infra: &baremetalInfra{
+				base: &baseInfra{
+					primaryNetworkName: bmPrimaryNetworkName,
+					hostNetworkInfo: &api.NetworkInterface{
+						IPv4: "192.168.111.1",
+						IPv6: "fd2e:6f44:5dd8:c956::1",
+					},
+				},
+			},
+			wantNetwork: bmExGwNetworkName,
+		},
+		{
+			name: "cloud host primary leaves EX_GW unset",
+			infra: &baseInfra{
+				primaryNetworkName: bastionPrimaryNetworkName,
+				hostNetworkInfo: &api.NetworkInterface{
+					IPv4: "10.0.0.5",
+					IPv6: "2001:db8::5",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OVN_TEST_EX_GW_NETWORK", "")
+			t.Setenv("OVN_TEST_EX_GW_IPV4", "")
+			t.Setenv("OVN_TEST_EX_GW_IPV6", "")
+
+			o := &OpenshiftInfraProvider{clusterInfra: tt.infra}
+			o.configureExternalGatewayEnvs()
+
+			if got := os.Getenv("OVN_TEST_EX_GW_NETWORK"); got != tt.wantNetwork {
+				t.Errorf("OVN_TEST_EX_GW_NETWORK = %q, want %q", got, tt.wantNetwork)
+			}
+			if got := os.Getenv("OVN_TEST_EX_GW_IPV4"); got != "" {
+				t.Errorf("OVN_TEST_EX_GW_IPV4 = %q, want empty", got)
+			}
+			if got := os.Getenv("OVN_TEST_EX_GW_IPV6"); got != "" {
+				t.Errorf("OVN_TEST_EX_GW_IPV6 = %q, want empty", got)
 			}
 		})
 	}

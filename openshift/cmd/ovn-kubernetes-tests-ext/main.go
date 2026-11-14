@@ -50,6 +50,7 @@ const (
 	featureLabelNetworkSegmentation = "Feature:NetworkSegmentation"
 	featureLabelEgressIP            = "Feature:EgressIP"
 	featureLabelMACSecurity         = "Feature:MACSecurity"
+	featureLabelExternalGateway     = "Feature:ExternalGateway"
 	// Test constants used for test categorization and filtering
 	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
 )
@@ -85,6 +86,14 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
 	// which is not yet configured on bastion-based platforms.
 	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsCloudPlatform() {
+		return false
+	}
+	// External Gateway non-vxlan setup installs a return route on the bastion
+	// gateway container as `ip route add <podIP> via <nodeInternalIP>`. That
+	// requires L2 adjacency to the worker (Kind/baremetal). On cloud bastions
+	// the node InternalIP is in another VPC subnet, so the nexthop is rejected
+	// ("Nexthop has invalid gateway").
+	if spec.Labels.Has(featureLabelExternalGateway) && ocpInfra.IsCloudPlatform() {
 		return false
 	}
 	// On GCP, nodes have a /32 primary interface address
@@ -164,6 +173,8 @@ func main() {
 
 	// Add the agnhost image to the required images
 	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost)
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Netshoot)
+	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.FRR)
 	// Register OVN-Kubernetes e2e images to the openshift-tests extension
 	err = registerTestImages(ovnTestsExtension)
 	if err != nil {

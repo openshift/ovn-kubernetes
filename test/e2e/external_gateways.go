@@ -1783,11 +1783,10 @@ func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) st
 
 // pokeConntrackEntries returns the number of conntrack entries that match the provided pattern, protocol and podIP
 func pokeConntrackEntries(nodeName, podIP, protocol string, patterns []string) int {
-	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
 	ovnKubernetesNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
-	ovsPodName, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, args...)
+	ovsPodName, err := ovsPodNameOnNode(ovnKubernetesNamespace, nodeName)
 	framework.ExpectNoError(err, "failed to get the ovs pod on node %s", nodeName)
-	args = []string{"exec", ovsPodName, "--", "ovs-appctl", "dpctl/dump-conntrack"}
+	args := []string{"exec", ovsPodName, "--", "ovs-appctl", "dpctl/dump-conntrack"}
 	conntrackEntries, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, args...)
 	framework.ExpectNoError(err, "failed to get the conntrack entries from node %s", nodeName)
 	numOfConnEntries := 0
@@ -1809,12 +1808,39 @@ func pokeConntrackEntries(nodeName, podIP, protocol string, patterns []string) i
 	return numOfConnEntries
 }
 
+// ovsPodNameOnNode returns the OVS-capable pod on nodeName. Kind Helm may use
+// app=ovs-node; OpenShift (and Kind's combined ovnkube-node) use app=ovnkube-node.
+func ovsPodNameOnNode(namespace, nodeName string) (string, error) {
+	fieldSelector := fmt.Sprintf("spec.nodeName=%s", nodeName)
+	for _, selector := range []string{"app=ovs-node", "app=ovnkube-node"} {
+		args := []string{"get", "pods", "--selector=" + selector, "--field-selector", fieldSelector, "-o", "jsonpath={.items[0].metadata.name}"}
+		name, err := e2ekubectl.RunKubectl(namespace, args...)
+		if err != nil {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name != "" {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("no ovs-node or ovnkube-node pod found on node %s in namespace %s", nodeName, namespace)
+}
+
 // prepareExternalGatewayContainer installs packages the official FRR image
 // does not include but that external-gateway e2e needs.
+//
+// On OpenShift metal CI, HTTP_PROXY points at a squid that only allows cluster
+// API domains, so Alpine mirrors must be fetched via direct egress (hypervisor
+// NAT). Prefer IPv4 for those fetches when dual-stack IPv6 NAT is incomplete.
 func prepareExternalGatewayContainer(container infraapi.ExternalContainer) {
-	_, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{
-		"apk", "add", "--no-cache", "tcpdump", "iputils", "iproute2", "netcat-openbsd", "curl", "libndp",
-	})
+	const install = `set -e
+# Do not use CI squid — its ACL denies dl-cdn.alpinelinux.org.
+unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
+# Prefer IPv4 when resolving package mirrors.
+printf 'precedence :ffff:0:0/96  100\n' > /etc/gai.conf
+apk add --no-cache tcpdump iputils iproute2 netcat-openbsd curl libndp
+`
+	_, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{"sh", "-c", install})
 	framework.ExpectNoError(err, "failed to install gateway tools on external gateway %s", container.Name)
 }
 
