@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: hello
+  labels:
+    app: hello
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: test-pods
+  serviceName: hello
+  template:
+    metadata:
+      labels:
+        name: test-pods
+    spec:
+      containers:
+      - image: quay.io/openshifttest/hello-sdn:1.2.0
+        name: hello
+        ports:
+        - containerPort: 8080
+          name: web
+          protocol: TCP
+        resources:
+          limits:
+            memory: 340Mi
+      restartPolicy: Always
