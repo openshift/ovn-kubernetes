@@ -18,6 +18,11 @@ var labelToPrependLabelsMap = map[string][]string{
 	featureLabelMACSecurity: {
 		"FeatureGate:MACSecurity",
 	},
+	// No-overlay, both on the default network and on user defined networks, is
+	// gated by the NoOverlayMode feature gate.
+	"Feature:NoOverlay": {
+		"FeatureGate:NoOverlayMode",
+	},
 }
 
 // getTestExtensionLabels returns labels that should be applied to all tests in this extension
