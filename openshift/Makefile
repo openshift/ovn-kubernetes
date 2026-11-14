@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-EXCLUDE_DIRS ?= test/annotate test/deploymentconfig test/generated
+EXCLUDE_DIRS ?= test/annotate test/generated
 TEST_PKGS := $$(go list ./... $(foreach dir,$(EXCLUDE_DIRS),| grep -v $(dir)))
 
 LICENSE_EYE := $(shell which license-eye 2>/dev/null || echo "$(shell go env GOPATH)/bin/license-eye")
