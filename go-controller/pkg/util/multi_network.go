@@ -1525,6 +1525,17 @@ func GetNadFromIndexedNADKey(nadKey string) (string, int, error) {
 	return "", 0, fmt.Errorf("malformed NAD key %s, expect in the form of namespace/name{/index}", nadKey)
 }
 
+// NADKeyWithoutIndex returns the NAD name for a key that may include an
+// attachment index. "ns/nad/1" becomes "ns/nad"; "ns/nad" is unchanged.
+// Unparseable keys, including the default network name, are returned as-is.
+func NADKeyWithoutIndex(nadKey string) string {
+	nadName, _, err := GetNadFromIndexedNADKey(nadKey)
+	if err != nil {
+		return nadKey
+	}
+	return nadName
+}
+
 // GetUserDefinedNetworkPrefix gets the string used as prefix of the logical entities
 // of the User Defined Network of the given network name, in the form of <netName>_.
 //

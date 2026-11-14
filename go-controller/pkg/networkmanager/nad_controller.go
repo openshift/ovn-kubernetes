@@ -1447,7 +1447,7 @@ func (c *nadController) GetNetwork(name string) util.NetInfo {
 
 func (c *nadController) GetNetInfoForNADKey(nadKey string) util.NetInfo {
 	c.RLock()
-	networkName := c.nads[nadKey]
+	networkName := c.networkNameForNADKeyLocked(nadKey)
 	c.RUnlock()
 	if networkName == "" {
 		return nil
@@ -1466,7 +1466,16 @@ func (c *nadController) GetNetInfoForNADKey(nadKey string) util.NetInfo {
 func (c *nadController) GetNetworkNameForNADKey(nadKey string) string {
 	c.RLock()
 	defer c.RUnlock()
-	return c.nads[nadKey]
+	return c.networkNameForNADKeyLocked(nadKey)
+}
+
+// networkNameForNADKeyLocked returns the network for nadKey. Indexed keys
+// ("ns/nad/1") are not stored in c.nads, so they fall back to the base NAD.
+func (c *nadController) networkNameForNADKeyLocked(nadKey string) string {
+	if name := c.nads[nadKey]; name != "" {
+		return name
+	}
+	return c.nads[util.NADKeyWithoutIndex(nadKey)]
 }
 
 func (c *nadController) GetNADKeysForNetwork(networkName string) []string {
