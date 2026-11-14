@@ -7,6 +7,8 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/annotate"
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
+	// import OTE migrated tests so the generator discovers them
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 )
