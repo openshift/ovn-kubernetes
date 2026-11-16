@@ -38,6 +38,8 @@ var (
 		"[Disabled:Alpha]": {},
 		// tests for features that are not implemented in openshift
 		"[Disabled:Unimplemented]": {
+			// Uplink is not supported on OpenShift.
+			"MAC binding mirroring for multiple UDNs on same uplink",
 			`Creating a static pod on a node Should successfully create then remove a static pod`,
 			`Pod to external server PMTUD`,
 			`Pod to pod TCP with low MTU`,

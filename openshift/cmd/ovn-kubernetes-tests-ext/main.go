@@ -51,6 +51,9 @@ const (
 	featureLabelEgressIP            = "Feature:EgressIP"
 	// Test constants used for test categorization and filtering
 	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
+	// nofloodMACBindingDescribe is the Describe text of the upstream no-flood
+	// MAC binding mirroring specs that run against isolated external containers.
+	nofloodMACBindingDescribe = "MAC binding mirroring with ARP/NDP flood disabled"
 )
 
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
@@ -84,6 +87,13 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
 	// which is not yet configured on bastion-based platforms.
 	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsCloudPlatform() {
+		return false
+	}
+	// The no-flood MAC binding mirroring specs need two external containers
+	// with their own IP and MAC on the cluster's L2 network. On cloud
+	// platforms the external containers share the bastion's IP, so the specs
+	// could pass without exercising two distinct hosts.
+	if strings.Contains(spec.Name, nofloodMACBindingDescribe) && ocpInfra.IsCloudPlatform() {
 		return false
 	}
 	// On GCP, nodes have a /32 primary interface address
