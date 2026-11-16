@@ -19,6 +19,7 @@ ARG ovnver=26.03
 # the corresponding Centos version when updating the OCP version.
 ARG ovsver_okd=3.5
 ARG ovnver_okd=26.03
+ARG with_ovn_debug_symbols=false
 
 RUN INSTALL_PKGS="iptables nftables" && \
     source /etc/os-release && \
@@ -26,6 +27,13 @@ RUN INSTALL_PKGS="iptables nftables" && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs $INSTALL_PKGS && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "openvswitch$ovsver" "python3-openvswitch$ovsver" && \
 	dnf --setopt=retries=2 --setopt=timeout=2 install -y --nodocs "ovn$ovnver" "ovn$ovnver-central" "ovn$ovnver-host" && \
+	# Install perf and OVN debug symbols for profiling.
+	if [ "$with_ovn_debug_symbols" = "true" ]; then \
+		dnf --setopt=retries=2 --setopt=timeout=2 --enablerepo='*debug*' install -y --nodocs \
+			perf binutils "openvswitch$ovsver-debuginfo" "openvswitch$ovsver-debugsource" \
+			"ovn$ovnver-debuginfo" "ovn$ovnver-debugsource" \
+			"ovn$ovnver-central-debuginfo" "ovn$ovnver-host-debuginfo"; \
+	fi && \
 	dnf clean all && rm -rf /var/cache/* && \
 	sed 's/%/"/g' <<<"%openvswitch$ovsver-devel% %openvswitch$ovsver-ipsec% %ovn$ovnver-vtep%" > /more-pkgs
 
