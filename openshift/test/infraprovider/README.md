@@ -47,6 +47,36 @@ machine network.
 - **IP forwarding**: Enabled on secondary interfaces of cluster nodes when a
   secondary network is discovered
 
+#### Isolated External Containers
+
+Some specs need external containers with their own IP and MAC on the machine
+network, and change the container's MAC or take its link down, which host
+networking can't provide safely. Primary-network containers whose name is
+listed in `isolatedContainerNames` are therefore not host-networked:
+`baremetal_isolated.go` creates them through the normal container engine
+(`podman run` with `--ip`/`--ip6`, cleanup with the test context) on a
+dedicated network. All other containers keep the host-networked behaviour.
+
+- **Addresses**: the e2e primary IP allocator (`test/e2e/allocators/
+  ipalloc.go`), which the other specs already use for machine-network
+  addresses: its reserved per-node range (`.200`-`.254` / `::c8`-`::ff` by
+  default), handed out per test process and checked against the node host
+  addresses (`k8s.ovn.org/host-cidrs`). The fixture only turns the allocated
+  IPs into `--ip`/`--ip6`. Like the allocator's other users, it relies on the
+  lane's dev-scripts profile to keep that range free.
+- **Network**: `ovnk-e2e-isolated`, a podman network that plugs containers
+  into the existing machine network bridge (`ostestbm` on dev-scripts, found at
+  provider initialisation). It is never `ostestbm_net`, which belongs to the BGP
+  setup. It's created once, when missing, with:
+  - `--opt mode=unmanaged`: podman only attaches the containers. In its
+    default (managed) mode it would set the hypervisor up around the bridge:
+    a gateway address on the bridge, firewall/NAT rules and forwarding sysctls.
+    The bridge belongs to libvirt and must stay as libvirt configured it;
+  - `--opt no_default_route=true`: the containers only talk to the machine
+    subnet, so they need no gateway (none is passed);
+  - `--disable-dns`: no podman DNS server next to libvirt's dnsmasq;
+  - the machine subnets, so the allocated addresses fit.
+
 ### Cloud Platforms (AWS, Azure, GCP)
 
 A bastion host in the same VPC runs external test containers via podman with
