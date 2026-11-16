@@ -19,6 +19,7 @@ var (
 			`[Feature:BaselineNetworkPolicy]`,
 			`[Feature:EgressService]`,
 			`[Feature:EgressQos]`,
+			`[Feature:EgressIP]`,
 			`[Feature:DisablePacketMTUCheck]`,
 			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
