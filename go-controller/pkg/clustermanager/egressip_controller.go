@@ -216,11 +216,29 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(ctx contex
 					return fmt.Errorf("cloud update request failed, CloudPrivateIPConfig: %s is being deleted", cloudPrivateIPConfigName)
 				}
 
-				// Handle a scenario in which the object exists in a failed state by removing it if the node it was assigned to no longer exists
+				// Handle a scenario in which the object exists in a failed state:
+				// 1) If it needs to be assigned to a different node (e.g., previous node was over capacity),
+				//    update it directly with the newly assigned node instead of deleting it.
+				// 2) Remove it if the node it was assigned to no longer exists.
 				assignedCondition := meta.FindStatusCondition(cloudPrivateIPConfig.Status.Conditions, string(ocpcloudnetworkapi.Assigned))
 				if cloudPrivateIPConfig.Status.Node != "" && assignedCondition != nil && assignedCondition.Status == metav1.ConditionFalse {
-					_, err := eIPC.watchFactory.GetNode(cloudPrivateIPConfig.Status.Node)
-					if err != nil && apierrors.IsNotFound(err) {
+					// If we are reassigning to another node with capacity:
+					if op.toAdd != cloudPrivateIPConfig.Spec.Node {
+						if cloudPrivateIPConfig.Annotations[util.OVNEgressIPOwnerRefLabel] != egressIPName {
+							return fmt.Errorf("CloudPrivateIPConfig %s is not owned by EgressIP %s", cloudPrivateIPConfigName, egressIPName)
+						}
+						klog.Warningf("CloudPrivateIPConfig: %s is in Failed state on node %s (message: %s), updating node to %s",
+							cloudPrivateIPConfigName, cloudPrivateIPConfig.Spec.Node, assignedCondition.Message, op.toAdd)
+						cpicToUpdate := cloudPrivateIPConfig.DeepCopy()
+						cpicToUpdate.Spec.Node = op.toAdd
+						if _, err := eIPC.kube.UpdateCloudPrivateIPConfig(ctx, cpicToUpdate); err != nil {
+							return fmt.Errorf("failed to update failed CloudPrivateIPConfig %s to node %s: %w", cloudPrivateIPConfigName, op.toAdd, err)
+						}
+						continue
+					}
+
+					_, nodeErr := eIPC.watchFactory.GetNode(cloudPrivateIPConfig.Status.Node)
+					if nodeErr != nil && apierrors.IsNotFound(nodeErr) {
 						klog.Warningf("CloudPrivateIPConfig: %s is in Failed state (reason: %s) and node %s no longer exists, deleting to allow retry",
 							cloudPrivateIPConfigName, assignedCondition.Message, cloudPrivateIPConfig.Status.Node)
 						eIPRef := corev1.ObjectReference{
@@ -233,10 +251,9 @@ func (eIPC *egressIPClusterController) executeCloudPrivateIPConfigOps(ctx contex
 						if err := eIPC.kube.DeleteCloudPrivateIPConfig(ctx, cloudPrivateIPConfigName); err != nil {
 							return fmt.Errorf("failed to delete failed CloudPrivateIPConfig: %s, err: %v", cloudPrivateIPConfigName, err)
 						}
-
 						return fmt.Errorf("deleted failed CloudPrivateIPConfig: %s, will retry creation in next reconciliation", cloudPrivateIPConfigName)
-					} else if err != nil {
-						klog.Errorf("Failed to check if node %s exists for CloudPrivateIPConfig %s: %v", cloudPrivateIPConfig.Status.Node, cloudPrivateIPConfigName, err)
+					} else if nodeErr != nil {
+						klog.Errorf("Failed to check if node %s exists for CloudPrivateIPConfig %s: %v", cloudPrivateIPConfig.Status.Node, cloudPrivateIPConfigName, nodeErr)
 					}
 				}
 
@@ -1169,6 +1186,13 @@ func (eIPC *egressIPClusterController) syncCloudPrivateIPConfigs(ctx context.Con
 				// cloud private ip config object. Note that the egress ip status might still reflect an
 				// old node assignment if the informer cache has old data, so do not invalidate if it is
 				// not the same node as the cloud private ip config assignment.
+				// CPIC doesn't exist
+				eIP := net.ParseIP(status.EgressIP)
+				if utilnet.IsIPv4(eIP) {
+					klog.Infof("IPv4 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
+				} else if utilnet.IsIPv6(eIP) {
+					klog.Infof("IPv6 CloudPrivateIPConfig %s not found for EgressIP %s", cloudPrivateIPConfigName, egressIP.Name)
+				}
 				cloudPrivateIPNotFound = true
 			}
 		}
