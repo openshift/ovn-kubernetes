@@ -1704,19 +1704,19 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink ages out every binding on every member once the traffic stops": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink ages out every binding on every member once the traffic stops": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink backfills a CUDN that joins the uplink after the bindings were learned, and reaps it when it leaves": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink backfills a CUDN that joins the uplink after the bindings were learned, and reaps it when it leaves": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink designates exactly one CUDN gateway router as the ARP/NDP source of the uplink": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink designates exactly one CUDN gateway router as the ARP/NDP source of the uplink": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink keeps the uplink group's bindings stable and isolated while the traffic lasts": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink keeps the uplink group's bindings stable and isolated while the traffic lasts": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink mirrors a binding resolved by the source CUDN onto every follower": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink mirrors a binding resolved by the source CUDN onto every follower": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink mirrors a binding resolved on behalf of a follower CUDN onto the source and the other followers": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink mirrors a binding resolved on behalf of a follower CUDN onto the source and the other followers": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink re-designates the source and keeps the followers resolved when the source CUDN leaves the uplink": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink re-designates the source and keeps the followers resolved when the source CUDN leaves the uplink": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the CDN-triggered binding on every gateway router once traffic stops": "[Suite:ovn-kubernetes/conformance/serial]",
 
