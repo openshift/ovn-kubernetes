@@ -1172,7 +1172,7 @@ func TestParseCloudEgressIPConfigCapacity(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-node",
 			Annotations: map[string]string{
-				"cloud.network.openshift.io/egress-ipconfig": `[{"interface":"eni-xxxx","ifaddr":{"ipv4":"10.0.128.0/18"},"capacity":{"ipv4":14,"ipv6":15,"ip":100}}]`,
+				"cloud.network.openshift.io/egress-ipconfig": `[{"interface":"eni-xxxx","ifaddr":{"ipv4":"10.0.128.0/18"},"capacity":{"ipv4":14,"ipv6":15}}]`,
 				OvnNodeIfAddr: `{"ipv4":"10.0.128.5/18"}`,
 			},
 		},
@@ -1186,5 +1186,5 @@ func TestParseCloudEgressIPConfigCapacity(t *testing.T) {
 
 	assert.Equal(t, 14, *parsed.Capacity.IPv4, "IPv4 capacity must not be corrupted by other capacity values")
 	assert.Equal(t, 15, *parsed.Capacity.IPv6, "IPv6 capacity must not be corrupted by other capacity values")
-	assert.Equal(t, 100, *parsed.Capacity.IP, "IP capacity must not be corrupted by other capacity values")
+	assert.Equal(t, UnlimitedNodeCapacity, *parsed.Capacity.IP, "IP capacity must remain unlimited when unset")
 }

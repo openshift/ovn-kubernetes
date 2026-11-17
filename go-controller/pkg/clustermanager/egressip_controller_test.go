@@ -4684,7 +4684,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 							"k8s.ovn.org/node-primary-ifaddr":            fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node1IPv4, ""),
 							"k8s.ovn.org/node-subnets":                   fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
 							util.OVNNodeHostCIDRs:                        fmt.Sprintf("[\"%s\"]", node1IPv4),
-							"cloud.network.openshift.io/egress-ipconfig": fmt.Sprintf(`[{"interface":"eth0","ifaddr":{"ipv4":"%s"},"capacity":{"ipv4":5,"ipv6":5}}]`, node1IPv4),
+							"cloud.network.openshift.io/egress-ipconfig": fmt.Sprintf(`[{"interface":"eth0","ifaddr":{"ipv4":"%s"},"capacity":{"ipv4":5,"ipv6":7}}]`, node1IPv4),
 						},
 						Labels: map[string]string{
 							"k8s.ovn.org/egress-assignable": "",
@@ -4708,7 +4708,7 @@ var _ = ginkgo.Describe("OVN cluster-manager EgressIP Operations", func() {
 							"k8s.ovn.org/node-primary-ifaddr":            fmt.Sprintf("{\"ipv4\": \"%s\", \"ipv6\": \"%s\"}", node2IPv4, ""),
 							"k8s.ovn.org/node-subnets":                   fmt.Sprintf("{\"default\":[\"%s\", \"%s\"]}", v4NodeSubnet, v6NodeSubnet),
 							util.OVNNodeHostCIDRs:                        fmt.Sprintf("[\"%s\"]", node2IPv4),
-							"cloud.network.openshift.io/egress-ipconfig": fmt.Sprintf(`[{"interface":"eth0","ifaddr":{"ipv4":"%s"},"capacity":{"ipv4":5,"ipv6":5}}]`, node2IPv4),
+							"cloud.network.openshift.io/egress-ipconfig": fmt.Sprintf(`[{"interface":"eth0","ifaddr":{"ipv4":"%s"},"capacity":{"ipv4":5,"ipv6":7}}]`, node2IPv4),
 						},
 						Labels: map[string]string{},
 					},
