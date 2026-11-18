@@ -234,4 +234,10 @@ var BlockingTests = []string{
 	"[Feature:MACSecurity][Feature:NetworkSegmentation][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security enabled, should fail [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:MACSecurity][Feature:NetworkSegmentation][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC security using UserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security disabled, should succeed (MAC spoofed traffic is allowed) [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:MACSecurity][Feature:NetworkSegmentation][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC security using UserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security enabled, should fail [Suite:ovn-kubernetes/conformance/parallel]",
+	// NetworkPolicy tests
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy the logs have the expected log level [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL allow and deny logging annotations are set to invalid values ACL logging is disabled [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is removed ACL logging is disabled [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network [Suite:ovn-kubernetes/conformance/parallel]",
 }
