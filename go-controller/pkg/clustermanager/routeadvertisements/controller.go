@@ -1900,6 +1900,8 @@ func nadNeedsUpdate(oldObj, newObj *nadtypes.NetworkAttachmentDefinition) bool {
 
 	return oldObj == nil || newObj == nil ||
 		!reflect.DeepEqual(oldObj.Labels, newObj.Labels) ||
+		oldObj.Annotations[types.OvnNetworkNameAnnotation] !=
+			newObj.Annotations[types.OvnNetworkNameAnnotation] ||
 		oldObj.Annotations[types.OvnRouteAdvertisementsKey] != newObj.Annotations[types.OvnRouteAdvertisementsKey]
 }
 
