@@ -483,6 +483,11 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 			defer cancel()
 			defer wg.Done()
 
+			// Must run before NewClusterManager: it installs the workqueue
+			// metrics provider, and client-go only applies a provider to
+			// queues created after it is set.
+			metrics.RegisterClusterManagerFunctional()
+
 			clusterManager, err := clustermanager.NewClusterManager(
 				ovnClientset.GetClusterManagerClientset(),
 				watchFactory,
@@ -492,8 +497,6 @@ func runOvnKube(ctx context.Context, runMode *ovnkubeRunMode, ovnClientset *util
 				managerErr = fmt.Errorf("failed to create new cluster manager: %w", err)
 				return
 			}
-
-			metrics.RegisterClusterManagerFunctional()
 
 			err = clusterManager.Start(ctx)
 			if err != nil {
