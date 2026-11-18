@@ -134,6 +134,27 @@ var _ = ginkgo.Describe("NFT Element Manager", func() {
 			elems := listElements(fake, testMapV4)
 			gomega.Expect(hasElement(elems, testMapV4, []string{"10.0.0.1", "eth0"}, []string{"192.168.1.2"})).To(gomega.BeTrue())
 		})
+
+		ginkgo.It("replaces a stale element already present in nftables", func() {
+			stale := &knftables.Element{
+				Map:   testMapV4,
+				Key:   []string{"10.0.0.1", "eth0"},
+				Value: []string{"192.168.1.1"},
+			}
+			tx := fake.NewTransaction()
+			tx.Add(stale)
+			gomega.Expect(fake.Run(context.TODO(), tx)).To(gomega.Succeed())
+
+			gomega.Expect(ctrl.Add(&knftables.Element{
+				Map:   testMapV4,
+				Key:   []string{"10.0.0.1", "eth0"},
+				Value: []string{"192.168.1.2"},
+			})).To(gomega.Succeed())
+
+			elems := listElements(fake, testMapV4)
+			gomega.Expect(elems).To(gomega.HaveLen(1))
+			gomega.Expect(hasElement(elems, testMapV4, []string{"10.0.0.1", "eth0"}, []string{"192.168.1.2"})).To(gomega.BeTrue())
+		})
 	})
 
 	ginkgo.Context("Delete", func() {
