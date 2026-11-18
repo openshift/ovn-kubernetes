@@ -1068,21 +1068,9 @@ var AppendedAnnotations = map[string]string{
 
 	"ClusterNetworkConnect ValidatingAdmissionPolicy should reject regular user modifying or removing network-connect-subnet annotation": "[Disabled:Unimplemented]",
 
-	"ClusterNetworkConnect: API validations api-server should accept valid ClusterNetworkConnect CRs Valid ClusterNetworkConnect configurations": "[Disabled:Unimplemented]",
-
-	"ClusterNetworkConnect: API validations api-server should reject invalid ClusterNetworkConnect CRs Invalid network selector types": "[Disabled:Unimplemented]",
-
 	"Creating a static pod on a node Should successfully create then remove a static pod": "[Disabled:Unimplemented]",
 
 	"DPU host node deletion restarts the DPU-side ovnkube-node and re-initializes the node once it is registered again": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"EVPN: VTEP API validations api-server should accept valid VTEP CRs Valid VTEP configurations": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"EVPN: VTEP API validations api-server should accept valid VTEP updates Valid VTEP update configurations": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"EVPN: VTEP API validations api-server should reject invalid VTEP CRs Invalid VTEP configurations": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"EVPN: VTEP API validations api-server should reject invalid VTEP updates Invalid VTEP update configurations": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Disabled:Unimplemented]",
 
