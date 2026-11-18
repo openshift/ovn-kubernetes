@@ -1,0 +1,12 @@
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: allow-all-egress
+spec:
+  podSelector:
+    matchLabels:
+      name: test-pods
+  egress:
+    - {}
+  policyTypes:
+    - Egress

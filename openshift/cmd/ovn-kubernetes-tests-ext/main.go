@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	exutil "github.com/openshift/origin/test/extended/util"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test"
 	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/generated"
@@ -16,6 +17,8 @@ import (
 
 	// import ovn-kubernetes tests
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e"
+	// import OTE migrated tests
+	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
@@ -57,8 +60,10 @@ const (
 // shouldIncludeTest determines if a test should be included based on cluster capabilities
 // and test labels. When ocpInfra is nil (no cluster access), all tests are included.
 func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
-	// Disable specs that are not explicitly assigned a lifecycle
-	if spec.Lifecycle == "" {
+	// Disable specs that are not explicitly assigned a lifecycle. OTP tests
+	// intentionally carry no explicit lifecycle; the test framework treats an
+	// empty lifecycle as terminal (blocking), so keep them included.
+	if spec.Lifecycle == "" && !strings.Contains(spec.Name, "[OTP]") {
 		return false
 	}
 	// Exclude explicitly disabled tests
@@ -181,6 +186,7 @@ func main() {
 		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
 			panic(err)
 		}
+		exutil.WithCleanup(func() {})
 		client, err := kclientset.NewForConfig(cfg)
 		if err != nil {
 			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
@@ -197,8 +203,12 @@ func main() {
 	blockingTests := sets.New(test.BlockingTests...)
 
 	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
-		for _, label := range getTestExtensionLabels() {
-			spec.Labels.Insert(label)
+		isOTP := strings.Contains(spec.Name, "[OTP]")
+
+		if !isOTP {
+			for _, label := range getTestExtensionLabels() {
+				spec.Labels.Insert(label)
+			}
 		}
 
 		// Exclude Network Segmentation tests on SingleReplica topology (e.g., MicroShift, SNO)
@@ -216,7 +226,17 @@ func main() {
 			spec.Labels.Insert(label)
 		}
 
-		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name // prepend ginkgo labels to test name
+		spec.Name = generatePrependedLabelsStr(spec.Labels) + " " + spec.Name
+
+		// OTP tests are not in the generated annotations map, so assign the
+		// conformance suite directly based on the g.Serial decorator.
+		if isOTP {
+			if spec.Labels.Has("Serial") {
+				spec.Name += " [Suite:ovn-kubernetes/conformance/serial]"
+			} else {
+				spec.Name += " [Suite:ovn-kubernetes/conformance/parallel]"
+			}
+		}
 
 		switch {
 		case informingTests.Has(spec.Name):
