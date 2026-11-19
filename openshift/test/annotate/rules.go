@@ -110,8 +110,6 @@ var (
 			// Multiple host-networked external containers with different IP addresses
 			// are needed for these tests. Currently, this is not supported.
 			"e2e egress firewall policy validation with external containers",
-			// network-segmentation mac-security tests over localnet topology
-			".*MAC security.*localnet.*",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
@@ -130,6 +128,11 @@ var (
 		"[Serial]": {
 			"e2e egress IP validation",
 			"Status manager validation Should validate the egress firewall status when adding a new node zone",
+			"connectivity between client and server pods over localnet, when mac-security",
+		},
+
+		"[Suite:ovn-kubernetes/conformance/serial/virtualization]": {
+			".*Network Segmentation: MAC security.*over localnet.*",
 		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
