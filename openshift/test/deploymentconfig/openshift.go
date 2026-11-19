@@ -99,7 +99,9 @@ func (m *openshift) PrimaryInterfaceName() string {
 }
 
 func (m *openshift) IsConfigurationEnabled(config api.Config) bool {
-	return false
+	// CNO enables preconfigured UDN addresses in ovnkube.conf on both
+	// standalone and hosted clusters.
+	return config == api.PreconfiguredUDNAddressesConfig
 }
 
 func (m *openshift) NBDBContainerName() string {
