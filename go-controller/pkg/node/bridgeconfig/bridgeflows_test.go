@@ -6,6 +6,7 @@ package bridgeconfig
 import (
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 
@@ -830,5 +831,59 @@ func expectNoFlow(t *testing.T, flows []string, unexpectedSubstring string) {
 		if strings.Contains(flow, unexpectedSubstring) {
 			t.Fatalf("unexpected flow found:\n%s\n\nall flows:\n%v", flow, flows)
 		}
+	}
+}
+
+func TestEVPNGatewayTunnelPort(t *testing.T) {
+	if err := config.PrepareTestConfig(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = config.PrepareTestConfig() })
+	bridge := &BridgeConfiguration{
+		bridgeName: "br-ex", ofPortHost: nodetypes.OvsLocalPort, ofPortPhys: "1",
+		macAddress: mustParseMAC(t, "02:00:00:00:00:01"),
+		ips:        []*net.IPNet{mustParseIPNet(t, "192.0.2.1/24"), mustParseIPNet(t, "2001:db8::1/64")},
+		netConfig:  map[string]*BridgeUDNConfiguration{types.DefaultNetworkName: {}},
+		ovsClient:  newBridgeFlowTestOVSClient(t, "br-ex"),
+	}
+	config.IPv4Mode, config.IPv6Mode = true, true
+	for _, tt := range []struct {
+		name      string
+		mode      config.GatewayMode
+		transport string
+		encapPort uint
+		wantVXLAN bool
+	}{
+		{"local EVPN", config.GatewayModeLocal, types.NetworkTransportEVPN, 6081, true},
+		{"shared EVPN", config.GatewayModeShared, types.NetworkTransportEVPN, 6081, false},
+		{"local without EVPN", config.GatewayModeLocal, types.NetworkTransportNoOverlay, 6081, false},
+		{"same encapsulation port", config.GatewayModeLocal, types.NetworkTransportEVPN, 4789, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			config.Gateway.Mode, config.Default.EncapPort = tt.mode, tt.encapPort
+			bridge.netConfig["blue"] = &BridgeUDNConfiguration{Transport: tt.transport}
+			bridge.netConfig["red"] = &BridgeUDNConfiguration{Transport: tt.transport}
+			flows, err := bridge.flowsForDefaultBridge(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got, want []string
+			for _, flow := range flows {
+				if strings.Contains(flow, "udp_dst=4789,") {
+					got = append(got, flow)
+				}
+			}
+			if tt.wantVXLAN {
+				for _, proto := range []string{"udp", "udp6"} {
+					want = append(want,
+						fmt.Sprintf("cookie=%s, priority=205, in_port=1, dl_dst=02:00:00:00:00:01, %s, udp_dst=4789, actions=output:LOCAL", nodetypes.DefaultOpenFlowCookie, proto),
+						fmt.Sprintf("cookie=%s, priority=200, in_port=1, %s, udp_dst=4789, actions=NORMAL", nodetypes.DefaultOpenFlowCookie, proto),
+						fmt.Sprintf("cookie=%s, priority=200, in_port=LOCAL, %s, udp_dst=4789, actions=output:1", nodetypes.DefaultOpenFlowCookie, proto))
+				}
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("VXLAN flows = %v, want %v", got, want)
+			}
+		})
 	}
 }
