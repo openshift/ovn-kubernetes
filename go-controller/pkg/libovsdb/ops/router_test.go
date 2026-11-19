@@ -4,15 +4,12 @@
 package ops
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
-
-	libovsdbclient "github.com/ovn-kubernetes/libovsdb/client"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/nbdb"
 	libovsdbtest "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
@@ -182,7 +179,7 @@ func TestGetRouterLogicalRouterStaticRoutesWithPredicateEmptyRouter(t *testing.T
 	}
 }
 
-func TestGetRouterLogicalRouterStaticRoutesWithPredicateReturnsErrorForMissingReferences(t *testing.T) {
+func TestGetRouterLogicalRouterStaticRoutesWithPredicateSkipsMissingReferences(t *testing.T) {
 	route := &nbdb.LogicalRouterStaticRoute{
 		UUID:     buildNamedUUID(),
 		IPPrefix: "10.0.0.0/24",
@@ -203,8 +200,8 @@ func TestGetRouterLogicalRouterStaticRoutesWithPredicateReturnsErrorForMissingRe
 	t.Cleanup(cleanup.Cleanup)
 
 	// Strong references prevent this state in a healthy NBDB. Inject it only in
-	// the client cache to verify that the batched lookup preserves the previous
-	// per-UUID lookup's error behavior for a stale reference.
+	// the client cache. A missing row must not fail the lookup; the routes that
+	// are present are still returned.
 	cachedRouter, err := GetLogicalRouter(nbClient, &nbdb.LogicalRouter{Name: router.Name})
 	if err != nil {
 		t.Fatalf("failed to get router: %v", err)
@@ -215,12 +212,15 @@ func TestGetRouterLogicalRouterStaticRoutesWithPredicateReturnsErrorForMissingRe
 	}
 
 	predicateCalls := 0
-	_, err = GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient, &nbdb.LogicalRouter{Name: router.Name}, func(*nbdb.LogicalRouterStaticRoute) bool {
+	routes, err := GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient, &nbdb.LogicalRouter{Name: router.Name}, func(*nbdb.LogicalRouterStaticRoute) bool {
 		predicateCalls++
 		return true
 	})
-	if !errors.Is(err, libovsdbclient.ErrNotFound) {
-		t.Fatalf("GetRouterLogicalRouterStaticRoutesWithPredicate() error = %v, want %v", err, libovsdbclient.ErrNotFound)
+	if err != nil {
+		t.Fatalf("GetRouterLogicalRouterStaticRoutesWithPredicate() error = %v", err)
+	}
+	if len(routes) != 1 || routes[0].IPPrefix != route.IPPrefix {
+		t.Fatalf("GetRouterLogicalRouterStaticRoutesWithPredicate() routes = %v, want prefix %s", routes, route.IPPrefix)
 	}
 	if predicateCalls != 1 {
 		t.Fatalf("GetRouterLogicalRouterStaticRoutesWithPredicate() predicate calls = %d, want 1", predicateCalls)
@@ -798,5 +798,151 @@ func TestDeleteLogicalRouterStaticRoutes(t *testing.T) {
 				t.Fatal(fmt.Errorf("test: \"%s\" encountered error: %v", tt.desc, err))
 			}
 		})
+	}
+}
+
+func TestCreateOrReplaceStaticRouteIgnoresMissingCachedRoute(t *testing.T) {
+	missing := &nbdb.LogicalRouterStaticRoute{
+		UUID:     buildNamedUUID(),
+		IPPrefix: "10.244.9.0/24",
+		Nexthop:  "100.88.0.99",
+	}
+	router := &nbdb.LogicalRouter{
+		UUID:         buildNamedUUID(),
+		Name:         "ovn_cluster_router",
+		StaticRoutes: []string{missing.UUID},
+	}
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{
+		NBData: []libovsdbtest.TestData{router, missing},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup.Cleanup)
+
+	// The server assigns the row UUID. Drop that cached row and leave the
+	// router's static_routes reference in place.
+	cached, err := GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient, &nbdb.LogicalRouter{Name: router.Name}, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.IPPrefix == missing.IPPrefix
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cached) != 1 {
+		t.Fatalf("got %d setup routes, want 1", len(cached))
+	}
+	if err := nbClient.Cache().Table(nbdb.LogicalRouterStaticRouteTable).Delete(cached[0].UUID); err != nil {
+		t.Fatalf("failed to drop route row from the cache: %v", err)
+	}
+	cachedRouter, err := GetLogicalRouter(nbClient, &nbdb.LogicalRouter{Name: router.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stillReferenced := false
+	for _, uuid := range cachedRouter.StaticRoutes {
+		if uuid == cached[0].UUID {
+			stillReferenced = true
+			break
+		}
+	}
+	if !stillReferenced {
+		t.Fatalf("router no longer references missing route %s", cached[0].UUID)
+	}
+
+	replacement := &nbdb.LogicalRouterStaticRoute{
+		IPPrefix: "10.129.4.0/23",
+		Nexthop:  "100.88.0.13",
+		ExternalIDs: map[string]string{
+			"ic-node": "example036",
+		},
+	}
+	err = CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, router.Name, replacement, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.IPPrefix == replacement.IPPrefix && PolicyEqualPredicate(nil, item.Policy)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routes, err := GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient, &nbdb.LogicalRouter{Name: router.Name}, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.IPPrefix == replacement.IPPrefix
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("got %d routes for %s, want 1", len(routes), replacement.IPPrefix)
+	}
+	if routes[0].Nexthop != replacement.Nexthop {
+		t.Fatalf("nexthop = %s, want %s", routes[0].Nexthop, replacement.Nexthop)
+	}
+	if routes[0].ExternalIDs["ic-node"] != "example036" {
+		t.Fatalf("ic-node = %q, want example036", routes[0].ExternalIDs["ic-node"])
+	}
+}
+
+func TestCreateOrReplaceStaticRouteDoesNotRewriteSrcIPRoute(t *testing.T) {
+	srcPolicy := nbdb.LogicalRouterStaticRoutePolicySrcIP
+	srcRoute := &nbdb.LogicalRouterStaticRoute{
+		UUID:     buildNamedUUID(),
+		Policy:   &srcPolicy,
+		IPPrefix: "10.244.4.0/24",
+		Nexthop:  "100.64.0.99",
+	}
+	router := &nbdb.LogicalRouter{
+		UUID:         buildNamedUUID(),
+		Name:         "ovn_cluster_router",
+		StaticRoutes: []string{srcRoute.UUID},
+	}
+	nbClient, cleanup, err := libovsdbtest.NewNBTestHarness(libovsdbtest.TestSetup{
+		NBData: []libovsdbtest.TestData{router, srcRoute},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cleanup.Cleanup)
+
+	replacement := &nbdb.LogicalRouterStaticRoute{
+		IPPrefix: "10.244.4.0/24",
+		Nexthop:  "100.88.0.4",
+		ExternalIDs: map[string]string{
+			"ic-node": "node3",
+		},
+	}
+	// Same match as addRemoteNodeStaticRoutes: this prefix, dst-ip or unset policy.
+	err = CreateOrReplaceLogicalRouterStaticRouteWithPredicate(nbClient, router.Name, replacement, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.IPPrefix == replacement.IPPrefix && PolicyEqualPredicate(nil, item.Policy)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	routes, err := GetRouterLogicalRouterStaticRoutesWithPredicate(nbClient, &nbdb.LogicalRouter{Name: router.Name}, func(item *nbdb.LogicalRouterStaticRoute) bool {
+		return item.IPPrefix == replacement.IPPrefix
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("got %d routes, want src-ip and dst-ip", len(routes))
+	}
+	var sawSrc, sawDst bool
+	for _, route := range routes {
+		if route.Policy != nil && *route.Policy == nbdb.LogicalRouterStaticRoutePolicySrcIP {
+			sawSrc = true
+			if route.Nexthop != "100.64.0.99" {
+				t.Fatalf("src-ip nexthop = %s, want 100.64.0.99", route.Nexthop)
+			}
+			continue
+		}
+		if !PolicyEqualPredicate(nil, route.Policy) {
+			t.Fatalf("unexpected policy %v", route.Policy)
+		}
+		sawDst = true
+		if route.Nexthop != "100.88.0.4" {
+			t.Fatalf("dst-ip nexthop = %s, want 100.88.0.4", route.Nexthop)
+		}
+	}
+	if !sawSrc || !sawDst {
+		t.Fatalf("saw src-ip %v, saw dst-ip %v", sawSrc, sawDst)
 	}
 }
