@@ -5,7 +5,6 @@ package generated
 
 import (
 	"fmt"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/types"
 )
@@ -1233,7 +1232,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines ipv4 subnet exhaustion should fail when subnet is exhausted": "[Disabled:Unimplemented]",
 
-	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over localnet": "[Disabled:Unimplemented]",
+	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over localnet": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
 
 	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over secondary layer2": "[Suite:ovn-kubernetes/conformance/serial/virtualization]",
 

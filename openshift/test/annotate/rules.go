@@ -117,7 +117,6 @@ var (
 			"Kubevirt Virtual Machines ipv4 subnet exhaustion",
 			"Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP",
 			"Kubevirt Virtual Machines with user defined networks with ipamless localnet",
-			"Kubevirt Virtual Machines user-defined network port-security.*localnet",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
