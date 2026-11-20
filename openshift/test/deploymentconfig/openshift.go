@@ -6,6 +6,8 @@ package deploymentconfig
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,25 +18,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	e2epodoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
-	imageutils "k8s.io/kubernetes/test/utils/image"
 )
-
-var (
-	imageIDMapping map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
-		api.Agnhost: imageutils.Agnhost,
-	}
-	imageConfigMap map[api.ImageID]api.ImageConfig
-)
-
-func init() {
-	// Add images that are needed by the test suite.
-	imageConfigMap = map[api.ImageID]api.ImageConfig{
-		api.Agnhost: {
-			ImageID:  api.Agnhost,
-			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
-		},
-	}
-}
 
 func IsOpenShift(config *rest.Config) (bool, error) {
 	kubeClient, err := kubernetes.NewForConfig(config)
@@ -56,12 +40,28 @@ func IsOpenShift(config *rest.Config) (bool, error) {
 
 type openshift struct {
 	kubeConfig     *rest.Config
-	requiredImages map[api.ImageID]struct{}
+	requiredImages map[api.ImageID]api.ImageConfig
+	mappedImages   map[api.ImageID]api.ImageConfig
 }
 
-func New(config *rest.Config) api.DeploymentConfig {
-	return &openshift{kubeConfig: config,
-		requiredImages: make(map[api.ImageID]struct{})}
+func New(config *rest.Config) (api.DeploymentConfig, error) {
+	mappedImages := map[api.ImageID]api.ImageConfig{}
+	for imageID, imageSource := range ImageSourceMap {
+		pullSpec, err := mappedPullSpec(imageSource)
+		if err != nil {
+			return nil, fmt.Errorf("failed to map image ID %d: %w", imageID, err)
+		}
+		mappedImages[imageID] = api.ImageConfig{
+			ImageID:  imageID,
+			PullSpec: pullSpec,
+		}
+	}
+
+	return &openshift{
+		kubeConfig:     config,
+		requiredImages: map[api.ImageID]api.ImageConfig{},
+		mappedImages:   mappedImages,
+	}, nil
 }
 
 func (m *openshift) OVNKubernetesNamespace() string {
@@ -99,7 +99,9 @@ func (m *openshift) PrimaryInterfaceName() string {
 }
 
 func (m *openshift) IsConfigurationEnabled(config api.Config) bool {
-	return false
+	// CNO enables preconfigured UDN addresses in ovnkube.conf on both
+	// standalone and hosted clusters.
+	return config == api.PreconfiguredUDNAddressesConfig
 }
 
 func (m *openshift) NBDBContainerName() string {
@@ -107,28 +109,26 @@ func (m *openshift) NBDBContainerName() string {
 }
 
 func (m *openshift) GetImage(imageID api.ImageID) api.ImageConfig {
-	return imageConfigMap[imageID]
+	return m.mappedImages[imageID]
 }
 
-func (m *openshift) AddRequiredImage(imageID ...api.ImageID) {
-	for _, imgID := range imageID {
-		m.requiredImages[imgID] = struct{}{}
-	}
-}
-
-func (m *openshift) GetRequiredImages() []api.ImageConfig {
-	imageConfigs := []api.ImageConfig{}
-	for imageID := range m.requiredImages {
-		newID, ok := imageIDMapping[imageID]
+func (m *openshift) AddRequiredImage(imageIDs ...api.ImageID) {
+	for _, imageID := range imageIDs {
+		imageSource, ok := ImageSourceMap[imageID]
 		if !ok {
-			newID = imageutils.None
+			panic(fmt.Sprintf("missing image source entry for image ID %d", imageID))
 		}
-		imageConfigs = append(imageConfigs, api.ImageConfig{
-			ImageID:  api.ImageID(newID),
-			PullSpec: m.GetImage(imageID).PullSpec,
-		})
+		m.requiredImages[imageID] = api.ImageConfig{
+			ImageID:  imageID,
+			PullSpec: originalPullSpec(imageSource),
+		}
 	}
-	return imageConfigs
+}
+
+// GetRequiredImages returns selected source images for external mirroring, not
+// the mapped runtime pull specs returned by GetImage. Image IDs remain OVN IDs.
+func (m *openshift) GetRequiredImages() []api.ImageConfig {
+	return slices.Collect(maps.Values(m.requiredImages))
 }
 
 func (m *openshift) GetNodeMachineNetworks() (map[string][]string, error) {
