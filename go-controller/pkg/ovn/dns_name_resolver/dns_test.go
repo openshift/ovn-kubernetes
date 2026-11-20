@@ -335,6 +335,54 @@ func TestAdd(t *testing.T) {
 				},
 			},
 		},
+		{
+			desc:                     "EgressFirewall DNS Run resolves a name that had no record at creation",
+			errExp:                   false,
+			dnsName:                  test1DNSName,
+			testingUpdateOnQueryTime: true,
+			syncTime:                 5 * time.Minute,
+			configIPv4:               true,
+			configIPv6:               false,
+
+			dnsOpsMockHelper: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "ClientConfigFromFile",
+					OnCallMethodArgType: []string{"string"},
+					RetArgList:          []interface{}{&dns.ClientConfig{Servers: []string{"1.1.1.1"}, Port: "1234"}, nil},
+					CallTimes:           1,
+				},
+				{OnCallMethodName: "Fqdn", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{test1DNSName}, CallTimes: 1},
+				{OnCallMethodName: "SetQuestion", OnCallMethodArgType: []string{"*dns.Msg", "string", "uint16"}, RetArgList: []interface{}{&dns.Msg{}}, CallTimes: 1},
+				{
+					OnCallMethodName:    "Exchange",
+					OnCallMethodArgType: []string{"*dns.Client", "*dns.Msg", "string"},
+					RetArgList:          []interface{}{&dns.Msg{MsgHdr: dns.MsgHdr{Rcode: dns.RcodeNameError}}, 0 * time.Second, nil},
+					CallTimes:           1,
+				},
+				{OnCallMethodName: "Fqdn", OnCallMethodArgType: []string{"string"}, RetArgList: []interface{}{test1DNSName}, CallTimes: 1},
+				{OnCallMethodName: "SetQuestion", OnCallMethodArgType: []string{"*dns.Msg", "string", "uint16"}, RetArgList: []interface{}{&dns.Msg{}}, CallTimes: 1},
+				{
+					OnCallMethodName:    "Exchange",
+					OnCallMethodArgType: []string{"*dns.Client", "*dns.Msg", "string"},
+					RetArgList:          []interface{}{&dns.Msg{Answer: []dns.RR{generateRR(test1DNSName, test1IPv4Update, "300")}}, 1 * time.Second, nil},
+					CallTimes:           1,
+				},
+			},
+			addressSetFactoryOpsHelper: []ovntest.TestifyMockHelper{
+				{OnCallMethodName: "NewAddressSet", OnCallMethodArgType: []string{"*ops.DbObjectIDs", "[]string"}, OnCallMethodArgs: []interface{}{}, RetArgList: []interface{}{mockAddressSetOps, nil}, OnCallMethodsArgsStrTypeAppendCount: 0, CallTimes: 1},
+			},
+			addressSetOpsHelper: []ovntest.TestifyMockHelper{
+				{
+					OnCallMethodName: "SetAddresses",
+					OnCallMethodArgs: []interface{}{[]string{}},
+					RetArgList:       []interface{}{nil},
+				},
+				{
+					OnCallMethodName: "SetAddresses",
+					OnCallMethodArgs: []interface{}{[]string{test1IPv4Update}},
+					RetArgList:       []interface{}{nil},
+				},
+			},
+		},
 	}
 	for i, tc := range tests {
 		t.Run(fmt.Sprintf("%d:%s", i, tc.desc), func(t *testing.T) {
