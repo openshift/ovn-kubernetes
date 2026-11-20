@@ -24,6 +24,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/test/e2e/ipalloc"
 
 	v1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -1849,10 +1850,10 @@ metadata:
 
 		svcLoadBalancerIP, err := getServiceLoadBalancerIP(f.ClientSet, namespaceName, svcName)
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get service lb ip: %s for %s, err: %v", svcLoadBalancerIP, svcName, err))
-        discoveryClient := f.ClientSet.DiscoveryV1()
+		discoveryClient := f.ClientSet.DiscoveryV1()
 		endpointSlice, err := discoveryClient.EndpointSlices(namespaceName).List(context.TODO(), metav1.ListOptions{
-		       LabelSelector: fmt.Sprintf("kubernetes.io/service-name=%s", svcName),
-	    })
+			LabelSelector: fmt.Sprintf("kubernetes.io/service-name=%s", svcName),
+		})
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get endpoints slice for service %s", svcName))
 		gomega.Expect(endpointSlice).NotTo(gomega.BeNil())
 		gomega.Expect(len(endpointSlice.Items)).To(gomega.Equal(1))
@@ -1862,7 +1863,7 @@ metadata:
 		nodeName := *endpointSlice.Items[0].Endpoints[0].NodeName
 		nodeIP, err := getNodeIP(f.ClientSet, nodeName)
 		framework.ExpectNoError(err, fmt.Sprintf("failed to get endpoint's %s node ip address", nodeIP))
-       
+
 		svcIPforCurl := svcLoadBalancerIP
 		if !utilnet.IsIPv6String(svcLoadBalancerIP) {
 			ginkgo.By("Setting up external IPv4 client with an intermediate node")
@@ -1884,7 +1885,7 @@ metadata:
 		// Use Eventually because IPv6 takes a while to finish its network configuration
 		// with network namespaces.
 		// TODO: Figure out why keeping this at 5seconds is causing CI flakes after K8s 1.33 rebase
-        // See: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5455
+		// See: https://github.com/ovn-kubernetes/ovn-kubernetes/issues/5455
 		gomega.Eventually(func() error {
 			return buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIPforCurl, endpointHTTPPort))
 		}, 10*time.Second).Should(gomega.BeNil(), "failed to connect with external load balancer service")
@@ -1899,7 +1900,7 @@ metadata:
 		gomega.Eventually(func() error {
 			return buildAndRunCommand(fmt.Sprintf("sudo ip netns exec client curl %s:%d/big.iso -o big.iso", svcIPforCurl, endpointHTTPPort))
 		}, 5*time.Second).Should(gomega.BeNil(), "failed to connect with external load balancer service after changing mtu size")
-		
+
 	})
 
 	ginkgo.It("Should ensure load balancer service works with pmtud", func() {
@@ -2230,7 +2231,7 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 		externalContainer := infraapi.ExternalContainer{Name: externalClientContainerName}
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
+		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		// Patch the service to use named ports.
@@ -2255,7 +2256,7 @@ spec:
 		framework.ExpectNoError(err, "Couldn't fetch the correct number of nftables elements, err: %v", err)
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 		externalContainer = infraapi.ExternalContainer{Name: externalClientContainerName}
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
+		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		// Patch the service to use allocateLoadBalancerNodeProts=false and externalTrafficPolicy=local.
@@ -2288,7 +2289,7 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
+		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		pktSize := 60
@@ -2321,7 +2322,7 @@ spec:
 
 		ginkgo.By("by sending a TCP packet to service " + svcName + " with type=LoadBalancer in namespace " + namespaceName + " with backend pod " + backendName)
 
-		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso")
+		_, err = wgetInExternalContainer(externalContainer, svcLoadBalancerIP, endpointHTTPPort, "big.iso", 120)
 		framework.ExpectNoError(err, "failed to curl load balancer service")
 
 		err = wait.PollImmediate(retryInterval, retryTimeout, checkNumberOfETPRules(backendNodeName, 1, fmt.Sprintf("[1:%d] -A OVN-KUBE-ETP", pktSize)))
