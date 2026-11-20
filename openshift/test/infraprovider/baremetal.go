@@ -385,6 +385,9 @@ func configureFirewallForExternalContainerPorts(runner api.Runner, interfaceName
 // creation/deletion and network attach/detach are no-ops for it. Every
 // secondary network shortcut applies only when that network exists; otherwise
 // the call goes to the base provider exactly as without this wrapper.
+// Attaching or detaching networks on isolated containers is not supported:
+// those containers are created on the isolated network with their
+// allocator-assigned addresses, and no spec attaches networks to them.
 type baremetalContextProvider struct {
 	base *baseContextProvider
 	bm   *baremetalInfra
@@ -423,6 +426,9 @@ func (p *baremetalContextProvider) DeleteExternalContainer(ec api.ExternalContai
 }
 
 func (p *baremetalContextProvider) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
+	if needsIsolation(instance) {
+		return api.NetworkInterface{}, fmt.Errorf("attaching network %q to isolated container %q is not supported", network.Name(), instance)
+	}
 	if network.Name() == bmSecondaryNetworkName && p.hasSecondaryNetwork() {
 		return api.NetworkInterface{}, nil
 	}
@@ -430,6 +436,9 @@ func (p *baremetalContextProvider) AttachNetwork(network api.Network, instance s
 }
 
 func (p *baremetalContextProvider) DetachNetwork(network api.Network, instance string) error {
+	if needsIsolation(instance) {
+		return fmt.Errorf("detaching network %q from isolated container %q is not supported", network.Name(), instance)
+	}
 	if network.Name() == bmSecondaryNetworkName && p.hasSecondaryNetwork() {
 		return nil
 	}
