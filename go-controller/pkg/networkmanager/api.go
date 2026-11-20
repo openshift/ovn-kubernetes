@@ -100,9 +100,13 @@ type Interface interface {
 
 	// GetNetInfoForNADKey returns a copy of the  cached network info for the given NAD key, or nil if unknown.
 	// This is a cheap lookup that does not parse the NAD object; it relies on NAD controller state.
+	// Indexed keys ("namespace/name/1") from a pod attaching the same NAD more
+	// than once resolve to the base NAD.
 	GetNetInfoForNADKey(nadKey string) util.NetInfo
 	// GetNetworkNameForNADKey returns the network name mapped to the NAD key, or empty if unknown.
 	// This uses NAD controller state and does not parse the NAD object.
+	// Indexed keys ("namespace/name/1") from a pod attaching the same NAD more
+	// than once resolve to the base NAD.
 	GetNetworkNameForNADKey(nadKey string) string
 	// GetNADKeysForNetwork returns NAD keys mapped to the network name, or empty if unknown.
 	// This uses NAD controller state and does not parse the NAD object.

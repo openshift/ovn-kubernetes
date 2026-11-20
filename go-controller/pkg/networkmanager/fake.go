@@ -234,19 +234,23 @@ func (fnm *FakeNetworkManager) GetActiveNetwork(networkName string) util.NetInfo
 func (fnm *FakeNetworkManager) GetNetInfoForNADKey(nadKey string) util.NetInfo {
 	fnm.Lock()
 	defer fnm.Unlock()
-	if netInfo, ok := fnm.NADNetworks[nadKey]; ok {
-		return netInfo
-	}
-	return nil
+	return fnm.netInfoForNADKeyLocked(nadKey)
 }
 
 func (fnm *FakeNetworkManager) GetNetworkNameForNADKey(nadKey string) string {
 	fnm.Lock()
 	defer fnm.Unlock()
-	if netInfo, ok := fnm.NADNetworks[nadKey]; ok {
+	if netInfo := fnm.netInfoForNADKeyLocked(nadKey); netInfo != nil {
 		return netInfo.GetNetworkName()
 	}
 	return ""
+}
+
+func (fnm *FakeNetworkManager) netInfoForNADKeyLocked(nadKey string) util.NetInfo {
+	if netInfo, ok := fnm.NADNetworks[nadKey]; ok {
+		return netInfo
+	}
+	return fnm.NADNetworks[util.NADKeyWithoutIndex(nadKey)]
 }
 
 func (fnm *FakeNetworkManager) GetNADKeysForNetwork(networkName string) []string {
