@@ -67,6 +67,19 @@ func (b *BridgeConfiguration) UplinkBridgeFlows(hostSubnets []*net.IPNet) ([]str
 	return append(uplinkFlows, commonFlows...), nil
 }
 
+// tunnelPortFlows sends locally terminated tunnel traffic to the host and
+// host-originated tunnel traffic to the uplink without gateway conntrack.
+func (b *BridgeConfiguration) tunnelPortFlows(proto, hostEgress string, dstPort uint) []string {
+	return []string{
+		fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, %s, udp_dst=%d, actions=output:%s",
+			nodetypes.DefaultOpenFlowCookie, b.ofPortPhys, b.macAddress, proto, dstPort, b.ofPortHost),
+		fmt.Sprintf("cookie=%s, priority=200, in_port=%s, %s, udp_dst=%d, actions=NORMAL",
+			nodetypes.DefaultOpenFlowCookie, b.ofPortPhys, proto, dstPort),
+		fmt.Sprintf("cookie=%s, priority=200, in_port=%s, %s, udp_dst=%d, actions=output:%s",
+			nodetypes.DefaultOpenFlowCookie, hostEgress, proto, dstPort, b.ofPortPhys),
+	}
+}
+
 // must be called with bridge.mutex held
 func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string, error) {
 	// CAUTION: when adding new flows where the in_port is ofPortPatch and the out_port is ofPortPhys, ensure
@@ -103,24 +116,26 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 		dftFlows = append(dftFlows, b.dropGARPFlows()...)
 	}
 
-	if config.IPv4Mode {
-		// table0, Geneve packets coming from external. Skip conntrack and go directly to host
-		// if dest mac is the shared mac send directly to host.
-		if ofPortPhys != "" {
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp, udp_dst=%d, "+
-					"actions=output:%s", nodetypes.DefaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
-					ofPortHost))
-			// perform NORMAL action otherwise.
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
-					"actions=NORMAL", nodetypes.DefaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
-
-			// table0, Geneve packets coming from LOCAL/Host OFPort. Skip conntrack and go directly to external
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp, udp_dst=%d, "+
-					"actions=output:%s", nodetypes.DefaultOpenFlowCookie, ofPortHost, config.Default.EncapPort, ofPortPhys))
+	if ofPortPhys != "" {
+		tunnelPorts := []uint{config.Default.EncapPort}
+		if config.Gateway.Mode == config.GatewayModeLocal && config.Default.EncapPort != config.DefaultVXLANPort {
+			for _, network := range b.netConfig {
+				if network.Transport == types.NetworkTransportEVPN {
+					tunnelPorts = append(tunnelPorts, config.DefaultVXLANPort)
+					break
+				}
+			}
 		}
+		for _, port := range tunnelPorts {
+			if config.IPv4Mode {
+				dftFlows = append(dftFlows, b.tunnelPortFlows("udp", ofPortHost, port)...)
+			}
+			if config.IPv6Mode {
+				dftFlows = append(dftFlows, b.tunnelPortFlows("udp6", nodetypes.OvsLocalPort, port)...)
+			}
+		}
+	}
+	if config.IPv4Mode {
 		physicalIP, err := util.MatchFirstIPNetFamily(false, bridgeIPs)
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv4 physical IP of host: %v", err)
@@ -184,24 +199,6 @@ func (b *BridgeConfiguration) flowsForDefaultBridge(extraIPs []net.IP) ([]string
 		}
 	}
 	if config.IPv6Mode {
-		if ofPortPhys != "" {
-			// table0, Geneve packets coming from external. Skip conntrack and go directly to host
-			// if dest mac is the shared mac send directly to host.
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=205, in_port=%s, dl_dst=%s, udp6, udp_dst=%d, "+
-					"actions=output:%s", nodetypes.DefaultOpenFlowCookie, ofPortPhys, bridgeMacAddress, config.Default.EncapPort,
-					ofPortHost))
-			// perform NORMAL action otherwise.
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
-					"actions=NORMAL", nodetypes.DefaultOpenFlowCookie, ofPortPhys, config.Default.EncapPort))
-
-			// table0, Geneve packets coming from LOCAL. Skip conntrack and send to external
-			dftFlows = append(dftFlows,
-				fmt.Sprintf("cookie=%s, priority=200, in_port=%s, udp6, udp_dst=%d, "+
-					"actions=output:%s", nodetypes.DefaultOpenFlowCookie, nodetypes.OvsLocalPort, config.Default.EncapPort, ofPortPhys))
-		}
-
 		physicalIP, err := util.MatchFirstIPNetFamily(true, bridgeIPs)
 		if err != nil {
 			return nil, fmt.Errorf("unable to determine IPv6 physical IP of host: %v", err)
