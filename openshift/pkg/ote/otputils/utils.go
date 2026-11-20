@@ -1,0 +1,205 @@
+package otputils
+
+import (
+	"bytes"
+	"context"
+	"embed"
+	"fmt"
+	"io/fs"
+	"net"
+	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	o "github.com/onsi/gomega"
+
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/kubernetes/test/e2e/framework"
+	e2eoutput "k8s.io/kubernetes/test/e2e/framework/pod/output"
+)
+
+// Fixtures ship inside the OTE binary: CI extracts only ovn-kubernetes-tests-ext
+// (cwd has no source tree), so disk paths under Getwd() do not work there.
+//
+//go:embed all:testdata/fixtures
+var fixtureFS embed.FS
+
+var materializedFixtures sync.Map // embed rel path -> temp file path
+
+// FixturePath returns a filesystem path to an OTE fixture for `oc process -f`.
+// Content is read from the embedded FS and written to a temp file once per path.
+func FixturePath(parts ...string) string {
+	rel := path.Join(append([]string{"testdata", "fixtures"}, parts...)...)
+	if cached, ok := materializedFixtures.Load(rel); ok {
+		return cached.(string)
+	}
+
+	data, err := fs.ReadFile(fixtureFS, rel)
+	if err != nil {
+		framework.Failf("embedded OTE fixture %s missing: %v", rel, err)
+	}
+
+	tmp, err := os.CreateTemp("", "ote-fixture-*-"+filepath.Base(rel))
+	if err != nil {
+		framework.Failf("failed to create temp file for fixture %s: %v", rel, err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		framework.Failf("failed to write fixture %s: %v", rel, err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		framework.Failf("failed to close fixture temp file %s: %v", rel, err)
+	}
+
+	abs := tmp.Name()
+	if actual, loaded := materializedFixtures.LoadOrStore(rel, abs); loaded {
+		_ = os.Remove(abs)
+		return actual.(string)
+	}
+	return abs
+}
+
+// ApplyResourceFromTemplate processes an OpenShift template and applies it.
+// --local avoids depending on the current kubeconfig namespace existing (CI
+// contexts often point at a short-lived ci-op-* project that is not on the DUT).
+func ApplyResourceFromTemplate(namespace string, templatePath string, parameters ...string) error {
+	args := append([]string{"process", "--local", "-f", templatePath, "--ignore-unknown-parameters=true"}, parameters...)
+	if namespace != "" {
+		args = append(args, "-p", "NAMESPACE="+namespace)
+	}
+	processCmd := exec.Command("oc", args...)
+	var processed bytes.Buffer
+	var errOut bytes.Buffer
+	processCmd.Stdout = &processed
+	processCmd.Stderr = &errOut
+	if err := processCmd.Run(); err != nil {
+		return fmt.Errorf("failed to process template %s: %w, stderr: %s", templatePath, err, errOut.String())
+	}
+
+	applyArgs := []string{"apply", "-f", "-"}
+	if namespace != "" {
+		applyArgs = append(applyArgs, "-n", namespace)
+	}
+	applyCmd := exec.Command("oc", applyArgs...)
+	applyCmd.Stdin = &processed
+	applyCmd.Stdout = os.Stdout
+	applyCmd.Stderr = os.Stderr
+	if err := applyCmd.Run(); err != nil {
+		return fmt.Errorf("failed to apply processed template: %v", err)
+	}
+
+	return nil
+}
+
+// RemoveResource removes a resource by type and name
+func RemoveResource(resourceType, name string, extraArgs ...string) error {
+	args := append([]string{"delete", resourceType, name, "--ignore-not-found=true"}, extraArgs...)
+	cmd := exec.Command("oc", args...)
+	return cmd.Run()
+}
+
+// WaitForPodWithLabelReady waits for pods with the given label to be ready
+func WaitForPodWithLabelReady(namespace, label string) error {
+	return wait.PollUntilContextTimeout(context.Background(), 5*time.Second, 2*time.Minute, true, func(context.Context) (bool, error) {
+		args := []string{"get", "pods", "-n", namespace, "-l", label, "-o", "jsonpath={.items[*].status.conditions[?(@.type==\"Ready\")].status}"}
+		output, err := exec.Command("oc", args...).Output()
+		if err != nil {
+			return false, nil
+		}
+		statuses := strings.Split(string(output), " ")
+		if len(statuses) == 0 || string(output) == "" {
+			return false, nil
+		}
+		for _, s := range statuses {
+			if s != "True" {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+}
+
+// GetPodNodeName returns the node name where the pod is scheduled
+func GetPodNodeName(namespace, podName string) (string, error) {
+	args := []string{"get", "pod", podName, "-n", namespace, "-o", "jsonpath={.spec.nodeName}"}
+	output, err := exec.Command("oc", args...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// GetPodName returns a pod name matching the label on a specific node
+func GetPodName(namespace, label, nodeName string) (string, error) {
+	args := []string{"get", "pods", "-n", namespace, "-l", label, "--field-selector", "spec.nodeName="+nodeName, "-o", "jsonpath={.items[0].metadata.name}"}
+	output, err := exec.Command("oc", args...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// CurlPod2PodPass ensures connectivity from pod to pod
+func CurlPod2PodPass(namespaceSrc, podNameSrc, namespaceDst, podNameDst string) {
+	podIPs, err := getPodIPs(namespaceDst, podNameDst)
+	o.Expect(err).NotTo(o.HaveOccurred())
+	for _, ip := range podIPs {
+		_, err := e2eoutput.RunHostCmd(namespaceSrc, podNameSrc, "curl --connect-timeout 5 -s "+net.JoinHostPort(ip, "8080"))
+		o.Expect(err).NotTo(o.HaveOccurred())
+	}
+}
+
+// CurlPod2PodFail ensures no connectivity from pod to pod
+func CurlPod2PodFail(namespaceSrc, podNameSrc, namespaceDst, podNameDst string) {
+	podIPs, err := getPodIPs(namespaceDst, podNameDst)
+	o.Expect(err).NotTo(o.HaveOccurred())
+	for _, ip := range podIPs {
+		_, err := e2eoutput.RunHostCmd(namespaceSrc, podNameSrc, "curl --connect-timeout 5 -s "+net.JoinHostPort(ip, "8080"))
+		o.Expect(err).To(o.HaveOccurred())
+	}
+}
+
+func getPodIPs(namespace, podName string) ([]string, error) {
+	args := []string{"get", "pod", podName, "-n", namespace, "-o", "jsonpath={.status.podIPs[*].ip}"}
+	output, err := exec.Command("oc", args...).Output()
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(output)), nil
+}
+
+// CheckACLLogs monitors OVN-K node logs for specific ACL audit strings
+func CheckACLLogs(serverPodNs, serverPodName, clientPodNs, clientPodName, curlCmd, aclLogSearchString, ovnKNodePodName string, resultPass bool) {
+	tailACLLog := "tail -f /var/log/ovn/acl-audit-log.log"
+	
+	cmd := exec.Command("oc", "exec", "-n", "openshift-ovn-kubernetes", ovnKNodePodName, "-c", "ovn-controller", "--", "/bin/bash", "-c", tailACLLog)
+	var logOutput bytes.Buffer
+	cmd.Stdout = &logOutput
+	if err := cmd.Start(); err != nil {
+		framework.Failf("Failed to start log tailing: %v", err)
+	}
+	defer func() { _ = cmd.Process.Kill() }()
+
+	time.Sleep(2 * time.Second)
+
+	if curlCmd == "pass" {
+		CurlPod2PodPass(serverPodNs, serverPodName, clientPodNs, clientPodName)
+	} else {
+		CurlPod2PodFail(serverPodNs, serverPodName, clientPodNs, clientPodName)
+	}
+
+	time.Sleep(5 * time.Second)
+	
+	found := strings.Contains(logOutput.String(), aclLogSearchString)
+	if resultPass {
+		o.Expect(found).To(o.BeTrue(), fmt.Sprintf("Expected log string not found: %s\nLogs:\n%s", aclLogSearchString, logOutput.String()))
+	} else {
+		o.Expect(found).To(o.BeFalse(), fmt.Sprintf("Unexpected log string found: %s\nLogs:\n%s", aclLogSearchString, logOutput.String()))
+	}
+}
