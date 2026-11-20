@@ -8,17 +8,22 @@ import (
 	"strings"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
+	ocpdeploymentconfig "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 )
 
 func registerTestImages(ext *extension.Extension) error {
-	for _, ri := range deploymentconfig.Get().GetRequiredImages() {
-		img, err := extensionImageFromPullSpec(ri.PullSpec)
+	for _, required := range deploymentconfig.Get().GetRequiredImages() {
+		image, err := extensionImageFromPullSpec(required.PullSpec)
 		if err != nil {
-			return fmt.Errorf("failed to register test image %q: %v", ri.PullSpec, err)
+			return fmt.Errorf("failed to register test image %q: %w", required.PullSpec, err)
 		}
-		img.Index = int(ri.ImageID)
-		ext.RegisterImage(img)
+		imageSource, ok := ocpdeploymentconfig.ImageSourceMap[required.ImageID]
+		if !ok {
+			return fmt.Errorf("missing image source at OTE for image id %d", required.ImageID)
+		}
+		image.Index = int(imageSource.K8SImageID)
+		ext.RegisterImage(image)
 	}
 	return nil
 }
