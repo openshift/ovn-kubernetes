@@ -43,8 +43,12 @@ type baremetalInfra struct {
 	base                 *baseInfra
 	secondaryNetwork     api.Network
 	secondaryHostNetInfo *api.NetworkInterface
+	// isolated creates primary-network containers with their own network
+	// identity, see baremetal_isolated.go.
+	isolated *isolatedContainers
 }
 
+// initializeBaremetalInfra sets up the hypervisor-backed provider.
 func initializeBaremetalInfra(infra *configv1.Infrastructure) (*baremetalInfra, error) {
 	// Initialize command runner for executing commands on hypervisor
 	// (optional, may not be available)
@@ -100,6 +104,7 @@ func initializeBaremetalInfra(infra *configv1.Infrastructure) (*baremetalInfra, 
 	}
 
 	bm := &baremetalInfra{base: h}
+	bm.isolated = newIsolatedContainers(sshRunner, h.machineNetwork, h.hostNetworkInfo)
 
 	// Discover secondary network interface on hypervisor (optional).
 	secondaryNetInfo, err := findHypervisorNodeInterface(sshRunner, bmSecondaryIPv4Subnet, bmSecondaryIPv6Subnet)
@@ -207,13 +212,13 @@ func (ci *baremetalInfra) GetExternalContainerLogs(container api.ExternalContain
 	return ci.base.GetExternalContainerLogs(container)
 }
 
+// GetExternalContainerContextProvider always returns the baremetal provider,
+// with or without a secondary network, so that isolated containers
+// are handled; every other call behaves like the base provider.
 func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testcontext.TestContext) api.ExternalContainerContextProvider {
 	baseProvider := &baseContextProvider{
 		parent: ci.base,
 		engine: ci.base.engine.WithTestContext(context),
-	}
-	if ci.secondaryNetwork == nil {
-		return baseProvider
 	}
 	return &baremetalContextProvider{base: baseProvider, bm: ci}
 }
@@ -224,9 +229,14 @@ func (ci *baremetalInfra) GetExternalContainerPort() uint16 {
 	return ci.base.GetExternalContainerPort()
 }
 
-// GetExternalContainerNetworkInterface handles the FRR container special case
-// on the primary network, then delegates to base for everything else.
+// GetExternalContainerNetworkInterface handles isolated containers and the FRR
+// container special cases, then delegates to base for everything else.
 func (ci *baremetalInfra) GetExternalContainerNetworkInterface(ec api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
+	if needsIsolation(ec.Name) {
+		// Isolated containers are only on the dedicated network, whatever
+		// network the spec asks about (usually PrimaryNetwork()).
+		return ci.base.engine.GetExternalContainerNetworkInterface(ec, isolatedNetwork)
+	}
 	if ec.Name == externalFRRContainerName && network.Name() == bmPrimaryNetworkName {
 		// frr container uses static ip configuration for ostestbm_net,
 		// querying it with podman inspect returns empty values, so build
@@ -370,30 +380,42 @@ func configureFirewallForExternalContainerPorts(runner api.Runner, interfaceName
 }
 
 // baremetalContextProvider wraps baseContextProvider with secondary network
-// awareness. On baremetal, the secondary network is pre-configured by CI and
-// containers use host networking, so network creation/deletion and network
-// attach/detach are no-ops.
+// awareness and isolated containers. On baremetal, the secondary network is
+// pre-configured by CI and containers use host networking, so network
+// creation/deletion and network attach/detach are no-ops for it. Every
+// secondary network shortcut applies only when that network exists; otherwise
+// the call goes to the base provider exactly as without this wrapper.
+// Attaching or detaching networks on isolated containers is not supported:
+// those containers are created on the isolated network with their
+// allocator-assigned addresses, and no spec attaches networks to them.
 type baremetalContextProvider struct {
 	base *baseContextProvider
 	bm   *baremetalInfra
 }
 
+func (p *baremetalContextProvider) hasSecondaryNetwork() bool {
+	return p.bm.secondaryNetwork != nil
+}
+
 func (p *baremetalContextProvider) CreateNetwork(name string, subnets ...string) (api.Network, error) {
-	if name == bmSecondaryNetworkName {
+	if name == bmSecondaryNetworkName && p.hasSecondaryNetwork() {
 		return p.bm.secondaryNetwork, nil
 	}
 	return p.base.CreateNetwork(name, subnets...)
 }
 
 func (p *baremetalContextProvider) DeleteNetwork(network api.Network) error {
-	if network.Name() == bmSecondaryNetworkName {
+	if network.Name() == bmSecondaryNetworkName && p.hasSecondaryNetwork() {
 		return nil
 	}
 	return p.base.DeleteNetwork(network)
 }
 
 func (p *baremetalContextProvider) CreateExternalContainer(ec api.ExternalContainer) (api.ExternalContainer, error) {
-	if ec.Network != nil && ec.Network.Name() == bmSecondaryNetworkName {
+	if ec.Network != nil && ec.Network.Name() == bmPrimaryNetworkName && needsIsolation(ec.Name) {
+		return p.bm.isolated.create(ec, p.base)
+	}
+	if ec.Network != nil && ec.Network.Name() == bmSecondaryNetworkName && p.hasSecondaryNetwork() {
 		return p.bm.base.getOrCreateHostNetworkedContainer(ec, p.bm.secondaryHostNetInfo)
 	}
 	return p.base.CreateExternalContainer(ec)
@@ -404,14 +426,20 @@ func (p *baremetalContextProvider) DeleteExternalContainer(ec api.ExternalContai
 }
 
 func (p *baremetalContextProvider) AttachNetwork(network api.Network, instance string) (api.NetworkInterface, error) {
-	if network.Name() == bmSecondaryNetworkName {
+	if needsIsolation(instance) {
+		return api.NetworkInterface{}, fmt.Errorf("attaching network %q to isolated container %q is not supported", network.Name(), instance)
+	}
+	if network.Name() == bmSecondaryNetworkName && p.hasSecondaryNetwork() {
 		return api.NetworkInterface{}, nil
 	}
 	return p.base.AttachNetwork(network, instance)
 }
 
 func (p *baremetalContextProvider) DetachNetwork(network api.Network, instance string) error {
-	if network.Name() == bmSecondaryNetworkName {
+	if needsIsolation(instance) {
+		return fmt.Errorf("detaching network %q from isolated container %q is not supported", network.Name(), instance)
+	}
+	if network.Name() == bmSecondaryNetworkName && p.hasSecondaryNetwork() {
 		return nil
 	}
 	return p.base.DetachNetwork(network, instance)
