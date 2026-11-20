@@ -171,7 +171,8 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					tcpDumpSync.Add(len(gwContainers))
 
 					for _, gwContainer := range gwContainers {
-						go checkReceivedPacketsOnExternalContainer(gwContainer, srcPingPodName, anyLink, []string{icmpCommand}, &tcpDumpSync)
+						filter := []string{icmpCommand, "and", "src", "host", addresses.srcPodIP}
+						go checkReceivedPacketsOnExternalContainer(gwContainer, srcPingPodName, anyLink, filter, &tcpDumpSync)
 					}
 
 					pingSync := sync.WaitGroup{}
@@ -220,9 +221,11 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					ginkgo.By("Checking that external ips are reachable with both gateways")
 					returnedHostNames := make(map[string]struct{})
 					gwIP := addresses.targetIPs[0]
+					capture := startHostnamePokeCapture(gwContainers, f.Namespace.Name, srcPingPodName, addresses.srcPodIP, protocol, gwIP, gwPort)
+					defer capture.StopAndLog("gateway-pod multi-gw hostname check done")
 					success := false
 					for i := 0; i < singleTargetRetries; i++ {
-						hostname := pokeHostnameViaNC(srcPingPodName, f.Namespace.Name, protocol, gwIP, gwPort)
+						hostname := pokeHostnameViaNCWithDebug(gwContainers, srcPingPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 						if hostname != "" {
 							returnedHostNames[hostname] = struct{}{}
 						}
@@ -235,6 +238,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					framework.Logf("Received hostnames for protocol %s are %v ", protocol, returnedHostNames)
 
 					if !success {
+						logExternalGatewayNCListenerDebug(gwContainers, f.Namespace.Name, srcPingPodName, protocol, gwIP, gwPort)
 						framework.Failf("Failed to hit all the external gateways via for protocol %s, diff %s", protocol, cmp.Diff(expectedHostNames, returnedHostNames))
 					}
 					checkAPBExternalRouteStatus(defaultPolicyName)
@@ -293,12 +297,13 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					ginkgo.By("Checking if one of the external gateways are reachable via Egress")
 					gwIP := addresses.targetIPs[0]
 					sourcePort := 50000
+					capture := startHostnamePokeCapture(gwContainers, f.Namespace.Name, srcPingPodName, addresses.srcPodIP, protocol, gwIP, gwPort)
+					defer capture.StopAndLog("MAC migration hostname check done")
 
-					res, err := e2ekubectl.RunKubectl(f.Namespace.Name, ncCmd(sourcePort, gwIP)...)
-					framework.ExpectNoError(err, "failed to reach %s (%s)", gwIP, protocol)
-					hostname := strings.TrimSuffix(res, "\n")
+					hostname := pokeHostnameViaNCCommandWithDebug(gwContainers, f.Namespace.Name, srcPingPodName, protocol, gwIP, gwPort, ncCmd(sourcePort, gwIP))
 					var gateway infraapi.ExternalContainer
 					if g, ok := expectedHostNames[hostname]; !ok {
+						logExternalGatewayNCListenerDebug(gwContainers, f.Namespace.Name, srcPingPodName, protocol, gwIP, gwPort)
 						framework.Failf("Unexpected gateway hostname %q, expected; %#v", hostname, expectedHostNames)
 					} else {
 						gateway = g
@@ -318,9 +323,10 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					tcpDumpSync := sync.WaitGroup{}
 					tcpDumpSync.Add(1)
 					go checkReceivedPacketsOnExternalContainer(gateway, srcPingPodName, anyLink, []string{protocol, "and", "port", strconv.Itoa(sourcePort)}, &tcpDumpSync)
-					res, err = e2ekubectl.RunKubectl(f.Namespace.Name, ncCmd(sourcePort, gwIP)...)
-					framework.ExpectNoError(err, "failed to reach %s (%s)", gwIP, protocol)
-					hostname2 := strings.TrimSuffix(res, "\n")
+					hostname2 := pokeHostnameViaNCCommandWithDebug([]infraapi.ExternalContainer{gateway}, f.Namespace.Name, srcPingPodName, protocol, gwIP, gwPort, ncCmd(sourcePort, gwIP))
+					if hostname != hostname2 {
+						logExternalGatewayNCListenerDebug([]infraapi.ExternalContainer{gateway}, f.Namespace.Name, srcPingPodName, protocol, gwIP, gwPort)
+					}
 					gomega.Expect(hostname).To(gomega.Equal(hostname2))
 					tcpDumpSync.Wait()
 
@@ -444,11 +450,14 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				}
 
 				ginkgo.By("Verifying connectivity to the pod from external gateways with large packets > pod MTU")
+				largePingCap := startLargePingCapture(gwContainers, f.Namespace.Name, srcPodName, addresses.srcPodIP, addresses.nodeIP, icmpToDump)
+				defer largePingCap.StopAndLog("large-ping check done")
 				for _, gwContainer := range gwContainers {
-					gomega.Eventually(infraprovider.Get().ExecExternalContainerCommand).
-						WithArguments(gwContainer, []string{"ping", "-s", "1420", "-c1", "-W1", addresses.srcPodIP}).
-						WithTimeout(testTimeout).
-						ShouldNot(gomega.BeEmpty(), "Failed to ping %s from container %s", addresses.srcPodIP, gwContainer.Name)
+					if err := waitForLargePingFromGateway(gwContainer, addresses.srcPodIP, testTimeout); err != nil {
+						largePingCap.MarkFailed()
+						logLargePingPathDebug(gwContainers, f.Namespace.Name, srcPodName, addresses.srcPodIP, addresses.nodeIP)
+						framework.Failf("Failed to ping %s from container %s with large packets: %v", addresses.srcPodIP, gwContainer.Name, err)
+					}
 				}
 
 				// Verify the gateways and remote loopback addresses are reachable from the pod.
@@ -509,8 +518,10 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 				// Picking only the first address, the one the udp listener is set for
 				gwIP := addresses.targetIPs[0]
+				capture := startHostnamePokeCapture(gwContainers, f.Namespace.Name, srcPodName, addresses.srcPodIP, protocol, gwIP, gwPort)
+				defer capture.StopAndLog("multi-gw hostname check done")
 				for i := 0; i < singleTargetRetries; i++ {
-					hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
+					hostname := pokeHostnameViaNCWithDebug(gwContainers, srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 					if hostname != "" {
 						returnedHostNames[hostname] = struct{}{}
 					}
@@ -523,6 +534,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 				framework.Logf("Received hostnames for protocol %s are %v ", protocol, returnedHostNames)
 
 				if !success {
+					logExternalGatewayNCListenerDebug(gwContainers, f.Namespace.Name, srcPodName, protocol, gwIP, gwPort)
 					framework.Failf("Failed to hit all the external gateways via for protocol %s, diff %s", protocol, cmp.Diff(expectedHostNames, returnedHostNames))
 				}
 
@@ -932,9 +944,11 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 						returnedHostNames := make(map[string]struct{})
 						gwIP := addresses.targetIPs[0]
+						capture := startHostnamePokeCapture(gwContainers, f.Namespace.Name, srcPingPodName, addresses.srcPodIP, protocol, gwIP, gwPort)
+						defer capture.StopAndLog("BFD dynamic-hop hostname check done")
 						success := false
 						for i := 0; i < singleTargetRetries; i++ {
-							hostname := pokeHostnameViaNC(srcPingPodName, f.Namespace.Name, protocol, gwIP, gwPort)
+							hostname := pokeHostnameViaNCWithDebug(gwContainers, srcPingPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 							if hostname != "" {
 								returnedHostNames[hostname] = struct{}{}
 							}
@@ -947,6 +961,7 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 						framework.Logf("Received hostnames for protocol %s are %v ", protocol, returnedHostNames)
 
 						if !success {
+							logExternalGatewayNCListenerDebug(gwContainers, f.Namespace.Name, srcPingPodName, protocol, gwIP, gwPort)
 							framework.Failf("Failed to hit all the external gateways via for protocol %s, diff %s", protocol, cmp.Diff(expectedHostNames, returnedHostNames))
 						}
 
@@ -954,6 +969,8 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 							ginkgo.By("Deleting one container")
 							err := providerCtx.DeleteExternalContainer(gwContainers[1])
 							framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
+							remaining := []infraapi.ExternalContainer{gwContainers[0]}
+							capture.containers = remaining
 							ginkgo.By("Waiting for BFD to sync")
 							time.Sleep(bfdTimeout)
 
@@ -962,7 +979,11 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 							ginkgo.By("Checking hostname multiple times")
 							for i := 0; i < 20; i++ {
-								hostname := pokeHostnameViaNC(srcPingPodName, f.Namespace.Name, protocol, gwIP, gwPort)
+								hostname := pokeHostnameViaNCWithDebug(remaining, srcPingPodName, f.Namespace.Name, protocol, gwIP, gwPort)
+								if hostname != expectedHostName {
+									framework.Logf("hostname mismatch on attempt %d/%d: got %q want %q", i+1, 20, hostname, expectedHostName)
+									logExternalGatewayNCListenerDebug(remaining, f.Namespace.Name, srcPingPodName, protocol, gwIP, gwPort)
+								}
 								gomega.Expect(expectedHostName).To(gomega.Equal(hostname), "Hostname returned by nc not as expected")
 							}
 						}
@@ -1151,8 +1172,10 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 					// Picking only the first address, the one the udp listener is set for
 					gwIP := addresses.targetIPs[0]
+					capture := startHostnamePokeCapture(gwContainers, f.Namespace.Name, srcPodName, addresses.srcPodIP, protocol, gwIP, gwPort)
+					defer capture.StopAndLog("BFD multi-gw hostname check done")
 					for i := 0; i < singleTargetRetries; i++ {
-						hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
+						hostname := pokeHostnameViaNCWithDebug(gwContainers, srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
 						if hostname != "" {
 							returnedHostNames[hostname] = struct{}{}
 						}
@@ -1165,12 +1188,15 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 					framework.Logf("Received hostnames for protocol %s are %v ", protocol, returnedHostNames)
 
 					if !success {
+						logExternalGatewayNCListenerDebug(gwContainers, f.Namespace.Name, srcPodName, protocol, gwIP, gwPort)
 						framework.Failf("Failed to hit all the external gateways via for protocol %s, diff %s", protocol, cmp.Diff(expectedHostNames, returnedHostNames))
 					}
 
 					ginkgo.By("Deleting one container")
 					err := providerCtx.DeleteExternalContainer(gwContainers[1])
 					framework.ExpectNoError(err, "failed to delete external container %s", gwContainers[1].Name)
+					remaining := []infraapi.ExternalContainer{gwContainers[0]}
+					capture.containers = remaining
 					ginkgo.By("Waiting for BFD to sync")
 					time.Sleep(bfdTimeout)
 
@@ -1179,7 +1205,11 @@ var _ = ginkgo.Describe("External Gateway", feature.ExternalGateway, func() {
 
 					ginkgo.By("Checking hostname multiple times")
 					for i := 0; i < 20; i++ {
-						hostname := pokeHostnameViaNC(srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
+						hostname := pokeHostnameViaNCWithDebug(remaining, srcPodName, f.Namespace.Name, protocol, gwIP, gwPort)
+						if hostname != expectedHostName {
+							framework.Logf("hostname mismatch on attempt %d/%d: got %q want %q", i+1, 20, hostname, expectedHostName)
+							logExternalGatewayNCListenerDebug(remaining, f.Namespace.Name, srcPodName, protocol, gwIP, gwPort)
+						}
 						gomega.Expect(expectedHostName).To(gomega.Equal(hostname), "Hostname returned by nc not as expected")
 					}
 				}, ginkgo.Entry("IPV4 udp", &addressesv4, "udp", gwUDPPort),
@@ -1360,15 +1390,25 @@ func setupGatewayContainers(f *framework.Framework, providerCtx infraapi.Context
 		framework.Fail("No ipv4 nor ipv6 addresses found in nodes and src pod")
 	}
 
-	// This sets up a listener that replies with the hostname, both on tcp and on udp
+	// This sets up a listener that replies with the hostname, both on tcp and on udp.
+	// Each accepted connection exits nc; the loop rebinds. Log start/done with subsecond
+	// timestamps, nc stderr, and exit status so empty-hostname flakes can be correlated
+	// with bind failures and listen-loop gaps.
 	setupListenersOrDie := func(container infraapi.ExternalContainer, gwAddress string) {
+		logExternalContainerNCVersion(container)
 		_, err = infraprovider.Get().ExecExternalContainerCommand(container,
-			[]string{"bash", "-c", fmt.Sprintf("while true; do echo $(hostname) | nc -l -u -W 1 %s %d; done &", gwAddress, gwUDPPort)})
+			[]string{"bash", "-c", fmt.Sprintf(
+				`while true; do echo "${EPOCHREALTIME} udp start addr=%s port=%d" >> /tmp/eg-nc-udp.log; echo $(hostname) | nc -l -u -W 1 %s %d 2>> /tmp/eg-nc-udp.log; ec=$?; echo "${EPOCHREALTIME} udp done exit=$ec addr=%s port=%d" >> /tmp/eg-nc-udp.log; done &`,
+				gwAddress, gwUDPPort, gwAddress, gwUDPPort, gwAddress, gwUDPPort)})
 		framework.ExpectNoError(err, "failed to setup UDP listener for %s on %s", gwAddress, container)
 
 		_, err = infraprovider.Get().ExecExternalContainerCommand(container,
-			[]string{"bash", "-c", fmt.Sprintf("while true; do echo $(hostname) | nc -l -N %s %d; done &", gwAddress, gwTCPPort)})
+			[]string{"bash", "-c", fmt.Sprintf(
+				`while true; do echo "${EPOCHREALTIME} tcp start addr=%s port=%d" >> /tmp/eg-nc-tcp.log; echo $(hostname) | nc -l -N %s %d 2>> /tmp/eg-nc-tcp.log; ec=$?; echo "${EPOCHREALTIME} tcp done exit=$ec addr=%s port=%d" >> /tmp/eg-nc-tcp.log; done &`,
+				gwAddress, gwTCPPort, gwAddress, gwTCPPort, gwAddress, gwTCPPort)})
 		framework.ExpectNoError(err, "failed to setup TCP listener for %s on %s", gwAddress, container)
+		framework.Logf("Started hostname nc listeners on %s for %s (tcp/%d udp/%d); accept log: /tmp/eg-nc-{tcp,udp}.log",
+			container.Name, gwAddress, gwTCPPort, gwUDPPort)
 	}
 
 	// The target ips are addresses added to the lo of each container.
@@ -1619,12 +1659,7 @@ spec:
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	gomega.Expect(stdout).To(gomega.Equal(fmt.Sprintf("adminpolicybasedexternalroute.k8s.ovn.org/%s created\n", policyName)))
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gwIPs := sets.List(sets.New(gateways...))
-	gomega.Eventually(func() string {
-		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		return lastMsg
-	}, time.Minute, 1).Should(gomega.ContainSubstring(fmt.Sprintf("configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
+	expectAPBExternalRouteConfiguredIPs(policyName, time.Minute, gateways...)
 	gomega.Eventually(func() string {
 		status, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.status}")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
@@ -1640,12 +1675,7 @@ func checkAPBExternalRouteStatus(policyName string) {
 
 func createAPBExternalRouteCRWithStaticHop(policyName, namespaceName string, bfd bool, gateways ...string) {
 	createAPBExternalRouteCRWithStaticHopAndStatus(policyName, namespaceName, bfd, "Success", gateways...)
-	gwIPs := sets.List(sets.New(gateways...))
-	gomega.Eventually(func() string {
-		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		return lastMsg
-	}, time.Minute, 1).Should(gomega.ContainSubstring(fmt.Sprintf("configured external gateway IPs: %s", strings.Join(gwIPs, ","))))
+	expectAPBExternalRouteConfiguredIPs(policyName, time.Minute, gateways...)
 }
 
 func createAPBExternalRouteCRWithStaticHopAndStatus(policyName, namespaceName string, bfd bool, status string, gateways ...string) {
@@ -1692,11 +1722,7 @@ spec:
 `, policyName, namespaceName, formatStaticHops(bfd, gateways...))
 	_, err = e2ekubectl.RunKubectlInput(namespaceName, data, "apply", "-f", "-")
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-	gomega.Eventually(func() string {
-		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
-		gomega.Expect(err).NotTo(gomega.HaveOccurred())
-		return lastMsg
-	}, 10).Should(gomega.ContainSubstring(fmt.Sprintf("configured external gateway IPs: %s", strings.Join(gateways, ","))))
+	expectAPBExternalRouteConfiguredIPs(policyName, 10*time.Second, gateways...)
 
 	gomega.Eventually(func() string {
 		s, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.status}")
@@ -1709,6 +1735,30 @@ spec:
 		return t
 	}, 10, 1).ShouldNot(gomega.Equal(lastUpdatetime))
 
+}
+
+// expectAPBExternalRouteConfiguredIPs waits until the APB status message reports each
+// expected gateway IP as a complete list member. Substring matching is unsafe (e.g.
+// "10.0.0.1" matches inside "10.0.0.10"); dual-stack messages may also list a
+// superset of families, so membership against the parsed list is required.
+func expectAPBExternalRouteConfiguredIPs(policyName string, timeout time.Duration, gateways ...string) {
+	expected := sets.New(gateways...)
+	gomega.Eventually(func(g gomega.Gomega) {
+		lastMsg, err := e2ekubectl.RunKubectl("", "get", "apbexternalroute", policyName, "-ojsonpath={.status.messages[-1:]}")
+		g.Expect(err).NotTo(gomega.HaveOccurred())
+		_, list, found := strings.Cut(lastMsg, "configured external gateway IPs:")
+		g.Expect(found).To(gomega.BeTrue(), "missing configured gateway IPs in %q", lastMsg)
+		configured := sets.New[string]()
+		for ip := range strings.SplitSeq(list, ",") {
+			ip = strings.TrimSpace(ip)
+			if ip == "" {
+				continue
+			}
+			configured.Insert(ip)
+		}
+		g.Expect(configured.HasAll(expected.UnsortedList()...)).To(gomega.BeTrue(),
+			"missing gateway IPs in %q; configured=%v expected=%v", lastMsg, sets.List(configured), sets.List(expected))
+	}).WithTimeout(timeout).WithPolling(time.Second).Should(gomega.Succeed())
 }
 
 func deleteAPBExternalRouteCR(policyName string) {
@@ -1769,21 +1819,620 @@ func hostNameForExternalContainer(container infraapi.ExternalContainer) string {
 }
 
 func pokeHostnameViaNC(podName, namespace, protocol, target string, port int) string {
+	args := hostnameNCPokeKubectlArgs(podName, protocol, target, port)
+	return pokeHostnameViaNCCommand(namespace, protocol, target, port, args)
+}
+
+func hostnameNCPokeKubectlArgs(podName, protocol, target string, port int) []string {
 	args := []string{"exec", podName, "--"}
 	if protocol == "tcp" {
 		args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 -N %s %d", target, port))
 	} else {
 		args = append(args, "bash", "-c", fmt.Sprintf("echo | nc -w 1 -u %s %d", target, port))
 	}
-	res, err := e2ekubectl.RunKubectl(namespace, args...)
-	framework.ExpectNoError(err, "failed to reach %s (%s)", target, protocol)
-	hostname := strings.TrimSuffix(res, "\n")
+	return args
+}
+
+// pokeHostnameViaNCCommand runs an nc-based hostname poke and fails the test on kubectl/nc errors.
+func pokeHostnameViaNCCommand(namespace, protocol, target string, port int, kubectlArgs []string) string {
+	hostname, stdout, stderr, err := tryPokeHostnameViaNCCommand(namespace, protocol, target, port, kubectlArgs)
+	framework.ExpectNoError(err, "failed to reach %s (%s): stdout=%q stderr=%q", target, protocol, stdout, stderr)
+	return hostname
+}
+
+// tryPokeHostnameViaNC runs a standard hostname poke without failing the test.
+func tryPokeHostnameViaNC(podName, namespace, protocol, target string, port int) (string, string, string, error) {
+	return tryPokeHostnameViaNCCommand(namespace, protocol, target, port, hostnameNCPokeKubectlArgs(podName, protocol, target, port))
+}
+
+// tryPokeHostnameViaNCCommand runs an nc-based hostname poke and logs duration, exit status,
+// and raw stdout/stderr so empty replies can be distinguished from reachability failures.
+func tryPokeHostnameViaNCCommand(namespace, protocol, target string, port int, kubectlArgs []string) (hostname, stdout, stderr string, err error) {
+	start := time.Now()
+	stdout, stderr, err = e2ekubectl.RunKubectlWithFullOutput(namespace, kubectlArgs...)
+	duration := time.Since(start)
+	hostname = strings.TrimSuffix(stdout, "\n")
+	framework.Logf("nc hostname poke %s %s: duration=%s err=%v stdoutLen=%d stdout=%q stderr=%q hostname=%q",
+		protocol, net.JoinHostPort(target, strconv.Itoa(port)), duration, err, len(stdout), stdout, stderr, hostname)
+	if hostname == "" {
+		framework.Logf("nc hostname poke returned empty hostname for %s %s (listen-loop race or blackhole next-hop?)",
+			protocol, net.JoinHostPort(target, strconv.Itoa(port)))
+	}
+	return hostname, stdout, stderr, err
+}
+
+func hostnamePokeTCPDumpFilter(protocol string, port int) string {
+	protoFilter := "tcp"
+	if protocol == "udp" {
+		protoFilter = "udp"
+	}
+	return fmt.Sprintf("%s port %d", protoFilter, port)
+}
+
+func logExternalContainerNCVersion(container infraapi.ExternalContainer) {
+	out, err := infraprovider.Get().ExecExternalContainerCommand(container, []string{"bash", "-c",
+		"echo '--- nc version ---'; nc -h 2>&1 | head -5; command -v nc; ls -l $(command -v nc); readlink -f $(command -v nc) 2>/dev/null || true"})
+	framework.Logf("gw %s nc implementation: err=%v out=%q", container.Name, err, out)
+}
+
+func logPodNCVersion(namespace, podName string) {
+	out, stderr, err := e2ekubectl.RunKubectlWithFullOutput(namespace, "exec", podName, "--", "bash", "-c",
+		"echo '--- nc version ---'; nc -h 2>&1 | head -5; command -v nc; ls -l $(command -v nc); readlink -f $(command -v nc) 2>/dev/null || true")
+	framework.Logf("pod %s/%s nc implementation: err=%v stdout=%q stderr=%q", namespace, podName, err, out, stderr)
+}
+
+// newEGCaptureID returns a unique id for one capture session so log/pid paths never collide
+// across tests or parallel specs on a shared node/container filesystem.
+func newEGCaptureID() string {
+	return strconv.FormatInt(time.Now().UnixNano(), 10)
+}
+
+func egCapturePaths(prefix, id string) (logPath, pidPath string) {
+	return fmt.Sprintf("/tmp/%s-%s.log", prefix, id), fmt.Sprintf("/tmp/%s-%s.pid", prefix, id)
+}
+
+// stopAndCollectTCPDumpCmd stops a tcpdump that belongs to this capture (pidfile + log path
+// unique to the session) and prints the log. It only signals a live process whose cmdline
+// contains tcpdump and that still has this capture's log open — never a reused PID or a
+// stale fixed-path pidfile from another test.
+func stopAndCollectTCPDumpCmd(logPath, pidPath, label string) string {
+	return fmt.Sprintf(`LOG=%q
+PIDFILE=%q
+LABEL=%q
+if [ -f "$PIDFILE" ]; then
+  PID=$(cat "$PIDFILE" 2>/dev/null || true)
+  if [ -n "$PID" ] && [ -d "/proc/$PID" ]; then
+    CMD=$(tr '\0' ' ' < "/proc/$PID/cmdline" 2>/dev/null || true)
+    case "$CMD" in
+      *tcpdump*)
+        OWNED=0
+        for fd in /proc/$PID/fd/*; do
+          target=$(readlink "$fd" 2>/dev/null || true)
+          if [ "$target" = "$LOG" ]; then OWNED=1; break; fi
+        done
+        if [ "$OWNED" = 1 ]; then
+          kill -INT "$PID" 2>/dev/null || kill "$PID" 2>/dev/null || true
+        else
+          echo "skipping pid $PID: not holding our capture log $LOG" >&2
+        fi
+        ;;
+      *)
+        echo "skipping pid $PID: cmdline is not tcpdump ($CMD)" >&2
+        ;;
+    esac
+  fi
+fi
+sleep 0.3
+echo "--- $LABEL ---"
+cat "$LOG" 2>/dev/null || echo "no $LOG"
+rm -f "$PIDFILE"
+`, logPath, pidPath, label)
+}
+
+// hostnamePokeCapture holds continuous tcpdump sessions started before hostname probes so the
+// original failing exchange is retained (gateway + in-pod / pod-netns), not only a post-failure repro.
+type hostnamePokeCapture struct {
+	containers      []infraapi.ExternalContainer
+	namespace       string
+	podName         string
+	nodeName        string
+	podIP           string
+	protocol        string
+	port            int
+	captureID       string
+	gwLog           string
+	gwPid           string
+	podLog          string
+	podPid          string
+	podNetnsLog     string
+	podNetnsPid     string
+	podHasTCPDump   bool // tcpdump running inside the pod
+	podNetnsCapture bool // tcpdump via nsenter into the pod netns (host-side process)
+	stopped         bool
+}
+
+// startHostnamePokeCapture starts continuous packet capture on the gateway containers and on
+// the client side before probes run. Client capture prefers in-pod tcpdump; if unavailable,
+// it enters the pod network namespace with nsenter so delivery inside the pod can be proven.
+// Capture startup failures fail the test — probes must not continue without evidence.
+// On partial startup failure, already-started captures are collected before failing.
+// podIP should be the address family under test (logged for correlation).
+func startHostnamePokeCapture(containers []infraapi.ExternalContainer, namespace, podName, podIP, protocol, target string, port int) *hostnamePokeCapture {
+	id := newEGCaptureID()
+	gwLog, gwPid := egCapturePaths("eg-nc-tcpdump-gw", id)
+	s := &hostnamePokeCapture{
+		containers: containers,
+		namespace:  namespace,
+		podName:    podName,
+		podIP:      podIP,
+		protocol:   protocol,
+		port:       port,
+		captureID:  id,
+		gwLog:      gwLog,
+		gwPid:      gwPid,
+	}
+	failStart := func(format string, args ...interface{}) {
+		s.StopAndLog("partial hostname-poke capture startup failure")
+		framework.Failf(format, args...)
+	}
+	filter := hostnamePokeTCPDumpFilter(protocol, port)
+	framework.Logf("Starting continuous hostname-poke capture for %s %s (filter %q, podIP %s, captureID %s)",
+		protocol, net.JoinHostPort(target, strconv.Itoa(port)), filter, podIP, id)
+
+	logPodNCVersion(namespace, podName)
+	for _, c := range containers {
+		logExternalContainerNCVersion(c)
+		startCmd := fmt.Sprintf(
+			"rm -f %q %q; "+
+				"tcpdump -ni any -nn -A -tt %q > %q 2>&1 & "+
+				"echo $! > %q; sleep 0.2; "+
+				"if ! kill -0 \"$(cat %q)\" 2>/dev/null; then cat %q >&2; exit 1; fi",
+			s.gwLog, s.gwPid, filter, s.gwLog, s.gwPid, s.gwPid, s.gwLog)
+		out, err := infraprovider.Get().ExecExternalContainerCommand(c, []string{"bash", "-c", startCmd})
+		if err != nil {
+			failStart("failed to start continuous tcpdump on gateway %s: err=%v out=%q", c.Name, err, out)
+		}
+		framework.Logf("gw %s continuous tcpdump start: out=%q", c.Name, out)
+	}
+
+	nodeName, err := e2ekubectl.RunKubectl(namespace, "get", "pod", podName, "-o", "jsonpath={.spec.nodeName}")
+	if err != nil {
+		failStart("failed to get node for %s/%s: %v", namespace, podName, err)
+	}
+	s.nodeName = strings.TrimSpace(nodeName)
+
+	if _, err := e2ekubectl.RunKubectl(namespace, "exec", podName, "--", "which", "tcpdump"); err == nil {
+		s.podLog, s.podPid = egCapturePaths("eg-nc-tcpdump-pod", id)
+		startCmd := fmt.Sprintf(
+			"rm -f %q %q; "+
+				"tcpdump -ni any -nn -A -tt %q > %q 2>&1 & "+
+				"echo $! > %q; sleep 0.2; "+
+				"if ! kill -0 \"$(cat %q)\" 2>/dev/null; then cat %q >&2; exit 1; fi",
+			s.podLog, s.podPid, filter, s.podLog, s.podPid, s.podPid, s.podLog)
+		out, stderr, startErr := e2ekubectl.RunKubectlWithFullOutput(namespace, "exec", podName, "--", "bash", "-c", startCmd)
+		if startErr != nil {
+			failStart("failed to start continuous tcpdump in pod %s/%s: err=%v stdout=%q stderr=%q",
+				namespace, podName, startErr, out, stderr)
+		}
+		framework.Logf("pod %s/%s continuous tcpdump start: stdout=%q stderr=%q", namespace, podName, out, stderr)
+		s.podHasTCPDump = true
+	} else {
+		// agnhost (and similar) often lack tcpdump; enter the pod netns from the node.
+		s.podNetnsLog, s.podNetnsPid = egCapturePaths("eg-nc-tcpdump-podnetns", id)
+		out, err := startPodNetnsTCPDumpToFiles(s.nodeName, namespace, podName, filter, s.podNetnsLog, s.podNetnsPid)
+		if err != nil {
+			failStart("failed to start continuous tcpdump in pod netns for %s/%s on node %s: err=%v out=%q",
+				namespace, podName, s.nodeName, err, out)
+		}
+		framework.Logf("pod-netns continuous tcpdump start for %s/%s on node %s: out=%q", namespace, podName, s.nodeName, out)
+		s.podNetnsCapture = true
+	}
+
+	time.Sleep(300 * time.Millisecond)
+	return s
+}
+
+func startPodNetnsTCPDumpToFiles(nodeName, namespace, podName, filter, logPath, pidPath string) (string, error) {
+	containerName := fmt.Sprintf("%s-container", podName)
+	startCmd := fmt.Sprintf(`set -euo pipefail
+NS=%q
+POD=%q
+CNAME=%q
+FILTER=%q
+LOG=%q
+PIDFILE=%q
+if ! command -v tcpdump >/dev/null 2>&1; then
+  echo "tcpdump not found on host PATH (ExecK8NodeCommand/chroot /host)" >&2
+  command -v tcpdump 2>&1 || true
+  ls -l /usr/sbin/tcpdump /sbin/tcpdump /usr/bin/tcpdump 2>&1 || true
+  exit 1
+fi
+if ! command -v nsenter >/dev/null 2>&1; then
+  echo "nsenter not found on host PATH (ExecK8NodeCommand/chroot /host)" >&2
+  command -v nsenter 2>&1 || true
+  ls -l /usr/bin/nsenter /bin/nsenter 2>&1 || true
+  exit 1
+fi
+echo "host tools: tcpdump=$(command -v tcpdump) nsenter=$(command -v nsenter)" >&2
+POD_ID=$(crictl pods --namespace "$NS" --name "$POD" -q | head -n1)
+if [ -z "$POD_ID" ]; then
+  echo "pod sandbox not found for $NS/$POD" >&2
+  exit 1
+fi
+CID=$(crictl ps --pod "$POD_ID" --name "$CNAME" -q | head -n1)
+if [ -z "$CID" ]; then
+  CID=$(crictl ps --pod "$POD_ID" -q | head -n1)
+fi
+if [ -z "$CID" ]; then
+  echo "pod container not found for $NS/$POD" >&2
+  exit 1
+fi
+PID=$(crictl inspect -o go-template --template '{{.info.pid}}' "$CID" 2>/dev/null || true)
+if [ -z "$PID" ] || [ "$PID" = "<no value>" ]; then
+  PID=$(crictl inspect "$CID" | jq -r '.info.pid // empty' 2>/dev/null || true)
+fi
+if [ -z "$PID" ] || [ "$PID" = "<no value>" ] || [ "$PID" = "null" ]; then
+  # Raw Go string: use single backslashes so sed receives BRE groups \( \) and \1.
+  PID=$(crictl inspect "$CID" | sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -n1)
+fi
+if [ -z "$PID" ] || [ "$PID" = "0" ]; then
+  echo "failed to resolve container pid for cid=$CID" >&2
+  exit 1
+fi
+if [ ! -e "/proc/$PID/ns/net" ]; then
+  echo "pod netns missing: /proc/$PID/ns/net (cid=$CID)" >&2
+  ls -l "/proc/$PID/ns" >&2 || true
+  exit 1
+fi
+rm -f "$LOG" "$PIDFILE"
+# -A keeps ASCII payload (hostname replies); -vv adds protocol details.
+nsenter -t "$PID" -n tcpdump -ni any -nn -vv -A -tt "$FILTER" > "$LOG" 2>&1 &
+echo $! > "$PIDFILE"
+sleep 0.2
+if ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  echo "tcpdump failed to stay running in pod netns; log $LOG follows:" >&2
+  cat "$LOG" >&2 || echo "no log at $LOG" >&2
+  exit 1
+fi
+echo "pod-netns tcpdump started host_pid=$(cat "$PIDFILE") container_pid=$PID cid=$CID filter=$FILTER log=$LOG"
+`, namespace, podName, containerName, filter, logPath, pidPath)
+	return infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"bash", "-c", startCmd})
+}
+
+func startNodeHostTCPDump(nodeName, filter, logPath, pidPath string) (string, error) {
+	startCmd := fmt.Sprintf(`set -euo pipefail
+LOG=%q
+PIDFILE=%q
+FILTER=%q
+if ! command -v tcpdump >/dev/null 2>&1; then
+  echo "tcpdump not found on host PATH (ExecK8NodeCommand/chroot /host)" >&2
+  command -v tcpdump 2>&1 || true
+  ls -l /usr/sbin/tcpdump /sbin/tcpdump /usr/bin/tcpdump 2>&1 || true
+  exit 1
+fi
+echo "host tools: tcpdump=$(command -v tcpdump)" >&2
+rm -f "$LOG" "$PIDFILE"
+tcpdump -ni any -nn -vv -tt "$FILTER" > "$LOG" 2>&1 &
+echo $! > "$PIDFILE"
+sleep 0.2
+if ! kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  echo "tcpdump failed to stay running on node; log $LOG follows:" >&2
+  cat "$LOG" >&2 || echo "no log at $LOG" >&2
+  exit 1
+fi
+echo "node-host tcpdump started pid=$(cat "$PIDFILE") filter=$FILTER log=$LOG"
+`, logPath, pidPath, filter)
+	return infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"bash", "-c", startCmd})
+}
+
+func stopAndCollectNodeTCPDump(nodeName, logPath, pidPath, label string) {
+	if nodeName == "" || logPath == "" || pidPath == "" {
+		return
+	}
+	out, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"bash", "-c",
+		stopAndCollectTCPDumpCmd(logPath, pidPath, label)})
+	framework.Logf("%s on node %s: err=%v out=%q", label, nodeName, err, out)
+}
+
+// largePingTCPDumpFilter captures ICMP/ICMPv6 including error messages and fragments,
+// not only echo request/reply involving the pod.
+func largePingTCPDumpFilter(icmpToDump string) string {
+	if icmpToDump == "icmp6" {
+		return "icmp6 or ip6 proto 44"
+	}
+	return "icmp or (ip[6:2] & 0x1fff) != 0"
+}
+
+// largePingCapture holds continuous captures for the >MTU ping from external gateways.
+type largePingCapture struct {
+	containers      []infraapi.ExternalContainer
+	namespace       string
+	podName         string
+	nodeName        string
+	podIP           string
+	nodeIP          string
+	icmpToDump      string
+	captureID       string
+	gwLog           string
+	gwPid           string
+	podLog          string
+	podPid          string
+	podNetnsLog     string
+	podNetnsPid     string
+	nodeLog         string
+	nodePid         string
+	podHasTCPDump   bool
+	podNetnsCapture bool
+	nodeCapture     bool
+	failed          bool
+	stopped         bool
+}
+
+func (s *largePingCapture) MarkFailed() {
+	if s != nil {
+		s.failed = true
+	}
+}
+
+// startLargePingCapture starts continuous tcpdump on both gateways, the pod netns, and the
+// source node before the large ping runs. Startup failures fail the test after collecting
+// any captures that already started.
+func startLargePingCapture(containers []infraapi.ExternalContainer, namespace, podName, podIP, nodeIP, icmpToDump string) *largePingCapture {
+	id := newEGCaptureID()
+	gwLog, gwPid := egCapturePaths("eg-largeping-gw", id)
+	s := &largePingCapture{
+		containers: containers,
+		namespace:  namespace,
+		podName:    podName,
+		podIP:      podIP,
+		nodeIP:     nodeIP,
+		icmpToDump: icmpToDump,
+		captureID:  id,
+		gwLog:      gwLog,
+		gwPid:      gwPid,
+	}
+	failStart := func(format string, args ...interface{}) {
+		s.MarkFailed()
+		s.StopAndLog("partial large-ping capture startup failure")
+		framework.Failf(format, args...)
+	}
+	filter := largePingTCPDumpFilter(icmpToDump)
+	framework.Logf("Starting continuous large-ping capture (filter %q, podIP %s, nodeIP %s, captureID %s)",
+		filter, podIP, nodeIP, id)
+
+	for _, c := range containers {
+		startCmd := fmt.Sprintf(
+			"rm -f %q %q; "+
+				"tcpdump -ni any -nn -vv -tt %q > %q 2>&1 & "+
+				"echo $! > %q; sleep 0.2; "+
+				"if ! kill -0 \"$(cat %q)\" 2>/dev/null; then cat %q >&2; exit 1; fi",
+			s.gwLog, s.gwPid, filter, s.gwLog, s.gwPid, s.gwPid, s.gwLog)
+		out, err := infraprovider.Get().ExecExternalContainerCommand(c, []string{"bash", "-c", startCmd})
+		if err != nil {
+			failStart("failed to start large-ping tcpdump on gateway %s: err=%v out=%q", c.Name, err, out)
+		}
+		framework.Logf("gw %s large-ping tcpdump start: out=%q", c.Name, out)
+	}
+
+	nodeName, err := e2ekubectl.RunKubectl(namespace, "get", "pod", podName, "-o", "jsonpath={.spec.nodeName}")
+	if err != nil {
+		failStart("failed to get node for %s/%s: %v", namespace, podName, err)
+	}
+	s.nodeName = strings.TrimSpace(nodeName)
+
+	if _, err := e2ekubectl.RunKubectl(namespace, "exec", podName, "--", "which", "tcpdump"); err == nil {
+		s.podLog, s.podPid = egCapturePaths("eg-largeping-pod", id)
+		startCmd := fmt.Sprintf(
+			"rm -f %q %q; "+
+				"tcpdump -ni any -nn -vv -tt %q > %q 2>&1 & "+
+				"echo $! > %q; sleep 0.2; "+
+				"if ! kill -0 \"$(cat %q)\" 2>/dev/null; then cat %q >&2; exit 1; fi",
+			s.podLog, s.podPid, filter, s.podLog, s.podPid, s.podPid, s.podLog)
+		out, stderr, startErr := e2ekubectl.RunKubectlWithFullOutput(namespace, "exec", podName, "--", "bash", "-c", startCmd)
+		if startErr != nil {
+			failStart("failed to start large-ping tcpdump in pod %s/%s: err=%v stdout=%q stderr=%q",
+				namespace, podName, startErr, out, stderr)
+		}
+		s.podHasTCPDump = true
+	} else {
+		s.podNetnsLog, s.podNetnsPid = egCapturePaths("eg-largeping-podnetns", id)
+		out, err := startPodNetnsTCPDumpToFiles(s.nodeName, namespace, podName, filter, s.podNetnsLog, s.podNetnsPid)
+		if err != nil {
+			failStart("failed to start large-ping tcpdump in pod netns for %s/%s on node %s: err=%v out=%q",
+				namespace, podName, s.nodeName, err, out)
+		}
+		s.podNetnsCapture = true
+	}
+
+	s.nodeLog, s.nodePid = egCapturePaths("eg-largeping-node", id)
+	out, err := startNodeHostTCPDump(s.nodeName, filter, s.nodeLog, s.nodePid)
+	if err != nil {
+		failStart("failed to start large-ping tcpdump on source node %s: err=%v out=%q", s.nodeName, err, out)
+	}
+	s.nodeCapture = true
+
+	time.Sleep(300 * time.Millisecond)
+	return s
+}
+
+func (s *largePingCapture) StopAndLog(reason string) {
+	if s == nil || s.stopped {
+		return
+	}
+	s.stopped = true
+	framework.Logf("Stopping continuous large-ping capture (%s, failed=%v, captureID %s)", reason, s.failed, s.captureID)
+	if s.failed {
+		logLargePingPathDebug(s.containers, s.namespace, s.podName, s.podIP, s.nodeIP)
+	}
+	if s.gwLog != "" {
+		collectGw := stopAndCollectTCPDumpCmd(s.gwLog, s.gwPid, "eg-largeping-gw.log")
+		for _, c := range s.containers {
+			out, err := infraprovider.Get().ExecExternalContainerCommand(c, []string{"bash", "-c", collectGw})
+			framework.Logf("gw %s large-ping tcpdump capture: err=%v out=%q", c.Name, err, out)
+		}
+	}
+	// Collect only this session's paths (set before each start attempt) so partial failures
+	// still dump logs without touching another test's fixed/shared pidfiles.
+	if s.podLog != "" {
+		collectPod := stopAndCollectTCPDumpCmd(s.podLog, s.podPid, "eg-largeping-pod.log")
+		out, stderr, err := e2ekubectl.RunKubectlWithFullOutput(s.namespace, "exec", s.podName, "--", "bash", "-c", collectPod)
+		framework.Logf("pod %s/%s large-ping tcpdump capture: err=%v stdout=%q stderr=%q", s.namespace, s.podName, err, out, stderr)
+	}
+	if s.podNetnsLog != "" {
+		stopAndCollectNodeTCPDump(s.nodeName, s.podNetnsLog, s.podNetnsPid, "eg-largeping-podnetns.log (pod netns)")
+	}
+	if s.nodeLog != "" {
+		stopAndCollectNodeTCPDump(s.nodeName, s.nodeLog, s.nodePid, "eg-largeping-node.log (source node)")
+	}
+}
+
+// logLargePingPathDebug dumps MTUs, route lookup to the pod (selected src), and neighbor state
+// on gateways, the source node, and the pod. Call before containers are deleted.
+func logLargePingPathDebug(containers []infraapi.ExternalContainer, namespace, podName, podIP, nodeIP string) {
+	framework.Logf("Dumping large-ping path debug for podIP %s nodeIP %s", podIP, nodeIP)
+	ipCmd := "ip"
+	routeGet := fmt.Sprintf("ip route get %s", podIP)
+	if net.ParseIP(podIP) != nil && net.ParseIP(podIP).To4() == nil {
+		ipCmd = "ip -6"
+		routeGet = fmt.Sprintf("ip -6 route get %s", podIP)
+	}
+	gwDebug := fmt.Sprintf(
+		"echo '--- links/mtu ---'; ip -br link; echo '--- addrs ---'; ip -br addr; ip -6 -br addr 2>/dev/null; "+
+			"echo '--- route get pod ---'; %s; "+
+			"echo '--- neigh ---'; %s neigh show; %s neigh show proxy 2>/dev/null || true",
+		routeGet, ipCmd, ipCmd)
+	for _, c := range containers {
+		out, err := infraprovider.Get().ExecExternalContainerCommand(c, []string{"bash", "-c", gwDebug})
+		framework.Logf("gw %s large-ping path debug: err=%v out=%q", c.Name, err, out)
+	}
+
+	nodeName, err := e2ekubectl.RunKubectl(namespace, "get", "pod", podName, "-o", "jsonpath={.spec.nodeName}")
+	if err != nil {
+		framework.Logf("large-ping path debug: failed to get node for %s/%s: %v", namespace, podName, err)
+		return
+	}
+	nodeName = strings.TrimSpace(nodeName)
+	nodeDebug := fmt.Sprintf(
+		"echo '--- links/mtu ---'; ip -br link; echo '--- addrs ---'; ip -br addr; ip -6 -br addr 2>/dev/null; "+
+			"echo '--- route get pod ---'; %s; "+
+			"echo '--- neigh ---'; %s neigh show",
+		routeGet, ipCmd)
+	if nodeIP != "" {
+		nodeRouteGet := fmt.Sprintf("ip route get %s", nodeIP)
+		if ip := net.ParseIP(nodeIP); ip != nil && ip.To4() == nil {
+			nodeRouteGet = fmt.Sprintf("ip -6 route get %s", nodeIP)
+		}
+		nodeDebug += fmt.Sprintf("; echo '--- route get nodeIP ---'; %s 2>/dev/null || true", nodeRouteGet)
+	}
+	out, err := infraprovider.Get().ExecK8NodeCommand(nodeName, []string{"bash", "-c", nodeDebug})
+	framework.Logf("source node %s large-ping path debug: err=%v out=%q", nodeName, err, out)
+
+	podDebug := fmt.Sprintf(
+		"echo '--- links/mtu ---'; ip -br link 2>/dev/null || true; echo '--- addrs ---'; ip -br addr 2>/dev/null; ip -6 -br addr 2>/dev/null; " +
+			"echo '--- routes ---'; ip route 2>/dev/null; ip -6 route 2>/dev/null; " +
+			"echo '--- neigh ---'; ip neigh 2>/dev/null; ip -6 neigh 2>/dev/null || true")
+	pOut, pErr, err := e2ekubectl.RunKubectlWithFullOutput(namespace, "exec", podName, "--", "bash", "-c", podDebug)
+	framework.Logf("pod %s/%s large-ping path debug: err=%v stdout=%q stderr=%q", namespace, podName, err, pOut, pErr)
+}
+
+// waitForLargePingFromGateway retries a >MTU ping until success or timeout.
+func waitForLargePingFromGateway(container infraapi.ExternalContainer, podIP string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastOut string
+	var lastErr error
+	for time.Now().Before(deadline) {
+		out, err := infraprovider.Get().ExecExternalContainerCommand(container,
+			[]string{"ping", "-s", "1420", "-c1", "-W1", podIP})
+		lastOut, lastErr = out, err
+		if err == nil && strings.TrimSpace(out) != "" {
+			return nil
+		}
+		time.Sleep(time.Second)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("err=%v out=%q", lastErr, lastOut)
+	}
+	return fmt.Errorf("empty ping output: %q", lastOut)
+}
+
+// StopAndLog stops continuous captures and prints their contents. Safe to call multiple times.
+// Only touches this session's unique paths so partial startup cannot signal another test's PID.
+func (s *hostnamePokeCapture) StopAndLog(reason string) {
+	if s == nil || s.stopped {
+		return
+	}
+	s.stopped = true
+	framework.Logf("Stopping continuous hostname-poke capture (%s, captureID %s)", reason, s.captureID)
+	if s.gwLog != "" {
+		collectCmd := stopAndCollectTCPDumpCmd(s.gwLog, s.gwPid, "eg-nc-tcpdump-gw.log")
+		for _, c := range s.containers {
+			out, err := infraprovider.Get().ExecExternalContainerCommand(c, []string{"bash", "-c", collectCmd})
+			framework.Logf("gw %s continuous tcpdump capture: err=%v out=%q", c.Name, err, out)
+		}
+	}
+	if s.podLog != "" {
+		collectCmd := stopAndCollectTCPDumpCmd(s.podLog, s.podPid, "eg-nc-tcpdump-pod.log")
+		out, stderr, err := e2ekubectl.RunKubectlWithFullOutput(s.namespace, "exec", s.podName, "--", "bash", "-c", collectCmd)
+		framework.Logf("pod %s/%s continuous tcpdump capture: err=%v stdout=%q stderr=%q", s.namespace, s.podName, err, out, stderr)
+	}
+	if s.podNetnsLog != "" {
+		stopAndCollectNodeTCPDump(s.nodeName, s.podNetnsLog, s.podNetnsPid, "eg-nc-tcpdump-podnetns.log (pod netns)")
+	}
+}
+
+// logExternalGatewayNCListenerDebug dumps gateway/pod listener process/socket state and accept
+// logs. Pair with startHostnamePokeCapture so packet evidence for the original failing exchange
+// is already being collected; call this on mismatch or command error before failing.
+func logExternalGatewayNCListenerDebug(containers []infraapi.ExternalContainer, namespace, podName, protocol, target string, port int) {
+	framework.Logf("Dumping external gateway nc listener debug for target %s port %d on %d container(s)",
+		target, port, len(containers))
+	debugCmds := [][]string{
+		{"hostname"},
+		{"bash", "-c", "echo '--- nc version ---'; nc -h 2>&1 | head -5; command -v nc; ls -l $(command -v nc); readlink -f $(command -v nc) 2>/dev/null || true"},
+		{"bash", "-c", "ps aux 2>/dev/null | grep -E '[n]c ' || true"},
+		{"bash", "-c", "echo '--- listening ---'; ss -ltnup 2>/dev/null || ss -ltnu 2>/dev/null || true; echo '--- established ---'; ss -tanpi 2>/dev/null || ss -tanp 2>/dev/null || true"},
+		{"bash", "-c", "ip -br addr show; ip -6 -br addr show 2>/dev/null; true"},
+		{"bash", "-c", "test -f /tmp/eg-nc-tcp.log && echo '--- eg-nc-tcp.log ---' && cat /tmp/eg-nc-tcp.log || echo 'no /tmp/eg-nc-tcp.log'"},
+		{"bash", "-c", "test -f /tmp/eg-nc-udp.log && echo '--- eg-nc-udp.log ---' && cat /tmp/eg-nc-udp.log || echo 'no /tmp/eg-nc-udp.log'"},
+	}
+	for _, c := range containers {
+		for _, cmd := range debugCmds {
+			out, err := infraprovider.Get().ExecExternalContainerCommand(c, cmd)
+			framework.Logf("gw %s debug %v: err=%v out=%q", c.Name, cmd, err, out)
+		}
+	}
+	if podName != "" && namespace != "" {
+		logPodNCVersion(namespace, podName)
+		out, stderr, err := e2ekubectl.RunKubectlWithFullOutput(namespace, "exec", podName, "--", "bash", "-c",
+			"echo '--- pod sockets ---'; ss -ltnup 2>/dev/null || true; ss -tanpi 2>/dev/null || ss -tanp 2>/dev/null || true")
+		framework.Logf("pod %s/%s socket debug: err=%v stdout=%q stderr=%q", namespace, podName, err, out, stderr)
+	}
+}
+
+// pokeHostnameViaNCWithDebug runs a hostname poke; on command error it dumps listener/socket
+// diagnostics before failing (continuous capture should already be running via startHostnamePokeCapture).
+func pokeHostnameViaNCWithDebug(containers []infraapi.ExternalContainer, podName, namespace, protocol, target string, port int) string {
+	hostname, stdout, stderr, err := tryPokeHostnameViaNC(podName, namespace, protocol, target, port)
+	if err != nil {
+		logExternalGatewayNCListenerDebug(containers, namespace, podName, protocol, target, port)
+	}
+	framework.ExpectNoError(err, "failed to reach %s (%s): stdout=%q stderr=%q", target, protocol, stdout, stderr)
+	return hostname
+}
+
+// pokeHostnameViaNCCommandWithDebug is like pokeHostnameViaNCWithDebug but for custom kubectl args.
+func pokeHostnameViaNCCommandWithDebug(containers []infraapi.ExternalContainer, namespace, podName, protocol, target string, port int, kubectlArgs []string) string {
+	hostname, stdout, stderr, err := tryPokeHostnameViaNCCommand(namespace, protocol, target, port, kubectlArgs)
+	if err != nil {
+		logExternalGatewayNCListenerDebug(containers, namespace, podName, protocol, target, port)
+	}
+	framework.ExpectNoError(err, "failed to reach %s (%s): stdout=%q stderr=%q", target, protocol, stdout, stderr)
 	return hostname
 }
 
 // pokeConntrackEntries returns the number of conntrack entries that match the provided pattern, protocol and podIP
 func pokeConntrackEntries(nodeName, podIP, protocol string, patterns []string) int {
-	args := []string{"get", "pods", "--selector=app=ovs-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
+	args := []string{"get", "pods", "--selector=app=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", nodeName), "-o", "jsonpath={.items..metadata.name}"}
 	ovnKubernetesNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 	ovsPodName, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, args...)
 	framework.ExpectNoError(err, "failed to get the ovs pod on node %s", nodeName)
@@ -1932,7 +2581,7 @@ func recreatePodWithReadinessProbe(f *framework.Framework, podName, nodeSelector
 			}
 		}
 		return false
-	}).Should(gomega.Equal(true), fmt.Sprintf("Readiness probe for second external gateway pod %s from ns %s, failed: %v", podName, namespace, err))
+	}).WithTimeout(5*time.Minute).Should(gomega.Equal(true), fmt.Sprintf("Readiness probe for second external gateway pod %s from ns %s, failed: %v", podName, namespace, err))
 }
 
 func handleGatewayPodRemoval(f *framework.Framework, removalType GatewayRemovalType, gatewayPodName, servingNamespace string) func() {

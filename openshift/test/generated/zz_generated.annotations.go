@@ -1113,95 +1113,95 @@ var AppendedAnnotations = map[string]string{
 
 	"EgressService [LGW] Should validate pods' egress uses node's IP when setting Network without SNAT ipv6 pods": "[Disabled:Unimplemented]",
 
-	"External Gateway When validating the Admin Policy Based External Route status Should update the status of a successful and failed CRs": "[Disabled:Unimplemented]",
+	"External Gateway When validating the Admin Policy Based External Route status Should update the status of a successful and failed CRs": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate ICMP connectivity to an external gateway's loopback address via a pod with dynamic hop ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate ICMP connectivity to an external gateway's loopback address via a pod with dynamic hop ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate ICMP connectivity to an external gateway's loopback address via a pod with dynamic hop ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate ICMP connectivity to an external gateway's loopback address via a pod with dynamic hop ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop TCP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop TCP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop TCP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop TCP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs BFD e2e non-vxlan external gateway through a dynamic hop Should validate TCP/UDP connectivity to an external gateway's loopback address via a pod with a dynamic hop UDP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod deletion timestamp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod label update": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod label update": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod not ready": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp + pod not ready": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod deletion timestamp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod label update": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod label update": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod not ready": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp + pod not ready": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod deletion timestamp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod deletion timestamp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod label update": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod label update": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod not ready": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp + pod not ready": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod deletion timestamp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod deletion timestamp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod label update": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod label update": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod not ready": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Dynamic Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp + pod not ready": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV4 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway stale conntrack entry deletion validation Static Hop: Should validate conntrack entry deletion for TCP/UDP traffic via multiple external gateways a.k.a ECMP routes IPV6 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate ICMP connectivity to multiple external gateways for an ECMP scenario IPV6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV4 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 tcp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e multiple external gateway validation Should validate TCP/UDP connectivity to multiple external gateways for a UDP / TCP scenario IPV6 udp": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate ICMP connectivity to an external gateway's loopback address via a gateway pod ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress TCP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress TCP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress TCP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress TCP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress UDP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress UDP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress UDP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity even after MAC change (gateway migration) for egress UDP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod TCP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod TCP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod TCP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod TCP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv4": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv6": "[Disabled:Unimplemented]",
+	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv6": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"Hybrid-overlay subnet claims rejects a remote node claiming an arbitrary subnet": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -2003,255 +2003,255 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e control plane test node readiness according to its defaults interface MTU size should get node ready with a big enough MTU": "[Disabled:Unimplemented]",
 
-	"e2e egress IP validation on network of type Cluster Default Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type Cluster Default should prevent duplicate MAC responses when egress node is rebooted": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type Cluster Default should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L2 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv4 L3 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv4 L3 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L2 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should fail if egressip-mark annotation is being added by a regular user": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should fail if egressip-mark annotation is present during EgressIP creation": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding Legacy health check": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes with egress-assignable label": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces sharing a role primary network": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Multiple EgressIP objects and their Egress IP hosted on the same interface": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv4": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 compressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress IPv6 uncompressed": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary of replies to egress IP packets that require fragmentation [LGW][IPv4]": "[Disabled:Unimplemented][Serial]",
 
-	"e2e egress IP validation on network of type IPv6 L3 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+	"e2e egress IP validation on network of type IPv6 L3 role primary should prevent duplicate MAC responses when egress node is rebooted": "[Disabled:Unimplemented][Serial]",
 
 	"e2e egress firewall policy validation with DNS name resolver Should validate that egressfirewall policy functionality for allowed DNS name": "[Suite:ovn-kubernetes/conformance/parallel]",
 

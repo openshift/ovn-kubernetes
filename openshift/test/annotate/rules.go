@@ -19,7 +19,7 @@ var (
 			`[Feature:BaselineNetworkPolicy]`,
 			`[Feature:EgressService]`,
 			`[Feature:EgressQos]`,
-			`[Feature:ExternalGateway]`,
+			`[Feature:EgressIP]`,
 			`[Feature:DisablePacketMTUCheck]`,
 			`[Feature:VirtualMachineSupport]`,
 			`[Feature:Interconnect]`,
@@ -129,6 +129,7 @@ var (
 			"e2e egress IP validation",
 			"Status manager validation Should validate the egress firewall status when adding a new node zone",
 			"connectivity between client and server pods over localnet, when mac-security",
+			"External Gateway",
 		},
 
 		"[Suite:ovn-kubernetes/conformance/serial/virtualization]": {
