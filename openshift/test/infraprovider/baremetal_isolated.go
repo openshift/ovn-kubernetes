@@ -11,28 +11,36 @@
 // would all share the hypervisor's IP/MAC and the link changes would hit the
 // hypervisor. Containers that opt in by name (isolatedContainerNames) are
 // therefore created through the normal container engine on ovnk-e2e-isolated,
-// a dedicated unmanaged podman network on the machine network bridge whose
-// IPAM pool is a few preflight-checked addresses per IP family.
+// a dedicated unmanaged podman network on the machine network bridge, with
+// static addresses from the e2e primary IP allocator.
 //
 // The first user is the upstream "MAC binding mirroring with ARP/NDP flood
 // disabled" group (two containers, A and B). The egress firewall specs with
 // external containers, disabled in test/annotate/rules.go for the same reason,
 // are the next candidate.
+//
+// TODO(CORENET-7750): when the existing primary-network containers move off
+// host networking onto a container network backend, fold this file into
+// baremetal.go and drop the name-based isolation; specs that need their own
+// L2 identity on the machine network stay the exception.
 package infraprovider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container/network"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/kubernetes/test/e2e/framework"
+	utilsnet "k8s.io/utils/net"
 )
 
 const (
@@ -65,9 +73,12 @@ func needsIsolation(name string) bool {
 	return slices.ContainsFunc(isolatedContainerNames, func(re *regexp.Regexp) bool { return re.MatchString(name) })
 }
 
-// isolatedContainers creates the isolated external containers. It keeps no state
-// besides its configuration.
+// isolatedContainers creates the isolated external containers.
 type isolatedContainers struct {
+	// mu serializes create within this process. It does not order
+	// separate test processes: the specs using isolated containers are
+	// Serial, so no other spec runs alongside them.
+	mu              sync.Mutex
 	runner          api.Runner
 	machineNetwork  api.Network
 	hostNetworkInfo *api.NetworkInterface
@@ -89,13 +100,17 @@ func (f *isolatedContainers) podman(args ...string) (string, error) {
 // network, then creation through the base provider's engine path with
 // addresses from the e2e primary IP allocator.
 func (f *isolatedContainers) create(ec api.ExternalContainer, base *baseContextProvider) (api.ExternalContainer, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	wrap := func(err error) error { return fmt.Errorf("isolated container %s: %w", ec.Name, err) }
 	nets, err := f.machineNetworks()
 	if err != nil {
-		return ec, err
+		return ec, wrap(err)
 	}
 	// 1. The dedicated network.
 	if err := f.ensureNetwork(nets); err != nil {
-		return ec, err
+		return ec, wrap(err)
 	}
 	// 2. Engine path, with addresses from the e2e primary IP allocator (its
 	// reserved per-node range of the machine network, checked against the
@@ -103,35 +118,40 @@ func (f *isolatedContainers) create(ec api.ExternalContainer, base *baseContextP
 	isolatedEC := ec
 	isolatedEC.Network = isolatedNetwork
 	isolatedEC.IPv4, isolatedEC.IPv6 = "", ""
-	node := f.allocationNode()
-	if node == "" {
-		return ec, fmt.Errorf("isolated container: no node to allocate the machine network address from")
+	node, err := f.allocationNode()
+	if err != nil {
+		return ec, wrap(err)
 	}
 	// One address per family the machine network has: a single-stack cluster
 	// gets a single-stack container.
 	for _, subnet := range nets {
-		if subnet.IP.To4() != nil {
+		if utilsnet.IsIPv4(subnet.IP) {
 			ip, err := allocators.NewPrimaryIPv4(node)
 			if err != nil {
-				return ec, fmt.Errorf("isolated container: %w", err)
+				return ec, wrap(fmt.Errorf("failed to allocate an IPv4 address from node %s: %w", node, err))
 			}
 			isolatedEC.IPv4 = ip.String()
-		} else {
+		}
+		if utilsnet.IsIPv6(subnet.IP) {
 			ip, err := allocators.NewPrimaryIPv6(node)
 			if err != nil {
-				return ec, fmt.Errorf("isolated container: %w", err)
+				return ec, wrap(fmt.Errorf("failed to allocate an IPv6 address from node %s: %w", node, err))
 			}
 			isolatedEC.IPv6 = ip.String()
 		}
 	}
-	return base.CreateExternalContainer(isolatedEC)
+	created, err := base.CreateExternalContainer(isolatedEC)
+	if err != nil {
+		return created, wrap(err)
+	}
+	return created, nil
 }
 
 // machineNetworks returns every machine network subnet, one per IP family.
 func (f *isolatedContainers) machineNetworks() ([]*net.IPNet, error) {
 	v4, v6, err := f.machineNetwork.IPv4IPv6Subnets()
 	if err != nil {
-		return nil, fmt.Errorf("isolated container: failed to read machine networks: %w", err)
+		return nil, fmt.Errorf("failed to read machine networks: %w", err)
 	}
 	var nets []*net.IPNet
 	for _, cidr := range []string{v4, v6} {
@@ -140,24 +160,33 @@ func (f *isolatedContainers) machineNetworks() ([]*net.IPNet, error) {
 		}
 		_, subnet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			return nil, fmt.Errorf("isolated container: invalid machine network %q: %w", cidr, err)
+			return nil, fmt.Errorf("invalid machine network %q: %w", cidr, err)
 		}
 		nets = append(nets, subnet)
 	}
 	if len(nets) == 0 {
-		return nil, fmt.Errorf("isolated container: machine network has no IPv4 or IPv6 CIDR")
+		return nil, fmt.Errorf("machine network has no IPv4 or IPv6 CIDR")
 	}
 	return nets, nil
 }
 
 // allocationNode returns a node name to allocate the machine network
 // addresses from: every node is on the same machine network, so any works.
-func (f *isolatedContainers) allocationNode() string {
-	nets, _ := deploymentconfig.Get().GetNodeMachineNetworks()
-	for name := range nets {
-		return name
+// It reads the node from the kube API to keep this package independent of
+// the deploymentconfig layer.
+func (f *isolatedContainers) allocationNode() (string, error) {
+	cs, err := framework.LoadClientset()
+	if err != nil {
+		return "", fmt.Errorf("failed to create kube client: %w", err)
 	}
-	return ""
+	nodes, err := cs.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{Limit: 1})
+	if err != nil {
+		return "", fmt.Errorf("failed to list nodes: %w", err)
+	}
+	if len(nodes.Items) == 0 {
+		return "", fmt.Errorf("cluster has no nodes")
+	}
+	return nodes.Items[0].Name, nil
 }
 
 // ensureNetwork creates ovnk-e2e-isolated over the machine network subnets if
@@ -169,13 +198,13 @@ func (f *isolatedContainers) allocationNode() string {
 func (f *isolatedContainers) ensureNetwork(nets []*net.IPNet) error {
 	out, err := f.podman("network", "ls", "--format", "json")
 	if err != nil {
-		return fmt.Errorf("isolated container: failed to list podman networks: %w (%s)", err, out)
+		return fmt.Errorf("failed to list podman networks: %w (podman output: %s)", err, strings.TrimSpace(out))
 	}
 	var existing []struct {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal([]byte(out), &existing); err != nil {
-		return fmt.Errorf("isolated container: failed to parse podman networks: %w", err)
+		return fmt.Errorf("failed to parse podman networks: %w", err)
 	}
 	for _, n := range existing {
 		if n.Name == isolatedNetworkName {
@@ -193,8 +222,8 @@ func (f *isolatedContainers) ensureNetwork(nets []*net.IPNet) error {
 	}
 	args = append(args, isolatedNetworkName)
 	if out, err := f.podman(args...); err != nil {
-		return fmt.Errorf("isolated container: could not create %s as an unmanaged bridge network (no managed fallback): %w (podman output: %s)",
-			isolatedNetworkName, err, strings.TrimSpace(out))
+		return fmt.Errorf("could not create podman network %s in unmanaged mode on bridge %s with subnets %v: %w (podman output: %s)",
+			isolatedNetworkName, f.hostNetworkInfo.InfName, nets, err, strings.TrimSpace(out))
 	}
 	framework.Logf("isolated container: created podman network %s", isolatedNetworkName)
 	return nil
