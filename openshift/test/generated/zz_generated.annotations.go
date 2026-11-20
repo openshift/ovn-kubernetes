@@ -1941,8 +1941,6 @@ var AppendedAnnotations = map[string]string{
 
 	"[OTP] SDN adminnetworkpolicy APBR interaction 73963-ANP overrides BANP with AdminPolicyBasedExternalRoutes [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"[OTP] SDN adminnetworkpolicy metrics 73331-BANP and ANP metrics are available [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
-
 	"[OTP] SDN adminnetworkpolicy services 73440-ANP/BANP with ClusterIP and NodePort Services [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"[OTP] SDN adminnetworkpolicy services 82081-ANP/BANP with LoadBalancer Services [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",

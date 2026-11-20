@@ -1,4 +1,4 @@
-package otp
+package ote
 
 import (
 	"fmt"
