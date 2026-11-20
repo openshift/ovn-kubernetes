@@ -5,7 +5,6 @@ package generated
 
 import (
 	"fmt"
-
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/types"
 )
@@ -963,7 +962,7 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
 
-	"BGP: managed self-peer filtering filters InternalIPs and reconciles address changes without a primary address annotation": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"BGP: managed self-peer filtering filters InternalIPs and reconciles address changes without a primary address annotation [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"Check whether gateway-mtu-support annotation on node is set based on disable-pkt-mtu-check value when DisablePacketMTUCheck is either not set or set to false Verify whether gateway-mtu-support annotation is not set on nodes when DisablePacketMTUCheck is either not set or set to false": "[Disabled:Unimplemented]",
 
@@ -1071,7 +1070,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Creating a static pod on a node Should successfully create then remove a static pod": "[Disabled:Unimplemented]",
 
-	"DPU host node deletion restarts the DPU-side ovnkube-node and re-initializes the node once it is registered again": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"DPU host node deletion restarts the DPU-side ovnkube-node and re-initializes the node once it is registered again [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"EgressService Multiple Networks, external clients sharing ip [LGW] Should validate pods on different networks can reach different clients with same ip without SNAT ipv4 pods": "[Disabled:Unimplemented]",
 
@@ -1273,17 +1272,17 @@ var AppendedAnnotations = map[string]string{
 
 	"Kubevirt Virtual Machines with user defined networks with ipamless localnet topology should start multiple VMs with same hostname": "[Disabled:Unimplemented]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure connectivity works on an external service when mtu changes in intermediate node": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure connectivity works on an external service when mtu changes in intermediate node": "[Disabled:SpecialConfig]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and backend pods are also egressIP served pods": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and backend pods are also egressIP served pods": "[Disabled:SpecialConfig]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and session affinity is set": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works when ETP=local and session affinity is set": "[Disabled:SpecialConfig]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with pmtud": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works with pmtud": "[Disabled:SpecialConfig]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when ETP=local": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when ETP=local": "[Disabled:SpecialConfig]",
 
-	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when named targetPorts are used and ETP=local": "[Disabled:Unimplemented]",
+	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when named targetPorts are used and ETP=local": "[Disabled:SpecialConfig]",
 
 	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology applies NetworkQoS DSCP marking to VM traffic on the DHCP localnet": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1719,31 +1718,31 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: MAC binding mirroring for multiple UDNs on same uplink re-designates the source and keeps the followers resolved when the source CUDN leaves the uplink": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the CDN-triggered binding on every gateway router once traffic stops": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the CDN-triggered binding on every gateway router once traffic stops [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the UDN-triggered binding on every gateway router once traffic stops": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the UDN-triggered binding on every gateway router once traffic stops [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled backfills a CUDN created after the bindings were learned, and reaps it on delete": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled backfills a CUDN created after the bindings were learned, and reaps it on delete [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled binds node IPs statically on the UDNs instead of mirroring them": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled binds node IPs statically on the UDNs instead of mirroring them [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled converges every gateway router onto the new MAC when the external container changes it": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled converges every gateway router onto the new MAC when the external container changes it [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not leak the bindings into the other nodes' zones": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not leak the bindings into the other nodes' zones [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not mirror onto a secondary CUDN": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not mirror onto a secondary CUDN [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled has no MAC bindings for the external containers before any traffic": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled has no MAC bindings for the external containers before any traffic [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled keeps the mirrored bindings stable while the traffic lasts": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled keeps the mirrored bindings stable while the traffic lasts [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled mirrors a binding triggered by a UDN pod to the CDN and every other UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled mirrors a binding triggered by a UDN pod to the CDN and every other UDN [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled mirrors the binding learned by the CDN gateway router to every UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled mirrors the binding learned by the CDN gateway router to every UDN [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled never adds a static MAC binding to the default network gateway router": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled never adds a static MAC binding to the default network gateway router [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled reconverges after ovnkube-node restarts, without leaving orphan static bindings": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled reconverges after ovnkube-node restarts, without leaving orphan static bindings [Serial]": "[Suite:ovn-kubernetes/conformance/serial]",
 
 	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
 
@@ -1839,7 +1838,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Node IP and MAC address migration when when MAC address changes when a nodeport service is configured Ensures flows are updated when MAC address changes": "[Disabled:Unimplemented]",
 
-	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup": "[Disabled:Unimplemented]",
+	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup [Serial]": "[Disabled:Unimplemented]",
 
 	"Node subnet claims rejects a node claiming controller-owned network allocations": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1851,67 +1850,67 @@ var AppendedAnnotations = map[string]string{
 
 	"Pod to pod TCP with low MTU when a client ovnk pod targeting an ovnk pod server(running on another node) with low mtu when MTU is lowered between the two nodes large queries to the server pod on another node shall work for TCP": "[Disabled:Unimplemented]",
 
-	"Service Hairpin SNAT Should ensure service hairpin traffic is NOT SNATed to hairpin masquerade IP; GR LB": "[Disabled:Unimplemented]",
+	"Service Hairpin SNAT Should ensure service hairpin traffic is NOT SNATed to hairpin masquerade IP; GR LB": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Service Hairpin SNAT Should ensure service hairpin traffic is SNATed to hairpin masquerade IP; Switch LB": "[Disabled:Unimplemented]",
+	"Service Hairpin SNAT Should ensure service hairpin traffic is SNATed to hairpin masquerade IP; Switch LB": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services All service features work when manually listening on a non-default address": "[Disabled:Unimplemented]",
+	"Services All service features work when manually listening on a non-default address": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services Allow connection to an external IP using a source port that is equal to a node port": "[Disabled:Unimplemented]",
+	"Services Allow connection to an external IP using a source port that is equal to a node port": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services Creates a host-network service, and ensures that host-network pods can connect to it": "[Disabled:Unimplemented]",
+	"Services Creates a host-network service, and ensures that host-network pods can connect to it": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services Creates a service with session-affinity, and ensures it works after backend deletion": "[Disabled:Unimplemented]",
+	"Services Creates a service with session-affinity, and ensures it works after backend deletion": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services Distributes external traffic to multiple host-network endpoints with different named target ports": "[Disabled:Unimplemented]",
+	"Services Distributes external traffic to multiple host-network endpoints with different named target ports": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services Distributes traffic to multiple endpoints with different named target ports": "[Disabled:Unimplemented]",
+	"Services Distributes traffic to multiple endpoints with different named target ports": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services Distributes traffic to multiple host-network endpoints with different named target ports": "[Disabled:Unimplemented]",
+	"Services Distributes traffic to multiple host-network endpoints with different named target ports": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services Maintains service connectivity during rolling update when target port changes": "[Disabled:Unimplemented]",
+	"Services Maintains service connectivity during rolling update when target port changes": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services does not use host masquerade address as source IP address when communicating externally": "[Disabled:Unimplemented]",
+	"Services does not use host masquerade address as source IP address when communicating externally": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services of type NodePort should be able to preserve UDP traffic when server pod cycles for a NodePort service via a different node": "[Disabled:Unimplemented]",
+	"Services of type NodePort should be able to preserve UDP traffic when server pod cycles for a NodePort service via a different node": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services of type NodePort should handle IP fragments": "[Disabled:Unimplemented]",
+	"Services of type NodePort should handle IP fragments": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services of type NodePort should listen on each host addresses": "[Disabled:Unimplemented]",
+	"Services of type NodePort should listen on each host addresses": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services of type NodePort should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP": "[Disabled:Unimplemented]",
+	"Services of type NodePort should work on secondary node interfaces for ETP=local and ETP=cluster when backend pods are also served by EgressIP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:false, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:false, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Cluster is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for TCP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Disabled:Unimplemented]",
+	"Services when a nodePort service targeting a pod with hostNetwork:true, namedPort:true, ETP:Local is created when tests are run towards the agnhost echo service queries to the nodePort service shall work for UDP": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Status manager validation Should validate the egress firewall status when adding a new node zone": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 

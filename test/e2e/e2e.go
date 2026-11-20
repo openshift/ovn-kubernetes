@@ -59,6 +59,14 @@ const (
 	localNodePortConvergenceTimeout      = 10 * time.Second
 	localNodePortConvergencePollInterval = 1 * time.Second
 	localNodePortStableProbeCount        = 3
+
+	// testContainerName is the container name used by the single container pods
+	// the helpers in this file create. Container names must be DNS-1123 labels:
+	// lowercase alphanumeric or '-', at most 63 characters, and no dots.
+	// Deriving the name from the pod name breaks whenever a test names a pod
+	// after the node it runs on, because node names are FQDNs on cloud
+	// platforms, for example "ip-10-0-13-58.us-west-1.compute.internal".
+	testContainerName = "test-container"
 )
 
 // setupHostRedirectPod
@@ -121,7 +129,7 @@ func setupHostRedirectPod(f *framework.Framework, externalContainer infraapi.Ext
 // TODO: this approach with the channels is a bit ugly, it might be worth to refactor this and the other
 // functions that use it similarly in this file.
 func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, tries, timeout int, podChan chan *v1.Pod, errChan chan error) {
-	contName := fmt.Sprintf("%s-container", podName)
+	contName := testContainerName
 
 	command := []string{
 		"bash", "-c",
@@ -207,7 +215,7 @@ const (
 
 // Place the workload on the specified node to test external connectivity
 func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host string, pingCmd pingCommand, timeout int) error {
-	contName := fmt.Sprintf("%s-container", podName)
+	contName := testContainerName
 	// Ping options are:
 	// -c sends 3 pings
 	// -W wait at most 2 seconds for a reply
@@ -269,7 +277,7 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 // Place the workload on the specified node and return pod gw route
 func getPodGWRoute(f *framework.Framework, nodeName string, podName string) net.IP {
 	command := []string{"bash", "-c", "sleep 20000"}
-	contName := fmt.Sprintf("%s-container", podName)
+	contName := testContainerName
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: podName,
@@ -446,7 +454,7 @@ func getPod(f *framework.Framework, podName string) *v1.Pod {
 // Create a pod on the specified node using the agnostic host image
 func createPod(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string, options ...func(*v1.Pod)) (*v1.Pod, error) {
 
-	contName := fmt.Sprintf("%s-container", podName)
+	contName := testContainerName
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2010,7 +2018,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 							CaptureStdout: true,
 							CaptureStderr: true,
 						}
-						rawUUID, stderr, execErr := e2epod.ExecWithOptions(f, getSFlowExecOptions)
+						rawUUID, stderr, execErr := e2epod.Exec(f.TContext(context.TODO()), getSFlowExecOptions)
 						if execErr != nil {
 							framework.Logf("waiting for sflow row on %s: query failed: %v, stderr: %s",
 								ovnKubeNodePod.Name, execErr, stderr)
@@ -2034,7 +2042,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 						CaptureStdout: true,
 						CaptureStderr: true,
 					}
-					_, setStderr, setErr := e2epod.ExecWithOptions(f, setSFlowExecOptions)
+					_, setStderr, setErr := e2epod.Exec(f.TContext(context.TODO()), setSFlowExecOptions)
 					if setErr != nil {
 						framework.Logf("skipping sflow sampling tuning on %s: failed to set sampling/polling for row %s: %v, stderr: %s",
 							ovnKubeNodePod.Name, sFlowUUID, setErr, setStderr)
@@ -2090,7 +2098,7 @@ var _ = ginkgo.Describe("e2e br-int flow monitoring export validation", func() {
 					CaptureStderr: true,
 				}
 
-				targets, stderr, execErr := e2epod.ExecWithOptions(f, execOptions)
+				targets, stderr, execErr := e2epod.Exec(f.TContext(context.TODO()), execOptions)
 				framework.Logf("execOptions are %v", execOptions)
 				if execErr != nil {
 					framework.Failf("could not lookup ovs %s targets: %v", protocolStr, stderr)
