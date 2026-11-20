@@ -60,6 +60,33 @@ type failingRunner struct{}
 
 func (failingRunner) Run(string, ...string) (string, error) { return "", errors.New("no hypervisor") }
 
+// TestBaremetalProviderRejectsNetworkAttachOnIsolatedContainers pins the
+// unsupported error: isolated containers are created on the isolated network
+// with their allocator-assigned addresses; attaching or detaching networks on
+// them afterwards is refused instead of being forwarded to the base provider,
+// which would attach an unrelated podman network with an uncontrolled address.
+func TestBaremetalProviderRejectsNetworkAttachOnIsolatedContainers(t *testing.T) {
+	base := &baseInfra{runner: failingRunner{}, engine: container.NewEngine("podman", failingRunner{}),
+		primaryNetworkName: bmPrimaryNetworkName, hostNetworkInfo: &api.NetworkInterface{IPv4: "192.168.111.1"},
+		externalContainers: map[string]api.ExternalContainer{}}
+	p := (&baremetalInfra{base: base}).GetExternalContainerContextProvider(&testcontext.TestContext{})
+	primary := &network.ContainerEngineNetwork{NetName: bmPrimaryNetworkName}
+	isolated := nofloodContainerPrefix + "0-abcde"
+	if _, err := p.AttachNetwork(primary, isolated); err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("AttachNetwork on an isolated container: expected the unsupported error, got %v", err)
+	}
+	if err := p.DetachNetwork(primary, isolated); err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("DetachNetwork on an isolated container: expected the unsupported error, got %v", err)
+	}
+	// non-isolated instances keep the base provider behaviour
+	if _, err := p.AttachNetwork(primary, "worker-0"); err == nil || strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("AttachNetwork on a node: expected a base provider error, got %v", err)
+	}
+	if err := p.DetachNetwork(primary, "worker-0"); err == nil || strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("DetachNetwork on a node: expected a base provider error, got %v", err)
+	}
+}
+
 // TestBaremetalProviderMatchesBaseWithoutFixture checks that the baremetal
 // context provider, now used even without a secondary network, behaves like
 // the base provider there for the operations it can short-cut and for
