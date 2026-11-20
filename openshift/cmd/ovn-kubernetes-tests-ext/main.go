@@ -14,7 +14,7 @@ import (
 	ocpinfraprovider "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/infraprovider"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
-	// import OTP tests (side-effect registration)
+	// import OTE tests (side-effect registration)
 	_ "github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/ote"
 
 	// import ovn-kubernetes tests
