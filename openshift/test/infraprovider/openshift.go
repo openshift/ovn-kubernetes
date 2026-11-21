@@ -24,9 +24,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 
 	"github.com/onsi/ginkgo/v2"
@@ -48,7 +48,6 @@ type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
-	hostPort                *portalloc.PortAllocator
 	clusterInfra            platformInfra
 	initialized             bool // true when New() was called with cluster access
 	platformType            configv1.PlatformType
@@ -62,7 +61,6 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 		return nil, err
 	}
 	o := &OpenshiftInfraProvider{
-		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
 		initialized:  true,
 		platformType: platformType,
@@ -283,8 +281,12 @@ func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
 
 }
 
-func (o *OpenshiftInfraProvider) GetK8HostPort() uint16 {
-	return o.hostPort.Allocate()
+func (o *OpenshiftInfraProvider) GetK8HostPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
+	// Stay within the NodePort range (30000-32767) because it is the range expected
+	// to be reachable on cluster nodes (see openshift/test/README.md).
+	port, err := allocators.AllocateHostPort(f, cleanup, 30000, 32767)
+	framework.ExpectNoError(err)
+	return port
 }
 
 // GetK8NodeNetworkInterface returns the network interface on the given node whose

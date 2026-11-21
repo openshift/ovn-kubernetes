@@ -372,52 +372,24 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 		return err
 	}
 
-	ovnKubeStopped := false
-	ovnKubeStopLock := sync.Mutex{}
+	lifecycle := &leaderLifecycle{
+		identity:    runMode.identity,
+		leaderGauge: metrics.MetricClusterManagerLeader,
+		run: func(ctx context.Context) error {
+			return runOvnKube(ctx, runMode, ovnClientset, eventRecorder)
+		},
+		cancel:  cancel,
+		startWg: ovnKubeStartWg,
+	}
 	lec := leaderelection.LeaderElectionConfig{
 		Lock:            rl,
 		LeaseDuration:   time.Duration(haConfig.ElectionLeaseDuration) * time.Second,
 		RenewDeadline:   time.Duration(haConfig.ElectionRenewDeadline) * time.Second,
 		RetryPeriod:     time.Duration(haConfig.ElectionRetryPeriod) * time.Second,
 		ReleaseOnCancel: true,
-		Callbacks: leaderelection.LeaderCallbacks{
-			OnStartedLeading: func(ctx context.Context) {
-				// Looking at the leader elector implementation,
-				// OnStartedLeading is called asynchronously with respect
-				// OnStoppedLeading and there seems to be no guarantee that
-				// OnStartedLeading won't run after OnStoppedLeading, so take
-				// some additional precautions to ensure we don't start when we
-				// shouldn't.
-				ovnKubeStopLock.Lock()
-				if ovnKubeStopped {
-					ovnKubeStopLock.Unlock()
-					return
-				}
-				ovnKubeStartWg.Add(1)
-				defer ovnKubeStartWg.Done()
-				ovnKubeStopLock.Unlock()
-				klog.Infof("Won leader election; in active mode")
-				if err := runOvnKube(ctx, runMode, ovnClientset, eventRecorder); err != nil {
-					klog.Error(err)
-					cancel()
-				}
-			},
-			OnStoppedLeading: func() {
-				ovnKubeStopLock.Lock()
-				defer ovnKubeStopLock.Unlock()
-				klog.Infof("No longer leader; exiting")
-				ovnKubeStopped = true
-				cancel()
-			},
-			OnNewLeader: func(newLeaderName string) {
-				if newLeaderName != runMode.identity {
-					klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
-				}
-			},
-		},
+		Callbacks:       lifecycle.callbacks(),
 	}
 
-	leaderelection.SetProvider(ovnkubeMetricsProvider{runMode})
 	leaderElector, err := leaderelection.NewLeaderElector(lec)
 	if err != nil {
 		return err
@@ -428,9 +400,7 @@ func startOvnKube(ctx *cli.Context, cancel context.CancelFunc) error {
 	// synchronously before Run exits. But the callbacks are documented as
 	// asynchronous so again out of precaution we make sure we don't start when
 	// we shouldn't.
-	ovnKubeStopLock.Lock()
-	ovnKubeStopped = true
-	ovnKubeStopLock.Unlock()
+	lifecycle.markStopped()
 
 	return nil
 }
@@ -696,28 +666,78 @@ func newWatchFactory(runMode *ovnkubeRunMode, ovnClientset *util.OVNClientset) (
 	return
 }
 
-type leaderMetrics struct {
-	runMode *ovnkubeRunMode
+// leaderLifecycle starts and stops the leader-elected ovnkube components and
+// reports leadership on the cluster manager leader gauge from OnStartedLeading
+// until OnStoppedLeading. The gauge is driven from the leader election
+// callbacks rather than a client-go leader election metrics provider: client-go
+// honors only the first provider registered in the process, and a linked
+// package can register one first (controller-runtime's metrics package does so
+// in init), which would leave the gauge stuck at 0 while this instance holds
+// the lease.
+type leaderLifecycle struct {
+	identity    string
+	leaderGauge prometheus.Gauge
+	run         func(context.Context) error
+	cancel      context.CancelFunc
+	startWg     *sync.WaitGroup
+
+	lock    sync.Mutex
+	stopped bool
 }
 
-func (m leaderMetrics) On(string) {
-	if m.runMode.clusterManager {
-		metrics.MetricClusterManagerLeader.Set(1)
+func (l *leaderLifecycle) callbacks() leaderelection.LeaderCallbacks {
+	return leaderelection.LeaderCallbacks{
+		OnStartedLeading: l.onStartedLeading,
+		OnStoppedLeading: l.onStoppedLeading,
+		OnNewLeader:      l.onNewLeader,
 	}
 }
 
-func (m leaderMetrics) Off(string) {
-	if m.runMode.clusterManager {
-		metrics.MetricClusterManagerLeader.Set(0)
+func (l *leaderLifecycle) onStartedLeading(ctx context.Context) {
+	// Looking at the leader elector implementation, OnStartedLeading is called
+	// asynchronously with respect to OnStoppedLeading and there seems to be no
+	// guarantee that OnStartedLeading won't run after OnStoppedLeading, so take
+	// some additional precautions to ensure we don't start when we shouldn't.
+	l.lock.Lock()
+	if l.stopped {
+		l.lock.Unlock()
+		return
+	}
+	l.startWg.Add(1)
+	defer l.startWg.Done()
+	// Set while holding the lock so that a concurrent onStoppedLeading cannot
+	// reset the gauge first and leave it reporting a lost leadership.
+	l.leaderGauge.Set(1)
+	l.lock.Unlock()
+	klog.Infof("Won leader election; in active mode")
+	if err := l.run(ctx); err != nil {
+		klog.Error(err)
+		l.cancel()
 	}
 }
 
-func (m leaderMetrics) SlowpathExercised(string) {}
-
-type ovnkubeMetricsProvider struct {
-	runMode *ovnkubeRunMode
+func (l *leaderLifecycle) onStoppedLeading() {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	klog.Infof("No longer leader; exiting")
+	l.stopped = true
+	// client-go reports a failed renewal only to its metrics provider, so this
+	// is the first callback that learns about the loss. The components keep
+	// running until cancel, so the gauge still matches what this instance does.
+	l.leaderGauge.Set(0)
+	l.cancel()
 }
 
-func (p ovnkubeMetricsProvider) NewLeaderMetric() leaderelection.LeaderMetric {
-	return &leaderMetrics{p.runMode}
+func (l *leaderLifecycle) onNewLeader(newLeaderName string) {
+	if newLeaderName != l.identity {
+		klog.Infof("Lost the election to %s; in standby mode", newLeaderName)
+	}
+}
+
+// markStopped prevents a late OnStartedLeading from starting the components
+// once leader election has returned.
+func (l *leaderLifecycle) markStopped() {
+	l.lock.Lock()
+	defer l.lock.Unlock()
+	l.stopped = true
 }
