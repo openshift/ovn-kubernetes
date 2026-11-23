@@ -124,7 +124,11 @@ var (
 		"[Disabled:SpecialConfig]": {},
 		// tests that are known broken and need to be fixed upstream or in openshift
 		// always add an issue here
-		"[Disabled:Broken]": {},
+		"[Disabled:Broken]": {
+			// Flaky test that needs to be fixed upstream.
+			// See https://github.com/ovn-kubernetes/ovn-kubernetes/pull/7300/
+			"reconverges after ovnkube-node restarts, without leaving orphan static bindings",
+		},
 		// tests that need to be temporarily disabled while the rebase is in progress.
 		"[Disabled:RebaseInProgress]": {},
 		// tests that may work, but we don't support them
