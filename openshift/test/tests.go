@@ -60,6 +60,10 @@ var InformingTests = []string{
 	"[Feature:EgressIP][Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Using different methods to disable a node or pod availability for egress [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:EgressIP][Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] should send address advertisements for EgressIP [Serial][Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:EgressIP][Feature:NetworkSegmentation][ovn-kubernetes-ote][sig-network] e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] uses VRF routing table if EIP assigned interface is VRF slave [Serial][Suite:ovn-kubernetes/conformance/serial]",
+	// The MAC binding mirroring with ARP/NDP flood disabled (no-flood) specs,
+	// run as one Ginkgo group: see nofloodMACBindingGroup in
+	// cmd/ovn-kubernetes-tests-ext/groups.go.
+	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled [Suite:ovn-kubernetes/conformance/serial]",
 }
 
 // BlockingTests lists tests that are considered stable and should block CI jobs
@@ -232,18 +236,4 @@ var BlockingTests = []string{
 	"[Feature:MACSecurity][Feature:NetworkSegmentation][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC security using UserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security enabled, should fail [Suite:ovn-kubernetes/conformance/parallel]",
 	"[Feature:MACSecurity][Feature:NetworkSegmentation][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security enabled, should fail [Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
 	"[Feature:MACSecurity][Feature:NetworkSegmentation][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed) [Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
-	// MAC binding mirroring with ARP/NDP flood disabled (no-flood) serial tests
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled has no MAC bindings for the external containers before any traffic [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled mirrors the binding learned by the CDN gateway router to every UDN [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled mirrors a binding triggered by a UDN pod to the CDN and every other UDN [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled binds node IPs statically on the UDNs instead of mirroring them [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled never adds a static MAC binding to the default network gateway router [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not mirror onto a secondary CUDN [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not leak the bindings into the other nodes' zones [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled keeps the mirrored bindings stable while the traffic lasts [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled backfills a CUDN created after the bindings were learned, and reaps it on delete [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled reconverges after ovnkube-node restarts, without leaving orphan static bindings [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled converges every gateway router onto the new MAC when the external container changes it [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the CDN-triggered binding on every gateway router once traffic stops [Suite:ovn-kubernetes/conformance/serial]",
-	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the UDN-triggered binding on every gateway router once traffic stops [Suite:ovn-kubernetes/conformance/serial]",
 }

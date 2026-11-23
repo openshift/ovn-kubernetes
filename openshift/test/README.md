@@ -129,6 +129,16 @@ disabled` specs run only on baremetal jobs that enable the CNO
 from the `openshift-network-operator/ovn-kubernetes-config-overrides` ConfigMap;
 without it the specs skip.
 
+The specs of the upstream Ordered container build on each other, so OTE runs
+them as one informing serial test,
+`[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled [Suite:ovn-kubernetes/conformance/serial]`,
+in a single Ginkgo run: BeforeAll once, the specs in declaration order, then
+the cleanup (see `nofloodMACBindingGroup` in
+`cmd/ovn-kubernetes-tests-ext/groups.go` and `test/ginkgogroup`). The result
+lists the outcome of every spec. The group test fails if any spec, or the run
+itself, fails; it is skipped if all of the specs skip, and passes otherwise. The catalog does not build
+if the upstream container no longer holds exactly the reviewed specs.
+
 ```
 +-----------------------------------------------------------+----+-----+-------+-----+
 | Test Scenario                                             | BM | AWS | Azure | GCP |
@@ -142,7 +152,7 @@ without it the specs skip.
 | Bindings do not leak into other nodes' zones              | Y  | -   | -     | -   |
 | Mirrored bindings stay stable while traffic lasts         | Y  | -   | -     | -   |
 | Late-created CUDN backfilled; reaped on delete            | Y  | -   | -     | -   |
-| Reconverges after ovnkube-node restart                    | Y  | -   | -     | -   |
+| Reconverges after ovnkube-node restart                    | -  | -   | -     | -   |
 | Converges every gateway onto a changed external MAC       | Y  | -   | -     | -   |
 | CDN-triggered binding ages out once traffic stops         | Y  | -   | -     | -   |
 | UDN-triggered binding ages out once traffic stops         | Y  | -   | -     | -   |
@@ -158,6 +168,9 @@ without it the specs skip.
 - AWS, Azure, GCP Excluded in `shouldIncludeTest`: on cloud platforms the external
   containers share the bastion's IP, so the specs could pass without testing
   two distinct hosts.
+- The ovnkube-node restart spec is `[Disabled:Broken]` until
+  https://github.com/ovn-kubernetes/ovn-kubernetes/pull/7300 fixes it, and stays
+  out of the group test.
 - The Uplink group is `[Disabled:Unimplemented]`: Uplink is not
   supported on OpenShift.
 

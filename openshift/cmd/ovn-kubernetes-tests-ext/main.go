@@ -21,6 +21,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 
 	kclientset "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
@@ -120,6 +121,31 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	return true
 }
 
+// setUpTestProcess initializes the kube ginkgo test framework and the cluster
+// for the tests this process runs.
+func setUpTestProcess(cfg *rest.Config, cfgErr, infraErr error) error {
+	if cfgErr != nil {
+		return cfgErr
+	}
+	if infraErr != nil {
+		return infraErr
+	}
+	if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
+		return err
+	}
+	client, err := kclientset.NewForConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create k8s clientset: %w", err)
+	}
+	if err := ocpInfra.EnableSecondaryForwarding(client); err != nil {
+		return fmt.Errorf("failed to enable secondary network forwarding: %w", err)
+	}
+	if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+		return fmt.Errorf("failed to initialize node primary IP allocator: %w", err)
+	}
+	return nil
+}
+
 func main() {
 	// Create our registry of openshift-tests extensions
 	extensionRegistry := extension.NewRegistry()
@@ -174,7 +200,19 @@ func main() {
 	}
 	infraprovider.Set(ocpInfra)
 
+	// The no-flood group test re-executes this binary to run its specs in one
+	// Ginkgo run, which has to start before the Ginkgo tree is built.
+	if nofloodMACBindingGroup.Reentered() {
+		os.Exit(nofloodMACBindingGroup.RunNative(func() error {
+			return setUpTestProcess(cfg, cfgErr, infraErr)
+		}))
+	}
+
 	specs, err := ginkgo.BuildExtensionTestSpecsFromOpenShiftGinkgoSuite(extensiontests.AllTestsIncludingVendored())
+	if err != nil {
+		panic(err)
+	}
+	specs, err = nofloodMACBindingGroup.Collect(specs, generated.AppendedAnnotations)
 	if err != nil {
 		panic(err)
 	}
@@ -189,24 +227,8 @@ func main() {
 
 	// Initialization for kube ginkgo test framework needs to run before all tests execute
 	specs.AddBeforeAll(func() {
-		if cfgErr != nil {
-			panic(cfgErr)
-		}
-		if infraErr != nil {
-			panic(infraErr)
-		}
-		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER"), cfg); err != nil {
+		if err := setUpTestProcess(cfg, cfgErr, infraErr); err != nil {
 			panic(err)
-		}
-		client, err := kclientset.NewForConfig(cfg)
-		if err != nil {
-			panic(fmt.Sprintf("failed to create k8s clientset: %v", err))
-		}
-		if err := ocpInfra.EnableSecondaryForwarding(client); err != nil {
-			panic(fmt.Sprintf("failed to enable secondary network forwarding: %v", err))
-		}
-		if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
-			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
 	})
 
