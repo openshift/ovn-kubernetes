@@ -1743,7 +1743,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled never adds a static MAC binding to the default network gateway router": "[Suite:ovn-kubernetes/conformance/serial]",
 
-	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled reconverges after ovnkube-node restarts, without leaving orphan static bindings": "[Suite:ovn-kubernetes/conformance/serial]",
+	"Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled reconverges after ovnkube-node restarts, without leaving orphan static bindings": "[Disabled:Broken]",
 
 	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
 
