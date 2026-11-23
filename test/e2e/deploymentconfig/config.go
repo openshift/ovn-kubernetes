@@ -7,7 +7,16 @@ import (
 
 var deployment api.DeploymentConfig
 
+// SetDeployment injects a deployment config. Used by the OpenShift tests
+// extension, which must set it before e2e BeforeSuite runs.
+func SetDeployment(d api.DeploymentConfig) {
+	deployment = d
+}
+
 func Set() {
+	if deployment != nil {
+		return
+	}
 	// upstream currently uses KinD as its preferred platform infra, so if we detect KinD, its upstream
 	if kind.IsKind() {
 		deployment = kind.New()
