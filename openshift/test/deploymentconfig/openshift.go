@@ -6,6 +6,7 @@ package deploymentconfig
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +20,10 @@ import (
 	imageutils "k8s.io/kubernetes/test/utils/image"
 )
 
+// netshoot has no k8s.io/kubernetes/test/utils/image index to resolve it to a
+// mirrored tag, so it is pulled as is. NETSHOOT_IMAGE overrides it.
+const defaultNetshootImage = "ghcr.io/nicolaka/netshoot:v0.13"
+
 var (
 	imageIDMapping map[api.ImageID]imageutils.ImageID = map[api.ImageID]imageutils.ImageID{
 		api.Agnhost: imageutils.Agnhost,
@@ -27,11 +32,20 @@ var (
 )
 
 func init() {
-	// Add images that are needed by the test suite.
+	netshootImage := defaultNetshootImage
+	if override := os.Getenv("NETSHOOT_IMAGE"); override != "" {
+		netshootImage = override
+	}
+	// Add images that are needed by the test suite. An image missing here
+	// resolves to an empty pull spec and its pods are rejected.
 	imageConfigMap = map[api.ImageID]api.ImageConfig{
 		api.Agnhost: {
 			ImageID:  api.Agnhost,
 			PullSpec: imageutils.GetE2EImage(imageutils.Agnhost),
+		},
+		api.Netshoot: {
+			ImageID:  api.Netshoot,
+			PullSpec: netshootImage,
 		},
 	}
 }
