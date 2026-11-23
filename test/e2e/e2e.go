@@ -1797,7 +1797,11 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 		clusterHTTPPort  = 81
 		clusterUDPPort   = 91
 
-		clientContainerName = "npclient"
+		// Distinct from the client containers in service.go: these are
+		// host-networked and providers may reuse an existing container with
+		// the same name, so specs that need different container commands must
+		// not share one.
+		clientContainerName = "npclient-hostnet-ingress"
 	)
 
 	f := wrappedTestFramework("nodeport-ingress-test")
