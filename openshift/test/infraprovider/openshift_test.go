@@ -257,6 +257,26 @@ func TestIsCloudPlatform(t *testing.T) {
 	}
 }
 
+func TestHasExternalContainerInfra(t *testing.T) {
+	tests := []struct {
+		name         string
+		clusterInfra platformInfra
+		want         bool
+	}{
+		{name: "unavailable", want: false},
+		{name: "available", clusterInfra: &baremetalInfra{}, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := &OpenshiftInfraProvider{clusterInfra: tt.clusterInfra}
+			if got := o.HasExternalContainerInfra(); got != tt.want {
+				t.Errorf("HasExternalContainerInfra() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCheckForEVPN(t *testing.T) {
 	fullNetwork := &operv1.Network{
 		Spec: operv1.NetworkSpec{

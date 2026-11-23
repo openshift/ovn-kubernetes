@@ -159,6 +159,12 @@ func (o *OpenshiftInfraProvider) HasClusterInfra() bool {
 	return o.initialized
 }
 
+// HasExternalContainerInfra returns true when the platform provides the
+// external containers and networks required by infrastructure-dependent tests.
+func (o *OpenshiftInfraProvider) HasExternalContainerInfra() bool {
+	return o.clusterInfra != nil
+}
+
 // HasSecondaryHostEIPSupport checks if the platform supports secondary-host-eip
 // tests (i.e., has a pre-configured secondary network for EgressIP on secondary
 // host interfaces). Currently only baremetal with a discovered secondary network.

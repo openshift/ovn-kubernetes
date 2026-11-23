@@ -110,6 +110,18 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, nofloodMACBindingDescribe) && ocpInfra.IsCloudPlatform() {
 		return false
 	}
+	// These Service specs require platform infrastructure for an external
+	// client. Some hosted platforms provide cluster access without that
+	// infrastructure.
+	if strings.Contains(spec.Name, "should listen on each host addresses") && !ocpInfra.HasExternalContainerInfra() {
+		return false
+	}
+	// This spec also sends UDP from an external container on the bastion to a
+	// NodePort, which the bastion cannot reach on cloud platforms.
+	if strings.Contains(spec.Name, "should handle IP fragments") &&
+		(!ocpInfra.HasExternalContainerInfra() || ocpInfra.IsCloudPlatform()) {
+		return false
+	}
 	// On GCP, nodes have a /32 primary interface address
 	// (k8s.ovn.org/node-primary-ifaddr: {"ipv4":"10.0.128.x/32"}), so
 	// isOVNNetworkIP returns false for any EgressIP because no IP other
