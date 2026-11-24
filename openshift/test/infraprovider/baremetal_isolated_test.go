@@ -22,7 +22,11 @@ import (
 // TestMain sets the OpenShift deployment config as main() does, without
 // cluster access: images.AgnHost() reads it.
 func TestMain(m *testing.M) {
-	deploymentconfig.Set(ocpdeploymentconfig.New(nil))
+	ocpDeploymentConfig, err := ocpdeploymentconfig.New(nil)
+	if err != nil {
+		panic(err)
+	}
+	deploymentconfig.Set(ocpDeploymentConfig)
 	os.Exit(m.Run())
 }
 
