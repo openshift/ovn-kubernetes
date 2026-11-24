@@ -219,7 +219,7 @@ type Layer2UserDefinedNetworkController struct {
 	eIPController *EgressIPController
 
 	// reconcile the virtual machine default gateway sending GARPs and RAs
-	defaultGatewayReconciler *kubevirt.DefaultGatewayReconciler
+	gatewayAnnouncer *kubevirt.Layer2GatewayAnnouncer
 
 	remoteNodesNoRouter sync.Map
 }
@@ -310,7 +310,7 @@ func NewLayer2UserDefinedNetworkController(
 
 	if util.IsNetworkSegmentationSupportEnabled() && netInfo.IsPrimaryNetwork() {
 		oc.svcController = serviceController
-		oc.defaultGatewayReconciler = kubevirt.NewDefaultGatewayReconciler(
+		oc.gatewayAnnouncer = kubevirt.NewLayer2GatewayAnnouncer(
 			oc.watchFactory,
 			oc.GetNetInfo(),
 			util.GetNetworkScopedK8sMgmtHostIntfName(uint(oc.GetNetworkID())),
@@ -725,7 +725,10 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 			oc.gatewayManagers.Store(node.Name, gwManager)
 
 			err := func() error {
-				gwConfig, err := oc.nodeGatewayConfig(node)
+				// Read advertisement state once so that all SNATs and isolation
+				// configured in this pass agree with each other.
+				isUDNAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
+				gwConfig, err := oc.nodeGatewayConfig(node, isUDNAdvertised)
 				if err != nil {
 					return err
 				}
@@ -735,7 +738,6 @@ func (oc *Layer2UserDefinedNetworkController) addUpdateLocalNodeEvent(node *core
 				); err != nil {
 					return err
 				}
-				isUDNAdvertised := util.IsPodNetworkAdvertisedAtNode(oc, node.Name)
 				err = oc.addOrUpdateUDNClusterSubnetEgressSNAT(gwConfig.hostSubnets, node.Name, isUDNAdvertised)
 				if err != nil {
 					return err
@@ -1146,7 +1148,7 @@ func (oc *Layer2UserDefinedNetworkController) addOrUpdateUDNClusterSubnetEgressS
 	return nil
 }
 
-func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Node) (*GatewayConfig, error) {
+func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Node, isPodNetworkAdvertised bool) (*GatewayConfig, error) {
 	networkName := oc.GetNetworkName()
 	l3GatewayConfig, hasUplink, err := oc.uplinkGatewayConfig(node)
 	if err != nil {
@@ -1201,6 +1203,7 @@ func (oc *Layer2UserDefinedNetworkController) nodeGatewayConfig(node *corev1.Nod
 		hostAddrs:                  nil,
 		externalIPs:                externalIPs,
 		ovnClusterLRPToJoinIfAddrs: nil,
+		isPodNetworkAdvertised:     isPodNetworkAdvertised,
 	}, nil
 }
 
@@ -1326,18 +1329,18 @@ func (oc *Layer2UserDefinedNetworkController) updateLocalPodEvent(pod *corev1.Po
 }
 
 func (oc *Layer2UserDefinedNetworkController) reconcileLiveMigrationTargetZone(kubevirtLiveMigrationStatus *kubevirt.LiveMigrationStatus) error {
-	if oc.defaultGatewayReconciler == nil {
+	if oc.gatewayAnnouncer == nil {
 		return nil
 	}
 	hasIPv4Subnet, hasIPv6Subnet := oc.IPMode()
 	if hasIPv4Subnet {
-		if err := oc.defaultGatewayReconciler.ReconcileIPv4AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
+		if err := oc.gatewayAnnouncer.AnnounceIPv4AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
 			return fmt.Errorf("failed reconciling IPv4 default gw after live migration at target pod '%s/%s': %w",
 				kubevirtLiveMigrationStatus.TargetPod.Namespace, kubevirtLiveMigrationStatus.TargetPod.Name, err)
 		}
 	}
 	if hasIPv6Subnet {
-		if err := oc.defaultGatewayReconciler.ReconcileIPv6AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
+		if err := oc.gatewayAnnouncer.AnnounceIPv6AfterLiveMigration(kubevirtLiveMigrationStatus); err != nil {
 			return fmt.Errorf("failed reconciling IPv6 default gw after live migration at target pod '%s/%s': %w",
 				kubevirtLiveMigrationStatus.TargetPod.Namespace, kubevirtLiveMigrationStatus.TargetPod.Name, err)
 		}
