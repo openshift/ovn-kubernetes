@@ -1,0 +1,27 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: anp-allow-ingress-all-pods-template
+objects:
+- apiVersion: policy.networking.k8s.io/v1alpha1
+  kind: AdminNetworkPolicy
+  metadata:
+    name: "${NAME}"
+  spec:
+    priority: ${{PRIORITY}}
+    subject:
+      namespaces:
+        matchLabels:
+          kubernetes.io/metadata.name: "${SUBJECT_NS}"
+    ingress:
+    - name: "${RULE_NAME}"
+      action: Allow
+      from:
+      - pods:
+          namespaceSelector: {}
+          podSelector: {}
+parameters:
+- name: NAME
+- name: PRIORITY
+- name: SUBJECT_NS
+- name: RULE_NAME

@@ -1,0 +1,21 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: anp-loadbalancer-service-template
+objects:
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: "${NAME}"
+    namespace: "${NAMESPACE}"
+  spec:
+    type: LoadBalancer
+    selector:
+      app: "${APP_LABEL}"
+    ports:
+    - port: 80
+      targetPort: 8080
+parameters:
+- name: NAME
+- name: NAMESPACE
+- name: APP_LABEL

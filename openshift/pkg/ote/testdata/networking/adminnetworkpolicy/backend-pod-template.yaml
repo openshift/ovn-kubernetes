@@ -1,0 +1,22 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: anp-backend-pod-template
+objects:
+- apiVersion: v1
+  kind: Pod
+  metadata:
+    name: "${NAME}"
+    namespace: "${NAMESPACE}"
+    labels:
+      app: "${APP_LABEL}"
+  spec:
+    containers:
+    - name: server
+      image: busybox
+      args: ["sh", "-c", "echo '${ECHO_MSG}' && sleep 3600"]
+parameters:
+- name: NAME
+- name: NAMESPACE
+- name: APP_LABEL
+- name: ECHO_MSG
