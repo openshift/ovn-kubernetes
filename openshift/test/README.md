@@ -121,6 +121,46 @@ Runs on all platforms (parallel).
 Excluded on `SingleReplica` topology (MicroShift, SNO) as these tests require
 at least 2 nodes.
 
+## ARP/NDP No-Flood MAC Binding Mirroring Tests
+
+The upstream `Network Segmentation: MAC binding mirroring with ARP/NDP flood
+disabled` specs run only on baremetal jobs that enable the CNO
+`disable-udn-arp-ndp-flood` config override. The deployment config reads it
+from the `openshift-network-operator/ovn-kubernetes-config-overrides` ConfigMap;
+without it the specs skip.
+
+```
++-----------------------------------------------------------+----+-----+-------+-----+
+| Test Scenario                                             | BM | AWS | Azure | GCP |
++-----------------------------------------------------------+----+-----+-------+-----+
+| No MAC bindings before any traffic                        | Y  | -   | -     | -   |
+| CDN-learned binding mirrored to every UDN                 | Y  | -   | -     | -   |
+| UDN-triggered binding mirrored to the CDN and other UDNs  | Y  | -   | -     | -   |
+| Node IPs bound statically on the UDNs                     | Y  | -   | -     | -   |
+| No static binding on the default network gateway router   | Y  | -   | -     | -   |
+| Bindings not mirrored onto a secondary CUDN               | Y  | -   | -     | -   |
+| Bindings do not leak into other nodes' zones              | Y  | -   | -     | -   |
+| Mirrored bindings stay stable while traffic lasts         | Y  | -   | -     | -   |
+| Late-created CUDN backfilled; reaped on delete            | Y  | -   | -     | -   |
+| Reconverges after ovnkube-node restart                    | Y  | -   | -     | -   |
+| Converges every gateway onto a changed external MAC       | Y  | -   | -     | -   |
+| CDN-triggered binding ages out once traffic stops         | Y  | -   | -     | -   |
+| UDN-triggered binding ages out once traffic stops         | Y  | -   | -     | -   |
+| Uplink group (7 specs)                                    | -  | -   | -     | -   |
++-----------------------------------------------------------+----+-----+-------+-----+
+```
+
+- The specs need two external containers with their own IP and MAC on the
+  cluster's L2 network. On baremetal, containers named `noflood-ext-<n>-*`
+  on the primary network get an isolated container on the dedicated unmanaged
+  `ovnk-e2e-isolated` network instead of the shared host-networked one (see
+  [infraprovider/README.md](infraprovider/README.md#isolated-external-containers)).
+- AWS, Azure, GCP Excluded in `shouldIncludeTest`: on cloud platforms the external
+  containers share the bastion's IP, so the specs could pass without testing
+  two distinct hosts.
+- The Uplink group is `[Disabled:Unimplemented]`: Uplink is not
+  supported on OpenShift.
+
 ## Known Issues
 
 ### GCP: /32 Node Primary Interface (OCPBUGS-122016)
