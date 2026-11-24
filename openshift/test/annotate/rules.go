@@ -125,6 +125,15 @@ var (
 		// tests that are known broken and need to be fixed upstream or in openshift
 		// always add an issue here
 		"[Disabled:Broken]": {
+			// The following noflood specs below are Ordered-dependent: they assert on the
+			// mirrored bindings primed by the earlier specs of their Ordered
+			// container, but openshift-tests runs each spec in its own process,
+			// so the bindings are missing and they fail on the first assertion.
+			// Will be fixed upstream to be self-contained.
+			"does not mirror onto a secondary CUDN",
+			"converges every gateway router onto the new MAC when the external container changes it",
+			"keeps the mirrored bindings stable while the traffic lasts",
+			"backfills a CUDN created after the bindings were learned, and reaps it on delete",
 			// Flaky test that needs to be fixed upstream.
 			// See https://github.com/ovn-kubernetes/ovn-kubernetes/pull/7300/
 			"reconverges after ovnkube-node restarts, without leaving orphan static bindings",
