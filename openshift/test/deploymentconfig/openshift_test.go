@@ -58,9 +58,13 @@ func TestIsConfigurationEnabledUDNARPNDPFloodDisabled(t *testing.T) {
 
 			var got bool
 			var panicked any
+			dc, err := New(&rest.Config{Host: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
 			func() {
 				defer func() { panicked = recover() }()
-				got = New(&rest.Config{Host: server.URL}).IsConfigurationEnabled(api.UDNARPNDPFloodDisabled)
+				got = dc.IsConfigurationEnabled(api.UDNARPNDPFloodDisabled)
 			}()
 			if len(tt.panicWant) > 0 {
 				for _, want := range tt.panicWant {
@@ -79,7 +83,11 @@ func TestIsConfigurationEnabledUDNARPNDPFloodDisabled(t *testing.T) {
 
 func TestIsConfigurationEnabledWithoutCluster(t *testing.T) {
 	// `list tests` builds the tree without a cluster.
-	if New(nil).IsConfigurationEnabled(api.UDNARPNDPFloodDisabled) {
+	dc, err := New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dc.IsConfigurationEnabled(api.UDNARPNDPFloodDisabled) {
 		t.Fatal("UDNARPNDPFloodDisabled reported enabled without a cluster")
 	}
 }
