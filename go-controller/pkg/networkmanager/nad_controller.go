@@ -136,9 +136,8 @@ func newController(
 	recorder record.EventRecorder,
 	tunnelKeysAllocator *id.TunnelKeysAllocator,
 	filterNADsOnNode string,
-	asyncNetworkStart bool,
 ) (*nadController, error) {
-	networkController := newNetworkController(name, node, cm, wf, asyncNetworkStart)
+	networkController := newNetworkController(name, node, cm, wf)
 	c := &nadController{
 		name:                   fmt.Sprintf("[%s NAD controller]", name),
 		stopChan:               make(chan struct{}),
@@ -1181,10 +1180,7 @@ func (c *nadController) syncNAD(key string, nad *nettypes.NetworkAttachmentDefin
 		klog.V(5).Infof("%s: removing NAD %q reference for network %q", c.name, key, oldNetwork.GetNetworkName())
 		oldNetworkName := oldNetwork.GetNetworkName()
 		oldNetwork.DeleteNADs(key)
-		// NADs removed locally after their Dynamic UDN grace period stay in
-		// nadsByNetwork for the informer but no longer render the network.
-		rendered := c.nadsByNetwork[oldNetworkName].Difference(c.dynamicallyRemovedNADs).Delete(key)
-		if rendered.Len() == 0 || oldNetworkName == types.DefaultNetworkName {
+		if !c.networkReferencedLocked(oldNetworkName, key) {
 			c.networkController.DeleteNetwork(oldNetworkName)
 		} else {
 			c.networkController.EnsureNetwork(oldNetwork)

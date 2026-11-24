@@ -160,7 +160,6 @@ func NewForCluster(
 		recorder,
 		tunnelKeysAllocator,
 		"",
-		false,
 	)
 }
 
@@ -179,28 +178,6 @@ func NewForNode(
 		nil,
 		nil,
 		node,
-		false,
-	)
-}
-
-// NewForController builds a controller for ovnkube-controller. Existing networks
-// are started asynchronously with bounded concurrency so bulk UDN start does not
-// block controller readiness.
-func NewForController(
-	node string,
-	cm ControllerManager,
-	wf watchFactory,
-) (Controller, error) {
-	return new(
-		"ovnkube-controller-nad-controller",
-		node,
-		cm,
-		wf,
-		nil,
-		nil,
-		nil,
-		node,
-		true,
 	)
 }
 
@@ -216,9 +193,8 @@ func new(
 	recorder record.EventRecorder,
 	tunnelKeysAllocator *id.TunnelKeysAllocator,
 	filterNADsOnNode string,
-	asyncNetworkStart bool,
 ) (Controller, error) {
-	return newController(name, node, cm, wf, ovnClient, recorder, tunnelKeysAllocator, filterNADsOnNode, asyncNetworkStart)
+	return newController(name, node, cm, wf, ovnClient, recorder, tunnelKeysAllocator, filterNADsOnNode)
 }
 
 // ControllerManager manages controllers. Needs to be provided in order to build

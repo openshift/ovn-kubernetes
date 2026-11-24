@@ -298,10 +298,7 @@ func NewLayer2UserDefinedNetworkController(
 		oc.onLogicalPortCacheAdd = func(pod *corev1.Pod, _ string) {
 			oc.requestLocalPodPolicyRetriesForPod(pod, "logical port cache update")
 			if oc.eIPController != nil {
-				if err := oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update"); err != nil {
-					klog.Warningf("Failed to enqueue EgressIP retry for pod %s/%s after logical port cache update: %v",
-						pod.Namespace, pod.Name, err)
-				}
+				oc.eIPController.addEgressIPPodRetry(pod, "logical port cache update")
 			}
 		}
 	}
@@ -362,7 +359,6 @@ func (oc *Layer2UserDefinedNetworkController) run() error {
 	if err != nil {
 		return err
 	}
-	oc.enqueueEgressIPNetwork()
 	if oc.svcController != nil {
 		startSvc := time.Now()
 
@@ -377,35 +373,10 @@ func (oc *Layer2UserDefinedNetworkController) run() error {
 	return nil
 }
 
-func (oc *Layer2UserDefinedNetworkController) enqueueEgressIPNetwork() {
-	if !config.OVNKubernetesFeature.EnableEgressIP || !util.IsNetworkSegmentationSupportEnabled() ||
-		!oc.IsPrimaryNetwork() || oc.eIPController == nil {
-		return
-	}
-	oc.eIPController.EnqueueNetwork(oc.GetNetworkName())
-}
-
-func (oc *Layer2UserDefinedNetworkController) unregisterEgressIPNetwork() {
-	if !config.OVNKubernetesFeature.EnableEgressIP || !util.IsNetworkSegmentationSupportEnabled() ||
-		!oc.IsPrimaryNetwork() || oc.eIPController == nil {
-		return
-	}
-	oc.eIPController.UnregisterNetwork(oc.GetNetworkName())
-}
-
-func (oc *Layer2UserDefinedNetworkController) cleanupEgressIPAddressSet() error {
-	if !config.OVNKubernetesFeature.EnableEgressIP || !util.IsNetworkSegmentationSupportEnabled() ||
-		!oc.IsPrimaryNetwork() || oc.eIPController == nil {
-		return nil
-	}
-	return oc.eIPController.DestroyNetworkServedPodsAddressSet(oc.GetNetworkName())
-}
-
 // Cleanup cleans up logical entities for the given network, called from net-attach-def routine
 // could be called from a dummy Controller (only has CommonNetworkControllerInfo set)
 func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 	networkName := oc.GetNetworkName()
-	oc.unregisterEgressIPNetwork()
 
 	// For primary Layer2 UDN only: when this is a cleanup-only controller (dummy for stale UDN
 	// cleanup; GetNetworkID() is InvalidID because netInfo was never reconciled from a NAD),
@@ -474,12 +445,6 @@ func (oc *Layer2UserDefinedNetworkController) Cleanup() error {
 	cleanupLoadBalancerGroups(oc.nbClient, oc.GetNetInfo(),
 		oc.switchLoadBalancerGroupUUID, oc.clusterLoadBalancerGroupUUID, oc.routerLoadBalancerGroupUUID)
 
-	// Remove the EgressIP served-pods address set after router/policy teardown;
-	// it is not covered by this network's own address-set cleanup.
-	if err := oc.cleanupEgressIPAddressSet(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -544,7 +509,6 @@ func (oc *Layer2UserDefinedNetworkController) init() (err error) {
 
 func (oc *Layer2UserDefinedNetworkController) Stop() {
 	klog.Infof("Stopping controller for UDN %s", oc.GetNetworkName())
-	oc.unregisterEgressIPNetwork()
 	oc.DeregisterServiceNetwork()
 	oc.DeregisterNodeHandler()
 	oc.BaseLayer2UserDefinedNetworkController.stop()
