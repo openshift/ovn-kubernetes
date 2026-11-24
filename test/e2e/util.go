@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -1071,6 +1072,51 @@ func newPrivelegedTestFramework(basename string) *framework.Framework {
 		debug.DumpAllNamespaceInfo(context.TODO(), f.ClientSet, namespace)
 	}
 	return f
+}
+
+// OCPHACK: carried downstream from unmerged upstream commit dbdc349e
+// ("e2e: give no-flood test namespaces the framework PSA labels") because
+// the no-flood specs must not trip the openshift-tests PodSecurityViolation
+// monitors. This carry is temporary: once the specs are made
+// order-independent by https://github.com/ovn-kubernetes/ovn-kubernetes/pull/7400
+// (which will also make the suites use the framework's
+// newPrivelegedTestFramework, whose namespace creation already sets the PSA
+// labels and deletes the namespace after every spec), this can be dropped at
+// the next downstream merge.
+//
+// createUnmanagedNamespace creates a namespace the way f.CreateNamespace does:
+// through TestContext.CreateTestingNS, which downstream test runners such as
+// the OpenShift tests extension override, and labelled with the pod security
+// levels configured on f - privileged for every wrappedTestFramework. Unlike
+// f.CreateNamespace it does not hand the namespace to the framework, whose
+// teardown deletes it after every spec: the caller owns its deletion. It is
+// meant for suites that set f.SkipNamespaceCreation because they must control
+// when their namespaces go away.
+func createUnmanagedNamespace(ctx context.Context, f *framework.Framework, baseName string, labels map[string]string) (*v1.Namespace, error) {
+	nsLabels := make(map[string]string, len(labels)+3)
+	maps.Copy(nsLabels, labels)
+	// Same levels as framework.(*Framework).CreateNamespace sets.
+	nsLabels[admissionapi.EnforceLevelLabel] = string(podSecurityLevelOrRestricted(f.NamespacePodSecurityEnforceLevel, f.NamespacePodSecurityLevel))
+	nsLabels[admissionapi.WarnLevelLabel] = string(podSecurityLevelOrRestricted(f.NamespacePodSecurityWarnLevel, f.NamespacePodSecurityLevel))
+	nsLabels[admissionapi.AuditLevelLabel] = string(podSecurityLevelOrRestricted(f.NamespacePodSecurityAuditLevel, f.NamespacePodSecurityLevel))
+
+	createTestingNS := framework.TestContext.CreateTestingNS
+	if createTestingNS == nil {
+		createTestingNS = framework.CreateTestingNS
+	}
+	return createTestingNS(ctx, baseName, f.ClientSet, nsLabels)
+}
+
+// OCPHACK: part of the createUnmanagedNamespace carry, see there.
+// podSecurityLevelOrRestricted returns the first non-empty level, or
+// restricted, mirroring how the e2e framework resolves namespace levels.
+func podSecurityLevelOrRestricted(levels ...admissionapi.Level) admissionapi.Level {
+	for _, level := range levels {
+		if level != "" {
+			return level
+		}
+	}
+	return admissionapi.LevelRestricted
 }
 
 // countACLLogs connects to <targetNodeName> (ovn-control-plane, ovn-worker or ovn-worker2 in kind environments) via the docker exec
