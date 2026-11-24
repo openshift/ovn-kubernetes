@@ -6,9 +6,7 @@ package controllermanager
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 
@@ -42,6 +40,12 @@ import (
 	ovntypes "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
+
+// startDefaultNetworkController starts the default network controller.
+// Unit tests may override this.
+var startDefaultNetworkController = func(ctx context.Context, c networkmanager.BaseNetworkController) error {
+	return c.Start(ctx)
+}
 
 // ControllerManager structure is the object manages all controllers
 type ControllerManager struct {
@@ -280,7 +284,7 @@ func NewControllerManager(nodeName string, ovnClient *util.OVNClientset, wf *fac
 
 	cm.networkManager = networkmanager.Default()
 	if config.OVNKubernetesFeature.EnableMultiNetwork {
-		cm.networkManager, err = networkmanager.NewForNode(cm.nodeName, cm, wf)
+		cm.networkManager, err = networkmanager.NewForController(cm.nodeName, cm, wf)
 		if err != nil {
 			return nil, err
 		}
@@ -443,26 +447,15 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to init default network controller: %v", err)
 	}
 
-	// OCPHACK starts
-	// Precreate CDN gateway router + external switch before NAD/UDN sync so
-	// ovn-controller can create the gateway patch port and unblock
-	// ovnkube-node gateway readiness while UDN/MNP reconciliation runs.
-	// Opt-in via OVN_PRECREATE_CDN_GATEWAY=true. Best-effort: failures are
-	// logged and startup continues.
-	if isPrecreateCDNGatewayExternalEnabled() {
-		if err = cm.precreateCDNGatewayExternal(ctx); err != nil {
-			klog.Warningf("Failed to precreate CDN gateway external topology for node %s: %v",
-				cm.nodeName, err)
-		}
-	}
-	// OCPHACK ends
-
 	if util.IsRouteAdvertisementsEnabled() {
 		if err := ovn.ConfigureAdvertisedNetworkIsolation(cm.nbClient); err != nil {
 			return fmt.Errorf("failed to initialize advertised network isolation: %w", err)
 		}
 	}
 
+	// Start NAD/network manager before the default network controller so NAD
+	// state is available. Existing UDNs start asynchronously with bounded
+	// concurrency so default network controller startup is not blocked.
 	if cm.networkManager != nil {
 		if cm.nodeController != nil {
 			if err = cm.nodeController.Start(); err != nil {
@@ -481,7 +474,7 @@ func (cm *ControllerManager) Start(ctx context.Context) error {
 		}
 	}
 
-	err = cm.defaultNetworkController.Start(ctx)
+	err = startDefaultNetworkController(ctx, cm.defaultNetworkController)
 	if err != nil {
 		return fmt.Errorf("failed to start default network controller: %v", err)
 	}
@@ -515,42 +508,6 @@ func (cm *ControllerManager) Stop() {
 		cm.addressSetManager.Stop()
 	}
 }
-
-// OCPHACK starts
-const precreateCDNGatewayExternalEnv = "OVN_PRECREATE_CDN_GATEWAY"
-
-// isPrecreateCDNGatewayExternalEnabled returns true when
-// OVN_PRECREATE_CDN_GATEWAY parses as true. Unset or empty is treated as
-// disabled. Invalid values are logged and treated as disabled.
-func isPrecreateCDNGatewayExternalEnabled() bool {
-	val := os.Getenv(precreateCDNGatewayExternalEnv)
-	if val == "" {
-		return false
-	}
-	enabled, err := strconv.ParseBool(val)
-	if err != nil {
-		klog.Warningf("Invalid value %q for %s: %v; treating as disabled",
-			val, precreateCDNGatewayExternalEnv, err)
-		return false
-	}
-	return enabled
-}
-
-// precreateCDNGatewayExternal creates the CDN gateway router and external
-// switch early in controller startup, before NAD/UDN sync.
-func (cm *ControllerManager) precreateCDNGatewayExternal(ctx context.Context) error {
-	dnc, ok := cm.defaultNetworkController.(*ovn.DefaultNetworkController)
-	if !ok {
-		return fmt.Errorf("unexpected default network controller type %T", cm.defaultNetworkController)
-	}
-	if err := dnc.PrecreateCDNGatewayExternal(ctx); err != nil {
-		return fmt.Errorf("failed to precreate CDN gateway external topology for node %s: %w",
-			cm.nodeName, err)
-	}
-	return nil
-}
-
-// OCPHACK ends
 
 func (cm *ControllerManager) Reconcile(_ string, _, _ util.NetInfo) error {
 	return nil

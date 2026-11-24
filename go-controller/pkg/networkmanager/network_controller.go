@@ -39,11 +39,12 @@ const (
 	defaultNetworkReconcilerThreadiness = 5
 )
 
-func newNetworkController(name, node string, cm ControllerManager, wf watchFactory) *networkController {
+func newNetworkController(name, node string, cm ControllerManager, wf watchFactory, asyncNetworkStart bool) *networkController {
 	nc := &networkController{
 		name:                   fmt.Sprintf("[%s network controller]", name),
 		node:                   node,
 		cm:                     cm,
+		asyncNetworkStart:      asyncNetworkStart,
 		networks:               map[string]util.MutableNetInfo{},
 		networksByID:           map[int]string{},
 		networkControllers:     map[string]*networkControllerState{},
@@ -105,6 +106,10 @@ func newNetworkController(name, node string, cm ControllerManager, wf watchFacto
 type networkControllerState struct {
 	controller         NetworkController
 	stoppedAndDeleting bool
+	// startFailed retains a stopped controller whose Cleanup method still owns
+	// any resources left by Start. Cleanup must succeed before deletion or a
+	// replacement Start so two controllers never own the same network state.
+	startFailed bool
 }
 
 type networkController struct {
@@ -112,6 +117,11 @@ type networkController struct {
 
 	name string
 	node string
+	// asyncNetworkStart, when true, skips inline network start during initial
+	// sync so reconciler workers start networks with bounded concurrency.
+	// Used by ovnkube-controller; ovnkube-node starts networks inline so they
+	// are ready before node setup continues.
+	asyncNetworkStart bool
 
 	nadLister  nadlisters.NetworkAttachmentDefinitionLister
 	raLister   ralisters.RouteAdvertisementsLister
@@ -171,6 +181,9 @@ func (c *networkController) Stop() {
 		if networkControllerState.controller.GetNetworkName() == types.DefaultNetworkName {
 			// we don't own the lifecycle of the default network, so don't stop
 			// it
+			continue
+		}
+		if networkControllerState.stoppedAndDeleting || networkControllerState.startFailed {
 			continue
 		}
 		networkControllerState.controller.Stop()
@@ -250,24 +263,24 @@ func (c *networkController) getNetworkState(network string) *networkControllerSt
 	return state
 }
 
-func (c *networkController) getReconcilableNetworkState(network string) (ReconcilableNetworkController, bool) {
+func (c *networkController) getReconcilableNetworkState(network string) (ReconcilableNetworkController, bool, bool) {
 	if network == types.DefaultNetworkName {
-		return c.cm.GetDefaultNetworkController(), false
+		return c.cm.GetDefaultNetworkController(), false, false
 	}
 	c.RLock()
 	defer c.RUnlock()
 	state := c.networkControllers[network]
 	if state == nil {
-		return nil, false
+		return nil, false, false
 	}
-	return state.controller, state.stoppedAndDeleting
+	return state.controller, state.stoppedAndDeleting, state.startFailed
 }
 
 func (c *networkController) getControllerForNotify(networkName string) (NetworkController, bool) {
 	c.RLock()
 	defer c.RUnlock()
 	state := c.networkControllers[networkName]
-	if state == nil || state.controller == nil || state.stoppedAndDeleting {
+	if state == nil || state.controller == nil || state.stoppedAndDeleting || state.startFailed {
 		return nil, false
 	}
 	return state.controller, true
@@ -374,6 +387,13 @@ func (c *networkController) syncAll() error {
 		return err
 	}
 
+	// For async start, skip inline sync and let reconciler workers handle networks
+	// asynchronously.
+	if c.asyncNetworkStart {
+		klog.Infof("%s: skipping inline sync for async start", c.name)
+		return nil
+	}
+
 	// sync all known networks. There is no informer for networks. Keys are added by NAD controller.
 	// Certain downstream controllers that handle configuration for multiple networks depend on being
 	// aware of all the existing networks on initialization. To achieve that, we need to start existing
@@ -408,14 +428,15 @@ func (c *networkController) syncNetwork(network string) error {
 		klog.V(4).Infof("%s: finished syncing network %s, took %v", c.name, network, time.Since(startTime))
 	}()
 
-	have, stoppedAndDeleting := c.getReconcilableNetworkState(network)
+	have, stoppedAndDeleting, startFailed := c.getReconcilableNetworkState(network)
 	want := c.getNetwork(network)
-
 	compatible := util.AreNetworksCompatible(have, want)
 
 	// we will dispose of the old network if deletion is in progress or if
-	// non-reconcilable configuration changed
-	dispose := stoppedAndDeleting || !compatible
+	// non-reconcilable configuration changed. A stopped controller whose Start
+	// failed remains the cleanup owner and must release that state before a new
+	// controller may attempt to program the same network.
+	dispose := startFailed || stoppedAndDeleting || !compatible
 	if dispose {
 		err := c.deleteNetwork(network)
 		if err != nil {
@@ -457,10 +478,10 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 	}
 
 	networkName := network.GetNetworkName()
-	reconcilable, _ := c.getReconcilableNetworkState(networkName)
+	reconcilable, _, startFailed := c.getReconcilableNetworkState(networkName)
 
 	// this might just be an update of reconcilable network configuration
-	if reconcilable != nil {
+	if reconcilable != nil && !startFailed {
 		err := reconcilable.Reconcile(network)
 		if err != nil {
 			return fmt.Errorf("failed to reconcile controller for network %s: %w", networkName, err)
@@ -478,10 +499,13 @@ func (c *networkController) ensureNetwork(network util.MutableNetInfo) error {
 		}
 		return fmt.Errorf("failed to create network %s: %w", networkName, err)
 	}
-
 	err = nc.Start(context.Background())
 	if err != nil {
 		nc.Stop()
+		c.setNetworkState(networkName, &networkControllerState{
+			controller:  nc,
+			startFailed: true,
+		})
 		return fmt.Errorf("failed to start network %s: %w", networkName, err)
 	}
 	c.setNetworkState(network.GetNetworkName(), &networkControllerState{controller: nc})
@@ -500,10 +524,11 @@ func (c *networkController) deleteNetwork(network string) error {
 	}
 	ctrl := have.controller
 	alreadyStopping := have.stoppedAndDeleting
+	startFailed := have.startFailed
 	have.stoppedAndDeleting = true
 	c.Unlock()
 
-	if !alreadyStopping {
+	if !alreadyStopping && !startFailed {
 		ctrl.Stop()
 	}
 

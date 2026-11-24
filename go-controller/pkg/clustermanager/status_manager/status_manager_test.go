@@ -26,6 +26,7 @@ import (
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	adminpolicybasedrouteapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/adminpolicybasedroute/v1"
 	egressfirewallapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1"
+	egressfirewallapply "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/applyconfiguration/egressfirewall/v1"
 	egressfirewallfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressfirewall/v1/apis/clientset/versioned/fake"
 	egressqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressqos/v1"
 	networkqosapi "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/networkqos/v1alpha1"
@@ -557,8 +558,8 @@ var _ = Describe("Cluster Manager Status Manager", func() {
 			},
 		}
 		egressFirewall.ManagedFields = []metav1.ManagedFieldsEntry{
-			{Manager: "zone1", Subresource: "status", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:messages":{"v:\"zone1: zone1: EgressFirewall Rules applied\"":{}}}}`)}},
-			{Manager: "zone2", Subresource: "status", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:messages":{"v:\"zone2: zone2: EgressFirewall Rules applied\"":{}}}}`)}},
+			{Manager: "zone1", Operation: metav1.ManagedFieldsOperationApply, Subresource: "status", APIVersion: "k8s.ovn.org/v1", FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:messages":{"v:\"zone1: zone1: EgressFirewall Rules applied\"":{}}}}`)}},
+			{Manager: "zone2", Operation: metav1.ManagedFieldsOperationApply, Subresource: "status", APIVersion: "k8s.ovn.org/v1", FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:messages":{"v:\"zone2: zone2: EgressFirewall Rules applied\"":{}}}}`)}},
 		}
 
 		// Set up a reactor to intercept cleanup patches and track which zones are cleaned
@@ -632,12 +633,12 @@ var _ = Describe("Cluster Manager Status Manager", func() {
 		}
 		egressFirewall.ManagedFields = []metav1.ManagedFieldsEntry{
 			// Valid managedFields with actual message content nested inside
-			{Manager: "zone1", Subresource: "status", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:messages":{"v:\"zone1: EgressFirewall Rules applied\"":{}}}}`)}},
-			{Manager: "zone2", Subresource: "status", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:messages":{"v:\"zone2: EgressFirewall Rules applied\"":{}}}}`)}},
+			{Manager: "zone1", Operation: metav1.ManagedFieldsOperationApply, Subresource: "status", APIVersion: "k8s.ovn.org/v1", FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:messages":{"v:\"zone1: EgressFirewall Rules applied\"":{}}}}`)}},
+			{Manager: "zone2", Operation: metav1.ManagedFieldsOperationApply, Subresource: "status", APIVersion: "k8s.ovn.org/v1", FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:messages":{"v:\"zone2: EgressFirewall Rules applied\"":{}}}}`)}},
 			// Stale managedField with empty status (left by buggy code when zone was deleted)
-			{Manager: "zone3-deleted", Subresource: "status", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{}}`)}},
+			{Manager: "zone3-deleted", Operation: metav1.ManagedFieldsOperationApply, Subresource: "status", APIVersion: "k8s.ovn.org/v1", FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{}}`)}},
 			// Legitimate cluster-manager managedField with its own nested structure
-			{Manager: "cluster-manager", Subresource: "status", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:status":{}}}`)}},
+			{Manager: "cluster-manager", Operation: metav1.ManagedFieldsOperationApply, Subresource: "status", APIVersion: "k8s.ovn.org/v1", FieldsType: "FieldsV1", FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:status":{}}}`)}},
 		}
 
 		var cleanupCalled atomic.Uint32
@@ -774,6 +775,63 @@ var _ = Describe("Cluster Manager Status Manager", func() {
 		}, fakeClient)
 		checkNQStatusEventually(networkQoS, false, false, fakeClient)
 
+	})
+
+	It("cleans up stale zone managedFields during startup", func() {
+		config.OVNKubernetesFeature.EnableEgressFirewall = true
+		namespace1 := util.NewNamespace(namespace1Name)
+		egressFirewall := newEgressFirewall(namespace1.Name)
+		zones := sets.New("zone1", "zone2")
+
+		objects := []runtime.Object{namespace1, egressFirewall}
+		for _, zone := range zones.UnsortedList() {
+			objects = append(objects, getNode(zone))
+		}
+		fakeClient = util.GetOVNClientset(objects...).GetClusterManagerClientset()
+		efClient := fakeClient.EgressFirewallClient.K8sV1().EgressFirewalls(namespace1.Name)
+
+		ctx := context.TODO()
+		applyZoneMessage := func(zone, message string) {
+			applyObj := egressfirewallapply.EgressFirewall(egressFirewall.Name, egressFirewall.Namespace).
+				WithStatus(egressfirewallapply.EgressFirewallStatus().WithMessages(message))
+			_, err := efClient.ApplyStatus(ctx, applyObj, metav1.ApplyOptions{FieldManager: zone, Force: true})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		zone1Msg := types.GetZoneStatus("zone1", "OK")
+		zone2Msg := types.GetZoneStatus("zone2", "OK")
+		zone3Msg := types.GetZoneStatus("zone3", "OK")
+		applyZoneMessage("zone1", zone1Msg)
+		applyZoneMessage("zone2", zone2Msg)
+		// zone3 is not a current zone (no matching node), so it is stale and must be cleaned up.
+		applyZoneMessage("zone3", zone3Msg)
+
+		var err error
+		wf, err = factory.NewClusterManagerWatchFactory(fakeClient)
+		Expect(err).NotTo(HaveOccurred())
+		statusManager = NewStatusManager(wf, fakeClient, networkmanager.Default().Interface())
+		Expect(wf.Start()).NotTo(HaveOccurred())
+		Expect(statusManager.Start()).NotTo(HaveOccurred())
+
+		// The stale zone3 managedField and message must be removed, while zone1 and
+		// zone2 (their managedFields and messages) must be preserved.
+		Eventually(func() bool {
+			ef, err := efClient.Get(ctx, egressFirewall.Name, metav1.GetOptions{})
+			if err != nil {
+				return false
+			}
+
+			managers := sets.New[string]()
+			for _, mf := range ef.ManagedFields {
+				managers.Insert(mf.Manager)
+			}
+			if managers.Has("zone3") || !managers.Has("zone1") || !managers.Has("zone2") {
+				return false
+			}
+
+			gotMessages := sets.New(ef.Status.Messages...)
+			return !gotMessages.Has(zone3Msg) && gotMessages.Has(zone1Msg) && gotMessages.Has(zone2Msg)
+		}, 5).Should(BeTrue(), "stale zone3 managedField and message should be removed; zone1/zone2 preserved")
 	})
 
 })
