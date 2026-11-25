@@ -22,7 +22,6 @@ var (
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
 			`[Feature:Interconnect]`,
-			`[Feature:Multicast]`,
 			`[Feature:MultiHoming]`,
 			`[Feature:NetworkConnect]`,
 			`[Feature:NodeIPMACMigration]`,
@@ -58,8 +57,6 @@ var (
 			`e2e ingress traffic validation`,
 			// pods dont drop privileges
 			`Should validate the hairpinned traffic is always allowed`,
-			// refactor to give pod sufficient privs for tcpdump
-			`should be able to receive multicast IGMP query`,
 			// refactor to give pod sufficient privs
 			`UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes`,
 			// load balancer isn't becoming available from the cloud services. Ensure, we provider the correct provider to the k8 api which spawns the ext LB.
@@ -82,8 +79,6 @@ var (
 			`Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology`,
 			// requires implementation of the SetupUnderlay() method
 			`Network Segmentation: Localnet should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart`,
-			// pods dont drop privileges
-			`should be able to send multicast UDP traffic between nodes`,
 			// TODO: fix the flakiness with net-seg overlapping CIDRs test in downstream.
 			"isolates overlapping CIDRs",
 			// tied to only kind cluster
