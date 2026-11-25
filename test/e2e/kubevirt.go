@@ -150,10 +150,10 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 	type execFnType = func(cmd string) (string, error)
 
 	var (
-		sendEcho = func(conn *net.TCPConn) error {
+		sendEchoWithTimeout = func(conn *net.TCPConn, timeout time.Duration) error {
 			strEcho := "Halo"
 
-			if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 				return fmt.Errorf("failed configuring connection deadline: %w", err)
 			}
 			_, err := conn.Write([]byte(strEcho))
@@ -173,6 +173,8 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			}
 			return nil
 		}
+
+		sendEcho = func(conn *net.TCPConn) error { return sendEchoWithTimeout(conn, 5*time.Second) }
 
 		sendEchos = func(conns []*net.TCPConn) error {
 			for _, conn := range conns {
@@ -499,17 +501,19 @@ var _ = Describe("Kubevirt Virtual Machines", feature.VirtualMachineSupport, fun
 			polling := 6 * time.Second
 			timeout := 2 * time.Minute
 			step := by(vmName, stage+": Check tcp connection is not broken")
-			Eventually(func() error {
-				err = sendEchos(endpoints)
-				if err != nil {
-					by(vmName, fmt.Sprintf("%s: Check tcp connection failed: %s", stage, err))
-					_ = reconnect(endpoints)
+			for i, endpoint := range endpoints {
+				if endpoint.RemoteAddr().(*net.TCPAddr).IP.To4() != nil {
+					Expect(sendEchoWithTimeout(endpoint, 2*time.Second)).To(Succeed(), step)
+					continue
 				}
-				return err
-			}).
-				WithPolling(polling).
-				WithTimeout(timeout).
-				Should(Succeed(), step)
+				Eventually(func() error {
+					err := sendEchos(endpoints[i : i+1])
+					if err != nil {
+						_ = reconnect(endpoints[i : i+1])
+					}
+					return err
+				}).WithPolling(polling).WithTimeout(timeout).Should(Succeed(), step)
+			}
 
 			stage = by(vmName, stage+": Check e/w tcp traffic")
 			checkEastWestTraffic(vmi, httpServerTestPodsDefaultNetworkIPs(), stage)
@@ -1184,6 +1188,32 @@ passwd:
 					}
 				}
 				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after live migration to node owning the subnet")
+
+				if isIPv4Supported(fr.ClientSet) {
+					by(vm.Name, "Re-resolve the IPv4 gateway on its subnet owner before leaving again")
+					ctx, cancel := context.WithTimeout(context.Background(), e2eframework.SingleCallTimeout)
+					homeNode, err := fr.ClientSet.CoreV1().Nodes().Get(ctx, originalNode, metav1.GetOptions{})
+					cancel()
+					Expect(err).NotTo(HaveOccurred())
+					subnets, err := util.ParseNodeHostSubnetAnnotation(homeNode, "default")
+					Expect(err).NotTo(HaveOccurred())
+					subnet, err := util.MatchFirstIPNetFamily(false, subnets)
+					Expect(err).NotTo(HaveOccurred())
+					gateway := util.GetNodeGatewayIfAddr(subnet).IP
+					output, err := virtClient.RunCommand(vmi, fmt.Sprintf("ip -4 neigh flush to %s dev eth0 && ping -4 -c 1 -W 2 %s", gateway, gateway), 5*time.Second)
+					Expect(err).NotTo(HaveOccurred(), output)
+					Eventually(func() (string, error) {
+						return virtClient.RunCommand(vmi, fmt.Sprintf("ip -4 neigh show to %s dev eth0", gateway), 5*time.Second)
+					}).WithTimeout(10 * time.Second).WithPolling(time.Second).Should(ContainSubstring(util.IPAddrToHWAddr(gateway).String()))
+				}
+
+				by(vm.Name, "Live migrate away from the subnet owner again")
+				for _, selectedNode := range selectedNodes {
+					if selectedNode.Name != originalNode {
+						e2enode.AddOrUpdateLabelOnNode(fr.ClientSet, selectedNode.Name, namespace, "true")
+					}
+				}
+				liveMigrateAndCheck(vm.Name, td.mode, endpoints, "after leaving the subnet owner again")
 			}
 
 		}

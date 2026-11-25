@@ -56,10 +56,24 @@ func DeleteRoutingForMigratedPod(nbClient libovsdbclient.Client, pod *corev1.Pod
 	return DeleteRoutingForMigratedPodWithZone(nbClient, pod, "")
 }
 
-// EnsureLocalZonePodAddressesToNodeRoute will add static routes and policies to ovn_cluster_route logical router
-// to ensure VM traffic work as expected after live migration if the pod is running at the local/global zone.
+// EnsureDefaultNetworkForLocalMigratablePod reconciles default-network routing
+// for a local live-migratable pod and refreshes its IPv4 gateway neighbor entry
+// when the migration target is ready.
 //
 // NOTE: IC with multiple nodes per zone is not supported
+func EnsureDefaultNetworkForLocalMigratablePod(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
+	lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, clusterSubnets []config.CIDRNetworkEntry) error {
+	if err := ensureLocalZonePodAddressesToNodeRoute(watchFactory, nbClient, lsManager, pod, types.DefaultNetworkName, clusterSubnets); err != nil {
+		return fmt.Errorf("failed ensuring local-zone migration routes for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	if config.IPv4Mode {
+		return reconcileIPv4GatewayForMigratablePod(watchFactory, pod)
+	}
+	return nil
+}
+
+// ensureLocalZonePodAddressesToNodeRoute adds static routes and policies to the ovn_cluster_router logical router
+// so VM traffic works as expected after live migration when the pod is running in the local zone.
 //
 // Following is the list of NB logical resources created depending if it's interconnected or not:
 //
@@ -73,7 +87,7 @@ func DeleteRoutingForMigratedPod(nbClient libovsdbclient.Client, pod *corev1.Pod
 //
 // Both:
 //   - static route with VM ip as dst-ip prefix and output port the LRP pointing to the VM's node switch
-func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
+func ensureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, nbClient libovsdbclient.Client,
 	lsManager *logicalswitchmanager.LogicalSwitchManager, pod *corev1.Pod, nadName string, clusterSubnets []config.CIDRNetworkEntry) error {
 	vmReady, err := virtualMachineReady(watchFactory, pod)
 	if err != nil {
@@ -185,8 +199,23 @@ func EnsureLocalZonePodAddressesToNodeRoute(watchFactory *factory.WatchFactory, 
 	return nil
 }
 
-// EnsureRemoteZonePodAddressesToNodeRoute will add static routes when live
-// migrated pod belongs to remote zone to send traffic over transwitch switch
+func reconcileIPv4GatewayForMigratablePod(watchFactory *factory.WatchFactory, pod *corev1.Pod) error {
+	status, err := DiscoverLiveMigrationStatus(watchFactory, pod)
+	if err != nil {
+		return fmt.Errorf("failed discovering live migration status for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	if status == nil || !status.IsTarget(pod) {
+		return nil
+	}
+	r := NewClusterDefaultNetworkGatewayAnnouncer(types.K8sMgmtIntfName)
+	if err := r.AnnounceIPv4AfterLiveMigration(status); err != nil {
+		return fmt.Errorf("failed reconciling IPv4 gateway after live migration for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	return nil
+}
+
+// EnsureRemoteZonePodAddressesToNodeRoute adds static routes when a live
+// migrated pod belongs to a remote zone, sending traffic over the transit switch
 // port of the node where the pod is running:
 //   - A dst-ip with live migrated pod ip as prefix and nexthop the pod's
 //     current node transit switch port.
