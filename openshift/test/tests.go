@@ -234,4 +234,13 @@ var BlockingTests = []string{
 	"[Feature:MACSecurity][Feature:NetworkSegmentation][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed) [Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
 	"[Feature:MACSecurity][Feature:VirtualMachineSupport][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over secondary layer2 [Suite:ovn-kubernetes/conformance/serial/virtualization]",
 	"[Feature:MACSecurity][Feature:VirtualMachineSupport][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over localnet [Suite:ovn-kubernetes/conformance/serial/virtualization]",
+	"[OTP] OVN Features 45146-should create healthy pod with single-stack gateway on dual-stack cluster [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] OVN Features 69761-should show aggregated status from all zones in AdminPolicyBasedExternalRoute [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] OVN Networking Tools 55889-should execute ovn-db-run-command script successfully [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] OVN Networking Tools 55890-should verify network-tools ovn-get script functionality [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] OVN Networking Tools 67625-should trace pod-to-pod traffic successfully [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] OVN Networking Tools 67648-should trace pod-to-hostnetworkpod traffic successfully [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] SDN network segmentation security 49216-should not expose API tokens in ovnkube-node logs [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] UDN Port Isolation 80526-should test UDN with mixed port isolation on bridge CNI [Suite:ovn-kubernetes/conformance/parallel]",
+	"[OTP] UDN Port Isolation 81757-should test port isolation with UDN and bridge CNI [Suite:ovn-kubernetes/conformance/parallel]",
 }
