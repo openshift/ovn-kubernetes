@@ -110,9 +110,9 @@ var (
 			// are needed for these tests. Currently, this is not supported.
 			"e2e egress firewall policy validation with external containers",
 			// Pending to implement virt tests
-			"Kubevirt Virtual Machines with user defined networks and persistent ips",
+			// The virtualization lane runs successful Layer2 migrations and restarts with SNAT.
+			`Kubevirt Virtual Machines with user defined networks and persistent ips .* (live migration failed|ingress routed|Secondary/Localnet)`,
 			"Kubevirt Virtual Machines IP family validation",
-			"Kubevirt Virtual Machines duplicate addresses validation",
 			"Kubevirt Virtual Machines with default pod network",
 			"Kubevirt Virtual Machines ipv4 subnet exhaustion",
 			"Kubevirt Virtual Machines with kubevirt VM using layer2 UDPN should configure IPv4 and IPv6 using DHCP and NDP",

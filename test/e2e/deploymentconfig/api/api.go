@@ -14,6 +14,8 @@ const (
 	L3UDNMultiSubnetConfig Config = "L3UDNMultiSubnet"
 	// UDNARPNDPFloodDisabled indicates wheter disabling UDN ARP/NDP flood setting is set true
 	UDNARPNDPFloodDisabled Config = "UDNARPNDPFloodDisabled"
+	// PreconfiguredUDNAddressesConfig indicates support for user-requested UDN IPs and MACs.
+	PreconfiguredUDNAddressesConfig Config = "PreconfiguredUDNAddresses"
 )
 
 type ImageID int
