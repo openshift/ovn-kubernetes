@@ -984,13 +984,13 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 			framework.ExpectNoError(err, "failed to get primary provider network")
 
 			// attach containers to the primary network
-			primaryTargetExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			primaryTargetExternalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			primaryTargetExternalContainerSpec := infraapi.ExternalContainer{Name: targetNodeName, Image: images.AgnHost(),
 				Network: primaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(primaryTargetExternalContainerPort), ExtPort: primaryTargetExternalContainerPort}
 			primaryTargetExternalContainer, err = providerCtx.CreateExternalContainer(primaryTargetExternalContainerSpec)
 			framework.ExpectNoError(err, "failed to create external target container on primary network", primaryTargetExternalContainerSpec.String())
 
-			primaryDeniedExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			primaryDeniedExternalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			primaryDeniedExternalContainerSpec := infraapi.ExternalContainer{Name: deniedTargetNodeName, Image: images.AgnHost(),
 				Network: primaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(primaryDeniedExternalContainerPort), ExtPort: primaryDeniedExternalContainerPort}
 			primaryDeniedExternalContainer, err = providerCtx.CreateExternalContainer(primaryDeniedExternalContainerSpec)
@@ -1010,7 +1010,7 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 				_, err = providerCtx.AttachNetwork(secondaryProviderNetwork, node.Name)
 				framework.ExpectNoError(err, "network %s must attach to node %s", secondaryProviderNetwork.Name, node.Name)
 			}
-			secondaryTargetExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			secondaryTargetExternalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			secondaryTargetExternalContainerSpec := infraapi.ExternalContainer{
 				Name:    targetSecondaryNodeName,
 				Image:   images.AgnHost(),
@@ -2379,7 +2379,7 @@ spec:
 			framework.ExpectNoError(err, "can't create a client pod: %v", err)
 
 			ginkgo.By("Creating an external container (outside k8 cluster) as server to send the traffic to/from")
-			externalContainerPrimaryPort := infraprovider.Get().GetExternalContainerPort()
+			externalContainerPrimaryPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			// Then create and run the server
 			httpPort := fmt.Sprintf("--http-port=%d", externalContainerPrimaryPort)
 			udpPort := fmt.Sprintf("--udp-port=%d", externalContainerPrimaryPort)

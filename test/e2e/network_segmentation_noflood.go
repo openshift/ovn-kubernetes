@@ -591,7 +591,7 @@ var _ = Describe("Network Segmentation: MAC binding mirroring with ARP/NDP flood
 				providerNetwork, err := infraprovider.Get().PrimaryNetwork()
 				framework.ExpectNoError(err, "provider primary network must be available")
 				for i, target := range []*infraapi.ExternalContainer{&extA, &extB} {
-					port := infraprovider.Get().GetExternalContainerPort()
+					port := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 					container, err := providerCtx.CreateExternalContainer(infraapi.ExternalContainer{
 						Name:    fmt.Sprintf("noflood-ext-%d-%s", i, rand.String(5)),
 						Image:   images.AgnHost(),
@@ -1289,7 +1289,7 @@ var _ = Describe("Network Segmentation: MAC binding mirroring for multiple UDNs 
 			}
 
 			createExternalContainer := func(name string) (infraapi.ExternalContainer, string, []string) {
-				port := infraprovider.Get().GetExternalContainerPort()
+				port := infraprovider.Get().GetExternalContainerPort(f, ictx)
 				container, err := ictx.CreateExternalContainer(infraapi.ExternalContainer{
 					Name:    fmt.Sprintf("%s-%s", name, framework.RandomSuffix()),
 					Image:   images.AgnHost(),

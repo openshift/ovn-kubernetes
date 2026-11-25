@@ -267,7 +267,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				providerCtx = infraprovider.Get().NewTestContext()
 				primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 				// container 1
-				externalContainer1Port := infraprovider.Get().GetExternalContainerPort()
+				externalContainer1Port := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 				externalContainer1Spec := infraapi.ExternalContainer{
 					Name:    externalContainerName1,
 					Image:   images.AgnHost(),
@@ -279,7 +279,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				framework.ExpectNoError(err, "must create external container 1")
 
 				// container 2
-				externalContainer2Port := infraprovider.Get().GetExternalContainerPort()
+				externalContainer2Port := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 				externalContainer2Spec := infraapi.ExternalContainer{
 					Name:    externalContainerName2,
 					Image:   images.AgnHost(),

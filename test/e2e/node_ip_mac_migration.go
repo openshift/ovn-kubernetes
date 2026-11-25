@@ -133,7 +133,7 @@ spec:
 		externalContainerIPs = make(map[int]string)
 		primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 		framework.ExpectNoError(err, "failed to get primary network")
-		externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+		externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 		externalContainer = infraapi.ExternalContainer{Name: externalContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
 			CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 		externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)

@@ -2348,7 +2348,7 @@ spec:
 			providerCtx = infraprovider.Get().NewTestContext()
 			providerPrimaryNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "provider primary network must be available")
-			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			externalContainerSpec := infraapi.ExternalContainer{
 				Name:    externalContainerName,
 				Image:   images.AgnHost(),

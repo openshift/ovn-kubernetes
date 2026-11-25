@@ -999,7 +999,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			ginkgo.By("Creating an external container to send the traffic from")
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get primary network")
-			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			externalContainer := infraapi.ExternalContainer{Name: fmt.Sprintf("%s-%d", hostAddrsClientContainerName, externalContainerPort), Image: images.AgnHost(), Network: primaryProviderNetwork,
 				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
@@ -1203,7 +1203,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 					e2eskipper.Skipf("Test requires nodes that support attaching provider networks; network %s could not attach to node %s: %v", secondaryProviderNetwork.Name(), node.Name, err)
 				}
 			}
-			serverExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			serverExternalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			serverExternalContainerSpec := infraapi.ExternalContainer{
 				Name:    targetSecondaryContainerName,
 				Image:   images.AgnHost(),
@@ -1518,7 +1518,7 @@ spec:
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Creating an external client")
-			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			externalContainer := infraapi.ExternalContainer{Name: fmt.Sprintf("%s-%d", fragmentsClientContainerName, externalContainerPort), Image: images.AgnHost(), Network: primaryProviderNetwork,
 				CmdArgs: []string{"pause"}, ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
