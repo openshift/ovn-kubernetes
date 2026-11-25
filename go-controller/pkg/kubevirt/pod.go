@@ -559,6 +559,14 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 
 	// no migration
 	if len(vmPods) < 2 {
+		// If the only remaining pod has the migration target ready
+		// annotation, the migration completed and the source pod is gone.
+		if len(vmPods) == 1 && isTargetPodReady(vmPods[0]) {
+			return &LiveMigrationStatus{
+				TargetPod: vmPods[0],
+				State:     LiveMigrationTargetDomainReady,
+			}, nil
+		}
 		return nil, nil
 	}
 
@@ -585,8 +593,15 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 		}, nil
 	}
 
-	// no active migration
+	// Source pod completed but target is still living. If the target has the
+	// migration ready annotation, the migration completed successfully.
 	if len(livingPods) < 2 {
+		if isTargetPodReady(targetPod) {
+			return &LiveMigrationStatus{
+				TargetPod: targetPod,
+				State:     LiveMigrationTargetDomainReady,
+			}, nil
+		}
 		return nil, nil
 	}
 
@@ -606,15 +621,24 @@ func DiscoverLiveMigrationStatus(client *factory.WatchFactory, pod *corev1.Pod) 
 	return &status, nil
 }
 
-// ReconcileIPv4AfterLiveMigration will send a GARP after live migration
-// to update the default gw mac address to the node where the VM is running
-// now.
+// ReconcileIPv4AfterLiveMigration sends unicast GARPs to the migrated VM to
+// update its default gateway MAC address to that of the node where it is running.
 func (r *DefaultGatewayReconciler) ReconcileIPv4AfterLiveMigration(liveMigrationStatus *LiveMigrationStatus) error {
 	if liveMigrationStatus.State != LiveMigrationTargetDomainReady {
 		return nil
 	}
 
-	targetNode, err := r.watchFactory.GetNode(liveMigrationStatus.TargetPod.Spec.NodeName)
+	targetPod := liveMigrationStatus.TargetPod
+	nads := r.netInfo.GetNADs()
+	if len(nads) != 1 {
+		return fmt.Errorf("expected only one nad for network %q, got %d", r.netInfo.GetNetworkName(), len(nads))
+	}
+	targetPodAnnotation, err := util.UnmarshalPodAnnotation(targetPod.Annotations, nads[0])
+	if err != nil {
+		return ovntypes.NewSuppressedError(fmt.Errorf("failed parsing ovn pod annotation for pod '%s/%s' and network %q: %w", targetPod.Namespace, targetPod.Name, r.netInfo.GetNetworkName(), err))
+	}
+
+	targetNode, err := r.watchFactory.GetNode(targetPod.Spec.NodeName)
 	if err != nil {
 		return err
 	}
@@ -634,7 +658,7 @@ func (r *DefaultGatewayReconciler) ReconcileIPv4AfterLiveMigration(liveMigration
 		if err != nil {
 			return fmt.Errorf("failed to create GARP for gateway IP %s: %w", gwIP, err)
 		}
-		if err := util.BroadcastGARP(r.interfaceName, garp); err != nil {
+		if err := util.UnicastGARP(r.interfaceName, garp, targetPodAnnotation.MAC); err != nil {
 			return err
 		}
 	}
