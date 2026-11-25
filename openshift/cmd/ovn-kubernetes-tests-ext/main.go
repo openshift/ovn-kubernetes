@@ -86,7 +86,13 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	}
 	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
 	// which is not yet configured on bastion-based platforms.
-	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") && ocpInfra.IsCloudPlatform() {
+	// They are also excluded on clusters with UDN ARP/NDP flood disabled: the
+	// spec has failed there and, because failed specs keep their namespace
+	// (DeleteNamespaceOnFailure=false in the ext harness), the leftover
+	// primary UDN of its network joins the MAC binding mirror group and
+	// breaks the exact-set assertions of the no-flood specs that follow.
+	if strings.Contains(spec.Name, "Should validate the egress IP SNAT functionality against host-networked pods") &&
+		(ocpInfra.IsCloudPlatform() || ocpInfra.IsArpfloodDisabled()) {
 		return false
 	}
 	// The no-flood MAC binding mirroring specs need two external containers
