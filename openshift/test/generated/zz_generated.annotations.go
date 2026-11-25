@@ -170,8 +170,6 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type CUDN EVPN overlapping subnet shared VTEP Both networks are isolated": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Layer 2 CUDN EVPN MAC-VRF and IP-VRF random VTEP Both networks are isolated": "[Suite:ovn-kubernetes/conformance/parallel]",
@@ -307,8 +305,6 @@ var AppendedAnnotations = map[string]string{
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type CUDN EVPN overlapping subnet shared VTEP Both networks are isolated": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 2 CUDN EVPN MAC-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -513,8 +509,6 @@ var AppendedAnnotations = map[string]string{
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv4": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When other pod runs on the tested network On the same node The pods on the tested network can reach each other When the networks are IPv6": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type CUDN EVPN overlapping subnet shared VTEP Both networks are isolated": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN EVPN IP-VRF shared VTEP When a pod runs on the tested network When there is other network Of type Default Both networks are isolated": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -746,8 +740,6 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: For BGP configured networks When the tested network is of type Layer 3 CUDN VRF-Lite no-overlay SNAT enabled unmanaged routing When a pod runs on the tested network When there is other network Of type Layer 3 UDN Both networks are isolated": "[Disabled:Unimplemented]",
 
-	"BGP: For BGP configured networks withdraws and restores VTEP advertisements after an invalid node annotation": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer2": "[Disabled:Unimplemented]",
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3 no-overlay SNAT disabled unmanaged routing": "[Disabled:Unimplemented]",
@@ -755,8 +747,6 @@ var AppendedAnnotations = map[string]string{
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3 no-overlay SNAT enabled unmanaged routing": "[Disabled:Unimplemented]",
 
 	"BGP: Pod to external server when CUDN network is advertised Route Advertisements layer3": "[Disabled:Unimplemented]",
-
-	"BGP: UDN service marks after advertisement updates refreshes unchanged services when network selection changes": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"BGP: When an advertised CUDN network is dynamically allocated is accepted when the network is allocated on a subset of the nodes only": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -962,8 +952,6 @@ var AppendedAnnotations = map[string]string{
 
 	"BGP: isolation between advertised networks Layer3 no-overlay SNAT disabled unmanaged routing connectivity between networks pod to pod on the same network and same node should work": "[Disabled:Unimplemented]",
 
-	"BGP: managed self-peer filtering filters InternalIPs and reconciles address changes without a primary address annotation": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"Check whether gateway-mtu-support annotation on node is set based on disable-pkt-mtu-check value when DisablePacketMTUCheck is either not set or set to false Verify whether gateway-mtu-support annotation is not set on nodes when DisablePacketMTUCheck is either not set or set to false": "[Disabled:Unimplemented]",
 
 	"ClusterNetworkConnect ClusterManagerController CNC lifecycle CNC deletion and recreation - tunnel ID is allocated after recreate": "[Disabled:Unimplemented]",
@@ -1074,8 +1062,6 @@ var AppendedAnnotations = map[string]string{
 
 	"Creating a static pod on a node Should successfully create then remove a static pod": "[Disabled:Unimplemented]",
 
-	"DPU host node deletion restarts the DPU-side ovnkube-node and re-initializes the node once it is registered again": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"EVPN: VTEP API validations api-server should accept valid VTEP CRs Valid VTEP configurations": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"EVPN: VTEP API validations api-server should accept valid VTEP updates Valid VTEP update configurations": "[Suite:ovn-kubernetes/conformance/parallel]",
@@ -1092,17 +1078,9 @@ var AppendedAnnotations = map[string]string{
 
 	"EgressService Should validate a node with a local ep is selected when ETP=Local ipv6 pods": "[Disabled:Unimplemented]",
 
-	"EgressService Should validate egress service backend pods on the egress host retain ClusterIP connectivity ipv4 pods": "[Disabled:Unimplemented]",
-
-	"EgressService Should validate egress service backend pods on the egress host retain ClusterIP connectivity ipv6 pods": "[Disabled:Unimplemented]",
-
 	"EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv4 pods": "[Disabled:Unimplemented]",
 
 	"EgressService Should validate egress service has higher priority than EgressIP when not assigned to the same node ipv6 pods": "[Disabled:Unimplemented]",
-
-	"EgressService Should validate namespace ownership of manually managed EndpointSlices IPv4": "[Disabled:Unimplemented]",
-
-	"EgressService Should validate namespace ownership of manually managed EndpointSlices IPv6": "[Disabled:Unimplemented]",
 
 	"EgressService Should validate pods' egress is SNATed to the LB's ingress ip with selectors ipv4 pods": "[Disabled:Unimplemented]",
 
@@ -1214,8 +1192,6 @@ var AppendedAnnotations = map[string]string{
 
 	"External Gateway With Admin Policy Based External Route CRs e2e non-vxlan external gateway through a gateway pod Should validate TCP/UDP connectivity to an external gateway's loopback address via a gateway pod UDP ipv6": "[Disabled:Unimplemented]",
 
-	"Hybrid-overlay subnet claims rejects a remote node claiming an arbitrary subnet": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv4": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines IP family validation for layer2 primary networks should fail when dual-stack network requests only IPv6": "[Disabled:Unimplemented]",
@@ -1231,10 +1207,6 @@ var AppendedAnnotations = map[string]string{
 	"Kubevirt Virtual Machines duplicate addresses validation should fail when creating second VM with duplicate user requested MAC": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines ipv4 subnet exhaustion should fail when subnet is exhausted": "[Disabled:Unimplemented]",
-
-	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over localnet": "[Disabled:Unimplemented]",
-
-	"Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over secondary layer2": "[Disabled:Unimplemented]",
 
 	"Kubevirt Virtual Machines with default pod network when live migration with post-copy succeeds, should keep connectivity": "[Disabled:Unimplemented]",
 
@@ -1295,14 +1267,6 @@ var AppendedAnnotations = map[string]string{
 	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when ETP=local": "[Disabled:Unimplemented]",
 
 	"Load Balancer Service Tests with MetalLB Should ensure load balancer service works without node ports when named targetPorts are used and ETP=local": "[Disabled:Unimplemented]",
-
-	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology applies NetworkQoS DSCP marking to VM traffic on the DHCP localnet": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology assigns DHCP addresses to VMs and reports them in the pod annotation": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology assigns a regular pod its address via the delegated dhcp IPAM plugin": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Localnet DHCP IPAM with user defined networks with DHCP IPAM localnet topology enforces MultiNetworkPolicy with pod selector peers on DHCP-assigned addresses": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Multi Homing A pod with multiple attachments to the same OVN-K networks features two different IPs from the same subnet": "[Disabled:Unimplemented]",
 
@@ -1444,10 +1408,6 @@ var AppendedAnnotations = map[string]string{
 
 	"Multi Homing multiple pods connected to the same OVN-K secondary network with multi-network policies that deny traffic using pod selectors and wrong port range for a localnet topology": "[Disabled:Unimplemented]",
 
-	"Multi Homing persistent IPAM claims enforces claim scope rejects a claim from another network": "[Disabled:Unimplemented]",
-
-	"Multi Homing persistent IPAM claims enforces claim scope resolves claims in the pod namespace when the NAD is elsewhere": "[Disabled:Unimplemented]",
-
 	"Multicast when multicast enabled for namespace should be able to receive multicast IGMP query": "[Disabled:Unimplemented]",
 
 	"Multicast when multicast enabled for namespace should be able to send multicast UDP traffic between nodes": "[Disabled:Unimplemented]",
@@ -1463,12 +1423,6 @@ var AppendedAnnotations = map[string]string{
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should create NAD in new created namespaces that apply to namespace-selector": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should delete NAD when target namespace is terminating": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should migrate annotations written by the old NAD update path in each namespace when apply succeeds": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should migrate annotations written by the old NAD update path in each namespace when the first apply fails": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation ClusterUserDefinedNetwork CRD Controller should preserve namespace-specific NAD annotations when CUDN annotations change": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation ClusterUserDefinedNetwork CRD Controller when CR is deleted, should delete all managed NAD in each target namespace": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1508,59 +1462,19 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation UDN Pod should react to k8s.ovn.org/open-default-ports annotations changes": "[Disabled:Unimplemented]",
 
-	"Network Segmentation Uplink DPU VF lifecycle recovers the management port device after an ovnkube-node restart": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink DPU VF lifecycle returns simulated VF netdevices to the host when the pod is deleted": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink default-VRF egress does not restore gateway readiness on an UplinkState recreated after deselection": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink default-VRF egress keeps ovnkube-node running when the Uplink bridge is deleted under an active CUDN": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"Network Segmentation Uplink default-VRF egress maps multiple CUDNs to the same Uplink bridge": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink default-VRF egress publishes the heaviest next hops of the lowest-metric default routes": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink default-VRF egress recreates an UplinkState deleted out of band": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink default-VRF egress reprograms an active CUDN when the selected Uplink configuration changes": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink default-VRF egress runs a CUDN without Uplink default gateways and adds its default routes when they appear": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink route advertisements discovers a default gateway that appears in the CUDN VRF after enslavement": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink route advertisements preserves pre-existing Uplink interface routes across VRF enslavement and release with NetworkManager-style interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink route advertisements preserves pre-existing Uplink interface routes across VRF enslavement and release with kernel-owned interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path in split DPU mode with NetworkManager-style interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path in split DPU mode with kernel-owned interface addressing": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation Uplink route advertisements uses the Uplink interface as the targetVRF auto BGP peering path": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation Uplink route advertisements uses the default VRF as the BGP peering path": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation Uplink split DPU status conditions discovers a default gateway that appears in the host-side CUDN VRF after enslavement": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"Network Segmentation Uplink split DPU status conditions keeps one writer per condition and recovers a missing host interface": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink split DPU status conditions recreates an UplinkState deleted out of band": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink split DPU status conditions resolves the bridge by host function and falls back to host MAC": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation Uplink split DPU status conditions runs a CUDN without Uplink default gateways and publishes them when they appear": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network pod connected to UserDefinedNetwork cannot be deleted when being used": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network should create NetworkAttachmentDefinition according to spec": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network should delete NetworkAttachmentDefinition when UserDefinedNetwork is deleted": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network should migrate annotations written by the old NAD update path when apply succeeds": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network should migrate annotations written by the old NAD update path when the first apply fails": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation UserDefinedNetwork CRD Controller for L2 secondary network should preserve NAD annotations when UDN annotations change": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation UserDefinedNetwork CRD Controller for primary UDN without required namespace label should be able to create pod and it will attach to the cluster default network": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1688,17 +1602,7 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation pod2Egress on a user defined primary network created using UserDefinedNetwork can be accessed to from the pods running in the Kubernetes cluster by one pod over a layer3 network": "[Disabled:Unimplemented]",
 
-	"Network Segmentation should manage annotations present when a network is created CUDN": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation should manage annotations present when a network is created UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"Network Segmentation should set NO_FLOOD on CUDN patch ports, direct node-IP ARP to default GR (p12 flow), and fan out external GARP to all GRs (p11 flow)": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation status.vrfName validation accepts a 15-character vrfName and rejects a 16-character one": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation when primary CUDN already exists, second primary CUDN targeting the same namespace should report not-ready": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation when primary UDN already exists, second primary UDN in the same namespace should report not-ready": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation when primary network exist, ClusterUserDefinedNetwork status should report not-ready": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1722,8 +1626,6 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, layer3, multi-subnets": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid macSecurity": "[Disabled:Unimplemented]",
-
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid mtu": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: API validations api-server should reject invalid CRs ClusterUserDefinedNetwork, localnet, invalid physicalNetworkName": "[Disabled:Unimplemented]",
@@ -1740,35 +1642,15 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: API validations api-server should reject invalid CRs UserDefinedNetwork, layer2": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: API validations api-server should reject invalid updates ClusterUserDefinedNetwork, layer2, mac-security": "[Disabled:Unimplemented]",
-
-	"Network Segmentation: API validations api-server should reject invalid updates ClusterUserDefinedNetwork, localnet, mac-security": "[Disabled:Unimplemented]",
-
-	"Network Segmentation: API validations api-server should reject invalid updates UserDefinedNetwork, layer2, mac-security": "[Disabled:Unimplemented]",
-
 	"Network Segmentation: Default network multus annotation ValidatingAdmissionPolicy protection should prevent adding, modifying and removing the default-network annotation on existing pods": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: Default network multus annotation when added with static IP and MAC to a pod belonging to primary UDN should create the pod with the specified static IP and MAC address with persistent IPAM": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: Default network multus annotation when added with static IP and MAC to a pod belonging to primary UDN should create the pod with the specified static IP and MAC address without persistent IPAM enabled": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation: Localnet should preserve the LSP of a localnet pod after ovnkube-node restart with no IPAM": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation: Localnet should preserve the LSP of a localnet pod after ovnkube-node restart with subnets": "[Suite:ovn-kubernetes/conformance/parallel]",
+	"Network Segmentation: Localnet should preserve LSPs for IPAM-less localnet pods after ovnkube-node restart": "[Disabled:Unimplemented]",
 
 	"Network Segmentation: Localnet using ClusterUserDefinedNetwork CR, pods in different namespaces, should communicate over localnet topology": "[Disabled:Unimplemented]",
-
-	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security enabled, should fail": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security enabled, should fail": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation: MAC security using UserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security disabled, should succeed (MAC spoofed traffic is allowed)": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"Network Segmentation: MAC security using UserDefinedNetwork, connectivity between client and server pods over secondary layer2, when mac-security enabled, should fail": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: Network Policies on a user defined primary network ICMP should bypass default deny policy for UDNs when enabled in L2 dualstack primary UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 
@@ -1812,8 +1694,6 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation: integration should recover ovnkube pods after restart with primary and secondary UDN resources": "[Disabled:Unimplemented]",
 
-	"Network Segmentation: services on a user defined primary network replays NodePort programming when a namespace joins an active primary network": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"Network Segmentation: services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L2 primary UDN with custom network, cluster-networked pods, NodePort service": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation: services on a user defined primary network should be reachable through their cluster IP, node port and load balancer L2 primary UDN, cluster-networked pods, NodePort service": "[Disabled:Unimplemented]",
@@ -1853,8 +1733,6 @@ var AppendedAnnotations = map[string]string{
 	"Node IP and MAC address migration when when MAC address changes when a nodeport service is configured Ensures flows are updated when MAC address changes": "[Disabled:Unimplemented]",
 
 	"Node Shutdown and Startup should maintain cluster health after node shutdown and startup": "[Disabled:Unimplemented]",
-
-	"Node subnet claims rejects a node claiming controller-owned network allocations": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"OVS CPU affinity pinning can be enabled on specific nodes by creating enable_dynamic_cpu_affinity file": "[Disabled:Unimplemented]",
 
@@ -1950,8 +1828,6 @@ var AppendedAnnotations = map[string]string{
 
 	"Uplink route advertisements with Dynamic UDN allocation allows node-disjoint Dynamic CUDNs to share a targetVRF auto Uplink and rejects overlap": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Uplink route advertisements with Dynamic UDN allocation rebuilds the CUDN gateway with the reallocated node subnets after an inactive interval": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"blocking ICMP needs frag when a client VM pod with 1500 MTU targets a host networked pod should be able to send large TCP packet and not get a route cache entry": "[Disabled:Unimplemented]",
 
 	"blocking ICMP needs frag when a client host networked pod with targets a proxy node nodeport service with ovnk networked backend should be able to send large UDP packet and not get a route cache entry": "[Disabled:Unimplemented]",
@@ -1992,12 +1868,6 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e NetworkQoS validation Should have correct DSCP value for overlay traffic when NetworkQoS is applied ipv6": "[Disabled:Unimplemented]",
 
-	"e2e OVN/OVS metrics delivers OVN controller and northd metrics, including the loop-collected ones": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"e2e OVN/OVS metrics delivers OVS metrics from the standalone exporter": "[Suite:ovn-kubernetes/conformance/parallel]",
-
-	"e2e OVN/OVS metrics keeps the endpoint responsive to repeated scrapes": "[Suite:ovn-kubernetes/conformance/parallel]",
-
 	"e2e br-int flow monitoring export validation Should validate flow data of br-int is sent to an external gateway with netflow v5": "[Disabled:Unimplemented]",
 
 	"e2e br-int flow monitoring export validation Should validate flow data of br-int is sent to an external gateway with sflow": "[Disabled:Unimplemented]",
@@ -2023,8 +1893,6 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type Cluster Default Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type Cluster Default Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
-
-	"e2e egress IP validation on network of type Cluster Default Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type Cluster Default Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
@@ -2074,8 +1942,6 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv4 L2 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
-
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
@@ -2123,8 +1989,6 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
-
-	"e2e egress IP validation on network of type IPv4 L3 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
@@ -2174,8 +2038,6 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
-	"e2e egress IP validation on network of type IPv6 L2 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
-
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate the egress IP SNAT functionality for stateful-sets": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
@@ -2223,8 +2085,6 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should handle EIP reassignment correctly on namespace and pod label updates, and EIP object updates": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should re-assign egress IPs when node readiness / reachability goes down/up": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
-
-	"e2e egress IP validation on network of type IPv6 L3 role primary Should skip orphaned nodes and assign EgressIPs to valid nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate egress IP logic when one pod is managed by more than one egressIP object": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
