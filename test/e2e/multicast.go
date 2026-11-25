@@ -65,7 +65,7 @@ var _ = ginkgo.Describe("Multicast", feature.Multicast, func() {
 			testMulticastUDPTraffic(fr, clientNodeInfo, serverNodeInfo, defaultPodInterface)
 		})
 		ginkgo.It("should be able to receive multicast IGMP query", func() {
-			testMulticastIGMPQuery(fr, clientNodeInfo, serverNodeInfo)
+			testMulticastIGMPQuery(fr, clientNodeInfo, serverNodeInfo, defaultPodInterface)
 		})
 	})
 })
@@ -160,7 +160,7 @@ func testMulticastUDPTraffic(fr *framework.Framework, clientNodeInfo, serverNode
 
 }
 
-func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeInfo nodeInfo) {
+func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeInfo nodeInfo, iface string) {
 	ginkgo.GinkgoHelper()
 	const (
 		mcastGroup           string = "224.1.1.1"
@@ -169,29 +169,41 @@ func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeIn
 		multicastSourcePod   string = "multicast-source-test-pod"
 		tcpdumpFileName      string = "tcpdump.txt"
 		retryTimeout                = 5 * time.Minute // polling timeout
-	)
-	var (
-		tcpDumpCommand = []string{"bash", "-c",
-			fmt.Sprintf("apk update; apk add tcpdump ; tcpdump -i any igmp > %s", tcpdumpFileName)}
-		// Multicast group (-c 224.1.1.1), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds
-		multicastSourceCommand = []string{"bash", "-c",
-			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5", mcastGroup)}
+		// MLD (IPv6) ICMPv6 types: Query=130, Report=131, Done=132, MLDv2 Report=143
+		mldTcpdumpFilter string = "icmp6 and (ip6[40] == 130 or ip6[40] == 131 or ip6[40] == 132 or ip6[40] == 143)"
 	)
 
-	// FIXME(trozet): the tcpdump filter is not correct for ipv6, it should be
-	// 'icmp6 and (ip6[40] == 0x8a or ip6[40] == 0x8b or ip6[40] == 0x8c or ip6[40] == 0x8d)'
-	// additionally this function needs to be modified like testMulticastUDPTraffic to specify correct pod interfaces
+	// IPv4 uses IGMP; IPv6 uses MLD (ICMPv6). Match both the capture filter and the
+	// assertion substring to the cluster's IP family.
+	tcpdumpFilter := "igmp"
+	queryMatch := "igmp"
+	queryKind := "IGMP"
+	mcastGroupAddr := mcastGroup
+	// Bind multicast to the pod interface (group%iface), same as testMulticastUDPTraffic.
+	// Multicast group, UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds
+	multicastSourceCommand := []string{"bash", "-c",
+		fmt.Sprintf("iperf -c %s%%%s -u -T 2 -t 3000 -i 5", mcastGroupAddr, iface)}
+
 	if IsIPv6Cluster(f.ClientSet) {
-		// Multicast group (-c ff3e::4321:1234), UDP (-u), TTL (-T 2), during (-t 3000) seconds, report every (-i 5) seconds, -V (Set the domain to IPv6)
+		tcpdumpFilter = mldTcpdumpFilter
+		// tcpdump prints e.g. "ICMP6, multicast listener query"
+		queryMatch = "multicast listener"
+		queryKind = "MLD"
+		mcastGroupAddr = mcastV6Group
+		// -V sets the domain to IPv6
 		multicastSourceCommand = []string{"bash", "-c",
-			fmt.Sprintf("iperf -c %s -u -T 2 -t 3000 -i 5 -V", mcastV6Group)}
+			fmt.Sprintf("iperf -c %s%%%s -u -T 2 -t 3000 -i 5 -V", mcastGroupAddr, iface)}
 	}
+
+	tcpDumpCommand := []string{"bash", "-c",
+		fmt.Sprintf("apk update; apk add tcpdump ; tcpdump -i %s %s > %s", iface, tcpdumpFilter, tcpdumpFileName)}
+
 	// Create a multicast source pod
 	ginkgo.By("creating a multicast source pod in node " + clientNodeInfo.name)
 	_, err := createGenericPod(f, multicastSourcePod, clientNodeInfo.name, f.Namespace.Name, multicastSourceCommand)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	// Create a multicast listener pod with required privileges and tcpdump to capture IGMP queries
+	// Create a multicast listener pod with required privileges and tcpdump to capture IGMP/MLD queries
 	ginkgo.By("creating a multicast listener pod in node " + serverNodeInfo.name)
 	_, err = createPod(f, multicastListenerPod, serverNodeInfo.name, f.Namespace.Name, tcpDumpCommand, nil,
 		func(p *v1.Pod) {
@@ -207,7 +219,7 @@ func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeIn
 	err = wait.PollUntilContextTimeout(context.Background(), retryInterval, retryTimeout, true /*immediate*/, func(context.Context) (bool, error) {
 		kubectlOut, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", "ls")
 		if err != nil {
-			framework.Failf("failed to retrieve multicast IGMP query: %v", err.Error())
+			framework.Failf("failed to retrieve multicast %s query: %v", queryKind, err.Error())
 		}
 		if !strings.Contains(kubectlOut, tcpdumpFileName) {
 			return false, nil
@@ -215,15 +227,15 @@ func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeIn
 		return true, nil
 	})
 	if err != nil {
-		framework.Failf("failed to retrieve multicast IGMP query: %v", err.Error())
+		framework.Failf("failed to retrieve multicast %s query: %v", queryKind, err.Error())
 	}
 
-	ginkgo.By("verifying that the IGMP query has been received")
+	ginkgo.By(fmt.Sprintf("verifying that the %s query has been received", queryKind))
 	// ovn-k leaves both mcast_idle_timeout and mcast_query_interval to default which means that
-	// ovn-controller will send IGMP queries every 150 seconds.
+	// ovn-controller will send IGMP/MLD queries every 150 seconds.
 	gomega.Eventually(func() (string, error) {
-		return e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("grep igmp %s", tcpdumpFileName))
-	}, 2*150*time.Second, 5*time.Second).Should(gomega.ContainSubstring("igmp"), "Failed to retrieve multicast IGMP query within the expected time")
+		return e2ekubectl.RunKubectl(f.Namespace.Name, "exec", multicastListenerPod, "--", "/bin/bash", "-c", fmt.Sprintf("grep %q %s", queryMatch, tcpdumpFileName))
+	}, 2*150*time.Second, 5*time.Second).Should(gomega.ContainSubstring(queryMatch), fmt.Sprintf("Failed to retrieve multicast %s query within the expected time", queryKind))
 }
 
 func enableMulticastForNamespace(fr *framework.Framework) {
