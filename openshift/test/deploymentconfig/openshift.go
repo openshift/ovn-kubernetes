@@ -8,14 +8,13 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/cnooverrides"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -109,25 +108,12 @@ func (m *openshift) IsConfigurationEnabled(config api.Config) bool {
 	}
 }
 
-const (
-	// CNO renders --disable-udn-arp-ndp-flood into ovnkube-node when this
-	// override key is true.
-	ovnConfigOverridesNamespace   = "openshift-network-operator"
-	ovnConfigOverridesConfigMap   = "ovn-kubernetes-config-overrides"
-	disableUDNARPNDPFloodOverride = "disable-udn-arp-ndp-flood"
-	configOverridesRequestTimeout = 30 * time.Second
-)
-
 // isUDNARPNDPFloodDisabled reports whether the CNO config override that
-// disables UDN ARP/NDP flooding is set. On OpenShift the setting is a CNO config
-// override rather than a feature gate, so the overrides ConfigMap is its only
-// declarative source.
-//
-// This answers "configured", not "converged": it does not observe that the
-// ovnkube-node rollout picked the override up. That is verified by the
-// openshift/release step that enables it (ovn-conf-disable-udn-arp-ndp-flood)
-// before the tests start. Call it only at spec time: `list tests` has to work
-// without a cluster.
+// disables UDN ARP/NDP flooding is set. The lookup itself lives in the
+// cnooverrides package, shared with infraprovider; this wrapper keeps the
+// deploymentconfig behavior: false without a kubeconfig, panic on read
+// failure. Call it only at spec time: `list tests` has to work without a
+// cluster.
 func (m *openshift) isUDNARPNDPFloodDisabled() bool {
 	if m.kubeConfig == nil {
 		return false
@@ -136,19 +122,10 @@ func (m *openshift) isUDNARPNDPFloodDisabled() bool {
 	if err != nil {
 		panic(fmt.Sprintf("failed to create kubernetes client: %v", err))
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), configOverridesRequestTimeout)
-	defer cancel()
-	overrides, err := kubeClient.CoreV1().ConfigMaps(ovnConfigOverridesNamespace).Get(ctx, ovnConfigOverridesConfigMap, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		return false
-	}
+	disabled, err := cnooverrides.IsUDNARPNDPFloodDisabled(kubeClient)
 	if err != nil {
-		panic(fmt.Sprintf("failed to read configmap %s/%s: %v", ovnConfigOverridesNamespace, ovnConfigOverridesConfigMap, err))
+		panic(err)
 	}
-	// As CNO does (validateConfigOverrideBool): the trimmed value must parse as
-	// a boolean true; a missing, blank or invalid value leaves the feature off
-	// (ParseBool returns false with its error).
-	disabled, _ := strconv.ParseBool(strings.TrimSpace(overrides.Data[disableUDNARPNDPFloodOverride]))
 	return disabled
 }
 

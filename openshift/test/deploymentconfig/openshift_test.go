@@ -10,9 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/cnooverrides"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	"k8s.io/client-go/rest"
+)
+
+var (
+	ovnConfigOverridesNamespace = cnooverrides.OvnConfigOverridesNamespace
+	ovnConfigOverridesConfigMap = cnooverrides.OvnConfigOverridesConfigMap
 )
 
 // TestIsConfigurationEnabledUDNARPNDPFloodDisabled covers the API outcomes

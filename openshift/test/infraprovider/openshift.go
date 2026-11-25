@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/cnooverrides"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	deploymentconfigapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -48,6 +49,7 @@ type OpenshiftInfraProvider struct {
 	clusterFeatureGate      *configv1.FeatureGate
 	operNetwork             *operv1.Network
 	hasFRRExternalContainer bool
+	arpFloodDisabled        bool
 	clusterInfra            platformInfra
 	initialized             bool // true when New() was called with cluster access
 	platformType            configv1.PlatformType
@@ -79,6 +81,16 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 	operatorClient, err := operatorv1client.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve operator client: %w", err)
+	}
+	kubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve kubernetes client: %w", err)
+	}
+	// Read once here: IsArpfloodDisabled is called during test selection at
+	// process startup, and the answer does not change during a run.
+	o.arpFloodDisabled, err = cnooverrides.IsUDNARPNDPFloodDisabled(kubeClient)
+	if err != nil {
+		return fmt.Errorf("failed to determine the UDN ARP/NDP flood override: %w", err)
 	}
 	o.operNetwork, err = operatorClient.OperatorV1().Networks().Get(context.Background(), "cluster", metav1.GetOptions{})
 	if err != nil {
@@ -122,6 +134,16 @@ func (o *OpenshiftInfraProvider) configureTestEnvs() {
 	if featureGateEnabled(o.clusterFeatureGate, apifeatures.FeatureGateDNSNameResolver) {
 		_ = os.Setenv("OVN_ENABLE_DNSNAMERESOLVER", "true")
 	}
+}
+
+// IsArpfloodDisabled reports whether the CNO config override that disables
+// UDN ARP/NDP flooding is set on this cluster, read once through the
+// cnooverrides package shared with deploymentconfig (the same override
+// ConfigMap the ovn-conf-disable-udn-arp-ndp-flood-verify CI step gates on).
+// Reports false for the zero-value provider used during test listing
+// without a kubeconfig.
+func (o *OpenshiftInfraProvider) IsArpfloodDisabled() bool {
+	return o.arpFloodDisabled
 }
 
 // HasClusterInfra returns true when the provider was fully initialized with
