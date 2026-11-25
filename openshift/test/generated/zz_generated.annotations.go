@@ -2022,6 +2022,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type Cluster Default Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
+	"e2e egress IP validation on network of type Cluster Default [Multi-NIC EgressIP] egressNodeSelector restricts assignment to labeled node": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
 	"e2e egress IP validation on network of type Cluster Default [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type Cluster Default [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
@@ -2035,6 +2037,16 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type Cluster Default [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type Cluster Default [Primary EgressIP] egressNodeSelector backward compatibility: legacy egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type Cluster Default [Primary EgressIP] egressNodeSelector lifecycle": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type Cluster Default [Primary EgressIP] egressNodeSelector mixed fleet: legacy and custom selectors coexist": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type Cluster Default [Primary EgressIP] egressNodeSelector multiple label ops in a single patch move the EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type Cluster Default [Primary EgressIP] egressNodeSelector scopes health-check probes to matching nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type Cluster Default [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
@@ -2072,6 +2084,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
+	"e2e egress IP validation on network of type IPv4 L2 role primary [Multi-NIC EgressIP] egressNodeSelector restricts assignment to labeled node": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
 	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
@@ -2085,6 +2099,16 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L2 role primary [Primary EgressIP] egressNodeSelector backward compatibility: legacy egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L2 role primary [Primary EgressIP] egressNodeSelector lifecycle": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L2 role primary [Primary EgressIP] egressNodeSelector mixed fleet: legacy and custom selectors coexist": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L2 role primary [Primary EgressIP] egressNodeSelector multiple label ops in a single patch move the EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L2 role primary [Primary EgressIP] egressNodeSelector scopes health-check probes to matching nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
@@ -2122,6 +2146,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
+	"e2e egress IP validation on network of type IPv4 L3 role primary [Multi-NIC EgressIP] egressNodeSelector restricts assignment to labeled node": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
 	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
@@ -2135,6 +2161,16 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L3 role primary [Primary EgressIP] egressNodeSelector backward compatibility: legacy egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L3 role primary [Primary EgressIP] egressNodeSelector lifecycle": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L3 role primary [Primary EgressIP] egressNodeSelector mixed fleet: legacy and custom selectors coexist": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L3 role primary [Primary EgressIP] egressNodeSelector multiple label ops in a single patch move the EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv4 L3 role primary [Primary EgressIP] egressNodeSelector scopes health-check probes to matching nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv4 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
@@ -2172,6 +2208,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
+	"e2e egress IP validation on network of type IPv6 L2 role primary [Multi-NIC EgressIP] egressNodeSelector restricts assignment to labeled node": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
 	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
@@ -2185,6 +2223,16 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L2 role primary [Primary EgressIP] egressNodeSelector backward compatibility: legacy egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L2 role primary [Primary EgressIP] egressNodeSelector lifecycle": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L2 role primary [Primary EgressIP] egressNodeSelector mixed fleet: legacy and custom selectors coexist": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L2 role primary [Primary EgressIP] egressNodeSelector multiple label ops in a single patch move the EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L2 role primary [Primary EgressIP] egressNodeSelector scopes health-check probes to matching nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L2 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
@@ -2222,6 +2270,8 @@ var AppendedAnnotations = map[string]string{
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary Should validate the egress IP functionality against remote hosts with egress firewall applied": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
+	"e2e egress IP validation on network of type IPv6 L3 role primary [Multi-NIC EgressIP] egressNodeSelector restricts assignment to labeled node": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
 	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Should validate the egress IP SNAT functionality against host-networked pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] Using different methods to disable a node's availability for egress Should validate the egress IP functionality against remote hosts disabling egress nodes impeding GRCP health check": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
@@ -2235,6 +2285,16 @@ var AppendedAnnotations = map[string]string{
 	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L2 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary [OVN network] multiple namespaces with different primary networks L3 Primary UDN": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L3 role primary [Primary EgressIP] egressNodeSelector backward compatibility: legacy egress-assignable label": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L3 role primary [Primary EgressIP] egressNodeSelector lifecycle": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L3 role primary [Primary EgressIP] egressNodeSelector mixed fleet: legacy and custom selectors coexist": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L3 role primary [Primary EgressIP] egressNodeSelector multiple label ops in a single patch move the EgressIP": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
+
+	"e2e egress IP validation on network of type IPv6 L3 role primary [Primary EgressIP] egressNodeSelector scopes health-check probes to matching nodes": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
 	"e2e egress IP validation on network of type IPv6 L3 role primary [secondary-host-eip] Egress IP Traffic Leak Prevention with Packet Mark Validation Should prevent pod IP traffic leak when EgressIP on secondary interface is applied to existing running pods": "[Serial][Suite:ovn-kubernetes/conformance/serial]",
 
