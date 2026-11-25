@@ -87,8 +87,8 @@ func (h *baseInfra) GetExternalContainerLogs(container api.ExternalContainer) (s
 	return h.engine.GetExternalContainerLogs(container)
 }
 
-func (h *baseInfra) GetExternalContainerPort() uint16 {
-	return h.engine.GetExternalContainerPort()
+func (h *baseInfra) GetExternalContainerPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
+	return h.engine.GetExternalContainerPort(f, cleanup)
 }
 
 func (h *baseInfra) GetExternalContainerNetworkInterface(ec api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {

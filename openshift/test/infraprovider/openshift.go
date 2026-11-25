@@ -533,11 +533,11 @@ func (o *OpenshiftInfraProvider) GetExternalContainerLogs(container api.External
 	return o.clusterInfra.GetExternalContainerLogs(container)
 }
 
-func (o *OpenshiftInfraProvider) GetExternalContainerPort() uint16 {
+func (o *OpenshiftInfraProvider) GetExternalContainerPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
 	if o.clusterInfra == nil {
 		panic("not implemented")
 	}
-	return o.clusterInfra.GetExternalContainerPort()
+	return o.clusterInfra.GetExternalContainerPort(f, cleanup)
 }
 
 func (o *OpenshiftInfraProvider) ListNetworks() ([]string, error) {
