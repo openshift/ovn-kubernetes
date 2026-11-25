@@ -191,9 +191,16 @@ func testMulticastIGMPQuery(f *framework.Framework, clientNodeInfo, serverNodeIn
 	_, err := createGenericPod(f, multicastSourcePod, clientNodeInfo.name, f.Namespace.Name, multicastSourceCommand)
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
-	// Create a multicast listener pod
+	// Create a multicast listener pod with required privileges and tcpdump to capture IGMP queries
 	ginkgo.By("creating a multicast listener pod in node " + serverNodeInfo.name)
-	_, err = createGenericPod(f, multicastListenerPod, serverNodeInfo.name, f.Namespace.Name, tcpDumpCommand)
+	_, err = createPod(f, multicastListenerPod, serverNodeInfo.name, f.Namespace.Name, tcpDumpCommand, nil,
+		func(p *v1.Pod) {
+			p.Spec.Containers[0].SecurityContext = &v1.SecurityContext{
+				Privileged: func(b bool) *bool { return &b }(true),
+			}
+		},
+	)
+
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	// Wait for tcpdump on listener pod to be ready
