@@ -190,6 +190,9 @@ func (tr *testNetworkRefReconciler) Reconcile(node, networkName string) {
 }
 
 func (tnc *testNetworkController) Start(context.Context) error {
+	if tnc.tcm.startHook != nil {
+		tnc.tcm.startHook(tnc.GetNetworkName())
+	}
 	tnc.tcm.Lock()
 	delay := tnc.tcm.startDelay
 	tnc.tcm.Unlock()
@@ -377,6 +380,10 @@ type testControllerManager struct {
 	raiseErrorWhenCleaningController error
 	// startDelay is applied inside testNetworkController.Start for async start tests.
 	startDelay time.Duration
+
+	// startHook, when set, runs at the start of every network
+	// controller's Start, before the manager lock is taken.
+	startHook func(networkName string)
 
 	valid []util.NetInfo
 }
