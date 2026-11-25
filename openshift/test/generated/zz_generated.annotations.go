@@ -1436,9 +1436,9 @@ var AppendedAnnotations = map[string]string{
 
 	"Multi Homing persistent IPAM claims enforces claim scope resolves claims in the pod namespace when the NAD is elsewhere": "[Disabled:Unimplemented]",
 
-	"Multicast when multicast enabled for namespace should be able to receive multicast IGMP query": "[Disabled:Unimplemented]",
+	"Multicast when multicast enabled for namespace should be able to receive multicast IGMP query": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Multicast when multicast enabled for namespace should be able to send multicast UDP traffic between nodes": "[Disabled:Unimplemented]",
+	"Multicast when multicast enabled for namespace should be able to send multicast UDP traffic between nodes": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network": "[Disabled:Unimplemented]",
 
@@ -1626,13 +1626,13 @@ var AppendedAnnotations = map[string]string{
 
 	"Network Segmentation a user defined primary network doesn't cause network name conflict": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to receive multicast IGMP query with primary layer3 UDN": "[Disabled:Unimplemented]",
+	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to receive multicast IGMP query with primary layer3 UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer2 UDN with custom network": "[Disabled:Unimplemented]",
+	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer2 UDN with custom network": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer2 UDN": "[Disabled:Unimplemented]",
+	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer2 UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 
-	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer3 UDN": "[Disabled:Unimplemented]",
+	"Network Segmentation a user defined primary network with multicast feature enabled for namespace should be able to send multicast UDP traffic between nodes with primary layer3 UDN": "[Suite:ovn-kubernetes/conformance/parallel]",
 
 	"Network Segmentation layer3 primary network with multi-subnets created using ClusterUserDefinedNetwork add bad subnet should not cause change on existing NAD": "[Suite:ovn-kubernetes/conformance/parallel]",
 

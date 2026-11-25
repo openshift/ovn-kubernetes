@@ -234,4 +234,7 @@ var BlockingTests = []string{
 	"[Feature:MACSecurity][Feature:NetworkSegmentation][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC security using ClusterUserDefinedNetwork, connectivity between client and server pods over localnet, when mac-security disabled, should succeed (MAC spoofed traffic is allowed) [Serial][Suite:ovn-kubernetes/conformance/serial/virtualization]",
 	"[Feature:MACSecurity][Feature:VirtualMachineSupport][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over secondary layer2 [Suite:ovn-kubernetes/conformance/serial/virtualization]",
 	"[Feature:MACSecurity][Feature:VirtualMachineSupport][FeatureGate:MACSecurity][ovn-kubernetes-ote][sig-network] Kubevirt Virtual Machines user-defined network port-security disabled, TCP connections with spoofed MAC should survive successful and failed live migration over localnet [Suite:ovn-kubernetes/conformance/serial/virtualization]",
+	// Multicast tests
+	"[Feature:Multicast][ovn-kubernetes-ote][sig-network] Multicast when multicast enabled for namespace should be able to receive multicast IGMP query [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:Multicast][ovn-kubernetes-ote][sig-network] Multicast when multicast enabled for namespace should be able to send multicast UDP traffic between nodes [Suite:ovn-kubernetes/conformance/parallel]",
 }
