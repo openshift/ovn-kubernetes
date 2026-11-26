@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/openshift/test/cnooverrides"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig/api"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,7 +100,33 @@ func (m *openshift) PrimaryInterfaceName() string {
 }
 
 func (m *openshift) IsConfigurationEnabled(config api.Config) bool {
-	return false
+	switch config {
+	case api.UDNARPNDPFloodDisabled:
+		return m.isUDNARPNDPFloodDisabled()
+	default:
+		return false
+	}
+}
+
+// isUDNARPNDPFloodDisabled reports whether the CNO config override that
+// disables UDN ARP/NDP flooding is set. The lookup itself lives in the
+// cnooverrides package, shared with infraprovider; this wrapper keeps the
+// deploymentconfig behavior: false without a kubeconfig, panic on read
+// failure. Call it only at spec time: `list tests` has to work without a
+// cluster.
+func (m *openshift) isUDNARPNDPFloodDisabled() bool {
+	if m.kubeConfig == nil {
+		return false
+	}
+	kubeClient, err := kubernetes.NewForConfig(m.kubeConfig)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create kubernetes client: %v", err))
+	}
+	disabled, err := cnooverrides.IsUDNARPNDPFloodDisabled(kubeClient)
+	if err != nil {
+		panic(err)
+	}
+	return disabled
 }
 
 func (m *openshift) NBDBContainerName() string {
