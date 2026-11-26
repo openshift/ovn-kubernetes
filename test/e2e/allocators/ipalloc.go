@@ -15,11 +15,13 @@ import (
 	"net"
 	"sync"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 )
 
 // Reserved range for E2E test IPs to avoid conflicts with node IPs
@@ -44,6 +46,7 @@ type primaryIPAllocator struct {
 	v6Allocs    map[string]*ipAllocator
 	nodeClient  v1.NodeInterface
 	nodeSubnets map[string][]string // keyed by node name
+	excluded    []*net.IPNet
 }
 
 type ipAllocator struct {
@@ -57,8 +60,9 @@ type ipAllocator struct {
 
 var pia *primaryIPAllocator
 
-// InitPrimaryIPAllocator must be called to init IP allocator(s). Callers must be synchronise.
-func InitPrimaryIPAllocator(nodeClient v1.NodeInterface) error {
+// InitPrimaryIPAllocator must be called before allocating primary addresses.
+// excludedCIDRs remain unavailable even after their external users are deleted.
+func InitPrimaryIPAllocator(nodeClient v1.NodeInterface, excludedCIDRs ...string) error {
 	nodeSubnets, err := deploymentconfig.Get().GetNodeMachineNetworks()
 	if err != nil {
 		return fmt.Errorf("failed to get provider node subnets: %v", err)
@@ -66,8 +70,19 @@ func InitPrimaryIPAllocator(nodeClient v1.NodeInterface) error {
 	if len(nodeSubnets) == 0 {
 		return fmt.Errorf("expected at least one node but found zero")
 	}
-	pia, err = newPrimaryIPAllocator(nodeClient, nodeSubnets)
-	return err
+	allocator, err := newPrimaryIPAllocator(nodeClient, nodeSubnets)
+	if err != nil {
+		return err
+	}
+	for _, cidr := range excludedCIDRs {
+		_, prefix, parseErr := net.ParseCIDR(cidr)
+		if parseErr != nil {
+			return fmt.Errorf("invalid primary IP exclusion %q: %w", cidr, parseErr)
+		}
+		allocator.excluded = append(allocator.excluded, prefix)
+	}
+	pia = allocator
+	return nil
 }
 
 func NewPrimaryIPv4(nodeName string) (net.IP, error) {
@@ -137,7 +152,7 @@ func (p *primaryIPAllocator) allocateNextV4(subnet string) (net.IP, error) {
 		return nil, fmt.Errorf("subnet %q is narrower than /24", subnet)
 	}
 	alloc := p.getOrCreateV4(ip4)
-	return allocateIP(p.nodeClient, alloc.allocateNextIP, testIPv4Start, testIPv4End)
+	return allocateIP(p.nodeClient, alloc.allocateNextIP, testIPv4Start, testIPv4End, p.excluded...)
 }
 
 // allocateNextV6 allocates the next available IPv6 from the reserved range (::c8-::ff)
@@ -159,7 +174,7 @@ func (p *primaryIPAllocator) allocateNextV6(subnet string) (net.IP, error) {
 		return nil, fmt.Errorf("subnet %q is narrower than /120", subnet)
 	}
 	alloc := p.getOrCreateV6(ip.To16())
-	return allocateIP(p.nodeClient, alloc.allocateNextIP, testIPv6Start, testIPv6End)
+	return allocateIP(p.nodeClient, alloc.allocateNextIP, testIPv6Start, testIPv6End, p.excluded...)
 }
 
 // getOrCreateV4 returns or lazily creates a per-subnet IPv4 allocator.
@@ -210,7 +225,7 @@ type allocNextFn func() (net.IP, error)
 // ::c8-::ff for IPv6) that doesn't conflict with existing node IPs. The last byte of each
 // candidate must fall within [startLastByte, endLastByte]; any candidate outside this range
 // triggers an exhaustion error.
-func allocateIP(nodeClient v1.NodeInterface, allocateFn allocNextFn, startLastByte, endLastByte byte) (net.IP, error) {
+func allocateIP(nodeClient v1.NodeInterface, allocateFn allocNextFn, startLastByte, endLastByte byte, excluded ...*net.IPNet) (net.IP, error) {
 	nodeList, err := nodeClient.List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list nodes: %v", err)
@@ -223,6 +238,16 @@ func allocateIP(nodeClient v1.NodeInterface, allocateFn allocNextFn, startLastBy
 		lastOctet := nextIP[len(nextIP)-1]
 		if lastOctet < startLastByte || lastOctet > endLastByte {
 			return nil, fmt.Errorf("reserved IP range exhausted: next candidate %s is outside range [%d, %d]", net.IP(nextIP), startLastByte, endLastByte)
+		}
+		reserved := false
+		for _, prefix := range excluded {
+			if prefix.Contains(nextIP) {
+				reserved = true
+				break
+			}
+		}
+		if reserved {
+			continue
 		}
 		isConflict, err := isConflictWithExistingHostIPs(nodeList.Items, nextIP)
 		if err != nil {

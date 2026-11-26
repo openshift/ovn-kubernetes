@@ -12,13 +12,13 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	utilsnet "k8s.io/utils/net"
+
+	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
 )
 
 func TestUtilSuite(t *testing.T) {
@@ -89,6 +89,7 @@ func TestIPAlloc(t *testing.T) {
 		desc                   string
 		existingPrimaryNodeIPs []node
 		allocations            []expectedAlloc
+		excluded               []string
 	}{
 		{
 			desc:                   "IPv4",
@@ -96,6 +97,15 @@ func TestIPAlloc(t *testing.T) {
 			allocations: []expectedAlloc{
 				{subnet: "192.168.1.1/16", expectedIP: "192.168.1.200"},
 				{subnet: "192.168.1.1/16", expectedIP: "192.168.1.201"},
+			},
+		},
+		{
+			desc:                   "IPv4 allocation skips an interior exclusion",
+			existingPrimaryNodeIPs: []node{{v4: network{ip: "192.168.1.1", mask: "24"}}},
+			excluded:               []string{"192.168.1.201/32"},
+			allocations: []expectedAlloc{
+				{subnet: "192.168.1.0/24", expectedIP: "192.168.1.200"},
+				{subnet: "192.168.1.0/24", expectedIP: "192.168.1.202"},
 			},
 		},
 		{
@@ -151,6 +161,13 @@ func TestIPAlloc(t *testing.T) {
 				t.Error(err)
 				return
 			}
+			for _, cidr := range tc.excluded {
+				_, prefix, err := net.ParseCIDR(cidr)
+				if err != nil {
+					t.Fatalf("failed to parse excluded CIDR %q: %v", cidr, err)
+				}
+				pipa.excluded = append(pipa.excluded, prefix)
+			}
 			for j, alloc := range tc.allocations {
 				expectedIP := net.ParseIP(alloc.expectedIP)
 				var nextIP net.IP
@@ -184,6 +201,7 @@ func TestIPAllocExhaustion(t *testing.T) {
 		allocCount     int    // number of IPs to allocate to reach the last valid IP
 		expectedLastIP string // the last valid IP that should be returned
 		isIPv6         bool
+		excluded       []string
 	}{
 		{
 			desc:           "IPv4: allocation after .254 fails",
@@ -200,6 +218,8 @@ func TestIPAllocExhaustion(t *testing.T) {
 			expectedLastIP: "fc00:f853:ccd:e793::ff",
 			isIPv6:         true,
 		},
+		{desc: "IPv4: gateway and Podman pool remain reserved", nodes: []node{{v4: network{ip: "192.168.1.1", mask: "24"}}}, subnet: "192.168.1.0/24", allocCount: 39, expectedLastIP: "192.168.1.238", excluded: []string{"192.168.1.239/32", "192.168.1.240/28"}},
+		{desc: "IPv6: gateway and Podman pool remain reserved", nodes: []node{{v6: network{ip: "2001:db8::1", mask: "120"}}}, subnet: "2001:db8::/120", allocCount: 39, expectedLastIP: "2001:db8::ee", isIPv6: true, excluded: []string{"2001:db8::ef/128", "2001:db8::f0/124"}},
 	}
 
 	for i, tc := range tests {
@@ -208,6 +228,13 @@ func TestIPAllocExhaustion(t *testing.T) {
 			pipa, err := newPrimaryIPAllocator(cs.CoreV1().Nodes(), nil)
 			if err != nil {
 				t.Fatalf("unexpected init error: %v", err)
+			}
+			for _, cidr := range tc.excluded {
+				_, prefix, err := net.ParseCIDR(cidr)
+				if err != nil {
+					t.Fatalf("failed to parse excluded CIDR %q: %v", cidr, err)
+				}
+				pipa.excluded = append(pipa.excluded, prefix)
 			}
 			// Allocate all IPs in the reserved range
 			var lastIP net.IP
