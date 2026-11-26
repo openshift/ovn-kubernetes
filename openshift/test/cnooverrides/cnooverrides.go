@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package cnooverrides reads the CNO config overrides that OpenShift renders
 // into OVN-Kubernetes components. It exists so that deploymentconfig and
