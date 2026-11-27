@@ -95,6 +95,47 @@ containers. On both baremetal (hypervisor with host networking) and cloud
 (bastion with `--network host`), all containers share the host IP, making
 CIDR-based firewall rules ineffective.
 
+## External Gateway Tests
+
+Baremetal only -- return-route setup requires L2 adjacency to worker nodes.
+
+```
++--------------------------------------------+--------+------+-------+------+
+| Test Scenario                              | BM[5]  | AWS  | Azure | GCP  |
++--------------------------------------------+--------+------+-------+------+
+| External Gateway (APB / non-vxlan)         | Y      | -    | -     | -    |
++--------------------------------------------+--------+------+-------+------+
+```
+
+**[5]** Non-vxlan External Gateway setup adds a return route on the gateway
+container (`ip route add <podIP> via <nodeInternalIP>`), which requires L2
+adjacency to the worker. Baremetal shares the machine network with nodes. On
+bastion-based clouds the node InternalIP is in another VPC subnet, so the
+kernel rejects the nexthop (`Nexthop has invalid gateway`).
+
+On bare metal, the `xgw` network is prepared when an External Gateway spec
+first requests it. A non-empty `OVN_TEST_EX_GW_NETWORK` override is preserved.
+The host sibling `xgw-host` must be a bridge-mode macvlan on the discovered
+machine-network interface. Setup reports stale interfaces or attached
+containers by name instead of removing them automatically.
+
+The sibling uses the parent interface's firewalld zone, preserving its
+host-input filtering. A forwarding policy permits traffic sourced from the
+gateway address pools to other zones without granting additional host access.
+The existing pool routes and IPv4/IPv6 NAT provide outbound Internet access.
+NAT is limited to the gateway pools. The empty policy is prepared before the
+provider's initial firewall reload; lazy gateway setup updates runtime rules
+without reloading the host firewall. Reusing the sibling removes obsolete
+addresses and explicit routes owned by the tests.
+
+The isolated-container allocator excludes the persistent sibling gateway and
+Podman pool in both families. Podman continues to allocate the gateway
+containers' addresses. On /24 IPv4 and /120 IPv6 machine networks, these
+reservations leave at most 39 primary test addresses per family; exhaustion is reported
+rather than allocating an infrastructure address.
+
+
+
 ## EVPN Tests
 
 ```
@@ -188,6 +229,15 @@ All external containers on cloud platforms share the bastion host's IP via
 EgressIP tests against host-networked pods require opening NodePort range
 (30000-32767) on cluster nodes via firewall rules. This is not yet configured
 on bastion-based cloud platforms.
+
+### Cloud Platforms: External Gateway Return Route
+
+External Gateway tests require installing a return route on the external
+gateway container via the worker's InternalIP. That assumes L2 adjacency
+(Kind/baremetal). Cloud bastion hosts are typically in a different VPC subnet
+than workers, so `via <nodeInternalIP>` fails with `Nexthop has invalid
+gateway`. These tests are filtered out on AWS/Azure/GCP via
+`shouldIncludeTest`.
 
 ### UDN Subnet Overlap with Bastion Network
 

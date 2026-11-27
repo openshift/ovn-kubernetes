@@ -80,6 +80,9 @@ func (h *baseInfra) GetExternalContainerNetworkInterface(ec api.ExternalContaine
 	h.mu.Lock()
 	cached, isCached := h.externalContainers[ec.Name]
 	h.mu.Unlock()
+	if network.Name() == "host" {
+		return *h.hostNetworkInfo, nil
+	}
 	if isCached && network.Name() == h.primaryNetworkName {
 		if h.hostNetworkInfo == nil {
 			return api.NetworkInterface{}, fmt.Errorf("can not find primary network interface info for cached container %q", ec.Name)
@@ -120,7 +123,8 @@ func (h *baseInfra) GetExternalContainerContextProvider(context *testcontext.Tes
 
 // getOrCreateHostNetworkedContainer returns a cached host-networked container
 // or creates one on the remote host using podman with --network host.
-// These containers persist across the suite and are not cleaned up per-test.
+// Primary-network containers persist across the suite. Explicit host gateways
+// are removed by the context provider when their spec deletes them.
 func (h *baseInfra) getOrCreateHostNetworkedContainer(ec api.ExternalContainer, netInfo *api.NetworkInterface) (api.ExternalContainer, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -165,16 +169,16 @@ func (h *baseInfra) getOrCreateHostNetworkedContainer(ec api.ExternalContainer, 
 }
 
 // baseContextProvider implements api.ExternalContainerContextProvider.
-// For primary network containers, it delegates to the parent baseInfra's
-// host-networked container cache. For secondary network containers, it
-// delegates to the container engine (standard per-test lifecycle).
+// Primary-network containers persist in the parent's host-networked cache.
+// Explicit host gateways use the same creation path but are removed on delete.
+// Other networks use the container engine with a per-test lifecycle.
 type baseContextProvider struct {
 	parent *baseInfra
 	engine *container.Engine
 }
 
 func (p *baseContextProvider) CreateExternalContainer(ec api.ExternalContainer) (api.ExternalContainer, error) {
-	if ec.Network != nil && ec.Network.Name() == p.parent.primaryNetworkName {
+	if ec.Network != nil && (ec.Network.Name() == p.parent.primaryNetworkName || ec.Network.Name() == "host") {
 		return p.parent.getOrCreateHostNetworkedContainer(ec, p.parent.hostNetworkInfo)
 	}
 	return p.engine.CreateExternalContainer(ec)
@@ -184,6 +188,15 @@ func (p *baseContextProvider) DeleteExternalContainer(ec api.ExternalContainer) 
 	p.parent.mu.Lock()
 	_, cached := p.parent.externalContainers[ec.Name]
 	p.parent.mu.Unlock()
+	if cached && ec.Network.Name() == "host" {
+		if err := p.engine.DeleteExternalContainer(ec); err != nil {
+			return err
+		}
+		p.parent.mu.Lock()
+		delete(p.parent.externalContainers, ec.Name)
+		p.parent.mu.Unlock()
+		return nil
+	}
 	if cached {
 		framework.Logf("skipping deletion of cached host-networked container %q", ec.Name)
 		return nil

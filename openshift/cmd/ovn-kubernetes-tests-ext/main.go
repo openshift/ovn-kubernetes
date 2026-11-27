@@ -51,6 +51,7 @@ const (
 	featureLabelVirtualMachineSupport = "Feature:VirtualMachineSupport"
 	featureLabelEgressIP              = "Feature:EgressIP"
 	featureLabelMACSecurity           = "Feature:MACSecurity"
+	featureLabelExternalGateway       = "Feature:ExternalGateway"
 	// Test constants used for test categorization and filtering
 	EIPSecondaryNetworkTestPrefix = "secondary-host-eip"
 	// nofloodMACBindingDescribe is the Describe text of the upstream no-flood
@@ -102,6 +103,12 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// platforms the external containers share the bastion's IP, so the specs
 	// could pass without exercising two distinct hosts.
 	if strings.Contains(spec.Name, nofloodMACBindingDescribe) && ocpInfra.IsCloudPlatform() {
+		return false
+	}
+	// External gateway return routes require L2 adjacency and a working
+	// hypervisor provider. A kubeconfig alone does not provide either.
+
+	if spec.Labels.Has(featureLabelExternalGateway) && !ocpInfra.HasExternalGatewaySupport() {
 		return false
 	}
 	// On GCP, nodes have a /32 primary interface address
@@ -191,7 +198,8 @@ func main() {
 	// Select the external images used by the enabled OTE tests.
 	deploymentconfig.Get().AddRequiredImage(deploymentconfigapi.Agnhost,
 		deploymentconfigapi.FedoraKubevirtContainerDisk,
-		deploymentconfigapi.Netshoot)
+		deploymentconfigapi.Netshoot,
+		deploymentconfigapi.FRR)
 	if err := registerTestImages(ovnTestsExtension); err != nil {
 		panic(err)
 	}
@@ -214,7 +222,11 @@ func main() {
 		if err := ocpInfra.EnableSecondaryForwarding(client); err != nil {
 			panic(fmt.Sprintf("failed to enable secondary network forwarding: %v", err))
 		}
-		if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes()); err != nil {
+		exclusions, err := ocpInfra.ExternalGatewayIPAMExclusions()
+		if err != nil {
+			panic(fmt.Sprintf("failed to reserve external gateway addresses: %v", err))
+		}
+		if err := allocators.InitPrimaryIPAllocator(client.CoreV1().Nodes(), exclusions...); err != nil {
 			panic(fmt.Sprintf("failed to initialize node primary IP allocator: %v", err))
 		}
 	})
