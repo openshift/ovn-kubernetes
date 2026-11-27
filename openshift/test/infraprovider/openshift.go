@@ -14,6 +14,7 @@ import (
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	ovnkconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -31,6 +32,7 @@ type OpenshiftInfraProvider struct {
 	hasFRRExternalContainer bool
 	hostPort                *portalloc.PortAllocator
 	clusterInfra            *baremetalInfra
+	initialized             bool // true when New() was called with cluster access
 }
 
 func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
@@ -43,6 +45,7 @@ func New(config *rest.Config) (*OpenshiftInfraProvider, error) {
 	o := &OpenshiftInfraProvider{
 		hostPort:     portalloc.New(30000, 32767),
 		clusterInfra: clusterInfra,
+		initialized:  true,
 	}
 	if err = o.initClusterObjects(config); err != nil {
 		return nil, err
@@ -97,6 +100,13 @@ func (o *OpenshiftInfraProvider) configureOVNGatewayMode() {
 		// satisfy this condition; otherwise, they will be skipped.
 		_ = os.Setenv("OVN_GATEWAY_MODE", "local")
 	}
+}
+
+// HasClusterInfra returns true when the provider was fully initialized with
+// cluster access via New(). Returns false for the zero-value provider used
+// during test listing without a kubeconfig.
+func (o *OpenshiftInfraProvider) HasClusterInfra() bool {
+	return o.initialized
 }
 
 // CheckForEVPN checks all EVPN prerequisites
@@ -154,6 +164,12 @@ func (o *OpenshiftInfraProvider) GetExternalContainerNetworkInterface(container 
 		panic("not implemented")
 	}
 	return o.clusterInfra.GetExternalContainerNetworkInterface(container, network)
+}
+
+func (o *OpenshiftInfraProvider) InfrastructureNetworkExclusions() (ipv4, ipv6 sets.Set[string]) {
+	// The hypervisor is on the same machine network as the cluster nodes,
+	// so no additional exclusion is needed.
+	return nil, nil
 }
 
 func (o *OpenshiftInfraProvider) ShutdownNode(nodeName string) error {
