@@ -243,4 +243,10 @@ var BlockingTests = []string{
 	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled does not leak the bindings into the other nodes' zones [Serial] [Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the CDN-triggered binding on every gateway router once traffic stops [Serial] [Suite:ovn-kubernetes/conformance/serial]",
 	"[Feature:NetworkSegmentation][Serial][ovn-kubernetes-ote][sig-network] Network Segmentation: MAC binding mirroring with ARP/NDP flood disabled ages out the UDN-triggered binding on every gateway router once traffic stops [Serial] [Suite:ovn-kubernetes/conformance/serial]",
+	// NetworkPolicy tests
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy the logs have the expected log level [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL allow and deny logging annotations are set to invalid values ACL logging is disabled [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is removed ACL logging is disabled [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] ACL Logging for NetworkPolicy when the namespace's ACL logging annotation is updated the ACL logs are updated accordingly [Suite:ovn-kubernetes/conformance/parallel]",
+	"[Feature:NetworkPolicy][ovn-kubernetes-ote][sig-network] Network Policy: ICMP bypass allows ICMP between pods with default deny policy on the default network [Suite:ovn-kubernetes/conformance/parallel]",
 }
