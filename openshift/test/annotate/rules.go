@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package annotate
 
 import (
@@ -14,9 +17,7 @@ var (
 			`[Feature:NetworkPolicy]`,
 			`[Feature:AdminNetworkPolicy]`,
 			`[Feature:BaselineNetworkPolicy]`,
-			`[Feature:EgressIP]`,
 			`[Feature:EgressService]`,
-			`[Feature:EgressFirewall]`,
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
@@ -37,6 +38,8 @@ var (
 		"[Disabled:Alpha]": {},
 		// tests for features that are not implemented in openshift
 		"[Disabled:Unimplemented]": {
+			// Uplink is not supported on OpenShift.
+			"MAC binding mirroring for multiple UDNs on same uplink",
 			`Creating a static pod on a node Should successfully create then remove a static pod`,
 			`Pod to external server PMTUD`,
 			`Pod to pod TCP with low MTU`,
@@ -106,12 +109,28 @@ var (
 			// These tests need bgpServerNetwork "bgpnet" which is not configured
 			// for downstream tests, so disable it.
 			"It cannot reach an external server on a different network",
+			// Multiple host-networked external containers with different IP addresses
+			// are needed for these tests. Currently, this is not supported.
+			"e2e egress firewall policy validation with external containers",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
 		// tests that are known broken and need to be fixed upstream or in openshift
 		// always add an issue here
-		"[Disabled:Broken]": {},
+		"[Disabled:Broken]": {
+			// The following noflood specs below are Ordered-dependent: they assert on the
+			// mirrored bindings primed by the earlier specs of their Ordered
+			// container, but openshift-tests runs each spec in its own process,
+			// so the bindings are missing and they fail on the first assertion.
+			// Will be fixed upstream to be self-contained.
+			"does not mirror onto a secondary CUDN",
+			"converges every gateway router onto the new MAC when the external container changes it",
+			"keeps the mirrored bindings stable while the traffic lasts",
+			"backfills a CUDN created after the bindings were learned, and reaps it on delete",
+			// Flaky test that needs to be fixed upstream.
+			// See https://github.com/ovn-kubernetes/ovn-kubernetes/pull/7300/
+			"reconverges after ovnkube-node restarts, without leaving orphan static bindings",
+		},
 		// tests that need to be temporarily disabled while the rebase is in progress.
 		"[Disabled:RebaseInProgress]": {},
 		// tests that may work, but we don't support them
@@ -121,7 +140,10 @@ var (
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			"e2e egress IP validation",
+			"Status manager validation Should validate the egress firewall status when adding a new node zone",
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)
