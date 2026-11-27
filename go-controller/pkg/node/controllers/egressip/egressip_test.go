@@ -30,10 +30,12 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 	utilnet "k8s.io/utils/net"
 	"sigs.k8s.io/knftables"
 
 	ovnconfig "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/config"
+	ovncontroller "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/controller"
 	egressipv1 "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1"
 	egressipfake "github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/crd/egressip/v1/apis/clientset/versioned/fake"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/factory"
@@ -1928,5 +1930,78 @@ var _ = ginkgo.Describe("isEgressIPOnLink", func() {
 			return nil
 		})
 		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+	})
+})
+
+func newTestEIPQueue() workqueue.TypedRateLimitingInterface[string] {
+	return workqueue.NewTypedRateLimitingQueueWithConfig(
+		ovncontroller.DefaultRateLimiter[string](),
+		workqueue.TypedRateLimitingQueueConfig[string]{Name: "test-eipeip"},
+	)
+}
+
+var _ = ginkgo.Describe("EgressIP handler event filtering", func() {
+	ginkgo.It("queues on status-only updates with unchanged Generation", func() {
+		c := &Controller{eIPQueue: newTestEIPQueue(), nodeName: node1Name}
+		oldEIP := newEgressIP(egressIP1Name, egressIP1IPV4, "", namespace1Label, egressPodLabel)
+		oldEIP.Generation = 1
+		newEIP := oldEIP.DeepCopy()
+		newEIP.Generation = 1
+		newEIP.Status.Items = []egressipv1.EgressIPStatusItem{{
+			Node:     node1Name,
+			EgressIP: egressIP1IPV4,
+		}}
+		c.onEIPUpdate(oldEIP, newEIP)
+		gomega.Expect(c.eIPQueue.Len()).To(gomega.Equal(1))
+	})
+
+	ginkgo.It("does not queue when Generation and status are unchanged", func() {
+		c := &Controller{eIPQueue: newTestEIPQueue(), nodeName: node1Name}
+		oldEIP := newEgressIP(egressIP1Name, egressIP1IPV4, node1Name, namespace1Label, egressPodLabel)
+		oldEIP.Generation = 1
+		newEIP := oldEIP.DeepCopy()
+		newEIP.Generation = 1
+		c.onEIPUpdate(oldEIP, newEIP)
+		gomega.Expect(c.eIPQueue.Len()).To(gomega.Equal(0))
+	})
+})
+
+var _ = ginkgo.Describe("processEIP host-network retry", func() {
+	ginkgo.It("returns a retriable error when assigned EIP has no matching host interface", func() {
+		defer ginkgo.GinkgoRecover()
+		if ovntest.NoRoot() {
+			ginkgo.Skip("Test requires root privileges")
+		}
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+
+		nodeCfg := nodeConfig{
+			linkConfigs: []linkConfig{
+				{dummyLink1Name, []address{{dummy1IPv4CIDR, false}}},
+			},
+		}
+		testNS, cleanupFn, err := setupFakeTestNode(nodeCfg)
+		if err != nil {
+			ginkgo.Skip(fmt.Sprintf("unable to create test netns: %v", err))
+		}
+		defer func() {
+			gomega.Expect(cleanupFn()).Should(gomega.Succeed())
+		}()
+
+		eIP := newEgressIP(egressIP1Name, egressIP3IP, node1Name, namespace1Label, egressPodLabel)
+		c, _, err := initController(
+			[]corev1.Namespace{newNamespaceWithLabels(namespace1, namespace1Label)},
+			[]corev1.Pod{newPodWithLabels(namespace1, pod1Name, node1Name, pod1IPv4, egressPodLabel)},
+			[]egressipv1.EgressIP{*eIP},
+			nodeCfg, true, false, false,
+		)
+		gomega.Expect(err).ShouldNot(gomega.HaveOccurred())
+
+		err = testNS.Do(func(ns.NetNS) error {
+			_, _, _, _, procErr := c.processEIP(eIP)
+			return procErr
+		})
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("no host network found"))
 	})
 })
