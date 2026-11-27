@@ -86,6 +86,12 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	if strings.Contains(spec.Name, EIPSecondaryNetworkTestPrefix) && !ocpInfra.HasSecondaryHostEIPSupport() {
 		return false
 	}
+	// This Service spec also needs the pre-configured secondary network: it
+	// attaches one to every node, which is a no-op on platforms whose nodes are
+	// not container engine containers, leaving its EgressIP unassignable.
+	if strings.Contains(spec.Name, "should work on secondary node interfaces") && !ocpInfra.HasSecondaryHostEIPSupport() {
+		return false
+	}
 	// EgressIP host-networked pods tests require opening ports (30000 to 32767) on cluster nodes,
 	// which is not yet configured on bastion-based platforms.
 	// They are also excluded on clusters with UDN ARP/NDP flood disabled: the
@@ -102,6 +108,18 @@ func shouldIncludeTest(spec *extensiontests.ExtensionTestSpec) bool {
 	// platforms the external containers share the bastion's IP, so the specs
 	// could pass without exercising two distinct hosts.
 	if strings.Contains(spec.Name, nofloodMACBindingDescribe) && ocpInfra.IsCloudPlatform() {
+		return false
+	}
+	// These Service specs require platform infrastructure for an external
+	// client. Some hosted platforms provide cluster access without that
+	// infrastructure.
+	if strings.Contains(spec.Name, "should listen on each host addresses") && !ocpInfra.HasExternalContainerInfra() {
+		return false
+	}
+	// This spec also sends UDP from an external container on the bastion to a
+	// NodePort, which the bastion cannot reach on cloud platforms.
+	if strings.Contains(spec.Name, "should handle IP fragments") &&
+		(!ocpInfra.HasExternalContainerInfra() || ocpInfra.IsCloudPlatform()) {
 		return false
 	}
 	// On GCP, nodes have a /32 primary interface address

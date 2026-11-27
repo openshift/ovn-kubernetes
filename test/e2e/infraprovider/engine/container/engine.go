@@ -7,25 +7,22 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container/network"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/container/ops"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/portalloc"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/engine/testcontext"
 	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 type Engine struct {
-	ops                   *ops.ContainerOps
-	externalContainerPort *portalloc.PortAllocator
-	testContext           *testcontext.TestContext
+	ops         *ops.ContainerOps
+	testContext *testcontext.TestContext
 }
 
 func NewEngine(runtime string, runner api.Runner) *Engine {
 	containerOps := ops.NewContainerOps(runtime, runner)
-	return &Engine{ops: containerOps,
-		// upper bound stays below the ephemeral range (net.ipv4.ip_local_port_range)
-		externalContainerPort: portalloc.New(12000, 32767)}
+	return &Engine{ops: containerOps}
 }
 
 func (p *Engine) ExternalContainerPrimaryInterfaceName() string {
@@ -40,8 +37,11 @@ func (p *Engine) ExecExternalContainerCommand(container api.ExternalContainer, c
 	return p.ops.ExecContainerCommand(container.Name, cmd)
 }
 
-func (p *Engine) GetExternalContainerPort() uint16 {
-	return p.externalContainerPort.Allocate()
+func (p *Engine) GetExternalContainerPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
+	// upper bound stays below the ephemeral range (net.ipv4.ip_local_port_range)
+	port, err := allocators.AllocateExternalContainerPort(f, cleanup, 12000, 32767)
+	framework.ExpectNoError(err)
+	return port
 }
 
 func (p *Engine) GetNetwork(name string) (api.Network, error) {
@@ -77,9 +77,7 @@ func (p *Engine) GetContainerState(container string) (string, error) {
 }
 
 func (p *Engine) WithTestContext(context *testcontext.TestContext) *Engine {
-	return &Engine{ops: p.ops,
-		externalContainerPort: p.externalContainerPort,
-		testContext:           context}
+	return &Engine{ops: p.ops, testContext: context}
 }
 
 func (p *Engine) CreateExternalContainer(container api.ExternalContainer) (api.ExternalContainer, error) {

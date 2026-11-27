@@ -59,6 +59,14 @@ const (
 	localNodePortConvergenceTimeout      = 10 * time.Second
 	localNodePortConvergencePollInterval = 1 * time.Second
 	localNodePortStableProbeCount        = 3
+
+	// testContainerName is the container name used by the single container pods
+	// the helpers in this file create. Container names must be DNS-1123 labels:
+	// lowercase alphanumeric or '-', at most 63 characters, and no dots.
+	// Deriving the name from the pod name breaks whenever a test names a pod
+	// after the node it runs on, because node names are FQDNs on cloud
+	// platforms, for example "ip-10-0-13-58.us-west-1.compute.internal".
+	testContainerName = "test-container"
 )
 
 // setupHostRedirectPod
@@ -121,7 +129,7 @@ func setupHostRedirectPod(f *framework.Framework, externalContainer infraapi.Ext
 // TODO: this approach with the channels is a bit ugly, it might be worth to refactor this and the other
 // functions that use it similarly in this file.
 func checkContinuousConnectivity(f *framework.Framework, nodeName, podName, host string, port, tries, timeout int, podChan chan *v1.Pod, errChan chan error) {
-	contName := fmt.Sprintf("%s-container", podName)
+	contName := testContainerName
 
 	command := []string{
 		"bash", "-c",
@@ -207,7 +215,7 @@ const (
 
 // Place the workload on the specified node to test external connectivity
 func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host string, pingCmd pingCommand, timeout int) error {
-	contName := fmt.Sprintf("%s-container", podName)
+	contName := testContainerName
 	// Ping options are:
 	// -c sends 3 pings
 	// -W wait at most 2 seconds for a reply
@@ -269,7 +277,7 @@ func checkConnectivityPingToHost(f *framework.Framework, nodeName, podName, host
 // Place the workload on the specified node and return pod gw route
 func getPodGWRoute(f *framework.Framework, nodeName string, podName string) net.IP {
 	command := []string{"bash", "-c", "sleep 20000"}
-	contName := fmt.Sprintf("%s-container", podName)
+	contName := testContainerName
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: podName,
@@ -446,7 +454,7 @@ func getPod(f *framework.Framework, podName string) *v1.Pod {
 // Create a pod on the specified node using the agnostic host image
 func createPod(f *framework.Framework, podName, nodeSelector, namespace string, command []string, labels map[string]string, options ...func(*v1.Pod)) (*v1.Pod, error) {
 
-	contName := fmt.Sprintf("%s-container", podName)
+	contName := testContainerName
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -728,7 +736,7 @@ var _ = ginkgo.Describe("e2e control plane", func() {
 			_, err = providerCtx.AttachNetwork(secondaryProviderNetwork, node.Name)
 			framework.ExpectNoError(err, "network %s must attach to node %s", secondaryProviderNetwork.Name(), node.Name)
 		}
-		secondaryExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
+		secondaryExternalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 		secondaryExternalContainerSpec := infraapi.ExternalContainer{Name: "e2e-ovn-k", Image: images.AgnHost(),
 			Network: secondaryProviderNetwork, CmdArgs: getAgnHostHTTPPortBindCMDArgs(secondaryExternalContainerPort), ExtPort: secondaryExternalContainerPort}
 		ginkgo.By("creating container on secondary provider network")
@@ -1286,7 +1294,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			// CAP NET_ADMIN is needed to remove neighbor entries for ARP/NS flap tests
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get primary network")
-			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			externalContainer = infraapi.ExternalContainer{Name: "e2e-ingress", Image: images.AgnHost(), Network: primaryProviderNetwork,
 				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
@@ -1687,7 +1695,7 @@ var _ = ginkgo.Describe("e2e ingress traffic validation", func() {
 			// addresses.
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get primary network")
-			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			externalContainer = infraapi.ExternalContainer{Name: "e2e-ingress-add-more", Image: images.AgnHost(), Network: primaryProviderNetwork,
 				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
@@ -1789,7 +1797,11 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 		clusterHTTPPort  = 81
 		clusterUDPPort   = 91
 
-		clientContainerName = "npclient"
+		// Distinct from the client containers in service.go: these are
+		// host-networked and providers may reuse an existing container with
+		// the same name, so specs that need different container commands must
+		// not share one.
+		clientContainerName = "npclient-hostnet-ingress"
 	)
 
 	f := wrappedTestFramework("nodeport-ingress-test")
@@ -1857,7 +1869,7 @@ var _ = ginkgo.Describe("e2e ingress to host-networked pods traffic validation",
 			// addresses.
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get primary network")
-			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			externalContainer = infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
 				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)

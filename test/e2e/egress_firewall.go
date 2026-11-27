@@ -208,7 +208,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 			}
 
 			checkConnectivity := func(srcPodName, dstIP string, dstPort string, shouldSucceed bool) {
-				testContainer := fmt.Sprintf("%s-container", srcPodName)
+				testContainer := testContainerName
 				testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 				if shouldSucceed {
 					gomega.Eventually(func() bool {
@@ -248,7 +248,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				podName, nodeName string, ipCheckInterval, ipCheckTimeout time.Duration, f *framework.Framework) {
 				for i := 0; i < retries; i++ {
 					createSrcPod(podName, nodeName, ipCheckInterval, ipCheckTimeout, f)
-					testContainer := fmt.Sprintf("%s-container", podName)
+					testContainer := testContainerName
 					testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 					for connectRetry := 0; connectRetry < 5; connectRetry++ {
 						_, err := e2ekubectl.RunKubectl(f.Namespace.Name, "exec", podName, testContainerFlag, "--",
@@ -267,7 +267,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				providerCtx = infraprovider.Get().NewTestContext()
 				primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 				// container 1
-				externalContainer1Port := infraprovider.Get().GetExternalContainerPort()
+				externalContainer1Port := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 				externalContainer1Spec := infraapi.ExternalContainer{
 					Name:    externalContainerName1,
 					Image:   images.AgnHost(),
@@ -279,7 +279,7 @@ func egressFirewallPolicyValidationTests(useUDN bool, udnTopology string) {
 				framework.ExpectNoError(err, "must create external container 1")
 
 				// container 2
-				externalContainer2Port := infraprovider.Get().GetExternalContainerPort()
+				externalContainer2Port := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 				externalContainer2Spec := infraapi.ExternalContainer{
 					Name:    externalContainerName2,
 					Image:   images.AgnHost(),
@@ -586,7 +586,7 @@ spec:
 				}
 
 				srcPodName := "e2e-egress-fw-src-pod"
-				testContainer := fmt.Sprintf("%s-container", srcPodName)
+				testContainer := testContainerName
 				testContainerFlag := fmt.Sprintf("--container=%s", testContainer)
 				// use random labels in case test runs again since it's a pain to remove the label from the node
 				labelMatch := randStr(5)

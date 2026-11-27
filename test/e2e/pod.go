@@ -117,7 +117,7 @@ var _ = ginkgo.Describe("Pod to external server PMTUD", func() {
 			e2epod.NewPodClient(f).CreateSync(context.TODO(), clientPod)
 
 			ginkgo.By("Creating the external server")
-			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			externalContainerName := fmt.Sprintf(echoServerNameTemplate, externalContainerPort)
 			framework.Logf("Creating external container server pod listening on TCP and UDP port %d", externalContainerPort)
 			providerPrimaryNetwork, err := infraprovider.Get().PrimaryNetwork()

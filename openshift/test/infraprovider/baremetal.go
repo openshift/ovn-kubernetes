@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/kubernetes/test/e2e/framework"
 
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
@@ -225,8 +226,8 @@ func (ci *baremetalInfra) GetExternalContainerContextProvider(context *testconte
 
 // GetExternalContainerPort delegates to base and also configures the
 // hypervisor firewall for the allocated port.
-func (ci *baremetalInfra) GetExternalContainerPort() uint16 {
-	return ci.base.GetExternalContainerPort()
+func (ci *baremetalInfra) GetExternalContainerPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
+	return ci.base.GetExternalContainerPort(f, cleanup)
 }
 
 // GetExternalContainerNetworkInterface handles isolated containers and the FRR

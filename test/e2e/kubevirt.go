@@ -1348,7 +1348,7 @@ config:
 				Name:    namespace + "-iperf",
 				Image:   images.Netshoot(),
 				CmdArgs: []string{"sleep", "infinity"},
-				ExtPort: infraprovider.Get().GetExternalContainerPort(),
+				ExtPort: infraprovider.Get().GetExternalContainerPort(fr, providerCtx),
 			}
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			Expect(err).NotTo(HaveOccurred(), "primary network must be available to attach containers")
@@ -1714,7 +1714,7 @@ write_files:
 					Name:    namespace + "-iperf",
 					Image:   images.Netshoot(),
 					CmdArgs: []string{"sleep", "infinity"},
-					ExtPort: infraprovider.Get().GetExternalContainerPort(),
+					ExtPort: infraprovider.Get().GetExternalContainerPort(fr, providerCtx),
 				}
 
 				By("Setting up EVPN infrastructure and external containers")
@@ -1787,7 +1787,7 @@ write_files:
 
 			if td.role == udnv1.NetworkRolePrimary && td.evpn == nil {
 				externalContainerName := namespace + "-iperf"
-				externalContainerPort := infraprovider.Get().GetExternalContainerPort()
+				externalContainerPort := infraprovider.Get().GetExternalContainerPort(fr, providerCtx)
 				externalContainer = infraapi.ExternalContainer{
 					Name:    externalContainerName,
 					Image:   images.Netshoot(),

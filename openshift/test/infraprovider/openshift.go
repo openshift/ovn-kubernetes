@@ -19,6 +19,7 @@ import (
 	operv1 "github.com/openshift/api/operator/v1"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1client "github.com/openshift/client-go/operator/clientset/versioned"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -51,6 +52,7 @@ type OpenshiftInfraProvider struct {
 	hasFRRExternalContainer bool
 	arpFloodDisabled        bool
 	clusterInfra            platformInfra
+	kubeClient              kubernetes.Interface
 	initialized             bool // true when New() was called with cluster access
 	platformType            configv1.PlatformType
 }
@@ -77,6 +79,10 @@ func (o *OpenshiftInfraProvider) initClusterObjects(config *rest.Config) error {
 	configClient, err := configclient.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve config client: %w", err)
+	}
+	o.kubeClient, err = kubernetes.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve kubernetes client: %w", err)
 	}
 	operatorClient, err := operatorv1client.NewForConfig(config)
 	if err != nil {
@@ -151,6 +157,12 @@ func (o *OpenshiftInfraProvider) IsArpfloodDisabled() bool {
 // during test listing without a kubeconfig.
 func (o *OpenshiftInfraProvider) HasClusterInfra() bool {
 	return o.initialized
+}
+
+// HasExternalContainerInfra returns true when the platform provides the
+// external containers and networks required by infrastructure-dependent tests.
+func (o *OpenshiftInfraProvider) HasExternalContainerInfra() bool {
+	return o.clusterInfra != nil
 }
 
 // HasSecondaryHostEIPSupport checks if the platform supports secondary-host-eip
@@ -303,25 +315,41 @@ func (o *OpenshiftInfraProvider) GetNetwork(name string) (api.Network, error) {
 
 }
 
+// hostPortRangeStart and hostPortRangeEnd bound the host ports tests may bind
+// on cluster nodes. 9000-9999 is the only range besides NodePort
+// (30000-32767) that the installer opens for node-to-node traffic, and unlike
+// NodePort it cannot collide with service allocations. Node components already
+// hold 15 ports in that range (9001 machine-config-daemon, 9099
+// cluster-version-operator, 9100 node-exporter, 9103 and 9105 ovnkube-node,
+// 9104 network-operator, 9108 ovnkube-control-plane, 9258-9260 and 9443
+// cloud-controller-manager-operator, 9637 kube-rbac-proxy-crio, 9978-9980
+// etcd), so only hand out the 9700-9899 window, which none of them use.
+const (
+	hostPortRangeStart = 9700
+	hostPortRangeEnd   = 9899
+)
+
 func (o *OpenshiftInfraProvider) GetK8HostPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
-	// Stay within the NodePort range (30000-32767) because it is the range expected
-	// to be reachable on cluster nodes (see openshift/test/README.md).
-	port, err := allocators.AllocateHostPort(f, cleanup, 30000, 32767)
+	port, err := allocators.AllocateHostPort(f, cleanup, hostPortRangeStart, hostPortRangeEnd)
 	framework.ExpectNoError(err)
 	return port
 }
 
-// GetK8NodeNetworkInterface returns the network interface on the given node whose
-// address falls within the provided network's IPv4/IPv6 subnets. It inspects the
-// node's links via "ip -json address show" (run through oc debug) and matches each
-// address against the network CIDRs.
+// GetK8NodeNetworkInterface returns the network interface on the given node that
+// belongs to the provided network. It inspects the node's links via
+// "ip -json address show" (run through oc debug).
+//
+// For the primary network the interface is identified by the node's own
+// InternalIP addresses instead of the network CIDRs. On cloud platforms the
+// primary network is derived from the bastion host's interface prefix, which
+// only covers the availability-zone subnet the bastion sits in, so nodes in
+// any other zone never match. A node's InternalIP is always carried by its
+// primary interface, which makes the lookup zone independent.
+//
+// Secondary networks keep matching on the network CIDRs.
 func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(instance string, network api.Network) (api.NetworkInterface, error) {
 	if network == nil {
 		return api.NetworkInterface{}, fmt.Errorf("network must not be nil")
-	}
-	v4Subnet, v6Subnet, err := network.IPv4IPv6Subnets()
-	if err != nil {
-		return api.NetworkInterface{}, fmt.Errorf("failed to get subnets for network %s: %w", network.Name(), err)
 	}
 
 	result, err := o.ExecK8NodeCommand(instance, []string{"ip", "-json", "address", "show"})
@@ -334,7 +362,89 @@ func (o *OpenshiftInfraProvider) GetK8NodeNetworkInterface(instance string, netw
 		return api.NetworkInterface{}, fmt.Errorf("failed to parse network interfaces from node %s: %w", instance, err)
 	}
 
+	if o.isPrimaryNetwork(network) {
+		nodeIPs, err := o.nodeInternalIPs(instance)
+		if err != nil {
+			return api.NetworkInterface{}, err
+		}
+		if nodeIPs.Len() > 0 {
+			return findNetworkInterfaceForAddresses(links, nodeIPs)
+		}
+	}
+
+	v4Subnet, v6Subnet, err := network.IPv4IPv6Subnets()
+	if err != nil {
+		return api.NetworkInterface{}, fmt.Errorf("failed to get subnets for network %s: %w", network.Name(), err)
+	}
+
 	return findNetworkInterfaceForSubnets(links, v4Subnet, v6Subnet)
+}
+
+// isPrimaryNetwork reports whether network is the platform's primary network.
+func (o *OpenshiftInfraProvider) isPrimaryNetwork(network api.Network) bool {
+	if o.clusterInfra == nil {
+		return false
+	}
+	primary, err := o.clusterInfra.PrimaryNetwork()
+	if err != nil || primary == nil {
+		return false
+	}
+	return primary.Name() == network.Name()
+}
+
+// nodeInternalIPs returns the InternalIP addresses reported by the node object.
+// An empty set is returned when the provider has no cluster access, which lets
+// callers fall back to CIDR matching.
+func (o *OpenshiftInfraProvider) nodeInternalIPs(nodeName string) (sets.Set[string], error) {
+	addresses := sets.New[string]()
+	if o.kubeClient == nil {
+		return addresses, nil
+	}
+	node, err := o.kubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve node %s: %w", nodeName, err)
+	}
+	for _, address := range node.Status.Addresses {
+		if address.Type == corev1.NodeInternalIP && address.Address != "" {
+			addresses.Insert(address.Address)
+		}
+	}
+	return addresses, nil
+}
+
+// findNetworkInterfaceForAddresses returns the link that carries any of the
+// given addresses.
+func findNetworkInterfaceForAddresses(links []linkInfo, addresses sets.Set[string]) (api.NetworkInterface, error) {
+	for _, link := range links {
+		netInterface := api.NetworkInterface{
+			InfName: link.IfName,
+			MAC:     link.Mac,
+		}
+		matched := false
+		for _, addr := range link.AddrInfo {
+			if !addresses.Has(addr.Local) {
+				continue
+			}
+			matched = true
+			switch addr.Family {
+			case "inet":
+				if netInterface.IPv4 == "" {
+					netInterface.IPv4 = addr.Local
+					netInterface.IPv4Prefix = strconv.Itoa(addr.PrefixLen)
+				}
+			case "inet6":
+				if netInterface.IPv6 == "" {
+					netInterface.IPv6 = addr.Local
+					netInterface.IPv6Prefix = strconv.Itoa(addr.PrefixLen)
+				}
+			}
+		}
+		if matched {
+			return netInterface, nil
+		}
+	}
+
+	return api.NetworkInterface{}, fmt.Errorf("no node network interface found carrying addresses %v", sets.List(addresses))
 }
 
 func findNetworkInterfaceForSubnets(links []linkInfo, v4Subnet, v6Subnet string) (api.NetworkInterface, error) {
@@ -423,11 +533,11 @@ func (o *OpenshiftInfraProvider) GetExternalContainerLogs(container api.External
 	return o.clusterInfra.GetExternalContainerLogs(container)
 }
 
-func (o *OpenshiftInfraProvider) GetExternalContainerPort() uint16 {
+func (o *OpenshiftInfraProvider) GetExternalContainerPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
 	if o.clusterInfra == nil {
 		panic("not implemented")
 	}
-	return o.clusterInfra.GetExternalContainerPort()
+	return o.clusterInfra.GetExternalContainerPort(f, cleanup)
 }
 
 func (o *OpenshiftInfraProvider) ListNetworks() ([]string, error) {

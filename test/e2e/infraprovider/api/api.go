@@ -62,7 +62,8 @@ type ExternalContainerProvider interface {
 	// GetExternalContainerPort returns a port. Requesting a port that maybe exposed in tests to avoid multiple parallel
 	// tests utilizing conflicting ports. It also allows infra provider implementations to set the external containers
 	// allowed port range and therefore comply with cloud provider firewall rules.
-	GetExternalContainerPort() uint16
+	// Deallocation is registered on cleanup.
+	GetExternalContainerPort(f *framework.Framework, cleanup ContextCleanUp) uint16
 	ExternalContainerPrimaryInterfaceName() string
 }
 

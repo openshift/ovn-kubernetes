@@ -779,11 +779,15 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 		var isDualStack bool
 
 		const (
-			endpointHTTPPort             = 80
-			endpointUDPPort              = 90
-			clusterHTTPPort              = 81
-			clusterUDPPort               = 91
-			clientContainerName          = "npclient"
+			endpointHTTPPort = 80
+			endpointUDPPort  = 90
+			clusterHTTPPort  = 81
+			clusterUDPPort   = 91
+			// Each spec and retry gets its own external client container. Providers
+			// may reuse an existing host-networked container with the same name,
+			// even when its command or allocated port differs.
+			hostAddrsClientContainerName = "npclient-hostaddrs"
+			fragmentsClientContainerName = "npclient-fragments"
 			targetSecondaryContainerName = "egressSecondaryTargetNode-allowed"
 		)
 
@@ -995,8 +999,8 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 			ginkgo.By("Creating an external container to send the traffic from")
 			primaryProviderNetwork, err := infraprovider.Get().PrimaryNetwork()
 			framework.ExpectNoError(err, "failed to get primary network")
-			externalContainerPort := infraprovider.Get().GetExternalContainerPort()
-			externalContainer := infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
+			externalContainer := infraapi.ExternalContainer{Name: fmt.Sprintf("%s-%d", hostAddrsClientContainerName, externalContainerPort), Image: images.AgnHost(), Network: primaryProviderNetwork,
 				CmdArgs: getAgnHostHTTPPortBindCMDArgs(externalContainerPort), ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "external container %s must be created", externalContainer.Name)
@@ -1199,7 +1203,7 @@ var _ = ginkgo.Describe("Services", feature.Service, func() {
 					e2eskipper.Skipf("Test requires nodes that support attaching provider networks; network %s could not attach to node %s: %v", secondaryProviderNetwork.Name(), node.Name, err)
 				}
 			}
-			serverExternalContainerPort := infraprovider.Get().GetExternalContainerPort()
+			serverExternalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
 			serverExternalContainerSpec := infraapi.ExternalContainer{
 				Name:    targetSecondaryContainerName,
 				Image:   images.AgnHost(),
@@ -1233,19 +1237,12 @@ spec:
         matchLabels:
             kubernetes.io/metadata.name: ` + f.Namespace.Name + `
 `
-			if err := os.WriteFile("egressip.yaml", []byte(egressIPConfig), 0644); err != nil {
-				framework.Failf("Unable to write CRD config to disk: %v", err)
-			}
-			ginkgo.DeferCleanup(func() error {
-				e2ekubectl.RunKubectlOrDie("default", "delete", "-f", "egressip.yaml", "--ignore-not-found=true")
-				if err := os.Remove("egressip.yaml"); err != nil {
-					return fmt.Errorf("unable to remove the CRD config from disk: %v", err)
-				}
-				return nil
+			ginkgo.DeferCleanup(func() {
+				e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "delete", "-f", "-", "--ignore-not-found=true")
 			})
 
 			framework.Logf("Create the EgressIP configuration")
-			e2ekubectl.RunKubectlOrDie("default", "create", "-f", "egressip.yaml")
+			e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "create", "-f", "-")
 
 			ginkgo.By("Check that the status is of length one and that it is assigned to " + egressNode)
 			err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {
@@ -1521,8 +1518,9 @@ spec:
 			framework.ExpectNoError(err)
 
 			ginkgo.By("Creating an external client")
-			externalContainer := infraapi.ExternalContainer{Name: clientContainerName, Image: images.AgnHost(), Network: primaryProviderNetwork,
-				CmdArgs: []string{"pause"}, ExtPort: infraprovider.Get().GetExternalContainerPort()}
+			externalContainerPort := infraprovider.Get().GetExternalContainerPort(f, providerCtx)
+			externalContainer := infraapi.ExternalContainer{Name: fmt.Sprintf("%s-%d", fragmentsClientContainerName, externalContainerPort), Image: images.AgnHost(), Network: primaryProviderNetwork,
+				CmdArgs: []string{"pause"}, ExtPort: externalContainerPort}
 			externalContainer, err = providerCtx.CreateExternalContainer(externalContainer)
 			framework.ExpectNoError(err, "failed to create external container", externalContainer)
 
@@ -3385,19 +3383,12 @@ spec:
         matchLabels:
             kubernetes.io/metadata.name: ` + namespaceName + `
 `
-		if err := os.WriteFile("egressip.yaml", []byte(egressIPConfig), 0644); err != nil {
-			framework.Failf("Unable to write CRD config to disk: %v", err)
-		}
-		ginkgo.DeferCleanup(func() error {
-			e2ekubectl.RunKubectlOrDie("default", "delete", "-f", "egressip.yaml", "--ignore-not-found=true")
-			if err := os.Remove("egressip.yaml"); err != nil {
-				return fmt.Errorf("unable to remove the CRD config from disk: %v", err)
-			}
-			return nil
+		ginkgo.DeferCleanup(func() {
+			e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "delete", "-f", "-", "--ignore-not-found=true")
 		})
 
 		framework.Logf("Create the EgressIP configuration")
-		e2ekubectl.RunKubectlOrDie("default", "create", "-f", "egressip.yaml")
+		e2ekubectl.RunKubectlOrDieInput("default", egressIPConfig, "create", "-f", "-")
 
 		ginkgo.By("4. Check that the status is of length one and that it is assigned to " + nonBackendNodeName)
 		err = wait.PollImmediate(retryInterval, retryTimeout, func() (bool, error) {

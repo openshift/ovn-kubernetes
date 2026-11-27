@@ -88,8 +88,8 @@ func (k *kind) GetExternalContainerNetworkInterface(container api.ExternalContai
 	return k.engine.GetExternalContainerNetworkInterface(container, network)
 }
 
-func (k *kind) GetExternalContainerPort() uint16 {
-	return k.engine.GetExternalContainerPort()
+func (k *kind) GetExternalContainerPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
+	return k.engine.GetExternalContainerPort(f, cleanup)
 }
 
 func (k *kind) ListNetworks() ([]string, error) {

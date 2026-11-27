@@ -61,10 +61,25 @@ func (h *baseInfra) ListNetworks() ([]string, error) {
 }
 
 func (h *baseInfra) ExecExternalContainerCommand(container api.ExternalContainer, cmd []string) (string, error) {
-	return h.engine.ExecExternalContainerCommand(container, cmd)
+	out, err := h.engine.ExecExternalContainerCommand(container, cmd)
+	if err != nil {
+		// DEBUG(CORENET-6742): podman reports "container state improper" when the
+		// container exited, which says nothing about why. Dump its state and logs.
+		state, _ := h.runner.Run(containerRuntime, "container", "inspect", "--format",
+			"running={{.State.Running}} exitcode={{.State.ExitCode}} err={{.State.Error}}", container.Name)
+		logs, _ := h.runner.Run(containerRuntime, "logs", "--tail", "50", container.Name)
+		framework.Logf("exec failed on external container %q: %s\nlogs:\n%s", container.Name, strings.TrimSpace(state), logs)
+	}
+	return out, err
 }
 
+// ExternalContainerPrimaryInterfaceName returns the host's interface name,
+// because primary network containers run with --network host and therefore see
+// the host's links rather than the engine's default "eth0".
 func (h *baseInfra) ExternalContainerPrimaryInterfaceName() string {
+	if h.hostNetworkInfo != nil && h.hostNetworkInfo.InfName != "" {
+		return h.hostNetworkInfo.InfName
+	}
 	return h.engine.ExternalContainerPrimaryInterfaceName()
 }
 
@@ -72,8 +87,8 @@ func (h *baseInfra) GetExternalContainerLogs(container api.ExternalContainer) (s
 	return h.engine.GetExternalContainerLogs(container)
 }
 
-func (h *baseInfra) GetExternalContainerPort() uint16 {
-	return h.engine.GetExternalContainerPort()
+func (h *baseInfra) GetExternalContainerPort(f *framework.Framework, cleanup api.ContextCleanUp) uint16 {
+	return h.engine.GetExternalContainerPort(f, cleanup)
 }
 
 func (h *baseInfra) GetExternalContainerNetworkInterface(ec api.ExternalContainer, network api.Network) (api.NetworkInterface, error) {
