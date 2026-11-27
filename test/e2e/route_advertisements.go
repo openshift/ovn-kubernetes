@@ -67,12 +67,6 @@ const (
 	netexecPort            = 8080
 )
 
-func init() {
-	if os.Getenv("ENABLE_ROUTE_ADVERTISEMENTS") == "true" {
-		images.Add(images.FRR())
-	}
-}
-
 var _ = ginkgo.Describe("BGP: When default podNetwork is advertised", feature.RouteAdvertisements, func() {
 	var serverContainerIPs []string
 	var frrContainerIPv4, frrContainerIPv6 string

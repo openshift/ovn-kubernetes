@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package annotate
 
 import (
@@ -14,9 +17,7 @@ var (
 			`[Feature:NetworkPolicy]`,
 			`[Feature:AdminNetworkPolicy]`,
 			`[Feature:BaselineNetworkPolicy]`,
-			`[Feature:EgressIP]`,
 			`[Feature:EgressService]`,
-			`[Feature:EgressFirewall]`,
 			`[Feature:EgressQos]`,
 			`[Feature:ExternalGateway]`,
 			`[Feature:DisablePacketMTUCheck]`,
@@ -106,6 +107,9 @@ var (
 			// These tests need bgpServerNetwork "bgpnet" which is not configured
 			// for downstream tests, so disable it.
 			"It cannot reach an external server on a different network",
+			// Multiple host-networked external containers with different IP addresses
+			// are needed for these tests. Currently, this is not supported.
+			"e2e egress firewall policy validation with external containers",
 		},
 		// tests that rely on special configuration that we do not yet support
 		"[Disabled:SpecialConfig]": {},
@@ -121,7 +125,10 @@ var (
 		// tests that are known flaky
 		"[Flaky]": {},
 		// tests that must be run without competition
-		"[Serial]": {},
+		"[Serial]": {
+			"e2e egress IP validation",
+			"Status manager validation Should validate the egress firewall status when adding a new node zone",
+		},
 		// Tests that don't pass on disconnected, either due to requiring
 		// internet access for GitHub (e.g. many of the s2i builds), or
 		// because of pullthrough not supporting ICSP (https://bugzilla.redhat.com/show_bug.cgi?id=1918376)

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package annotate
 
 import (
@@ -55,7 +58,9 @@ func Run(labelToTestName, labelToLabel map[string][]string, filter func(name str
 		pairs = append(pairs, fmt.Sprintf("%q:\n%q,", testName, labels))
 	}
 	sort.Strings(pairs)
-	contents := fmt.Sprintf(`
+	contents := fmt.Sprintf(`// SPDX-FileCopyrightText: Copyright The OVN-Kubernetes Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package generated
 
 import (
@@ -212,13 +217,13 @@ func (r *labelAppender) generate(name string, node types.TestSpec) {
 		isConformance := strings.Contains(newName, "[Conformance]")
 		switch {
 		case isSerial && isConformance:
-			newLabels += "[Suite:openshift/conformance/serial/minimal]"
+			newLabels += "[Suite:ovn-kubernetes/conformance/serial/minimal]"
 		case isSerial:
-			newLabels += "[Suite:openshift/conformance/serial]"
+			newLabels += "[Suite:ovn-kubernetes/conformance/serial]"
 		case isConformance:
-			newLabels += "[Suite:openshift/conformance/parallel/minimal]"
+			newLabels += "[Suite:ovn-kubernetes/conformance/parallel/minimal]"
 		default:
-			newLabels += "[Suite:openshift/conformance/parallel]"
+			newLabels += "[Suite:ovn-kubernetes/conformance/parallel]"
 		}
 	}
 
