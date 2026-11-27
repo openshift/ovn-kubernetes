@@ -24,12 +24,12 @@ import (
 
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/types"
 	"github.com/ovn-kubernetes/ovn-kubernetes/go-controller/pkg/util"
+	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/allocators"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/deploymentconfig"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/feature"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/images"
 	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider"
 	infraapi "github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/infraprovider/api"
-	"github.com/ovn-kubernetes/ovn-kubernetes/test/e2e/ipalloc"
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -202,12 +202,14 @@ func getLastLogLine(data string) string {
 }
 
 // checks if the given IP is found. If there are multiple lines, only consider the last line.
+// The last line is expected to be in host:port format (e.g. "172.18.0.200:38137" or "[fc00::c8]:38137").
 func containsIPInLastEntry(data, ip string) bool {
-	if strings.Contains(getLastLogLine(data), ip) {
-
-		return true
+	lastLine := getLastLogLine(data)
+	host, _, err := net.SplitHostPort(lastLine)
+	if err != nil {
+		return false
 	}
-	return false
+	return host == ip
 }
 
 // support for agnhost image is limited to netexec command
@@ -483,8 +485,8 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 			targetNodeName          string = "egressTargetNode-allowed"
 			deniedTargetNodeName    string = "egressTargetNode-denied"
 			targetSecondaryNodeName string = "egressSecondaryTargetNode-allowed"
-			egressIPYaml            string = "egressip.yaml"
-			egressFirewallYaml      string = "egressfirewall.yaml"
+			egressIPYaml            string = "/tmp/egressip.yaml"
+			egressFirewallYaml      string = "/tmp/egressfirewall.yaml"
 			retryTimeout                   = 3 * retryTimeout // Boost the retryTimeout for EgressIP tests.
 		)
 
@@ -573,7 +575,8 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 					}
 					return nil
 				})
-			} else {
+			} else if getNodeStatus(node) != string(corev1.ConditionTrue) {
+				// Skip starting kubelet if the node is already ready.
 				_, err := infraprovider.Get().ExecK8NodeCommand(node, []string{"systemctl", "start", "kubelet.service"})
 				if err != nil {
 					framework.Failf("failed to start kubelet on node: %s, err: %v", node, err)
@@ -1042,15 +1045,16 @@ var _ = ginkgo.Describe("e2e egress IP validation", feature.EgressIP, func() {
 
 					ginkgo.By("1. Create an EgressIP object with two egress IPs defined")
 					var egressIP1, egressIP2 net.IP
-					var err error
+					var err, err2 error
 					if utilnet.IsIPv6String(egress1Node.nodeIP) {
-						egressIP1, err = ipalloc.NewPrimaryIPv6()
-						egressIP2, err = ipalloc.NewPrimaryIPv6()
+						egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
+						egressIP2, err2 = allocators.NewPrimaryIPv6(egress2Node.name)
 					} else {
-						egressIP1, err = ipalloc.NewPrimaryIPv4()
-						egressIP2, err = ipalloc.NewPrimaryIPv4()
+						egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
+						egressIP2, err2 = allocators.NewPrimaryIPv4(egress2Node.name)
 					}
 					gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
+					gomega.Expect(err2).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
 					var egressIPConfig = `apiVersion: k8s.ovn.org/v1
 kind: EgressIP
@@ -1242,10 +1246,11 @@ spec:
 			var otherDstIP net.IP
 			var err error
 			if utilnet.IsIPv6String(egress2Node.nodeIP) {
-				otherDstIP, err = ipalloc.NewPrimaryIPv6()
+				otherDstIP, err = allocators.NewPrimaryIPv6(egress2Node.name)
 			} else {
-				otherDstIP, err = ipalloc.NewPrimaryIPv4()
+				otherDstIP, err = allocators.NewPrimaryIPv4(egress2Node.name)
 			}
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate secondary node IP")
 			otherDst := otherDstIP.String()
 			framework.Logf("Adding secondary IP %s to external bridge %s on Node %s", otherDst, deploymentconfig.Get().ExternalBridgeName(), egress2Node.name)
 			_, err = infraprovider.Get().ExecK8NodeCommand(egress2Node.name, []string{"ip", "addr", "add", otherDst, "dev", deploymentconfig.Get().ExternalBridgeName()})
@@ -1258,14 +1263,16 @@ spec:
 			})
 
 			hostNetPort := infraprovider.Get().GetK8HostPort()
+			// Use a fixed pod name instead of deriving it from the node name to avoid
+			// exceeding the 63-character limit or including dots in the pod name.
+			hostNetPodName := "egress-host-net-pod"
 			otherHostNetPodIP := node{
-				name:   egress2Node.name + "-host-net-pod",
+				name:   hostNetPodName,
 				nodeIP: otherDst,
 				port:   hostNetPort,
 			}
 
 			ginkgo.By("2. Creating host-networked pod, on non-egress node acting as \"another node\"")
-			hostNetPodName := egress2Node.name + "-host-net-pod"
 			p, err := createPod(f, hostNetPodName, egress2Node.name, f.Namespace.Name, []string{}, map[string]string{}, func(p *corev1.Pod) {
 				p.Spec.HostNetwork = true
 				p.Spec.Containers[0].Image = images.AgnHost()
@@ -1282,7 +1289,7 @@ spec:
 				gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "pod must be fully deleted within 60 seconds")
 			}()
 			hostNetPod := node{
-				name:   egress2Node.name + "-host-net-pod",
+				name:   hostNetPodName,
 				nodeIP: egress2Node.nodeIP,
 				port:   hostNetPort,
 			}
@@ -1297,9 +1304,9 @@ spec:
 			ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 			var egressIP1 net.IP
 			if utilnet.IsIPv6String(egress2Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -1448,9 +1455,9 @@ spec:
 			var egressIP1 net.IP
 			var err error
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -1572,14 +1579,14 @@ spec:
 			var egressIP1, egressIP2 net.IP
 			var err2 error
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
-				egressIP2, err2 = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
+				egressIP2, err2 = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
-				egressIP2, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
+				egressIP2, err2 = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
-			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new IPv4 Node IP")
-			gomega.Expect(err2).ShouldNot(gomega.HaveOccurred(), "must allocate new IPv6 Node IP")
+			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
+			gomega.Expect(err2).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
 			var egressIPConfig = `apiVersion: k8s.ovn.org/v1
 kind: EgressIP
@@ -1629,9 +1636,9 @@ spec:
 			ginkgo.By("5. Create an EgressIP object2 with one egress IP3 defined (standby egressIP)")
 			var egressIP3 net.IP
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP3, err = ipalloc.NewPrimaryIPv6()
+				egressIP3, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP3, err = ipalloc.NewPrimaryIPv4()
+				egressIP3, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -1686,7 +1693,7 @@ spec:
 			ginkgo.By("7. Check the OVN DB to ensure no SNATs are added for the standby egressIP")
 			ovnKubernetesNamespace := deploymentconfig.Get().OVNKubernetesNamespace()
 			dbPods, err := e2ekubectl.RunKubectl(ovnKubernetesNamespace, "get", "pods", "-l", "app=ovnkube-node", "--field-selector", fmt.Sprintf("spec.nodeName=%s", egress1Node.name), "-o=jsonpath='{.items..metadata.name}'")
-			dbContainerName := "nb-ovsdb"
+			dbContainerName := deploymentconfig.Get().NBDBContainerName()
 			if err != nil || len(dbPods) == 0 {
 				framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
 			}
@@ -1704,7 +1711,7 @@ spec:
 			if err != nil {
 				framework.Failf("Error: Check the OVN DB to ensure no SNATs are added for the standby egressIP, err: %v", err)
 			}
-			if !strings.Contains(snats, statuses[0].EgressIP) || strings.Contains(snats, egressIP3.String()) {
+			if !strings.Contains(snats, "\""+statuses[0].EgressIP+"\"") || strings.Contains(snats, "\""+egressIP3.String()+"\"") {
 				framework.Failf("Step 7. Check the OVN DB to ensure no SNATs are added for the standby egressIP, failed")
 			}
 
@@ -1768,7 +1775,7 @@ spec:
 			if err != nil {
 				framework.Failf("Error: Check the OVN DB to ensure SNATs are added for only the standby egressIP, err: %v", err)
 			}
-			if !strings.Contains(snats, egressIP3.String()) || strings.Contains(snats, egressIP1.String()) || strings.Contains(snats, egressIP2.String()) || strings.Contains(snats, egress1Node.nodeIP) {
+			if !strings.Contains(snats, "\""+egressIP3.String()+"\"") || strings.Contains(snats, "\""+egressIP1.String()+"\"") || strings.Contains(snats, "\""+egressIP2.String()+"\"") || strings.Contains(snats, "\""+egress1Node.nodeIP+"\"") {
 				framework.Failf("Step 12. Check the OVN DB to ensure SNATs are added for only the standby egressIP, failed")
 			}
 
@@ -1814,11 +1821,11 @@ spec:
 			if err != nil {
 				framework.Failf("Error: Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, err: %v", err)
 			}
-			if !(strings.Contains(snats, egressIP3.String()) || strings.Contains(snats, toKeepEIP)) {
+			if !(strings.Contains(snats, "\""+egressIP3.String()+"\"") || strings.Contains(snats, "\""+toKeepEIP+"\"")) {
 				framework.Failf("Step 15. Check the OVN DB to ensure SNATs are added for either egressIP1 or egressIP3, failed")
 			}
 			var toDelete, unassignedEIP string
-			if strings.Contains(snats, egressIP3.String()) {
+			if strings.Contains(snats, "\""+egressIP3.String()+"\"") {
 				assignedEIP = egressIP3.String()
 				unassignedEIP = toKeepEIP
 				toDelete = egressIPName2
@@ -1889,9 +1896,9 @@ spec:
 			var egressIP1 net.IP
 			var err error
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -2069,9 +2076,9 @@ spec:
 			var egressIP net.IP
 			var err error
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP, err = ipalloc.NewPrimaryIPv6()
+				egressIP, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP, err = ipalloc.NewPrimaryIPv4()
+				egressIP, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -2219,9 +2226,9 @@ spec:
 			var egressIP1 net.IP
 			var err error
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -2629,9 +2636,9 @@ spec:
 			var egressIP net.IP
 			var err error
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP, err = ipalloc.NewPrimaryIPv6()
+				egressIP, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP, err = ipalloc.NewPrimaryIPv4()
+				egressIP, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 			egressIPOVN := egressIP.String()
@@ -3512,9 +3519,9 @@ spec:
 			ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 			var egressIP1 net.IP
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -3628,9 +3635,9 @@ spec:
 			var err error
 			var retryTimeout2 = 2 * retryInterval
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new EgressIP")
 			podNamespace := f.Namespace
@@ -3652,9 +3659,9 @@ spec:
 			ginkgo.By("2. Create second EgressIP object with one egress IP2 defined")
 			var egressIP2 net.IP
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP2, err = ipalloc.NewPrimaryIPv6()
+				egressIP2, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP2, err = ipalloc.NewPrimaryIPv4()
+				egressIP2, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new EgressIP")
 			egressLabels2 := map[string]string{
@@ -3819,9 +3826,9 @@ spec:
 			var egressIP1 net.IP
 			var err error
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -3869,9 +3876,9 @@ spec:
 			var egressIP1 net.IP
 			var err error
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
@@ -3946,9 +3953,9 @@ spec:
 			var egressIP net.IP
 			var err error
 			if isIPv6TestRun {
-				egressIP, err = ipalloc.NewPrimaryIPv6()
+				egressIP, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP, err = ipalloc.NewPrimaryIPv4()
+				egressIP, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate egress IP")
 			egressIPConfig := createEIPManifest(egressIPName, podEgressLabel, labels, egressIP.String())
@@ -4171,9 +4178,9 @@ spec:
 			ginkgo.By("3. Create an EgressIP object with one egress IP defined")
 			var egressIP1 net.IP
 			if utilnet.IsIPv6String(egress1Node.nodeIP) {
-				egressIP1, err = ipalloc.NewPrimaryIPv6()
+				egressIP1, err = allocators.NewPrimaryIPv6(egress1Node.name)
 			} else {
-				egressIP1, err = ipalloc.NewPrimaryIPv4()
+				egressIP1, err = allocators.NewPrimaryIPv4(egress1Node.name)
 			}
 			gomega.Expect(err).ShouldNot(gomega.HaveOccurred(), "must allocate new Node IP")
 
