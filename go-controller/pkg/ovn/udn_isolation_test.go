@@ -311,6 +311,8 @@ var _ = Describe("UDN Isolation", func() {
 
 		l3Controller, ok := fakeOVN.fullL3UDNControllers[netInfoBefore.netName]
 		Expect(ok).To(BeTrue())
+		Expect(fakeOVN.registerUDNNodeHandler(netInfoBefore.netName)).To(Succeed())
+		defer l3Controller.DeregisterNodeHandler()
 		mutableNetInfo := util.NewMutableNetInfo(l3Controller.GetNetInfo())
 		mutableNetInfo.SetNetworkID(2)
 		mutableNetInfo.SetPodNetworkAdvertisedVRFs(map[string][]string{nodeName: {"vrf"}})
