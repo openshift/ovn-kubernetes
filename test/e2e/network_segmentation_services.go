@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strings"
 	"time"
 
 	nadclient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
@@ -21,6 +22,7 @@ import (
 
 	kapi "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -226,9 +228,22 @@ ips=$(ip -o addr show dev $iface | grep global | awk '{print $4}' | cut -d/ -f1 
 				})
 				framework.ExpectNoError(err)
 
-				By("Wait for UDN LoadBalancer Ingress to pop up")
-				udnService, err = jig.WaitForLoadBalancer(context.TODO(), 180*time.Second)
-				framework.ExpectNoError(err)
+				hasProvider, detectErr := hasLoadBalancerProvider(cs)
+				framework.ExpectNoError(detectErr, "failed to detect LoadBalancer provider")
+
+				var lbAvailable bool
+				if hasProvider {
+					By("Wait for UDN LoadBalancer Ingress to pop up")
+					udnService, err = jig.WaitForLoadBalancer(context.TODO(), 180*time.Second)
+					framework.ExpectNoError(err, "timed out waiting for LoadBalancer ingress despite an LB provider being available")
+					lbAvailable = true
+				} else {
+					framework.Logf("No LoadBalancer provider detected - LB assertions will be skipped")
+					svcCtx, svcCancel := context.WithTimeout(context.TODO(), 30*time.Second)
+					defer svcCancel()
+					udnService, err = cs.CoreV1().Services(namespace).Get(svcCtx, jig.Name, metav1.GetOptions{})
+					framework.ExpectNoError(err, "failed to refetch UDN LoadBalancer service after skipping LoadBalancer wait")
+				}
 
 				By("Creating a UDN backend pod")
 				udnServerPod := e2epod.NewAgnhostPod(
@@ -257,7 +272,9 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 				By("Connect to the UDN service cluster IP from the UDN client pod on the same node")
 				checkConnectionToClusterIPs(f, udnClientPod, udnService, udnServerPod.Name)
 				By("Connect to the UDN service nodePort on all 3 nodes from the UDN client pod")
-				checkConnectionToLoadBalancers(f, udnClientPod, udnService, udnServerPod.Name)
+				if lbAvailable {
+					checkConnectionToLoadBalancers(f, udnClientPod, udnService, udnServerPod.Name)
+				}
 				checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[0], "endpoint node", udnServerPod.Name)
 				if !dynamicUDNEnabled {
 					checkConnectionToNodePort(f, udnClientPod, udnService, &nodes.Items[1], "other node", udnServerPod.Name)
@@ -270,7 +287,9 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 				By("Connect to the UDN service from the UDN client pod on a different node")
 				checkConnectionToClusterIPs(f, udnClientPod2, udnService, udnServerPod.Name)
-				checkConnectionToLoadBalancers(f, udnClientPod2, udnService, udnServerPod.Name)
+				if lbAvailable {
+					checkConnectionToLoadBalancers(f, udnClientPod2, udnService, udnServerPod.Name)
+				}
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[1], "local node", udnServerPod.Name)
 				checkConnectionToNodePort(f, udnClientPod2, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
 				if !dynamicUDNEnabled {
@@ -279,7 +298,7 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 				By("Connect to the UDN service from the UDN client external container")
 				externalContainer := infraapi.ExternalContainer{Name: "frr"}
-				if !dynamicUDNEnabled {
+				if lbAvailable && !dynamicUDNEnabled {
 					checkConnectionToLoadBalancersFromExternalContainer(f, externalContainer, udnService, udnServerPod.Name)
 				}
 				checkConnectionToNodePortFromExternalContainer(externalContainer, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
@@ -305,7 +324,9 @@ ips=$(ip -o addr show dev $iface| grep global |awk '{print $4}' | cut -d/ -f1 | 
 
 				By("Verify the connection of the client in the default network to the UDN service")
 				checkNoConnectionToClusterIPs(f, defaultClient, udnService)
-				checkNoConnectionToLoadBalancers(f, defaultClient, udnService)
+				if lbAvailable {
+					checkNoConnectionToLoadBalancers(f, defaultClient, udnService)
+				}
 				checkNoConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[1], "local node") // TODO change to checkConnectionToNodePort when we have full UDN support in ovnkube-node
 
 				checkConnectionToNodePort(f, defaultClient, udnService, &nodes.Items[0], "server node", udnServerPod.Name)
@@ -625,6 +646,47 @@ func checkConnectionToLoadBalancersFromExternalContainer(f *framework.Framework,
 			WithPolling(200*time.Millisecond).
 			Should(Equal(expectedOutput), "Failed to verify that %s", msg)
 	}
+}
+
+// hasLoadBalancerProvider checks whether the cluster has a LoadBalancer
+// controller that can assign ingress IPs to services. It detects MetalLB
+// (used in KinD) by looking for the metallb-system namespace, and cloud LB
+// controllers by checking if nodes have a providerID set by the cloud
+// controller manager. Bare-metal providerIDs (baremetalhost://) are excluded
+// because the bare-metal operator does not provide a LoadBalancer controller.
+// Transient API errors are returned so that callers fail loudly instead of
+// silently skipping LB assertions.
+func hasLoadBalancerProvider(cs clientset.Interface) (bool, error) {
+	apiTimeout := 30 * time.Second
+
+	// MetalLB runs in the metallb-system namespace.
+	nsCtx, nsCancel := context.WithTimeout(context.TODO(), apiTimeout)
+	defer nsCancel()
+	_, err := cs.CoreV1().Namespaces().Get(nsCtx, "metallb-system", metav1.GetOptions{})
+	if err == nil {
+		return true, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return false, fmt.Errorf("failed to check for metallb-system namespace: %w", err)
+	}
+
+	// Cloud platforms (AWS, GCP, Azure) set providerID on nodes; the same
+	// cloud controller that manages nodes also provisions LoadBalancers.
+	// Bare-metal clusters also set a providerID (baremetalhost:///...) but
+	// do not include a cloud LB controller, so exclude that scheme.
+	nodeCtx, nodeCancel := context.WithTimeout(context.TODO(), apiTimeout)
+	defer nodeCancel()
+	nodes, err := cs.CoreV1().Nodes().List(nodeCtx, metav1.ListOptions{})
+	if err != nil {
+		return false, fmt.Errorf("failed to list nodes for LB provider detection: %w", err)
+	}
+	for i := range nodes.Items {
+		pid := nodes.Items[i].Spec.ProviderID
+		if pid != "" && !strings.HasPrefix(pid, "baremetalhost://") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func filterLoadBalancerIngressByIPFamily(f *framework.Framework, service *v1.Service) []v1.LoadBalancerIngress {
