@@ -551,6 +551,7 @@ jobs:
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "local", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
           - {"target": "network-segmentation-dynamic", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv4", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "cni-mode": "unprivileged"}
           - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "ipv6", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones"}
+          - {"target": "network-segmentation", "ha": "noHA", "gateway-mode": "shared", "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "disable-udn-arp-ndp-flood":"true"}
           - {"target": "bgp", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "bgp", "ha": "noHA", "gateway-mode": "shared",  "ipfamily": "dualstack", "disable-snat-multiple-gws": "noSnatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation", "dns-name-resolver": "enable-dns-name-resolver"}
           - {"target": "bgp", "ha": "noHA", "gateway-mode": "local",  "ipfamily": "ipv6", "disable-snat-multiple-gws": "snatGW", "second-bridge": "1br", "ic": "ic-single-node-zones", "routeadvertisements": "advertise-default", "network-segmentation": "enable-network-segmentation"}
@@ -583,6 +584,7 @@ jobs:
       OVN_SECOND_BRIDGE: "${{ matrix.second-bridge == '2br' }}"
       ENABLE_MULTI_NET: "${{ matrix.target == 'multi-homing' || matrix.target == 'kv-live-migration' || startsWith(matrix.target, 'network-segmentation') || matrix.target == 'tools' || matrix.target == 'traffic-flow-test-only' || matrix.routeadvertisements != '' }}"
       ENABLE_NETWORK_SEGMENTATION: "${{ startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation' }}"
+      DISABLE_UDN_ARP_NDP_FLOOD: "${{ matrix.disable-udn-arp-ndp-flood }}"
       PLATFORM_IPV4_SUPPORT: "${{ matrix.ipfamily == 'IPv4' || matrix.ipfamily == 'dualstack' }}"
       PLATFORM_IPV6_SUPPORT: "${{ matrix.ipfamily == 'IPv6' || matrix.ipfamily == 'dualstack' }}"
       KIND_LOCAL_REGISTRY: "${{ matrix.local-kind-registry == 'true' }}"
@@ -599,8 +601,12 @@ jobs:
       ENABLE_UPLINK: "${{ startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation' }}"
       ENABLE_PRE_CONF_UDN_ADDR: "${{ matrix.ic == 'ic-single-node-zones' && (startsWith(matrix.target, 'network-segmentation') || matrix.network-segmentation == 'enable-network-segmentation') }}"
       ADVERTISED_UDN_ISOLATION_MODE: "${{ matrix.advertised-udn-isolation-mode }}"
-      # Override PARALLEL=true for Serial tests target to run Serial tests
-      PARALLEL: "${{ matrix.target != 'serial' }}"
+      # Override PARALLEL=true for Serial tests target to run Serial tests.
+      # The ARP/NDP flood lane carries Serial specs that PARALLEL=true would skip,
+      # and they are the only CI coverage of the MAC binding mirroring controller.
+      # Compared against 'true' rather than negated: any non-empty string, "false"
+      # included, is truthy in a GitHub expression.
+      PARALLEL: "${{ matrix.target != 'serial' && matrix.disable-udn-arp-ndp-flood != 'true' }}"
       OVN_UNPRIVILEGED_MODE: "${{ matrix.cni-mode == 'unprivileged' }}"
       MULTI_POD_SUBNET: true
       DYNAMIC_UDN_ALLOCATION: "${{ endsWith(matrix.target, '-dynamic') }}"
